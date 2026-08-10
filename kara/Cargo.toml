@@ -1,0 +1,17 @@
+[package]
+name = "kara"
+version = "0.1.0"
+edition = "2024"
+description = "Text Editor Rust practice"
+license = "MIT"
+repository = "git@github.com:di-rs/kara.git"
+keywords = ["rust", "text-editor"]
+categories = ["pratice", "pet"]
+
+[lints]
+workspace = true
+
+[dependencies]
+crossterm = "0.29.0"
+unicode-segmentation = "1.13.3"
+unicode-width = "0.2.2"
