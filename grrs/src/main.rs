@@ -7,8 +7,10 @@ use std::io::{BufReader, IsTerminal};
 use std::path::Path;
 
 use crate::cli::Cli;
+use crate::clierror::CliError;
 
 mod cli;
+mod clierror;
 
 fn main() {
     setup_panic!();
@@ -19,47 +21,48 @@ fn main() {
         .filter_level(args.verbosity.into())
         .init();
 
-    ctrlc::set_handler(move || {
+    let _ = ctrlc::set_handler(move || {
         println!("received Ctrl+C!");
     })
-    .expect("ctrlc is always can attach handler");
+    .context("always can attach ctrl-c handler");
 
-    let result = run_cli(args);
+    let result = run_cli(&args);
 
     match result {
-        Ok(_) => {
+        Ok(()) => {
             std::process::exit(exitcode::OK);
         }
+        Err(CliError::Config) => {
+            std::process::exit(exitcode::CONFIG);
+        }
         Err(e) => {
-            eprintln!("Error: {}", e);
+            eprintln!("Error: {e}");
             std::process::exit(exitcode::DATAERR);
         }
     }
 }
 
-fn run_cli(args: Cli) -> Result<()> {
+fn run_cli(args: &Cli) -> Result<(), CliError> {
     let reader = get_reader(&args.path)?;
 
     let stdout = std::io::stdout();
     let writer = std::io::BufWriter::new(stdout.lock());
 
-    grrs::find_matches(&args.pattern, reader, writer)
+    grrs::find_matches(&args.pattern, reader, writer)?;
+    Ok(())
 }
 
-fn get_reader(path: &Path) -> Result<BufReader<Box<dyn Read>>> {
-    let read: Box<dyn Read> = match path == Path::new("-") {
-        true => {
-            if std::io::stdin().is_terminal() {
-                Cli::command().print_help().expect("always can print help");
-                std::process::exit(exitcode::CONFIG);
-            }
-            Box::new(std::io::stdin().lock())
+fn get_reader(path: &Path) -> Result<BufReader<Box<dyn Read>>, CliError> {
+    let read: Box<dyn Read> = if path == Path::new("-") {
+        if std::io::stdin().is_terminal() {
+            let _ = Cli::command().print_help().context("always can print help");
+            return Err(CliError::Config);
         }
-        false => {
-            let file = std::fs::File::open(path)
-                .with_context(|| format!("could not read file '{}'", path.display()))?;
-            Box::new(file)
-        }
+        Box::new(std::io::stdin().lock())
+    } else {
+        let file = std::fs::File::open(path)
+            .with_context(|| format!("could not read file '{}'", path.display()))?;
+        Box::new(file)
     };
     Ok(BufReader::new(read))
 }

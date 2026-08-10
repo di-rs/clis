@@ -2,7 +2,7 @@ use clap::CommandFactory;
 
 use crate::cli::Cli;
 
-#[path="src/cli.rs"]
+#[path = "src/cli.rs"]
 mod cli;
 
 fn main() -> std::io::Result<()> {
@@ -12,7 +12,7 @@ fn main() -> std::io::Result<()> {
     let cmd = Cli::command();
 
     let man = clap_mangen::Man::new(cmd);
-    let mut buffer: Vec<u8> = Default::default();
+    let mut buffer: Vec<u8> = Vec::default();
     man.render(&mut buffer)?;
 
     std::fs::write(out_dir.join("grrs.1"), buffer)?;

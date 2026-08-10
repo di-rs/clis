@@ -3,15 +3,13 @@ use assert_fs::fixture::FileWriteStr;
 use predicates::prelude::*;
 
 #[test]
-fn file_doesnt_exists() -> Result<(), Box<dyn std::error::Error>> {
+fn file_doesnt_exists() {
     let mut cmd = cargo_bin_cmd!("grrs");
     cmd.arg("foobar").arg("test/file/doesnt/exist");
 
     cmd.assert()
         .failure()
         .stderr(predicate::str::contains("could not read file"));
-
-    Ok(())
 }
 
 #[test]

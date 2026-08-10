@@ -1,7 +1,7 @@
-use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 
 #[test]
 fn false_not_ok() {
-    let mut cmd = Command::cargo_bin("false").unwrap();
+    let mut cmd = cargo_bin_cmd!("false");
     cmd.assert().failure();
 }

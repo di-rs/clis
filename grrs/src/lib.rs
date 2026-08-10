@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use log::warn;
 
+/// # Errors
+/// Throws error when couldn't read the line or writing to the writer fails
 pub fn find_matches(
     pattern: &str,
     reader: impl std::io::BufRead,
@@ -10,7 +12,7 @@ pub fn find_matches(
         let line = line.context("could not read line in file")?;
 
         if line.contains(pattern) {
-            warn!("found line with pattern: {0} - {line}", pattern);
+            warn!("found line with pattern: {pattern} - {line}");
             writeln!(writer, "{line}").context("could not write to stdout")?;
         }
     }
@@ -24,9 +26,9 @@ mod tests {
     #[test]
     fn find_a_match() {
         let mut result = Vec::new();
-        let reader = "lorem ipsum\ndelor sit amet".as_bytes();
+        let reader = b"lorem ipsum\ndelor sit amet";
 
-        let _ = find_matches("lorem", reader, &mut result);
+        let _ = find_matches("lorem", &reader[..], &mut result);
 
         assert_eq!(result, b"lorem ipsum\n");
     }
