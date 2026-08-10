@@ -411,6 +411,12 @@ dependencies = [
 [[package]]
 name = "echor"
 version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "clap",
+ "predicates",
+ "pretty_assertions",
+]
 
 [[package]]
 name = "env_filter"
