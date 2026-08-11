@@ -1,8 +1,7 @@
-use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
-
 use assert_cmd::cargo::cargo_bin_cmd;
 use assert_fs::{NamedTempFile, fixture::FileTouch};
 use predicates::prelude::*;
+use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
 
 const EMPTY: &str = "tests/inputs/empty.txt";
 const FOX: &str = "tests/inputs/fox.txt";
@@ -114,7 +113,7 @@ fn spiders() -> Result<()> {
 
 #[test]
 fn spiders_n() -> Result<()> {
-    run(&["-n",SPIDERS], "spiders.txt.n.out")
+    run(&["-n", SPIDERS], "spiders.txt.n.out")
 }
 
 #[test]
@@ -164,12 +163,18 @@ fn mutipspaces_s() -> Result<()> {
 
 #[test]
 fn mutipspaces_s_n() -> Result<()> {
-    run(&[SPIDERS_MULTISPACE, "-s", "-n"], "spiders-multispaces.txt.s.n.out")
+    run(
+        &[SPIDERS_MULTISPACE, "-s", "-n"],
+        "spiders-multispaces.txt.s.n.out",
+    )
 }
 
 #[test]
 fn mutipspaces_s_b() -> Result<()> {
-    run(&[SPIDERS_MULTISPACE, "-s", "-b"], "spiders-multispaces.txt.s.b.out")
+    run(
+        &[SPIDERS_MULTISPACE, "-s", "-b"],
+        "spiders-multispaces.txt.s.b.out",
+    )
 }
 
 #[test]

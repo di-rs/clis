@@ -1,0 +1,19 @@
+==> /Users/dima/personal/clis/headr/tests/inputs/empty.txt <==
+
+==> /Users/dima/personal/clis/headr/tests/inputs/two.txt <==
+Two lines.
+Four words.
+
+==> /Users/dima/personal/clis/headr/tests/inputs/twelve.txt <==
+one
+two
+three
+four
+
+==> /Users/dima/personal/clis/headr/tests/inputs/three.txt <==
+Three
+lines,
+four words.
+
+==> /Users/dima/personal/clis/headr/tests/inputs/one.txt <==
+Öne line, four words.
