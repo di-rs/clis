@@ -1,0 +1,18 @@
+[package]
+name = "catr"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.6.6", features = ["derive"] }
+exitcode = "1.1.2"
+thiserror = "2.0.20"
+
+[dev-dependencies]
+assert_cmd = "2.2.2"
+assert_fs = "1.1.4"
+predicates = "3.1.4"
+pretty_assertions = "1.4.1"
+
+[lints]
+workspace = true

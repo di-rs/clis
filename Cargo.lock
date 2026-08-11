@@ -173,6 +173,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "catr"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "assert_fs",
+ "clap",
+ "exitcode",
+ "predicates",
+ "pretty_assertions",
+ "thiserror",
+]
+
+[[package]]
 name = "cfg-if"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
