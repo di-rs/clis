@@ -25,11 +25,12 @@ fn main() {
 }
 
 fn run(args: &Args) -> Result<(), CliError> {
+    let mut writer = get_writer(args.unbuffered);
+
     for filename in &args.files {
-        let writer = BufWriter::new(std::io::stdout().lock());
-        match open(filename) {
+        match get_reader(filename) {
             Ok(reader) => {
-                write_lines(reader, writer, &args.into())?;
+                write_lines(reader, &mut writer, &args.into())?;
             }
             Err(e) => eprintln!("Failed to open {filename}: {e}"),
         }
@@ -37,7 +38,7 @@ fn run(args: &Args) -> Result<(), CliError> {
     Ok(())
 }
 
-fn open(path: &str) -> Result<Box<dyn BufRead>, CliError> {
+fn get_reader(path: &str) -> Result<Box<dyn BufRead>, CliError> {
     match path {
         "-" => {
             if stdin().is_terminal() {
@@ -47,5 +48,14 @@ fn open(path: &str) -> Result<Box<dyn BufRead>, CliError> {
             Ok(Box::new(BufReader::new(stdin().lock())))
         }
         path => Ok(Box::new(BufReader::new(File::open(path)?))),
+    }
+}
+
+fn get_writer(unbuffered: bool) -> Box<dyn std::io::Write> {
+    let stdout = std::io::stdout();
+    if unbuffered {
+        Box::new(BufWriter::new(stdout.lock()))
+    } else {
+        Box::new(stdout.lock())
     }
 }

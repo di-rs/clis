@@ -7,6 +7,7 @@ rm -rf $output_dir
 mkdir $output_dir
 
 let bustle = $"($inputs_dir)/the-bustle.txt"
+let spiders_multispaces = $"($inputs_dir)/spiders-multispaces.txt"
 let files = [
     $"($inputs_dir)/empty.txt"
     $"($inputs_dir)/fox.txt"
@@ -30,3 +31,8 @@ let bustle_name = $bustle | path basename
 open --raw $bustle | ^cat | save $"($output_dir)/($bustle_name).stdin.out"
 open --raw $bustle | ^cat -n | save $"($output_dir)/($bustle_name).n.stdin.out"
 open --raw $bustle | ^cat -b | save $"($output_dir)/($bustle_name).b.stdin.out"
+
+^cat $spiders_multispaces | save $"($output_dir)/($spiders_multispaces | path basename).out"
+^cat -s $spiders_multispaces | save $"($output_dir)/($spiders_multispaces | path basename).s.out"
+^cat -s -n $spiders_multispaces | save $"($output_dir)/($spiders_multispaces | path basename).s.n.out"
+^cat -s -b $spiders_multispaces | save $"($output_dir)/($spiders_multispaces | path basename).s.b.out"

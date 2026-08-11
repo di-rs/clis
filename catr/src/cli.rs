@@ -3,6 +3,7 @@ use thiserror::Error;
 
 use catr::Flags;
 
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
 /// Rust minimal version of `cat`
@@ -18,6 +19,14 @@ pub struct Args {
     /// Number non-blank lines
     #[arg(short('b'), long("number-nonblank"))]
     pub number_nonblank_lines: bool,
+
+    /// Squeeze multiple adjacent empty lines
+     #[arg(short('s'), long("squeeze-blank"))]
+    pub squeeze_blank: bool,
+
+    /// Disable output buffering
+     #[arg(short('u'), long("unbuffered"))]
+    pub unbuffered: bool,
 }
 
 impl From<&Args> for Flags {
@@ -25,6 +34,7 @@ impl From<&Args> for Flags {
         Self {
             number_lines: value.number_lines,
             number_nonblank_lines: value.number_nonblank_lines,
+            squeeze_blank: value.squeeze_blank,
         }
     }
 }

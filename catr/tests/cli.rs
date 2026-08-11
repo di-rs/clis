@@ -8,6 +8,7 @@ const EMPTY: &str = "tests/inputs/empty.txt";
 const FOX: &str = "tests/inputs/fox.txt";
 const SPIDERS: &str = "tests/inputs/spiders.txt";
 const BUSTLE: &str = "tests/inputs/the-bustle.txt";
+const SPIDERS_MULTISPACE: &str = "tests/inputs/spiders-multispaces.txt";
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -149,4 +150,29 @@ fn all_n() -> Result<()> {
 #[test]
 fn all_b() -> Result<()> {
     run(&[FOX, SPIDERS, BUSTLE, "-b"], "all.b.out")
+}
+
+#[test]
+fn mutipspaces() -> Result<()> {
+    run(&[SPIDERS_MULTISPACE], "spiders-multispaces.txt.out")
+}
+
+#[test]
+fn mutipspaces_s() -> Result<()> {
+    run(&[SPIDERS_MULTISPACE, "-s"], "spiders-multispaces.txt.s.out")
+}
+
+#[test]
+fn mutipspaces_s_n() -> Result<()> {
+    run(&[SPIDERS_MULTISPACE, "-s", "-n"], "spiders-multispaces.txt.s.n.out")
+}
+
+#[test]
+fn mutipspaces_s_b() -> Result<()> {
+    run(&[SPIDERS_MULTISPACE, "-s", "-b"], "spiders-multispaces.txt.s.b.out")
+}
+
+#[test]
+fn bustle_u() -> Result<()> {
+    run(&[BUSTLE, "-u"], "the-bustle.txt.out")
 }
