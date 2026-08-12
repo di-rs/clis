@@ -1,16 +1,15 @@
 use clap::{CommandFactory, Parser};
-use wcr::write_file_info;
 use std::{
     fs::File,
     io::{BufRead, BufReader, BufWriter, IsTerminal, Write, stdin},
-    path::Path,
 };
 
 mod cli;
-use crate::cli::{Args, CliError};
+use crate::cli::{Cli, CliError};
+use wcr::{FileInfo, get_file_info};
 
 fn main() {
-    match run(Args::parse()) {
+    match run(Cli::parse()) {
         Ok(()) => {
             std::process::exit(exitcode::OK);
         }
@@ -24,36 +23,33 @@ fn main() {
     }
 }
 
-fn run(mut args: Args) -> Result<(), CliError> {
-    normalize_args(&mut args);
+fn run(mut cli: Cli) -> Result<(), CliError> {
+    cli.normalize();
     let mut writer = get_writer();
+    let mut total_info = FileInfo::default();
 
-    for filename in &args.files {
+    for filename in &cli.files {
         match get_reader(filename) {
             Ok(reader) => {
-                write_file_info(reader, &mut writer)?;
+                let info = get_file_info(reader)?;
+                cli.write_info_line(&mut writer, &info, filename)?;
+                total_info.add(&info);
             }
-            Err(e) => eprintln!("{}: {e}", filename.display()),
+            Err(e) => eprintln!("{filename}: {e}"),
         }
     }
+
+    if cli.files.len() > 1 {
+        cli.write_info_line(&mut writer, &total_info, "total")?;
+    }
+
     Ok(())
 }
 
-fn normalize_args(args: &mut Args) {
-    if [args.lines, args.words, args.chars, args.bytes]
-        .iter()
-        .all(|v| !v)
-    {
-        args.lines = true;
-        args.bytes = true;
-        args.words = true;
-    }
-}
-
-fn get_reader(path: &Path) -> Result<Box<dyn BufRead>, CliError> {
-    if path == Path::new("-") {
+fn get_reader(path: &str) -> Result<Box<dyn BufRead>, CliError> {
+    if path == "-" {
         if stdin().is_terminal() {
-            let _ = Args::command().print_help();
+            let _ = Cli::command().print_help();
             return Err(CliError::Config);
         }
         Ok(Box::new(BufReader::new(stdin().lock())))

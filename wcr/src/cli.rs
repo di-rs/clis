@@ -1,15 +1,17 @@
-use std::path::PathBuf;
 use clap::Parser;
+use std::io::Write;
 use thiserror::Error;
+
+use wcr::FileInfo;
 
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 /// Rust minimal head implementation
-pub struct Args {
+pub struct Cli {
     /// Input file(s), use `-` to read from stdin (must not be a tty)
     #[arg(value_name = "FILE", default_value = "-")]
-    pub files: Vec<PathBuf>,
+    pub files: Vec<String>,
 
     /// Show count of lines
     #[arg(short('l'), long, value_name = "LINES")]
@@ -34,4 +36,42 @@ pub enum CliError {
     Config,
     #[error(transparent)]
     IO(#[from] std::io::Error),
+}
+
+impl Cli {
+    pub fn normalize(&mut self) {
+        if [self.lines, self.words, self.chars, self.bytes]
+            .iter()
+            .all(|v| !v)
+        {
+            self.lines = true;
+            self.bytes = true;
+            self.words = true;
+        }
+    }
+
+    pub fn write_info_line(
+        &self,
+        mut writer: impl Write,
+        info: &FileInfo,
+        name: &str,
+    ) -> Result<(), CliError> {
+        if self.lines {
+            write!(writer, "{:>8}", info.num_lines)?;
+        }
+        if self.words {
+            write!(writer, "{:>8}", info.num_words)?;
+        }
+        if self.chars {
+            write!(writer, "{:>8}", info.num_chars)?;
+        }
+        if self.bytes {
+            write!(writer, "{:>8}", info.num_bytes)?;
+        }
+        if name != "-" {
+            write!(writer, " {name}")?;
+        }
+        writeln!(writer)?;
+        Ok(())
+    }
 }
