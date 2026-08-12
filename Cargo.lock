@@ -1126,6 +1126,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
+ "getrandom",
  "once_cell",
  "rustix",
  "windows-sys",
@@ -1201,6 +1202,19 @@ name = "unicode-width"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
+
+[[package]]
+name = "uniqr"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "clap",
+ "exitcode",
+ "predicates",
+ "pretty_assertions",
+ "tempfile",
+ "thiserror",
+]
 
 [[package]]
 name = "utf8parse"
