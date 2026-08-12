@@ -9,35 +9,44 @@ pub struct Flags {
 /// # Errors
 /// Throws error if unable to decode line in the reader or write to writer is failed
 pub fn write_lines(
-    reader: impl BufRead,
+    mut reader: impl BufRead,
     mut writer: impl Write,
     args: &Flags,
 ) -> Result<(), std::io::Error> {
     let mut num = 0_usize;
     let mut prev_empty = false;
+    let mut line = String::new();
 
-    for line in reader.lines() {
-        let line = line?;
+    loop {
+        let bytes = reader.read_line(&mut line)?;
+        if bytes == 0 {
+            break;
+        }
+
+        let is_empty = line.trim_end_matches(['\r', '\n']).is_empty();
 
         if args.squeeze_blank {
-            let cur_empty = line.is_empty();
-            if cur_empty && prev_empty {
+            dbg!(is_empty, prev_empty);
+            if is_empty && prev_empty {
+                line.clear();
                 continue;
             }
-            prev_empty = cur_empty;
+            prev_empty = is_empty;
         }
 
         if args.number_lines {
             write_numbered(&mut writer, &mut num, &line)?;
         } else if args.number_nonblank_lines {
-            if line.is_empty() {
+            if is_empty {
                 writeln!(writer)?;
             } else {
                 write_numbered(&mut writer, &mut num, &line)?;
             }
         } else {
-            writeln!(writer, "{line}")?;
+            write!(writer, "{line}")?;
         }
+
+        line.clear();
     }
     Ok(())
 }
@@ -48,5 +57,5 @@ fn write_numbered(
     line: &str,
 ) -> Result<(), std::io::Error> {
     *num = num.saturating_add(1);
-    writeln!(writer, "{num:>6}\t{line}")
+    write!(writer, "{num:>6}\t{line}")
 }
