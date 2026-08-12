@@ -127,9 +127,11 @@ fn run_count(test: &Test) -> Result<()> {
 }
 
 fn run_stdin(test: &Test) -> Result<()> {
+    let input = fs::read_to_string(test.input)?;
     let expected = std::fs::read_to_string(test.out)?;
+    
     cargo_bin_cmd!()
-        .write_stdin(test.input)
+        .write_stdin(input)
         .assert()
         .success()
         .stdout(expected);
@@ -137,10 +139,12 @@ fn run_stdin(test: &Test) -> Result<()> {
 }
 
 fn run_stdin_count(test: &Test) -> Result<()> {
+    let input = fs::read_to_string(test.input)?;
     let expected = std::fs::read_to_string(test.out_count)?;
+    
     cargo_bin_cmd!()
         .arg("--count")
-        .write_stdin(test.input)
+        .write_stdin(input)
         .assert()
         .success()
         .stdout(expected);
