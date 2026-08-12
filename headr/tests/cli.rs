@@ -1,7 +1,8 @@
 use assert_cmd::cargo::cargo_bin_cmd;
 use assert_fs::{NamedTempFile, fixture::FileTouch};
 use predicates::prelude::*;
-use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
+use pretty_assertions::assert_eq;
+use std::{fs, io::Read, os::unix::fs::PermissionsExt, path::PathBuf};
 
 const EMPTY: &str = "./tests/inputs/empty.txt";
 const ONE: &str = "./tests/inputs/one.txt";
@@ -36,41 +37,36 @@ fn skip_bad_file() -> Result<()> {
     cargo_bin_cmd!()
         .args([EMPTY, &bad])
         .assert()
-        .success()
-        .stderr(predicate::str::contains(expected));
+        .stderr(predicate::str::is_match(expected)?);
     Ok(())
 }
 
 #[test]
-fn dies_bad_bytes() -> Result<()> {
-    let bad = gen_bad_file()?;
-    let bad = bad.path().display().to_string();
+fn dies_bad_bytes() {
+    let bad = "ddsdsasad";
     let expected = format!(
         "invalid value '{bad}' for \
         '--bytes <BYTES>': invalid digit found in string"
     );
     cargo_bin_cmd!()
-        .args(["-c", &bad, EMPTY])
+        .args(["-c", bad, EMPTY])
         .assert()
-        .success()
+        .failure()
         .stderr(predicate::str::contains(expected));
-    Ok(())
 }
 
 #[test]
-fn dies_bad_lines() -> Result<()> {
-    let bad = gen_bad_file()?;
-    let bad = bad.path().display().to_string();
+fn dies_bad_lines() {
+    let bad = "ddsdsasad";
     let expected = format!(
         "invalid value '{bad}' for \
         '--lines <LINES>': invalid digit found in string"
     );
     cargo_bin_cmd!()
-        .args(["-n", &bad, EMPTY])
+        .args(["-n", bad, EMPTY])
         .assert()
-        .success()
+        .failure()
         .stderr(predicate::str::contains(expected));
-    Ok(())
 }
 
 #[test]
@@ -80,28 +76,43 @@ fn dies_bytes_and_lines() {
     cargo_bin_cmd!()
         .args(["-n", "1", "-c", "2"])
         .assert()
-        .success()
+        .failure()
         .stderr(predicate::str::contains(expected));
 }
 
 fn run(args: &[&str], expected_file: &str) -> Result<()> {
     let outfile: PathBuf = ["tests/expected", expected_file].iter().collect();
-    let expected = std::fs::read_to_string(outfile)?;
-    let mut cmd = cargo_bin_cmd!();
-    cmd.args(args).assert().success().stdout(expected);
+
+    let mut file = std::fs::File::open(outfile)?;
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+    let expected = String::from_utf8_lossy(&buffer);
+
+    let cmd = cargo_bin_cmd!().args(args).assert().success();
+    let output = cmd.get_output();
+    assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+
     Ok(())
 }
 
 fn run_stdin(input_file: &str, args: &[&str], expected_file: &str) -> Result<()> {
     let outfile: PathBuf = ["tests/expected", expected_file].iter().collect();
-    let expected = std::fs::read_to_string(outfile)?;
+
+    let mut file = std::fs::File::open(outfile)?;
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+    let expected = String::from_utf8_lossy(&buffer);
+
     let input = std::fs::read_to_string(input_file)?;
-    let mut cmd = cargo_bin_cmd!();
-    cmd.write_stdin(input)
+
+    let cmd = cargo_bin_cmd!()
+        .write_stdin(input)
         .args(args)
         .assert()
-        .success()
-        .stdout(expected);
+        .success();
+    let output = cmd.get_output();
+    assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+
     Ok(())
 }
 

@@ -1,10 +1,10 @@
-==> /Users/dima/personal/clis/headr/tests/inputs/empty.txt <==
+==> ./tests/inputs/empty.txt <==
 
-==> /Users/dima/personal/clis/headr/tests/inputs/two.txt <==
-T
-==> /Users/dima/personal/clis/headr/tests/inputs/twelve.txt <==
-o
-==> /Users/dima/personal/clis/headr/tests/inputs/three.txt <==
-T
-==> /Users/dima/personal/clis/headr/tests/inputs/one.txt <==
+==> ./tests/inputs/one.txt <==
 Ã
+==> ./tests/inputs/two.txt <==
+T
+==> ./tests/inputs/three.txt <==
+T
+==> ./tests/inputs/twelve.txt <==
+o

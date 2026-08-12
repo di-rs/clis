@@ -19,9 +19,17 @@ for file in $files {
     ^head -c 4 $file | save $"($output_dir)/($name).c4.out"
 }
 
-^head ...$files | save $"($output_dir)/all.out"
-^head -n 2 ...$files | save $"($output_dir)/all.n2.out"
-^head -n 4 ...$files | save $"($output_dir)/all.n4.out"
-^head -c 1 ...$files | save $"($output_dir)/all.c1.out"
-^head -c 2 ...$files | save $"($output_dir)/all.c2.out"
-^head -c 4 ...$files | save $"($output_dir)/all.c4.out"
+let all = [
+    $"./($inputs_dir)/empty.txt"
+    $"./($inputs_dir)/one.txt"
+    $"./($inputs_dir)/two.txt"
+    $"./($inputs_dir)/three.txt"
+    $"./($inputs_dir)/twelve.txt"
+]
+
+^head ...$all | save $"($output_dir)/all.out"
+^head -n 2 ...$all | save $"($output_dir)/all.n2.out"
+^head -n 4 ...$all | save $"($output_dir)/all.n4.out"
+^head -c 1 ...$all | save $"($output_dir)/all.c1.out"
+^head -c 2 ...$all | save $"($output_dir)/all.c2.out"
+^head -c 4 ...$all | save $"($output_dir)/all.c4.out"
