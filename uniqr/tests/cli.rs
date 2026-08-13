@@ -1,6 +1,6 @@
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
-use pretty_assertions::assert_eq;
+// use pretty_assertions::assert_eq;
 use std::{fs, os::unix::fs::PermissionsExt};
 use tempfile::NamedTempFile;
 

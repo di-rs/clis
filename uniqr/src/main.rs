@@ -6,7 +6,7 @@ use std::{
 
 mod cli;
 use crate::cli::{Cli, CliError};
-use uniqr::report_unique_lines;
+use uniqr::{UniqueList, report_unique_lines};
 
 fn main() {
     let cli = Cli::parse();
@@ -32,7 +32,8 @@ fn run(cli: Cli) -> Result<(), CliError> {
     let reader = get_reader(&cli.input_file)?;
     let writer = get_writer(cli.output_file)?;
 
-    report_unique_lines(reader, writer, cli.count)?;
+    let list = UniqueList::from_reader(reader)?;
+    report_unique_lines(writer, list, cli.count)?;
 
     Ok(())
 }
@@ -55,7 +56,7 @@ fn get_reader(path: &str) -> Result<Box<dyn BufRead>, CliError> {
 
 fn get_writer(path: Option<String>) -> Result<Box<dyn Write>, CliError> {
     if let Some(path) = path {
-        let file = File::open(&path).map_err(|err| CliError::FileOpen { err, path })?;
+        let file = File::create(&path).map_err(|err| CliError::FileOpen { err, path })?;
         Ok(Box::new(BufWriter::new(file)))
     } else {
         let stdout = std::io::stdout();
