@@ -14,12 +14,14 @@ impl LineNode {
         }
     }
 
-    fn inner_eq(&self, other: &Self) -> bool {
-        self.inner.trim_end() == other.inner.trim_end()
-    }
-
     const fn increase(&mut self) {
         self.count = self.count.saturating_add(1);
+    }
+}
+
+impl PartialEq for LineNode {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner.trim_end() == other.inner.trim_end()
     }
 }
 
@@ -39,7 +41,7 @@ impl UniqueList {
             let cur = LineNode::new(&line);
 
             if let Some(prev) = prev
-                && prev.inner_eq(&cur)
+                && *prev == cur
             {
                 prev.increase();
             } else {
@@ -60,10 +62,9 @@ pub fn report_unique_lines(
     list: UniqueList,
     line_count: bool,
 ) -> Result<(), std::io::Error> {
-    let list = list.0;
-    for item in list {
+    for item in list.0 {
         let LineNode { inner, count } = item;
-        
+
         if line_count {
             write!(writer, "{count:>4} {inner}")?;
         } else {

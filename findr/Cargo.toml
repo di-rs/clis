@@ -1,0 +1,20 @@
+[package]
+name = "findr"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.6.6", features = ["derive"] }
+exitcode = "1.1.2"
+thiserror = "2.0.20"
+regex = "1.10.3"
+walkdir = "2.4.0"
+
+[dev-dependencies]
+assert_cmd = "2.2.2"
+predicates = "3.1.4"
+pretty_assertions = "1.4.1"
+tempfile = "3.27.0"
+
+[lints]
+workspace = true
