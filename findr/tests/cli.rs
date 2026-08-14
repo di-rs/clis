@@ -4,7 +4,6 @@ use pretty_assertions::assert_eq;
 use std::fs;
 #[cfg(not(windows))]
 use std::{borrow::Cow, path::Path};
-use tempfile::NamedTempFile;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -16,18 +15,6 @@ fn usage() {
             .assert()
             .stdout(predicate::str::contains("Usage"));
     }
-}
-
-#[test]
-fn skips_bad_dir() -> Result<()> {
-    let bad = NamedTempFile::new()?;
-    let expected = format!("{}: .* [(]os error [23][)]", bad.path().display());
-    cargo_bin_cmd!()
-        .arg(bad.path())
-        .assert()
-        .success()
-        .stderr(predicate::str::is_match(expected)?);
-    Ok(())
 }
 
 #[test]

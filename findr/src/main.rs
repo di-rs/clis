@@ -4,6 +4,7 @@ use walkdir::WalkDir;
 
 mod cli;
 use crate::cli::{Cli, CliError};
+use findr::{is_name_matches, is_type_matches};
 
 fn main() {
     let cli = Cli::parse();
@@ -25,7 +26,12 @@ fn run(cli: Cli) -> Result<(), CliError> {
         for entry in WalkDir::new(path) {
             match entry {
                 Ok(entry) => {
-                    write!(writer, "{}", entry.path().display())?;
+                    let type_match = is_type_matches(&entry, &cli.entry_types);
+                    let name_match = is_name_matches(&entry, &cli.names);
+
+                    if type_match && name_match {
+                        writeln!(writer, "{}", entry.path().display())?;
+                    }
                 }
                 Err(e) => {
                     eprintln!("{e}");

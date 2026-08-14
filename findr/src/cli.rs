@@ -1,7 +1,9 @@
-use clap::{ArgAction, Parser, ValueEnum, builder::PossibleValue};
+use clap::{ArgAction, Parser};
 use regex::Regex;
 use std::path::PathBuf;
 use thiserror::Error;
+
+use findr::EntryType;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -18,26 +20,7 @@ pub struct Cli {
     pub entry_types: Vec<EntryType>,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum EntryType {
-    Dir,
-    File,
-    Link,
-}
 
-impl ValueEnum for EntryType {
-    fn value_variants<'a>() -> &'a [Self] {
-        &[Self::Dir, Self::File, Self::Link]
-    }
-
-    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
-        Some(match self {
-            Self::Dir => PossibleValue::new("d"),
-            Self::File => PossibleValue::new("f"),
-            Self::Link => PossibleValue::new("l"),
-        })
-    }
-}
 
 #[derive(Error, Debug)]
 pub enum CliError {
