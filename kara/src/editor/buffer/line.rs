@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::range::Range;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 

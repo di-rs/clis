@@ -70,35 +70,26 @@ fn dies_not_enough_args() {
 #[test]
 fn dies_bad_digit_field() {
     let bad = random_string();
-    dies(
-        &[CSV, "-f", &bad],
-        &format!(r#"illegal list value: "{}""#, &bad),
-    );
+    dies(&[CSV, "-f", &bad], &format!("illegal list value: `{bad}`"));
 }
 
 #[test]
 fn dies_bad_digit_bytes() {
     let bad = random_string();
-    dies(
-        &[CSV, "-b", &bad],
-        &format!(r#"illegal list value: "{}""#, &bad),
-    );
+    dies(&[CSV, "-b", &bad], &format!("illegal list value: `{bad}`"));
 }
 
 #[test]
 fn dies_bad_digit_chars() {
     let bad = random_string();
-    dies(
-        &[CSV, "-c", &bad],
-        &format!(r#"illegal list value: "{}""#, &bad),
-    );
+    dies(&[CSV, "-c", &bad], &format!("illegal list value: `{bad}`"));
 }
 
 #[test]
 fn dies_empty_delimiter() {
     dies(
         &[CSV, "-f", "1", "-d", ""],
-        r#"--delim "" must be a single byte"#,
+        "--delim `` must be a single byte",
     );
 }
 
@@ -106,7 +97,7 @@ fn dies_empty_delimiter() {
 fn dies_bad_delimiter() {
     dies(
         &[CSV, "-f", "1", "-d", ",,"],
-        r#"--delim ",," must be a single byte"#,
+        "--delim `,,` must be a single byte",
     );
 }
 

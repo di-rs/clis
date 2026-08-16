@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, range::Range};
 
 use crate::editor::{Coordinate, Size, buffer::Buffer, terminal::Terminal};
 
@@ -45,7 +45,7 @@ impl View {
                 Some(line) => {
                     let left = self.scroll_offset.x;
                     let right = self.scroll_offset.x.saturating_add(width);
-                    Self::render_line(i, line.get(left..right));
+                    Self::render_line(i, line.get(Range::from(left..right)));
                 }
                 None => Self::render_line(i, "~"),
             }

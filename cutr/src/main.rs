@@ -7,10 +7,11 @@ use std::{
 
 mod cli;
 use crate::cli::{Cli, CliError};
+use cutr::{Extract};
 
 fn main() {
     let cli = Cli::parse();
-    match run(cli) {
+    match run(&cli) {
         Ok(()) => {
             std::process::exit(exitcode::OK);
         }
@@ -24,10 +25,18 @@ fn main() {
     }
 }
 
-fn run(cli: Cli) -> Result<(), CliError> {
+fn run(cli: &Cli) -> Result<(), CliError> {
     let mut writer = get_writer();
-    let delimiter = cli.parse_delimeter()?;
 
+    for filename in &cli.files {
+        match get_reader(filename) {
+            Ok(reader) => {
+                let extractor = Extract::try_from(&cli.extract)?;
+                extractor.extract(reader, &mut writer, cli.delimiter)?;
+            }
+            Err(e) => eprintln!("Failed to open {}: {e}", filename.display()),
+        }
+    }
     Ok(())
 }
 
