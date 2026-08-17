@@ -40,7 +40,7 @@ fn dies_bad_pattern() {
         .args(["*foo", FOX])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Invalid pattern `*foo`"));
+        .stderr(predicate::str::contains("invalid pattern `*foo`"));
 }
 
 #[test]

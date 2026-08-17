@@ -1,5 +1,5 @@
 use clap::{CommandFactory, Parser};
-use grepr::find_matches;
+use grepr::{find_files, find_matches};
 use human_panic::setup_panic;
 use log::info;
 use std::io::{BufReader, IsTerminal};
@@ -18,7 +18,7 @@ fn main() {
 
     let cli = Cli::parse();
     env_logger::Builder::new()
-        .filter_level(cli.verbosity.into())
+        .filter_level(cli.verbosity.log_level_filter())
         .init();
 
     let _ = ctrlc::set_handler(move || {
@@ -32,6 +32,7 @@ fn main() {
             std::process::exit(exitcode::OK);
         }
         Err(CliError::Config) => {
+            let _ = Cli::command().print_help();
             std::process::exit(exitcode::CONFIG);
         }
         Err(e) => {
@@ -43,13 +44,16 @@ fn main() {
 
 fn run(cli: &Cli) -> Result<(), CliError> {
     let mut writer = get_writer();
+    let pattern = cli.try_parse_pattern()?;
 
-    for filename in &cli.files {
-        match get_reader(filename) {
+    let entries = find_files(&cli.files, cli.recursive);
+    for entry in entries {
+        let entry = entry?;
+        match get_reader(&entry) {
             Ok(reader) => {
-                find_matches(&cli.pattern, reader, &mut writer)?;
+                find_matches(reader, &mut writer, &pattern, cli.invert)?;
             }
-            Err(e) => eprintln!("Failed to open {}: {e}", filename.display()),
+            Err(e) => eprintln!("Failed to open {}: {e}", entry.display()),
         }
     }
     Ok(())
@@ -58,10 +62,10 @@ fn run(cli: &Cli) -> Result<(), CliError> {
 fn get_reader(path: &Path) -> Result<Box<dyn BufRead>, CliError> {
     if path == Path::new("-") {
         if stdin().is_terminal() {
-            let _ = Cli::command().print_help();
-            return Err(CliError::Config);
+            Err(CliError::Config)
+        } else {
+            Ok(Box::new(BufReader::new(stdin().lock())))
         }
-        Ok(Box::new(BufReader::new(stdin().lock())))
     } else {
         Ok(Box::new(BufReader::new(File::open(path)?)))
     }
