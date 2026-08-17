@@ -1,16 +1,16 @@
 use clap::{CommandFactory, Parser};
-use grepr::{find_files, find_matches};
+use grepr::{count_matches, find_files, find_matches};
 use human_panic::setup_panic;
 use log::info;
 use std::io::{BufReader, IsTerminal};
 use std::path::Path;
 use std::{
     fs::File,
-    io::{BufRead, BufWriter, Write, stdin},
+    io::{BufRead, stdin},
 };
 
 mod cli;
-use crate::cli::{Cli, CliError};
+use crate::cli::{Cli, CliError, get_writer};
 
 fn main() {
     setup_panic!();
@@ -43,15 +43,21 @@ fn main() {
 }
 
 fn run(cli: &Cli) -> Result<(), CliError> {
-    let mut writer = get_writer();
     let pattern = cli.try_parse_pattern()?;
 
     let entries = find_files(&cli.files, cli.recursive);
+    let multiple_files = entries.len() > 1;
     for entry in entries {
         let entry = entry?;
         match get_reader(&entry) {
             Ok(reader) => {
-                find_matches(reader, &mut writer, &pattern, cli.invert)?;
+                let writer = get_writer(&entry, multiple_files)?;
+
+                if cli.count {
+                    count_matches(reader, writer, &pattern, cli.invert)?;
+                } else {
+                    find_matches(reader, writer, &pattern, cli.invert)?;
+                }
             }
             Err(e) => eprintln!("Failed to open {}: {e}", entry.display()),
         }
@@ -69,9 +75,4 @@ fn get_reader(path: &Path) -> Result<Box<dyn BufRead>, CliError> {
     } else {
         Ok(Box::new(BufReader::new(File::open(path)?)))
     }
-}
-
-fn get_writer() -> impl Write {
-    let stdout = std::io::stdout();
-    BufWriter::new(stdout.lock())
 }

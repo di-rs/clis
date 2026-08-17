@@ -59,20 +59,54 @@ pub fn find_matches(
     pattern: &Regex,
     invert: bool,
 ) -> Result<(), std::io::Error> {
+    let write_line = |line: &str| -> Result<(), std::io::Error> { writeln!(writer, "{line}") };
+
+    run_matches_finder(reader, pattern, invert, write_line)?;
+
+    Ok(())
+}
+
+/// # Errors
+/// Throws error when couldn't read the line or writing to the writer fails
+pub fn count_matches(
+    reader: impl BufRead,
+    mut writer: impl Write,
+    pattern: &Regex,
+    invert: bool,
+) -> Result<(), std::io::Error> {
+    let mut count: usize = 0;
+
+    let increase_count = |_: &str| {
+        count = count.saturating_add(1);
+        Ok(())
+    };
+
+    run_matches_finder(reader, pattern, invert, increase_count)?;
+
+    writeln!(writer, "{count}")?;
+    Ok(())
+}
+
+fn run_matches_finder<F>(
+    reader: impl BufRead,
+    pattern: &Regex,
+    invert: bool,
+    mut cb: F,
+) -> Result<(), std::io::Error>
+where
+    F: FnMut(&str) -> Result<(), std::io::Error>,
+{
     for line in reader.lines() {
         let line = line?;
         let matches_pattern = pattern.is_match(&line);
-
-        dbg!(&line, matches_pattern, invert);
-
         match (matches_pattern, invert) {
             (true, false) => {
-                writeln!(writer, "{line}")?;
+                cb(&line)?;
                 #[cfg(not(test))]
                 warn!("found line with pattern: {pattern} - {line}");
             }
             (false, true) => {
-                writeln!(writer, "{line}")?;
+                cb(&line)?;
                 #[cfg(not(test))]
                 warn!("invert: found line without pattern: {pattern} - {line}");
             }

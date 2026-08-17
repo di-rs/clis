@@ -4,6 +4,9 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 mod verbosity;
+mod writer;
+
+pub use writer::get_writer;
 
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Parser, Debug)]
