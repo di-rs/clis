@@ -1,0 +1,19 @@
+[package]
+name = "grepr"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.5.0", features = ["derive"] }
+regex = "1.10.3"
+walkdir = "2.4.0"
+thiserror = "2.0.20"
+
+[dev-dependencies]
+assert_cmd = "2.0.13"
+predicates = "3.0.4"
+pretty_assertions = "1.4.0"
+sys-info = "0.9.1"
+
+[lints]
+workspace = true
