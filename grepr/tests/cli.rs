@@ -1,8 +1,8 @@
-use std::{fs, path::PathBuf};
-
 use assert_cmd::cargo::cargo_bin_cmd;
+use assert_fs::{NamedTempFile, fixture::FileWriteStr};
 use predicates::prelude::*;
 use pretty_assertions::assert_eq;
+use std::{fs, path::PathBuf};
 
 const BUSTLE: &str = "tests/inputs/bustle.txt";
 const EMPTY: &str = "tests/inputs/empty.txt";
@@ -217,5 +217,36 @@ fn stdin_insensitive_count() -> Result<()> {
 
     let stdout = String::from_utf8(output.stdout)?;
     assert_eq!(stdout, expected);
+    Ok(())
+}
+
+#[test]
+fn file_content_in_file() -> Result<()> {
+    let file = NamedTempFile::new("sample.txt")?;
+    file.write_str("A test\nActual content\nMore content\nAnother test")?;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("test").arg(file.path());
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("A test\nAnother test"));
+
+    Ok(())
+}
+
+#[test]
+fn empty_pattern_returns_all_file() -> Result<()> {
+    let file = NamedTempFile::new("sample.txt")?;
+    let file_content = "A test\nActual content\nMore content\nAnother test";
+    file.write_str(file_content)?;
+
+    let mut cmd = cargo_bin_cmd!();
+    cmd.arg("").arg(file.path());
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains(file_content));
+
     Ok(())
 }
