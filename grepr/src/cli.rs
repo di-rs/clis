@@ -5,8 +5,10 @@ use thiserror::Error;
 
 mod verbosity;
 mod writer;
+mod reader;
 
 pub use writer::get_writer;
+pub use reader::get_reader;
 
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Parser, Debug)]

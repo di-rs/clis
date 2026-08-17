@@ -6,7 +6,7 @@ let output_dir = "tests/expected"
 rm -rf $output_dir
 mkdir $output_dir
 
-let files = glob $"($input_dir)/*.txt"
+let files = glob $"($input_dir)/*.txt" | sort 
 
 def --wrapped grep [...args] {
     ^grep ...$args | complete | get stdout

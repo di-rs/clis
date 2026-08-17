@@ -2,15 +2,10 @@ use clap::{CommandFactory, Parser};
 use grepr::{count_matches, find_files, find_matches};
 use human_panic::setup_panic;
 use log::info;
-use std::io::{BufReader, IsTerminal};
-use std::path::Path;
-use std::{
-    fs::File,
-    io::{BufRead, stdin},
-};
+use std::{fs, path::Path, io::Write};
 
 mod cli;
-use crate::cli::{Cli, CliError, get_writer};
+use crate::cli::{Cli, CliError, get_writer, get_reader};
 
 fn main() {
     setup_panic!();
@@ -44,6 +39,7 @@ fn main() {
 
 fn run(cli: &Cli) -> Result<(), CliError> {
     let pattern = cli.try_parse_pattern()?;
+    let mut writer = get_writer();
 
     let entries = find_files(&cli.files, cli.recursive);
     let multiple_files = entries.len() > 1;
@@ -51,12 +47,13 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         let entry = entry?;
         match get_reader(&entry) {
             Ok(reader) => {
-                let writer = get_writer(&entry, multiple_files)?;
+                let line_prefix = get_line_prefix(&entry, multiple_files)?;
 
                 if cli.count {
-                    count_matches(reader, writer, &pattern, cli.invert)?;
+                    write!(writer, "{line_prefix}")?;
+                    count_matches(reader, &mut writer, &pattern, cli.invert)?;
                 } else {
-                    find_matches(reader, writer, &pattern, cli.invert)?;
+                    find_matches(reader, &mut writer, &pattern, cli.invert)?;
                 }
             }
             Err(e) => eprintln!("Failed to open {}: {e}", entry.display()),
@@ -65,14 +62,11 @@ fn run(cli: &Cli) -> Result<(), CliError> {
     Ok(())
 }
 
-fn get_reader(path: &Path) -> Result<Box<dyn BufRead>, CliError> {
-    if path == Path::new("-") {
-        if stdin().is_terminal() {
-            Err(CliError::Config)
-        } else {
-            Ok(Box::new(BufReader::new(stdin().lock())))
-        }
+fn get_line_prefix(path: &Path, multiple_files: bool) -> Result<String, std::io::Error> {
+    if multiple_files {
+        let full_path = fs::canonicalize(path)?;
+        Ok(format!("{}:", full_path.display()))
     } else {
-        Ok(Box::new(BufReader::new(File::open(path)?)))
+        Ok(String::new())
     }
 }
