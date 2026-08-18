@@ -58,7 +58,7 @@ fn dies_bad_file2() -> Result<()> {
 
 #[test]
 fn dies_both_stdin() {
-    let expected = r#"Both input files cannot be STDIN ("-")"#;
+    let expected = "Error: both input files cannot be STDIN (`-`)";
     cargo_bin_cmd!()
         .args(["-", "-"])
         .assert()

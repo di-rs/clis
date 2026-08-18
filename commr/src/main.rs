@@ -20,6 +20,10 @@ fn main() {
             let _ = Cli::command().print_help();
             std::process::exit(exitcode::CONFIG);
         }
+        Err(CliError::FileOpen(file_name, e)) => {
+            eprintln!("{}: {e}", file_name.display());
+            std::process::exit(exitcode::CONFIG);
+        }
         Err(e) => {
             eprintln!("Error: {e}");
             std::process::exit(exitcode::DATAERR);
@@ -28,6 +32,15 @@ fn main() {
 }
 
 fn run(cli: &Cli) -> Result<(), CliError> {
+    let file1 = &cli.file1;
+    let file2 = &cli.file2;
+    if file1 == Path::new("-") && file2 == Path::new("-") {
+        return Err(CliError::BothFilesStdin);
+    }
+
+    let reader1 = get_reader(file1)?;
+    let reader2 = get_reader(file2)?;
+
     let mut writer = get_writer();
 
     Ok(())
@@ -41,7 +54,8 @@ fn get_reader(path: &Path) -> Result<Box<dyn BufRead>, CliError> {
             Ok(Box::new(BufReader::new(stdin().lock())))
         }
     } else {
-        Ok(Box::new(BufReader::new(File::open(path)?)))
+        let file = File::open(path).map_err(|e| CliError::FileOpen(path.to_owned(), e))?;
+        Ok(Box::new(BufReader::new(file)))
     }
 }
 
