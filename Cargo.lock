@@ -739,9 +739,8 @@ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 [[package]]
 name = "line_prefixer"
 version = "0.1.0"
-dependencies = [
- "pretty_assertions",
-]
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63ca40d3ca9061a6b7bdca2a937d65fecf84672c106a0c8cf16a1fe379ba4640"
 
 [[package]]
 name = "linux-raw-sys"
