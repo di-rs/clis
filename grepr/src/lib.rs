@@ -1,7 +1,7 @@
 #[cfg(not(test))]
 use log::warn;
 use regex::Regex;
-use std::{io::BufRead, io::Write, path::PathBuf};
+use std::{io::{BufRead, Write}, path::{Path, PathBuf}};
 use walkdir::WalkDir;
 
 #[derive(Debug, thiserror::Error)]
@@ -19,6 +19,11 @@ pub fn find_files(paths: &[PathBuf], recursive: bool) -> Vec<Result<PathBuf, Par
     let mut res = Vec::new();
 
     for path in paths {
+        if path == Path::new("-") {
+            res.push(Ok(path.clone()));
+            continue;
+        }
+
         let is_dir = path.is_dir();
         let exists = path.exists();
 
@@ -59,7 +64,7 @@ pub fn find_matches(
     pattern: &Regex,
     invert: bool,
 ) -> Result<(), std::io::Error> {
-    let write_line = |line: &str| -> Result<(), std::io::Error> { writeln!(writer, "{line}") };
+    let write_line = |line: &str| -> Result<(), std::io::Error> { write!(writer, "{line}") };
 
     run_matches_finder(reader, pattern, invert, write_line)?;
 
@@ -88,7 +93,7 @@ pub fn count_matches(
 }
 
 fn run_matches_finder<F>(
-    reader: impl BufRead,
+    mut reader: impl BufRead,
     pattern: &Regex,
     invert: bool,
     mut cb: F,
@@ -96,8 +101,11 @@ fn run_matches_finder<F>(
 where
     F: FnMut(&str) -> Result<(), std::io::Error>,
 {
-    for line in reader.lines() {
-        let line = line?;
+    let mut line = String::new();
+
+    while let bytes = reader.read_line(&mut line)?
+        && bytes != 0
+    {
         let matches_pattern = pattern.is_match(&line);
         match (matches_pattern, invert) {
             (true, false) => {
@@ -112,7 +120,10 @@ where
             }
             _ => (),
         }
+
+        line.clear();
     }
+
     Ok(())
 }
 
@@ -207,7 +218,7 @@ mod tests {
         let matches = find_matches(Cursor::new(&text), &mut result, &pattern, true);
 
         assert!(matches.is_ok());
-        assert_eq!(result, b"Ipsum\nDOLOR\n");
+        assert_eq!(result, b"Ipsum\r\nDOLOR");
         Ok(())
     }
 
@@ -221,7 +232,7 @@ mod tests {
         let matches = find_matches(Cursor::new(&text), &mut result, &pattern, false);
 
         assert!(matches.is_ok());
-        assert_eq!(result, b"Lorem\nDOLOR\n");
+        assert_eq!(result, b"Lorem\nDOLOR");
         Ok(())
     }
 }

@@ -40,18 +40,17 @@ fn dies_bad_pattern() {
         .args(["*foo", FOX])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("invalid pattern `*foo`"));
+        .stderr(predicate::str::contains("invalid pattern passed `*foo`"));
 }
 
 #[test]
-fn warns_bad_file() -> Result<()> {
+fn warns_bad_file() {
     let bad = gen_bad_file();
-    let expected = format!("{bad}: .* [(]os error 2[)]");
+    let expected = format!("{bad} doesn\'t exists");
     cargo_bin_cmd!()
         .args(["foo", &bad])
         .assert()
-        .stderr(predicate::str::is_match(expected)?);
-    Ok(())
+        .stderr(predicate::str::contains(expected));
 }
 
 fn run(args: &[&str], expected_file: &str) -> Result<()> {
@@ -66,7 +65,7 @@ fn run(args: &[&str], expected_file: &str) -> Result<()> {
 
 #[test]
 fn empty_file() -> Result<()> {
-    run(&["foo", EMPTY], "empty.foo")
+    run(&["foo", EMPTY], "foo.empty.txt")
 }
 
 #[test]
@@ -191,7 +190,7 @@ fn stdin() -> Result<()> {
     let input = fs::read_to_string(BUSTLE)?;
     let expected = fs::read_to_string("tests/expected/bustle.txt.the.capitalized")?;
 
-    let output = cargo_bin_cmd!().arg("The").write_stdin(input).output()?;
+    let output = cargo_bin_cmd!().write_stdin(input).arg("The").output()?;
 
     let stdout = String::from_utf8(output.stdout)?;
     assert_eq!(stdout, expected);
