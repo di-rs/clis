@@ -107,18 +107,10 @@ where
         && bytes != 0
     {
         let matches_pattern = pattern.is_match(&line);
-        match (matches_pattern, invert) {
-            (true, false) => {
-                cb(&line)?;
-                #[cfg(not(test))]
-                warn!("found line with pattern: {pattern} - {line}");
-            }
-            (false, true) => {
-                cb(&line)?;
-                #[cfg(not(test))]
-                warn!("invert: found line without pattern: {pattern} - {line}");
-            }
-            _ => (),
+        if matches_pattern ^ invert {
+            cb(&line)?;
+            #[cfg(not(test))]
+            warn!("found line with pattern: {pattern} - {line}");
         }
 
         line.clear();
