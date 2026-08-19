@@ -1,4 +1,3 @@
-mod cli;
 use clap::Parser;
 use std::{
     fs::File,
@@ -6,6 +5,7 @@ use std::{
     path::Path,
 };
 
+mod cli;
 use crate::cli::{Cli, CliError};
 use tailr::{get_buffer_info, print_bytes, print_lines};
 
