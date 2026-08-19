@@ -1,0 +1,20 @@
+==> tests/inputs/twelve.txt <==
+three
+four
+five
+six
+seven
+eight
+nine
+ten
+eleven
+twelve
+
+==> tests/inputs/empty.txt <==
+
+==> tests/inputs/one.txt <==
+
+==> tests/inputs/three.txt <==
+four words.
+
+==> tests/inputs/two.txt <==

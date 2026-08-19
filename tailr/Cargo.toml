@@ -1,5 +1,5 @@
 [package]
-name = "commr"
+name = "tailr"
 version = "0.1.0"
 edition = "2024"
 
@@ -7,6 +7,9 @@ edition = "2024"
 clap = { version = "4.5.0", features = ["derive"] }
 thiserror = "2.0.20"
 exitcode = "1.1.2"
+num = "0.4.1"
+once_cell = "1.19.0"
+regex = "1.10.3"
 
 [dev-dependencies]
 assert_cmd = "2.0.13"
