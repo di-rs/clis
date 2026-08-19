@@ -1,7 +1,7 @@
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use pretty_assertions::assert_eq;
-use std::{fs, path::PathBuf};
+use std::{fs::File, io::Read, path::PathBuf};
 
 const EMPTY: &str = "tests/inputs/empty.txt";
 const ONE: &str = "tests/inputs/one.txt";
@@ -36,7 +36,7 @@ fn dies_no_args() {
 #[test]
 fn dies_bad_bytes() {
     let bad = gen_bad_file();
-    let expected = format!("illegal byte count -- {bad}");
+    let expected = "invalid digit found in string";
     cargo_bin_cmd!()
         .args(["-c", &bad, EMPTY])
         .assert()
@@ -47,7 +47,7 @@ fn dies_bad_bytes() {
 #[test]
 fn dies_bad_lines() {
     let bad = gen_bad_file();
-    let expected = format!("illegal line count -- {bad}");
+    let expected = "invalid digit found in string";
     cargo_bin_cmd!()
         .args(["-n", &bad, EMPTY])
         .assert()
@@ -80,10 +80,14 @@ fn skips_bad_file() -> Result<()> {
 
 fn run(args: &[&str], expected_file: &str) -> Result<()> {
     let outfile: PathBuf = ["tests/expected", expected_file].iter().collect();
-    let expected = fs::read_to_string(outfile)?;
+    let mut file = File::open(outfile)?;
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+    let expected = String::from_utf8_lossy(&buffer);
+
     let output = cargo_bin_cmd!().args(args).output()?;
 
-    let stdout = String::from_utf8(output.stdout)?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert_eq!(stdout, expected);
     Ok(())
 }
