@@ -7,6 +7,7 @@ use std::{
 };
 
 use crate::cli::{Cli, CliError};
+use commr::{Column, get_lines};
 
 fn main() {
     let cli = Cli::parse();
@@ -38,10 +39,15 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         return Err(CliError::BothFilesStdin);
     }
 
+    let mut writer = get_writer();
     let reader1 = get_reader(file1)?;
     let reader2 = get_reader(file2)?;
 
-    let mut writer = get_writer();
+    let traverse = |col: Column| {
+        let _ = cli.print_column(&mut writer, col);
+    };
+
+    get_lines(reader1, reader2, cli.insensitive, traverse);
 
     Ok(())
 }

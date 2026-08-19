@@ -274,7 +274,9 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "clap",
+ "env_logger",
  "exitcode",
+ "log",
  "predicates",
  "pretty_assertions",
  "thiserror",
