@@ -2,12 +2,12 @@ mod cli;
 use clap::{CommandFactory, Parser};
 use std::{
     fs::File,
-    io::{BufRead, BufReader, BufWriter, IsTerminal, Write, stdin},
+    io::{BufRead, BufReader, IsTerminal, stdin},
     path::Path,
 };
 
 use crate::cli::{Cli, CliError};
-use commr::{Column, get_lines};
+use commr::get_lines;
 
 fn main() {
     let cli = Cli::parse();
@@ -39,15 +39,10 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         return Err(CliError::BothFilesStdin);
     }
 
-    let mut writer = get_writer();
     let reader1 = get_reader(file1)?;
     let reader2 = get_reader(file2)?;
 
-    let traverse = |col: Column| {
-        let _ = cli.print_column(&mut writer, col);
-    };
-
-    get_lines(reader1, reader2, cli.insensitive, traverse);
+    get_lines(reader1, reader2, cli.insensitive, cli);
 
     Ok(())
 }
@@ -63,9 +58,4 @@ fn get_reader(path: &Path) -> Result<Box<dyn BufRead>, CliError> {
         let file = File::open(path).map_err(|e| CliError::FileOpen(path.to_owned(), e))?;
         Ok(Box::new(BufReader::new(file)))
     }
-}
-
-fn get_writer() -> impl Write {
-    let stdout = std::io::stdout();
-    BufWriter::new(stdout.lock())
 }

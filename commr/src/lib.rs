@@ -7,16 +7,18 @@ pub enum Column<'a> {
     Col3(&'a str),
 }
 
+pub trait Reporter {
+    fn report(&self, col: Column) -> ();
+}
+
 /// # Errors
 /// Throws error if unable to write to writer
-pub fn get_lines<F>(reader1: impl BufRead, reader2: impl BufRead, insensitive: bool, cb: F)
-where
-    F: FnMut(Column),
+pub fn get_lines(reader1: impl BufRead, reader2: impl BufRead, insensitive: bool, reporter: &impl Reporter)
 {
     let reader1 = get_lines_reader(reader1, insensitive);
     let reader2 = get_lines_reader(reader2, insensitive);
 
-    traverse_lines(reader1, reader2, cb);
+    traverse_lines(reader1, reader2, reporter);
 }
 
 fn get_lines_reader(reader: impl BufRead, insensitive: bool) -> impl Iterator<Item = String> {
@@ -29,9 +31,8 @@ fn get_lines_reader(reader: impl BufRead, insensitive: bool) -> impl Iterator<It
     })
 }
 
-fn traverse_lines<F, R1, R2>(mut reader1: R1, mut reader2: R2, mut cb: F)
+fn traverse_lines<R1, R2>(mut reader1: R1, mut reader2: R2, reporter: &impl Reporter)
 where
-    F: FnMut(Column),
     R1: Iterator<Item = String>,
     R2: Iterator<Item = String>,
 {
@@ -42,25 +43,25 @@ where
         match (&line1, &line2) {
             (Some(val1), Some(val2)) => match val1.cmp(val2) {
                 Ordering::Equal => {
-                    cb(Column::Col3(val1));
+                    reporter.report(Column::Col3(val1));
                     line1 = reader1.next();
                     line2 = reader2.next();
                 }
                 Ordering::Less => {
-                    cb(Column::Col1(val1));
+                    reporter.report(Column::Col1(val1));
                     line1 = reader1.next();
                 }
                 Ordering::Greater => {
-                    cb(Column::Col2(val2));
+                    reporter.report(Column::Col2(val2));
                     line2 = reader2.next();
                 }
             },
             (Some(val1), None) => {
-                cb(Column::Col1(val1));
+                reporter.report(Column::Col1(val1));
                 line1 = reader1.next();
             }
             (None, Some(val2)) => {
-                cb(Column::Col2(val2));
+                reporter.report(Column::Col2(val2));
                 line2 = reader2.next();
             }
             _ => (),

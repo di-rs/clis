@@ -1,8 +1,8 @@
-use clap::Parser;
-use std::{io::Write, path::PathBuf};
+use clap::{ArgAction, Parser};
+use std::path::PathBuf;
 use thiserror::Error;
 
-use commr::Column;
+use commr::{Column, Reporter};
 
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Parser, Debug)]
@@ -19,15 +19,15 @@ pub struct Cli {
     pub file2: PathBuf,
 
     /// Supress printing of column 1
-    #[arg(short('1'), default_value = "true")]
+    #[arg(short('1'), default_value = "true", action(ArgAction::SetFalse))]
     show_col1: bool,
 
     /// Supress printing of column 2
-    #[arg(short('2'), default_value = "true")]
+    #[arg(short('2'), default_value = "true", action(ArgAction::SetFalse))]
     show_col2: bool,
 
     /// Supress printing of column 3
-    #[arg(short('3'), default_value = "true")]
+    #[arg(short('3'), default_value = "true", action(ArgAction::SetFalse))]
     show_col3: bool,
 
     /// Case-insensitive comparison of lines
@@ -56,8 +56,8 @@ pub enum CliError {
     IO(#[from] std::io::Error),
 }
 
-impl Cli {
-    pub fn print_column(&self, mut writer: impl Write, col: Column) -> Result<(), std::io::Error> {
+impl Reporter for Cli {
+    fn report(&self, col: Column) {
         let mut columns = vec![];
 
         match col {
@@ -88,9 +88,7 @@ impl Cli {
         }
 
         if !columns.is_empty() {
-            writeln!(writer, "{}", columns.join(&self.delimiter))?;
+            println!("{}", columns.join(&self.delimiter));
         }
-
-        Ok(())
     }
 }
