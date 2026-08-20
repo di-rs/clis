@@ -1,13 +1,10 @@
 use clap::{CommandFactory, Parser};
 use std::{
-    fs::File,
-    io::{BufRead, BufReader, IsTerminal, stdin},
-    path::Path,
+    fs::File, io::{BufRead, BufReader, BufWriter, IsTerminal, Write, stdin}, path::Path,
 };
 
 mod cli;
 use crate::cli::{Cli, CliError};
-use commr::get_lines;
 
 fn main() {
     let cli = Cli::parse();
@@ -33,18 +30,15 @@ fn main() {
 }
 
 fn run(cli: &Cli) -> Result<(), CliError> {
-    let file1 = &cli.file1;
-    let file2 = &cli.file2;
-    if file1 == Path::new("-") && file2 == Path::new("-") {
-        return Err(CliError::BothFilesStdin);
-    }
 
-    let reader1 = get_reader(file1)?;
-    let reader2 = get_reader(file2)?;
-
-    get_lines(reader1, reader2, cli.insensitive, cli);
 
     Ok(())
+}
+
+
+fn get_writer() -> impl Write {
+    let stdout = std::io::stdout();
+    BufWriter::new(stdout.lock())
 }
 
 fn get_reader(path: &Path) -> Result<Box<dyn BufRead>, CliError> {

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["biggie","bool", "catr", "commr", "cutr", "echor", "findr", "grepr", "headr", "kara", "tailr", "uniqr", "wcr"]
+members = ["biggie","bool", "catr", "commr", "cutr", "echor", "findr", "fortuner", "grepr", "headr", "kara", "tailr", "uniqr", "wcr"]
 
 [workspace.lints.clippy]
 pedantic = { level = "deny", priority = -1 }
