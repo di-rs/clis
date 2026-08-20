@@ -1,4 +1,5 @@
 use clap::{CommandFactory, Parser};
+use regex::RegexBuilder;
 use std::{
     fs::File, io::{BufRead, BufReader, BufWriter, IsTerminal, Write, stdin}, path::Path,
 };
@@ -30,7 +31,7 @@ fn main() {
 }
 
 fn run(cli: &Cli) -> Result<(), CliError> {
-
+    let pattern = cli.try_parse_pattern()?;
 
     Ok(())
 }
