@@ -5,7 +5,9 @@ mod cli;
 use crate::cli::{Cli, CliError};
 
 fn main() {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+    cli.setup_default();
+
     let result = run(&cli);
 
     match result {
@@ -21,6 +23,7 @@ fn main() {
 
 fn run(cli: &Cli) -> Result<(), CliError> {
     let mut writer = get_writer();
+    dbg!(&cli);
     Ok(())
 }
 

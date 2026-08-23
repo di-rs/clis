@@ -41,34 +41,36 @@ fn dies_invalid_year() {
 }
 
 #[test]
-fn dies_month_0() -> Result<()> {
-    let output = cargo_bin_cmd!().args(["-m", "0"]).output()?;
-
-    let stdout = String::from_utf8(output.stdout)?;
-    assert_eq!(stdout, "");
-
-    let stderr = String::from_utf8(output.stderr)?;
-    assert_eq!(stderr.trim(), "month `0` not in the range 1 through 12");
-
-    Ok(())
+fn dies_month_0() {
+    cargo_bin_cmd!()
+        .args(["-m", "0"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "invalid value '0' for '-m <MONTH>': not in the range 1 through 12",
+        ));
 }
 
 #[test]
-fn dies_month_13() -> Result<()> {
-    let output = cargo_bin_cmd!().args(["-m", "13"]).output()?;
-
-    let stderr = String::from_utf8(output.stderr)?;
-    assert_eq!(stderr.trim(), "month `13` not in the range 1 through 12");
-    Ok(())
+fn dies_month_13() {
+    cargo_bin_cmd!()
+        .args(["-m", "13"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "invalid value '13' for '-m <MONTH>': not in the range 1 through 12",
+        ));
 }
 
 #[test]
-fn dies_invalid_month() -> Result<()> {
-    let output = cargo_bin_cmd!().args(["-m", "foo"]).output()?;
-
-    let stderr = String::from_utf8(output.stderr)?;
-    assert_eq!(stderr.trim(), "Invalid month `foo`");
-    Ok(())
+fn dies_invalid_month() {
+    cargo_bin_cmd!()
+        .args(["-m", "foo"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "invalid value 'foo' for '-m <MONTH>'",
+        ));
 }
 
 #[test]
