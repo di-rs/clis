@@ -36,6 +36,13 @@ impl Month {
     pub const fn inner(&self) -> u32 {
         self.0
     }
+
+    #[must_use]
+    #[allow(clippy::indexing_slicing, clippy::as_conversions)]
+    pub fn get_name(&self) -> String {
+        let num = self.0 as usize;
+        Self::MONTH_NAMES[num.saturating_sub(1)].to_owned()
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

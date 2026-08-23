@@ -1,30 +1,45 @@
-use chrono::{Local, NaiveDate};
-use std::io::Write;
+use ansi_term::Style;
+use chrono::{Datelike, Local, NaiveDate};
 
 mod month;
 pub use month::Month;
 
-pub struct Date {
+pub struct CalendarDate {
     year: i32,
     month: Month,
-    day: NaiveDate,
+    today: NaiveDate,
 }
 
-impl Date {
+impl CalendarDate {
     #[must_use]
-    pub const fn new(year: i32, month: Month, day: NaiveDate) -> Self {
-        Self { year, month, day }
+    pub const fn new(year: i32, month: Month, today: NaiveDate) -> Self {
+        Self { year, month, today }
     }
 
-    fn last_day_in_month(&self) -> NaiveDate {
-        let next_month = self.month.next_month();
-        let is_next_year = next_month.inner() == 1;
-        let year = self.year.saturating_add(i32::from(is_next_year));
+    #[allow(clippy::unwrap_used)]
+    const fn first_day(&self) -> NaiveDate {
+        NaiveDate::from_ymd_opt(self.year, self.month.inner(), 1).unwrap()
+    }
 
-        NaiveDate::from_ymd_opt(year, next_month.inner(), 1)
-            .unwrap_or_default()
+    #[allow(clippy::unwrap_used)]
+    const fn last_day_in_month(&self) -> NaiveDate {
+        let month = self.month.inner();
+        let (y, m) = if month == 12 {
+            (self.year.saturating_add(1), 1)
+        } else {
+            (self.year, month.saturating_add(1))
+        };
+
+        NaiveDate::from_ymd_opt(y, m, 1)
+            .unwrap()
             .pred_opt()
-            .unwrap_or_default()
+            .unwrap()
+    }
+
+    fn is_today(&self, day: u32) -> bool {
+        self.year == self.today.year()
+            && self.month.inner() == self.today.month()
+            && day == self.today.day()
     }
 }
 
@@ -33,8 +48,53 @@ pub fn get_today() -> NaiveDate {
     Local::now().date_naive()
 }
 
-pub fn format_month(mut writer: impl Write, date: &Date) {
-    todo!()
+const LINE_WIDTH: usize = 22;
+
+#[must_use]
+pub fn format_month(date: &CalendarDate, print_year: bool) -> Vec<String> {
+    let first = date.first_day();
+    let mut days: Vec<String> = (1..first.weekday().number_from_sunday())
+        .map(|_| "  ".to_string())
+        .collect();
+
+    let last = date.last_day_in_month();
+    days.extend((first.day()..=last.day()).map(|num| {
+        let fmt = format!("{num:>2}");
+        if date.is_today(num) {
+            Style::new().reverse().paint(fmt).to_string()
+        } else {
+            fmt
+        }
+    }));
+
+    let mut lines = Vec::new();
+
+    let month_name = date.month.get_name();
+    let year = date.year;
+    lines.push(format!(
+        "{:^20}  ",
+        if print_year {
+            format!("{month_name} {year}")
+        } else {
+            month_name
+        }
+    ));
+
+    lines.push("Su Mo Tu We Th Fr Sa  ".to_string());
+
+    for week in days.chunks(7) {
+        lines.push(format!(
+            "{:width$}  ",
+            week.join(" "),
+            width = LINE_WIDTH - 2
+        ));
+    }
+
+    while lines.len() < 8 {
+        lines.push(" ".repeat(LINE_WIDTH));
+    }
+
+    lines
 }
 
 #[cfg(test)]
@@ -45,9 +105,8 @@ mod tests {
     #[test]
     #[allow(clippy::unwrap_used)]
     fn format_month_leap_year() {
-        let mut buf = Vec::new();
         let today = NaiveDate::from_ymd_opt(0, 1, 1).unwrap();
-        let date = Date::new(2020, Month::new(2), today);
+        let date = CalendarDate::new(2020, Month::new(2), today);
 
         let leap_february = [
             "   February 2020      ",
@@ -60,16 +119,15 @@ mod tests {
             "                      ",
         ];
 
-        format_month(&mut buf, &date);
-        assert_eq!(buf, leap_february.join("\n").as_bytes());
+        let buf = format_month(&date, true);
+        assert_eq!(buf.join("\n"), leap_february.join("\n"));
     }
 
     #[test]
     #[allow(clippy::unwrap_used)]
     fn test_format_month_selected_day() {
-        let mut buf = Vec::new();
         let today = NaiveDate::from_ymd_opt(2021, 4, 7).unwrap();
-        let date = Date::new(2020, Month::new(2), today);
+        let date = CalendarDate::new(2021, Month::new(4), today);
 
         let april_hl = [
             "     April 2021       ",
@@ -82,7 +140,7 @@ mod tests {
             "                      ",
         ];
 
-        format_month(&mut buf, &date);
-        assert_eq!(buf, april_hl.join("\n").as_bytes());
+        let buf = format_month(&date, true);
+        assert_eq!(buf.join("\n"), april_hl.join("\n"));
     }
 }

@@ -25,12 +25,14 @@ pub struct Cli {
 impl Cli {
     pub fn setup_default(&mut self) {
         let today = get_today();
-
         if self.month.is_none() && self.year.is_none() && !self.show_current_year {
             self.month = Some(Month::new(today.month()));
         }
+    }
 
-        self.year = self.year.or_else(|| Some(today.year()));
+    pub fn get_year(&self) -> i32 {
+        let today = get_today();
+        self.year.unwrap_or_else(|| today.year())
     }
 }
 
