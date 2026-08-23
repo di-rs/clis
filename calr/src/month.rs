@@ -25,6 +25,17 @@ impl Month {
         debug_assert!(value > 0, "should be positive value");
         Self(value)
     }
+
+    #[must_use]
+    pub const fn next_month(&self) -> Self {
+        let next_month = (self.0.saturating_add(1)) % 12;
+        Self(next_month)
+    }
+
+    #[must_use]
+    pub const fn inner(&self) -> u32 {
+        self.0
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
