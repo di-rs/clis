@@ -1,0 +1,20 @@
+[package]
+name = "lsr"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chrono = "0.4.45"
+clap = { workspace = true }
+exitcode = { workspace = true }
+tabular = "0.2.0"
+thiserror = { workspace = true }
+users = "0.11.0"
+
+[dev-dependencies]
+assert_cmd = { workspace = true }
+predicates = { workspace = true }
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

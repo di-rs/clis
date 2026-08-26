@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["biggie","bool", "calr", "catr", "commr", "cutr", "echor", "findr", "grepr", "headr", "kara", "tailr", "uniqr", "wcr"]
+members = ["biggie","bool", "calr", "catr", "commr", "cutr", "echor", "findr", "grepr", "headr", "kara", "lsr", "tailr", "uniqr", "wcr"]
 
 [workspace.dependencies]
 clap = { version = "4.6.6", features = ["derive"] }
