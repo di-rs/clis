@@ -1,5 +1,5 @@
 use crossterm::cursor::SetCursorStyle::BlinkingBlock;
-use crossterm::cursor::{Hide, MoveTo, Show};
+use crossterm::cursor::{self, Hide, MoveTo, Show};
 use crossterm::style::Print;
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::terminal::{Clear, ClearType, disable_raw_mode, enable_raw_mode};
@@ -37,7 +37,7 @@ impl Terminal {
 
     pub fn terminate() -> Result<()> {
         Self::leave_alternate_screen()?;
-        Self::show_caret()?;
+        Self::show_caret(BlinkingBlock)?;
         Self::execute()?;
         disable_raw_mode()?;
         Ok(())
@@ -66,8 +66,8 @@ impl Terminal {
         queue!(MoveTo(x, y))
     }
 
-    pub fn show_caret() -> Result<()> {
-        queue!(Show, BlinkingBlock)
+    pub fn show_caret(style: cursor::SetCursorStyle) -> Result<()> {
+        queue!(Show, style)
     }
 
     pub fn hide_caret() -> Result<()> {

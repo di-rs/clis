@@ -5,18 +5,20 @@ use view::View;
 
 mod buffer;
 mod editorcommand;
+mod editormode;
 mod terminal;
 mod view;
 
 mod prelude;
 pub use prelude::*;
 
-use crate::editor::editorcommand::EditorCommand;
+use crate::editor::{editorcommand::EditorCommand, editormode::EditorMode};
 
 pub struct Editor {
     should_quit: bool,
     view: View,
     buffer: Buffer,
+    mode: EditorMode,
 }
 
 impl Editor {
@@ -39,6 +41,7 @@ impl Editor {
         Ok(Self {
             should_quit: false,
             view: View::new(),
+            mode: EditorMode::View,
             buffer,
         })
     }
@@ -51,7 +54,7 @@ impl Editor {
             }
 
             match read() {
-                Ok(event) => self.evaluate_event(event),
+                Ok(event) => self.evaluate_event(&event),
                 Err(err) => {
                     debug_assert!(false, "Could not read event: {err:?}");
                 }
@@ -70,11 +73,11 @@ impl Editor {
         let location = caret_location.saturation_sub(self.view.scroll_offset);
         let _ = Terminal::move_to(location.into());
 
-        let _ = Terminal::show_caret();
+        let _ = Terminal::show_caret(self.mode.get_cursor_style());
         let _ = Terminal::execute();
     }
 
-    fn evaluate_event(&mut self, event: Event) {
+    fn evaluate_event(&mut self, event: &Event) {
         let should_process = match &event {
             Event::Key(KeyEvent { kind, .. }) => kind == &KeyEventKind::Press,
             Event::Resize(_, _) => true,
@@ -82,7 +85,7 @@ impl Editor {
         };
 
         if should_process {
-            match EditorCommand::try_from(event) {
+            match EditorCommand::from_event(event, self.mode) {
                 Ok(command) => self.handle_command(command),
                 Err(err) => {
                     debug_assert!(false, "Could not handle command: {err}");
@@ -98,6 +101,12 @@ impl Editor {
             }
             EditorCommand::Resize(size) => {
                 self.view.resize(size);
+            }
+            EditorCommand::CharInput(char) => {
+                self.buffer.insert_char(char);
+            }
+            EditorCommand::ChangeMode(mode) => {
+                self.mode = mode;
             }
             EditorCommand::Quit => {
                 self.should_quit = true;
