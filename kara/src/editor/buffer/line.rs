@@ -57,6 +57,22 @@ impl Line {
         result
     }
 
+    pub fn insert_char(&mut self, char: char, x: usize) {
+        let mut result = String::new();
+
+        for (index, fragment) in self.fragments.iter().enumerate() {
+            if index == x {
+                result.push(char);
+            }
+            result.push_str(&fragment.grapheme);
+        }
+        if x >= self.fragments.len() {
+            result.push(char);
+        }
+
+        self.fragments = Self::str_to_fragments(&result);
+    }
+
     pub fn prefix_whitespace_count(&self) -> usize {
         self.fragments
             .iter()
@@ -94,11 +110,9 @@ impl Line {
             _ => None,
         }
     }
-}
 
-impl From<&str> for Line {
-    fn from(value: &str) -> Self {
-        let fragments = value
+    fn str_to_fragments(line_str: &str) -> Vec<TextFragment> {
+        line_str
             .graphemes(true)
             .map(|grapheme| {
                 let (replacement, rendered_width) = Self::replacement_character(grapheme)
@@ -120,8 +134,13 @@ impl From<&str> for Line {
                     replacement,
                 }
             })
-            .collect();
+            .collect()
+    }
+}
 
+impl From<&str> for Line {
+    fn from(s: &str) -> Self {
+        let fragments = Self::str_to_fragments(s);
         Self { fragments }
     }
 }

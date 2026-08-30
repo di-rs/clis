@@ -25,7 +25,7 @@ pub enum EditorCommand {
     Move(Direction),
     Resize(Size),
     ChangeMode(EditorMode),
-    CharInput(char),
+    Insert(char),
     Quit,
     UnknownEvent,
     UnknownCode,
@@ -91,9 +91,9 @@ impl EditorCommand {
                 code, modifiers, ..
             }) => match (code, modifiers) {
                 (Char('c'), &KeyModifiers::CONTROL) | (KeyCode::Esc, _) => {
-                    Self::ChangeMode(EditorMode::Edit)
+                    Self::ChangeMode(EditorMode::View)
                 }
-                (Char(char), &KeyModifiers::NONE | &KeyModifiers::SHIFT) => Self::CharInput(*char),
+                (Char(char), &KeyModifiers::NONE | &KeyModifiers::SHIFT) => Self::Insert(*char),
                 _ => Self::UnknownCode,
             },
             _ => Self::UnknownEvent,

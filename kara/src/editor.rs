@@ -102,8 +102,9 @@ impl Editor {
             EditorCommand::Resize(size) => {
                 self.view.resize(size);
             }
-            EditorCommand::CharInput(char) => {
+            EditorCommand::Insert(char) => {
                 self.buffer.insert_char(char);
+                self.view.redraw();
             }
             EditorCommand::ChangeMode(mode) => {
                 self.mode = mode;

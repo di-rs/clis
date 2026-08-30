@@ -28,6 +28,10 @@ impl View {
         self.needs_redraw = true;
     }
 
+    pub const fn redraw(&mut self) {
+        self.needs_redraw = true;
+    }
+
     pub fn render(&mut self, buffer: &Buffer) {
         if !self.needs_redraw {
             return;
@@ -87,7 +91,9 @@ impl View {
             offset_changed = true;
         }
 
-        self.needs_redraw = self.needs_redraw || offset_changed;
+        if offset_changed {
+            self.needs_redraw = true;
+        }
     }
 
     const fn scroll_vertically(&mut self, to: usize) {
@@ -112,7 +118,9 @@ impl View {
             offset_changed = true;
         }
 
-        self.needs_redraw = self.needs_redraw || offset_changed;
+        if offset_changed {
+            self.needs_redraw = true;
+        }
     }
 
     fn draw_welcome_message(&self) {
