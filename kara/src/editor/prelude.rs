@@ -11,12 +11,12 @@ pub struct Position {
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
-pub struct Coordinate {
+pub struct Location {
     pub x: usize,
     pub y: usize,
 }
 
-impl Coordinate {
+impl Location {
     pub fn saturation_sub(&self, coordinate: Self) -> Self {
         debug_assert!(self.x >= coordinate.x);
         debug_assert!(self.y >= coordinate.y);
@@ -27,8 +27,8 @@ impl Coordinate {
     }
 }
 
-impl From<Coordinate> for Position {
-    fn from(loc: Coordinate) -> Self {
+impl From<Location> for Position {
+    fn from(loc: Location) -> Self {
         Self {
             col: loc.x,
             row: loc.y,

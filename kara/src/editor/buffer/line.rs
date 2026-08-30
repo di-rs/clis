@@ -73,6 +73,18 @@ impl Line {
         self.fragments = Self::str_to_fragments(&result);
     }
 
+    pub fn delete(&mut self, x: usize) {
+        let mut result = String::new();
+
+        for (index, fragment) in self.fragments.iter().enumerate() {
+            if index != x {
+                result.push_str(&fragment.grapheme);
+            }
+        }
+
+        self.fragments = Self::str_to_fragments(&result);
+    }
+
     pub fn prefix_whitespace_count(&self) -> usize {
         self.fragments
             .iter()

@@ -106,6 +106,10 @@ impl Editor {
                 self.buffer.insert_char(char);
                 self.view.redraw();
             }
+            EditorCommand::Delete => {
+                self.buffer.delete();
+                self.view.redraw();
+            }
             EditorCommand::ChangeMode(mode) => {
                 self.change_mode(mode);
             }
@@ -142,14 +146,8 @@ impl Editor {
     }
 
     fn change_mode(&mut self, mode: EditorMode) {
-        match (self.mode, mode) {
-            (EditorMode::View, EditorMode::Edit) => {
-                self.buffer.move_caret(Direction::Right(1));
-            }
-            (EditorMode::Edit, EditorMode::View) => {
-                self.buffer.move_caret(Direction::Left(1));
-            }
-            (_, _) => {}
+        if let Some(direction) = self.mode.change_mode_movement(mode) {
+            self.buffer.move_caret(direction);
         }
         self.mode = mode;
     }

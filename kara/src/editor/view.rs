@@ -1,6 +1,6 @@
 use std::{fmt::Display, range::Range};
 
-use crate::editor::{Coordinate, Size, buffer::Buffer, terminal::Terminal};
+use crate::editor::{Location, Size, buffer::Buffer, terminal::Terminal};
 
 const NAME: &str = env!("CARGO_PKG_NAME");
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -8,7 +8,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub struct View {
     needs_redraw: bool,
     pub size: Size,
-    pub scroll_offset: Coordinate,
+    pub scroll_offset: Location,
 }
 
 const Y_OVERSCAN: usize = 5;
@@ -19,7 +19,7 @@ impl View {
         Self {
             needs_redraw: true,
             size: Terminal::size().unwrap_or_default(),
-            scroll_offset: Coordinate::default(),
+            scroll_offset: Location::default(),
         }
     }
 
@@ -62,8 +62,8 @@ impl View {
         self.needs_redraw = false;
     }
 
-    pub const fn scroll_into_view(&mut self, current_location: Coordinate) {
-        let Coordinate { x, y } = current_location;
+    pub const fn scroll_into_view(&mut self, current_location: Location) {
+        let Location { x, y } = current_location;
 
         self.scroll_vertically(y);
         self.scroll_horizontally(x);

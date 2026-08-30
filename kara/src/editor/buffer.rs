@@ -1,6 +1,6 @@
 use std::cmp::{max, min};
 
-use crate::editor::{Coordinate, buffer::buffer_content::BufferContent};
+use crate::editor::{Location, buffer::buffer_content::BufferContent};
 use line::Line;
 
 mod buffer_content;
@@ -21,7 +21,7 @@ pub enum Direction {
 #[derive(Default)]
 pub struct Buffer {
     content: BufferContent,
-    text_location: Coordinate,
+    text_location: Location,
     max_prev_x: usize,
 }
 
@@ -30,7 +30,7 @@ impl Buffer {
         let content = BufferContent::open(file_name)?;
         Ok(Self {
             content,
-            text_location: Coordinate::default(),
+            text_location: Location::default(),
             max_prev_x: 0,
         })
     }
@@ -43,6 +43,10 @@ impl Buffer {
         if delta > 0 {
             self.move_right(1);
         }
+    }
+
+    pub fn delete(&mut self) {
+        self.content.delete(self.text_location);
     }
 
     pub fn move_caret(&mut self, direction: Direction) {
@@ -119,13 +123,13 @@ impl Buffer {
         self.text_location.y = min(self.text_location.y, self.content.height());
     }
 
-    pub fn caret_location(&self) -> Coordinate {
+    pub fn caret_location(&self) -> Location {
         let y = self.text_location.y;
         let x = self
             .content
             .get_line(y)
             .map_or(0, |line| line.width_until(self.text_location.x));
-        Coordinate { x, y }
+        Location { x, y }
     }
 
     pub const fn is_empty(&self) -> bool {

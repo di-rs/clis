@@ -4,7 +4,7 @@ use crossterm::event::{
     KeyEvent, KeyModifiers,
 };
 
-use crate::editor::{Size, editormode::EditorMode};
+use crate::editor::{Size, editormode::{EditorMode, Placement}};
 
 #[derive(Debug)]
 pub enum Direction {
@@ -26,6 +26,7 @@ pub enum EditorCommand {
     Resize(Size),
     ChangeMode(EditorMode),
     Insert(char),
+    Delete,
     Quit,
     UnknownEvent,
     UnknownCode,
@@ -37,7 +38,7 @@ impl EditorCommand {
         common_command.map_or_else(
             || match mode {
                 EditorMode::View => Ok(Self::match_event_view_mode(event)),
-                EditorMode::Edit => Ok(Self::match_event_edit_mode(event)),
+                EditorMode::Edit(_) => Ok(Self::match_event_edit_mode(event)),
             },
             Ok,
         )
@@ -78,7 +79,13 @@ impl EditorCommand {
                 (Char('G'), _) => Self::Move(Direction::End),
                 (Char('p'), _) => Self::Move(Direction::PageUp),
                 (Char('P'), _) => Self::Move(Direction::PageDown),
-                (Char('i'), _) => Self::ChangeMode(EditorMode::Edit),
+                
+                (Char('i'), _) => Self::ChangeMode(EditorMode::Edit(Placement::Left)),
+                (Char('a'), _) => Self::ChangeMode(EditorMode::Edit(Placement::Right)),
+                (Char('I'), _) => Self::ChangeMode(EditorMode::Edit(Placement::Start)),
+                (Char('A'), _) => Self::ChangeMode(EditorMode::Edit(Placement::End)),
+
+                (Char('d'), _) => Self::Delete,
                 _ => Self::UnknownCode,
             },
             _ => Self::UnknownEvent,
@@ -94,6 +101,7 @@ impl EditorCommand {
                     Self::ChangeMode(EditorMode::View)
                 }
                 (Char(char), &KeyModifiers::NONE | &KeyModifiers::SHIFT) => Self::Insert(*char),
+                // (KeyCode::Backspace, _) => Self::Delete,
                 _ => Self::UnknownCode,
             },
             _ => Self::UnknownEvent,

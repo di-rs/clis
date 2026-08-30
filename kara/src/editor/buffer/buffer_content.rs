@@ -1,5 +1,5 @@
 use super::line::Line;
-use crate::editor::Coordinate;
+use crate::editor::Location;
 
 #[derive(Default)]
 pub struct BufferContent {
@@ -16,7 +16,7 @@ impl BufferContent {
         Ok(Self { lines })
     }
 
-    pub fn insert_char(&mut self, char: char, at: Coordinate) {
+    pub fn insert_char(&mut self, char: char, at: Location) {
         if at.y > self.lines.len() {
             return;
         }
@@ -25,6 +25,12 @@ impl BufferContent {
             self.lines.push(str.as_str().into());
         } else if let Some(line) = self.lines.get_mut(at.y) {
             line.insert_char(char, at.x);
+        }
+    }
+
+    pub fn delete(&mut self, at: Location) {
+        if let Some(line) = self.lines.get_mut(at.y) {
+            line.delete(at.x);
         }
     }
 
