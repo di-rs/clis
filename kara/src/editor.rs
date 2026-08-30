@@ -107,7 +107,7 @@ impl Editor {
                 self.view.redraw();
             }
             EditorCommand::ChangeMode(mode) => {
-                self.mode = mode;
+                self.change_mode(mode);
             }
             EditorCommand::Quit => {
                 self.should_quit = true;
@@ -139,6 +139,19 @@ impl Editor {
                 self.buffer.move_caret(Direction::Down(step));
             }
         }
+    }
+
+    fn change_mode(&mut self, mode: EditorMode) {
+        match (self.mode, mode) {
+            (EditorMode::View, EditorMode::Edit) => {
+                self.buffer.move_caret(Direction::Right(1));
+            }
+            (EditorMode::Edit, EditorMode::View) => {
+                self.buffer.move_caret(Direction::Left(1));
+            }
+            (_, _) => {}
+        }
+        self.mode = mode;
     }
 }
 

@@ -6,7 +6,7 @@ use line::Line;
 mod buffer_content;
 mod line;
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum Direction {
     Up(usize),
     Down(usize),
