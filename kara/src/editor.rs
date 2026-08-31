@@ -104,11 +104,12 @@ impl Editor {
             }
             EditorCommand::Insert(char) => {
                 self.buffer.insert_char(char);
-                self.view.redraw();
             }
             EditorCommand::Delete => {
                 self.buffer.delete();
-                self.view.redraw();
+            }
+            EditorCommand::Backspace => {
+                self.buffer.backspace();
             }
             EditorCommand::ChangeMode(mode) => {
                 self.change_mode(mode);

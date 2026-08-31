@@ -1,3 +1,5 @@
+use chrono::{DateTime, Local};
+
 #[derive(Default, Clone, Copy, Debug)]
 pub struct Size {
     pub height: usize,
@@ -35,3 +37,5 @@ impl From<Location> for Position {
         }
     }
 }
+
+pub type LocalTimestamp = DateTime<Local>;

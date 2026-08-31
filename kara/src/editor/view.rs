@@ -1,14 +1,16 @@
 use std::{fmt::Display, range::Range};
 
-use crate::editor::{Location, Size, buffer::Buffer, terminal::Terminal};
-
-const NAME: &str = env!("CARGO_PKG_NAME");
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+mod welcome_message;
+use crate::editor::{
+    LocalTimestamp, Location, Size, buffer::Buffer, terminal::Terminal,
+    view::welcome_message::WelcomeMessage,
+};
 
 pub struct View {
     needs_redraw: bool,
     pub size: Size,
     pub scroll_offset: Location,
+    last_modified_at: Option<LocalTimestamp>,
 }
 
 const Y_OVERSCAN: usize = 5;
@@ -20,6 +22,7 @@ impl View {
             needs_redraw: true,
             size: Terminal::size().unwrap_or_default(),
             scroll_offset: Location::default(),
+            last_modified_at: None,
         }
     }
 
@@ -28,12 +31,8 @@ impl View {
         self.needs_redraw = true;
     }
 
-    pub const fn redraw(&mut self) {
-        self.needs_redraw = true;
-    }
-
     pub fn render(&mut self, buffer: &Buffer) {
-        if !self.needs_redraw {
+        if !self.needs_redraw && !self.has_buffer_changed(buffer) {
             return;
         }
 
@@ -60,6 +59,7 @@ impl View {
         }
 
         self.needs_redraw = false;
+        self.last_modified_at = Some(buffer.modified_at);
     }
 
     pub const fn scroll_into_view(&mut self, current_location: Location) {
@@ -124,22 +124,17 @@ impl View {
     }
 
     fn draw_welcome_message(&self) {
-        let Size { height, width } = self.size;
-
-        let welcome_message = format!("{NAME} v{VERSION}");
-        let message_len = welcome_message.len();
-
-        let y = height / 3;
-        let padding = width.saturating_sub(message_len).saturating_sub(1) / 2;
-
-        let mut message = format!("~{}{}", " ".repeat(padding), welcome_message);
-        message.truncate(width);
-
+        let (y, message) = WelcomeMessage::draw(&self.size);
         Self::render_line(y, message);
     }
 
     fn render_line(at: usize, line_text: impl Display) {
         let result = Terminal::print_row(at, line_text);
         debug_assert!(result.is_ok(), "Failed to render line");
+    }
+
+    fn has_buffer_changed(&self, buffer: &Buffer) -> bool {
+        self.last_modified_at
+            .is_none_or(|last| buffer.has_changed_since(last))
     }
 }

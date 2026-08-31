@@ -1,6 +1,7 @@
 use std::cmp::{max, min};
 
-use crate::editor::{Location, buffer::buffer_content::BufferContent};
+use crate::editor::{LocalTimestamp, Location, buffer::buffer_content::BufferContent};
+use chrono::Local;
 use line::Line;
 
 mod buffer_content;
@@ -23,15 +24,18 @@ pub struct Buffer {
     content: BufferContent,
     text_location: Location,
     max_prev_x: usize,
+    pub modified_at: LocalTimestamp,
 }
 
 impl Buffer {
     pub fn open(file_name: &str) -> Result<Self, std::io::Error> {
         let content = BufferContent::open(file_name)?;
+        let last_modified = Local::now();
         Ok(Self {
             content,
             text_location: Location::default(),
             max_prev_x: 0,
+            modified_at: last_modified,
         })
     }
 
@@ -43,10 +47,17 @@ impl Buffer {
         if delta > 0 {
             self.move_right(1);
         }
+        self.mark_modified();
     }
 
     pub fn delete(&mut self) {
         self.content.delete(self.text_location);
+        self.mark_modified();
+    }
+
+    pub fn backspace(&mut self) {
+        self.move_left(1);
+        self.delete();
     }
 
     pub fn move_caret(&mut self, direction: Direction) {
@@ -148,5 +159,13 @@ impl Buffer {
 
     const fn reset_max_x(&mut self) {
         self.max_prev_x = self.text_location.x;
+    }
+
+    fn mark_modified(&mut self) {
+        self.modified_at = Local::now();
+    }
+
+    pub fn has_changed_since(&self, since: LocalTimestamp) -> bool {
+        self.modified_at != since
     }
 }

@@ -27,6 +27,7 @@ pub enum EditorCommand {
     ChangeMode(EditorMode),
     Insert(char),
     Delete,
+    Backspace,
     Quit,
     UnknownEvent,
     UnknownCode,
@@ -101,7 +102,7 @@ impl EditorCommand {
                     Self::ChangeMode(EditorMode::View)
                 }
                 (Char(char), &KeyModifiers::NONE | &KeyModifiers::SHIFT) => Self::Insert(*char),
-                // (KeyCode::Backspace, _) => Self::Delete,
+                (KeyCode::Backspace, _) => Self::Backspace,
                 _ => Self::UnknownCode,
             },
             _ => Self::UnknownEvent,
