@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crossterm::cursor::{
     self,
     SetCursorStyle::{BlinkingBar, BlinkingBlock},
@@ -37,5 +39,15 @@ impl EditorMode {
 
             (_, _) => None,
         }
+    }
+}
+
+impl Display for EditorMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            Self::View => "NAVIGATION",
+            Self::Edit(_) => "EDIT",
+        };
+        f.write_str(name)
     }
 }

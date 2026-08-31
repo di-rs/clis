@@ -28,26 +28,28 @@ pub struct EditorBuffer {
     buffer: BufferKind,
     text_location: Location,
     max_prev_x: usize,
-    pub modified_at: LocalTimestamp,
+    pub modified_at: Option<LocalTimestamp>,
 }
 
 impl EditorBuffer {
     pub fn open(file_name: &str) -> Result<Self, std::io::Error> {
         let buffer = FileBuffer::open(file_name)?;
-        let last_modified = Local::now();
         Ok(Self {
             buffer: BufferKind::File(buffer),
             text_location: Location::default(),
             max_prev_x: 0,
-            modified_at: last_modified,
+            modified_at: None,
         })
     }
 
-    pub fn save(&self) -> Result<(), std::io::Error> {
-        match &self.buffer {
-            BufferKind::File(file_buffer) => file_buffer.save(),
-            BufferKind::Buffer(_buffer) => Ok(()),
-        }
+    pub fn save(&mut self) -> Result<(), std::io::Error> {
+        self.buffer.save().inspect(|()| {
+            self.modified_at = None;
+        })
+    }
+
+    pub const fn filename(&self) -> Option<&String> {
+        self.buffer.filename()
     }
 
     pub fn insert_char(&mut self, char: char) {
@@ -181,11 +183,15 @@ impl EditorBuffer {
     }
 
     fn mark_modified(&mut self) {
-        self.modified_at = Local::now();
+        self.modified_at = Some(Local::now());
     }
 
-    pub fn has_changed_since(&self, since: LocalTimestamp) -> bool {
+    pub fn has_changed_since(&self, since: Option<LocalTimestamp>) -> bool {
         self.modified_at != since
+    }
+
+    pub fn height(&self) -> usize {
+        self.buffer.height()
     }
 }
 
@@ -195,7 +201,7 @@ impl Default for EditorBuffer {
             buffer: BufferKind::Buffer(Buffer::default()),
             text_location: Location::default(),
             max_prev_x: 0,
-            modified_at: Local::now(),
+            modified_at: None,
         }
     }
 }

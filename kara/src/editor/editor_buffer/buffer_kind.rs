@@ -5,6 +5,22 @@ pub enum BufferKind {
     File(FileBuffer),
 }
 
+impl BufferKind {
+    pub fn save(&self) -> Result<(), std::io::Error> {
+        match &self {
+            Self::File(file_buffer) => file_buffer.save(),
+            Self::Buffer(_buffer) => Ok(()),
+        }
+    }
+
+    pub const fn filename(&self) -> Option<&String> {
+        match &self {
+            Self::File(file_buffer) => Some(&file_buffer.filename),
+            Self::Buffer(_) => None,
+        }
+    }
+}
+
 impl std::ops::Deref for BufferKind {
     type Target = Buffer;
 

@@ -5,7 +5,7 @@ use super::Buffer;
 #[derive(Default)]
 pub struct FileBuffer {
     buffer: Buffer,
-    filename: String,
+    pub(crate) filename: String,
 }
 
 impl FileBuffer {

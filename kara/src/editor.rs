@@ -8,17 +8,19 @@ mod editorcommand;
 mod editormode;
 mod terminal;
 mod view;
+mod statusbar;
 
 mod prelude;
 pub use prelude::*;
 
-use crate::editor::{editorcommand::EditorCommand, editormode::EditorMode};
+use crate::editor::{editorcommand::EditorCommand, editormode::EditorMode, statusbar::StatusBar};
 
 pub struct Editor {
-    should_quit: bool,
-    view: View,
-    buffer: EditorBuffer,
     mode: EditorMode,
+    buffer: EditorBuffer,
+    view: View,
+    statusbar: StatusBar,
+    should_quit: bool,
 }
 
 impl Editor {
@@ -43,6 +45,7 @@ impl Editor {
             view: View::new(),
             mode: EditorMode::View,
             buffer,
+            statusbar: StatusBar::new(),
         })
     }
 
@@ -69,6 +72,7 @@ impl Editor {
 
         self.view.scroll_into_view(caret_location);
         self.view.render(&self.buffer);
+        self.statusbar.render(&self.buffer, self.mode);
 
         let location = caret_location.saturation_sub(self.view.scroll_offset);
         let _ = Terminal::move_to(location.into());
@@ -101,6 +105,7 @@ impl Editor {
             }
             EditorCommand::Resize(size) => {
                 self.view.resize(size);
+                self.statusbar.resize(size);
             }
             EditorCommand::Insert(char) => {
                 self.buffer.insert_char(char);

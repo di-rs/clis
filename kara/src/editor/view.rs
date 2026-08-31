@@ -15,12 +15,17 @@ pub struct View {
 
 const Y_OVERSCAN: usize = 5;
 const X_OVERSCAN: usize = 5;
+const MARGIN_BOTTOM: usize = 2;
 
 impl View {
     pub fn new() -> Self {
+        let Size { height, width } = Terminal::size().unwrap_or_default();
         Self {
             needs_redraw: true,
-            size: Terminal::size().unwrap_or_default(),
+            size: Size {
+                height: height.saturating_sub(MARGIN_BOTTOM),
+                width,
+            },
             scroll_offset: Location::default(),
             last_modified_at: None,
         }
@@ -59,7 +64,7 @@ impl View {
         }
 
         self.needs_redraw = false;
-        self.last_modified_at = Some(buffer.modified_at);
+        self.last_modified_at = buffer.modified_at;
     }
 
     pub const fn scroll_into_view(&mut self, current_location: Location) {
@@ -134,7 +139,6 @@ impl View {
     }
 
     fn has_buffer_changed(&self, buffer: &EditorBuffer) -> bool {
-        self.last_modified_at
-            .is_none_or(|last| buffer.has_changed_since(last))
+        buffer.has_changed_since(self.last_modified_at)
     }
 }
