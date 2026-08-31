@@ -50,7 +50,13 @@ impl Buffer {
         self.mark_modified();
     }
 
-    pub fn backspace(&mut self) {
+    pub fn insert_newline(&mut self) {
+        self.content.insert_newline(self.text_location);
+        self.move_right(1);
+        self.mark_modified();
+    }
+
+    pub fn delete_backward(&mut self) {
         self.move_left(1);
         self.delete();
     }

@@ -109,7 +109,10 @@ impl Editor {
                 self.buffer.delete();
             }
             EditorCommand::Backspace => {
-                self.buffer.backspace();
+                self.buffer.delete_backward();
+            }
+            EditorCommand::Enter => {
+                self.buffer.insert_newline();
             }
             EditorCommand::ChangeMode(mode) => {
                 self.change_mode(mode);

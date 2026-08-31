@@ -4,7 +4,10 @@ use crossterm::event::{
     KeyEvent, KeyModifiers,
 };
 
-use crate::editor::{Size, editormode::{EditorMode, Placement}};
+use crate::editor::{
+    Size,
+    editormode::{EditorMode, Placement},
+};
 
 #[derive(Debug)]
 pub enum Direction {
@@ -28,6 +31,7 @@ pub enum EditorCommand {
     Insert(char),
     Delete,
     Backspace,
+    Enter,
     Quit,
     UnknownEvent,
     UnknownCode,
@@ -71,7 +75,9 @@ impl EditorCommand {
                 code, modifiers, ..
             }) => match (code, modifiers) {
                 (Char('u'), _) => Self::Move(Direction::Up),
-                (Char('j'), _) => Self::Move(Direction::Down),
+                (Char('j'), _) | (KeyCode::Enter, &KeyModifiers::NONE) => {
+                    Self::Move(Direction::Down)
+                }
                 (Char('h'), _) => Self::Move(Direction::Left),
                 (Char('k'), _) => Self::Move(Direction::Right),
                 (Char('s'), _) => Self::Move(Direction::LineStart),
@@ -80,7 +86,7 @@ impl EditorCommand {
                 (Char('G'), _) => Self::Move(Direction::End),
                 (Char('p'), _) => Self::Move(Direction::PageUp),
                 (Char('P'), _) => Self::Move(Direction::PageDown),
-                
+
                 (Char('i'), _) => Self::ChangeMode(EditorMode::Edit(Placement::Left)),
                 (Char('a'), _) => Self::ChangeMode(EditorMode::Edit(Placement::Right)),
                 (Char('I'), _) => Self::ChangeMode(EditorMode::Edit(Placement::Start)),
@@ -102,6 +108,8 @@ impl EditorCommand {
                     Self::ChangeMode(EditorMode::View)
                 }
                 (Char(char), &KeyModifiers::NONE | &KeyModifiers::SHIFT) => Self::Insert(*char),
+                (KeyCode::Tab, &KeyModifiers::NONE) => Self::Insert('\t'),
+                (KeyCode::Enter, &KeyModifiers::NONE) => Self::Enter,
                 (KeyCode::Backspace, _) => Self::Backspace,
                 _ => Self::UnknownCode,
             },

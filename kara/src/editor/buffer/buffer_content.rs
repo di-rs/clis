@@ -17,14 +17,23 @@ impl BufferContent {
     }
 
     pub fn insert_char(&mut self, char: char, at: Location) {
-        if at.y > self.lines.len() {
+        if at.y > self.height() {
             return;
         }
-        if at.y == self.lines.len() {
+        if at.y == self.height() {
             let str = char.to_string();
             self.lines.push(str.as_str().into());
         } else if let Some(line) = self.lines.get_mut(at.y) {
             line.insert_char(char, at.x);
+        }
+    }
+
+    pub fn insert_newline(&mut self, at: Location) {
+        if at.y == self.height() {
+            self.lines.push(Line::default());
+        } else if let Some(line) = self.lines.get_mut(at.y) {
+            let new = line.split(at.x);
+            self.lines.insert(at.y.saturating_add(1), new);
         }
     }
 
@@ -38,7 +47,7 @@ impl BufferContent {
         }
 
         let next_line_index = at.y.saturating_add(1);
-        if self.lines.len() > next_line_index {
+        if self.height() > next_line_index {
             let next_line = self.lines.remove(next_line_index);
             if let Some(line) = self.lines.get_mut(at.y) {
                 line.append(&next_line);

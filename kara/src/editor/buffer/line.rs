@@ -2,7 +2,7 @@ use std::{fmt::Display, range::Range};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 enum GraphemeWidth {
     Half,
     Full,
@@ -17,12 +17,14 @@ impl GraphemeWidth {
     }
 }
 
+#[derive(Debug)]
 struct TextFragment {
     grapheme: String,
     rendered_width: GraphemeWidth,
     replacement: Option<char>,
 }
 
+#[derive(Debug, Default)]
 pub struct Line {
     fragments: Vec<TextFragment>,
 }
@@ -57,18 +59,28 @@ impl Line {
         result
     }
 
-    pub fn insert_char(&mut self, char: char, x: usize) {
+    pub fn insert_char(&mut self, char: char, at: usize) {
         let mut result = String::new();
         for (index, fragment) in self.fragments.iter().enumerate() {
-            if index == x {
+            if index == at {
                 result.push(char);
             }
             result.push_str(&fragment.grapheme);
         }
-        if x >= self.fragments.len() {
+        if at >= self.fragments.len() {
             result.push(char);
         }
         self.fragments = Self::str_to_fragments(&result);
+    }
+
+    pub fn split(&mut self, at: usize) -> Self {
+        if at > self.fragments.len() {
+            return Self::default();
+        }
+        let reminder = self.fragments.split_off(at);
+        Self {
+            fragments: reminder,
+        }
     }
 
     pub fn delete(&mut self, x: usize) {
