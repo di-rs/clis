@@ -32,9 +32,9 @@ pub enum EditorCommand {
     Delete,
     Backspace,
     Enter,
+    Save,
     Quit,
-    UnknownEvent,
-    UnknownCode,
+    Unknown,
 }
 
 impl EditorCommand {
@@ -55,6 +55,8 @@ impl EditorCommand {
                 code, modifiers, ..
             }) => match (code, modifiers) {
                 (Char('q'), &KeyModifiers::CONTROL) => Some(Self::Quit),
+                (Char('s'), &KeyModifiers::CONTROL) => Some(Self::Save),
+                
                 (KeyCode::Up, _) => Some(Self::Move(Direction::Up)),
                 (KeyCode::Down, _) => Some(Self::Move(Direction::Down)),
                 (KeyCode::Left, _) => Some(Self::Move(Direction::Left)),
@@ -93,9 +95,9 @@ impl EditorCommand {
                 (Char('A'), _) => Self::ChangeMode(EditorMode::Edit(Placement::End)),
 
                 (Char('d'), _) => Self::Delete,
-                _ => Self::UnknownCode,
+                _ => Self::Unknown,
             },
-            _ => Self::UnknownEvent,
+            _ => Self::Unknown,
         }
     }
 
@@ -111,9 +113,9 @@ impl EditorCommand {
                 (KeyCode::Tab, &KeyModifiers::NONE) => Self::Insert('\t'),
                 (KeyCode::Enter, &KeyModifiers::NONE) => Self::Enter,
                 (KeyCode::Backspace, _) => Self::Backspace,
-                _ => Self::UnknownCode,
+                _ => Self::Unknown,
             },
-            _ => Self::UnknownEvent,
+            _ => Self::Unknown,
         }
     }
 }

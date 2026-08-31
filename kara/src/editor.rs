@@ -1,9 +1,9 @@
-use buffer::{Buffer, Direction};
+use editor_buffer::{EditorBuffer, Direction};
 use crossterm::event::{Event, KeyEvent, KeyEventKind, read};
 use terminal::Terminal;
 use view::View;
 
-mod buffer;
+mod editor_buffer;
 mod editorcommand;
 mod editormode;
 mod terminal;
@@ -17,7 +17,7 @@ use crate::editor::{editorcommand::EditorCommand, editormode::EditorMode};
 pub struct Editor {
     should_quit: bool,
     view: View,
-    buffer: Buffer,
+    buffer: EditorBuffer,
     mode: EditorMode,
 }
 
@@ -35,7 +35,7 @@ impl Editor {
 
         Terminal::initialize()?;
         let buffer = file_name
-            .and_then(|file_name| Buffer::open(&file_name).ok())
+            .and_then(|file_name| EditorBuffer::open(&file_name).ok())
             .unwrap_or_default();
 
         Ok(Self {
@@ -117,10 +117,13 @@ impl Editor {
             EditorCommand::ChangeMode(mode) => {
                 self.change_mode(mode);
             }
+            EditorCommand::Save => {
+                let _ = self.buffer.save();
+            }
             EditorCommand::Quit => {
                 self.should_quit = true;
             }
-            EditorCommand::UnknownEvent | EditorCommand::UnknownCode => (),
+            EditorCommand::Unknown => (),
         }
     }
 

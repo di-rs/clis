@@ -2,20 +2,11 @@ use super::line::Line;
 use crate::editor::Location;
 
 #[derive(Default)]
-pub struct BufferContent {
-    lines: Vec<Line>,
+pub struct Buffer {
+    pub(crate) lines: Vec<Line>,
 }
 
-impl BufferContent {
-    pub fn open(file_name: &str) -> Result<Self, std::io::Error> {
-        let content = std::fs::read_to_string(file_name)?;
-        let mut lines = Vec::new();
-        for line in content.lines() {
-            lines.push(line.into());
-        }
-        Ok(Self { lines })
-    }
-
+impl Buffer {
     pub fn insert_char(&mut self, char: char, at: Location) {
         if at.y > self.height() {
             return;
@@ -65,5 +56,13 @@ impl BufferContent {
 
     pub const fn height(&self) -> usize {
         self.lines.len()
+    }
+}
+
+impl From<String> for Buffer {
+    fn from(value: String) -> Self {
+        Self {
+            lines: value.lines().map(Into::into).collect(),
+        }
     }
 }

@@ -1,10 +1,15 @@
 use std::cmp::{max, min};
 
-use crate::editor::{LocalTimestamp, Location, buffer::buffer_content::BufferContent};
+use crate::editor::{
+    LocalTimestamp, Location,
+    editor_buffer::{buffer::Buffer, buffer_kind::BufferKind, file_buffer::FileBuffer},
+};
 use chrono::Local;
 use line::Line;
 
-mod buffer_content;
+mod buffer;
+mod buffer_kind;
+mod file_buffer;
 mod line;
 
 #[derive(Debug, Clone, Copy)]
@@ -19,29 +24,35 @@ pub enum Direction {
     EndOfBuffer,
 }
 
-#[derive(Default)]
-pub struct Buffer {
-    content: BufferContent,
+pub struct EditorBuffer {
+    buffer: BufferKind,
     text_location: Location,
     max_prev_x: usize,
     pub modified_at: LocalTimestamp,
 }
 
-impl Buffer {
+impl EditorBuffer {
     pub fn open(file_name: &str) -> Result<Self, std::io::Error> {
-        let content = BufferContent::open(file_name)?;
+        let buffer = FileBuffer::open(file_name)?;
         let last_modified = Local::now();
         Ok(Self {
-            content,
+            buffer: BufferKind::File(buffer),
             text_location: Location::default(),
             max_prev_x: 0,
             modified_at: last_modified,
         })
     }
 
+    pub fn save(&self) -> Result<(), std::io::Error> {
+        match &self.buffer {
+            BufferKind::File(file_buffer) => file_buffer.save(),
+            BufferKind::Buffer(_buffer) => Ok(()),
+        }
+    }
+
     pub fn insert_char(&mut self, char: char) {
         let old_len = self.current_line_width();
-        self.content.insert_char(char, self.text_location);
+        self.buffer.insert_char(char, self.text_location);
         let new_len = self.current_line_width();
         let delta = new_len.saturating_sub(old_len);
         if delta > 0 {
@@ -51,7 +62,7 @@ impl Buffer {
     }
 
     pub fn insert_newline(&mut self) {
-        self.content.insert_newline(self.text_location);
+        self.buffer.insert_newline(self.text_location);
         self.move_right(1);
         self.mark_modified();
     }
@@ -63,7 +74,7 @@ impl Buffer {
 
     pub fn delete(&mut self) {
         if self.text_location.x != 0 || self.text_location.y != 0 {
-            self.content.delete(self.text_location);
+            self.buffer.delete(self.text_location);
             self.mark_modified();
         }
     }
@@ -80,7 +91,7 @@ impl Buffer {
                 self.text_location.y = 0;
             }
             Direction::EndOfBuffer => {
-                self.text_location.y = self.content.height().saturating_sub(1);
+                self.text_location.y = self.buffer.height().saturating_sub(1);
             }
         }
     }
@@ -111,7 +122,7 @@ impl Buffer {
         if self.text_location.x < width {
             self.text_location.x = self.text_location.x.saturating_add(step);
             self.reset_max_x();
-        } else if self.text_location.y < self.content.height() {
+        } else if self.text_location.y < self.buffer.height() {
             self.move_down(1);
             self.move_line_start();
         }
@@ -139,28 +150,28 @@ impl Buffer {
     }
 
     fn snap_to_valid_line(&mut self) {
-        self.text_location.y = min(self.text_location.y, self.content.height());
+        self.text_location.y = min(self.text_location.y, self.buffer.height());
     }
 
     pub fn caret_location(&self) -> Location {
         let y = self.text_location.y;
         let x = self
-            .content
+            .buffer
             .get_line(y)
             .map_or(0, |line| line.width_until(self.text_location.x));
         Location { x, y }
     }
 
-    pub const fn is_empty(&self) -> bool {
-        self.content.is_empty()
+    pub fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
     }
 
     pub fn get_line(&self, idx: usize) -> Option<&Line> {
-        self.content.get_line(idx)
+        self.buffer.get_line(idx)
     }
 
     fn current_line_width(&self) -> usize {
-        self.content
+        self.buffer
             .get_line(self.text_location.y)
             .map_or(0, Line::len)
     }
@@ -175,5 +186,16 @@ impl Buffer {
 
     pub fn has_changed_since(&self, since: LocalTimestamp) -> bool {
         self.modified_at != since
+    }
+}
+
+impl Default for EditorBuffer {
+    fn default() -> Self {
+        Self {
+            buffer: BufferKind::Buffer(Buffer::default()),
+            text_location: Location::default(),
+            max_prev_x: 0,
+            modified_at: Local::now(),
+        }
     }
 }

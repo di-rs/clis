@@ -2,7 +2,7 @@ use std::{fmt::Display, range::Range};
 
 mod welcome_message;
 use crate::editor::{
-    LocalTimestamp, Location, Size, buffer::Buffer, terminal::Terminal,
+    LocalTimestamp, Location, Size, editor_buffer::EditorBuffer, terminal::Terminal,
     view::welcome_message::WelcomeMessage,
 };
 
@@ -31,7 +31,7 @@ impl View {
         self.needs_redraw = true;
     }
 
-    pub fn render(&mut self, buffer: &Buffer) {
+    pub fn render(&mut self, buffer: &EditorBuffer) {
         if !self.needs_redraw && !self.has_buffer_changed(buffer) {
             return;
         }
@@ -133,7 +133,7 @@ impl View {
         debug_assert!(result.is_ok(), "Failed to render line");
     }
 
-    fn has_buffer_changed(&self, buffer: &Buffer) -> bool {
+    fn has_buffer_changed(&self, buffer: &EditorBuffer) -> bool {
         self.last_modified_at
             .is_none_or(|last| buffer.has_changed_since(last))
     }
