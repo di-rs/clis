@@ -29,8 +29,20 @@ impl BufferContent {
     }
 
     pub fn delete(&mut self, at: Location) {
-        if let Some(line) = self.lines.get_mut(at.y) {
+        let Some(line) = self.lines.get_mut(at.y) else {
+            return;
+        };
+        if at.x < line.len() {
             line.delete(at.x);
+            return;
+        }
+
+        let next_line_index = at.y.saturating_add(1);
+        if self.lines.len() > next_line_index {
+            let next_line = self.lines.remove(next_line_index);
+            if let Some(line) = self.lines.get_mut(at.y) {
+                line.append(&next_line);
+            }
         }
     }
 

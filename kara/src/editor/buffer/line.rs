@@ -1,4 +1,4 @@
-use std::range::Range;
+use std::{fmt::Display, range::Range};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -59,7 +59,6 @@ impl Line {
 
     pub fn insert_char(&mut self, char: char, x: usize) {
         let mut result = String::new();
-
         for (index, fragment) in self.fragments.iter().enumerate() {
             if index == x {
                 result.push(char);
@@ -69,20 +68,23 @@ impl Line {
         if x >= self.fragments.len() {
             result.push(char);
         }
-
         self.fragments = Self::str_to_fragments(&result);
     }
 
     pub fn delete(&mut self, x: usize) {
         let mut result = String::new();
-
         for (index, fragment) in self.fragments.iter().enumerate() {
             if index != x {
                 result.push_str(&fragment.grapheme);
             }
         }
-
         self.fragments = Self::str_to_fragments(&result);
+    }
+
+    pub fn append(&mut self, other: &Self) {
+        let mut concat = self.to_string();
+        concat.push_str(&other.to_string());
+        self.fragments = Self::str_to_fragments(&concat);
     }
 
     pub fn prefix_whitespace_count(&self) -> usize {
@@ -154,5 +156,12 @@ impl From<&str> for Line {
     fn from(s: &str) -> Self {
         let fragments = Self::str_to_fragments(s);
         Self { fragments }
+    }
+}
+
+impl Display for Line {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let result: String = self.fragments.iter().map(|f| f.grapheme.as_str()).collect();
+        f.write_str(&result)
     }
 }

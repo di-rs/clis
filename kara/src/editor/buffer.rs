@@ -50,14 +50,16 @@ impl Buffer {
         self.mark_modified();
     }
 
-    pub fn delete(&mut self) {
-        self.content.delete(self.text_location);
-        self.mark_modified();
-    }
-
     pub fn backspace(&mut self) {
         self.move_left(1);
         self.delete();
+    }
+
+    pub fn delete(&mut self) {
+        if self.text_location.x != 0 || self.text_location.y != 0 {
+            self.content.delete(self.text_location);
+            self.mark_modified();
+        }
     }
 
     pub fn move_caret(&mut self, direction: Direction) {
