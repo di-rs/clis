@@ -1,4 +1,4 @@
-use std::{fmt::Display, range::Range};
+use std::{fmt::Display, range::Range, str::FromStr};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -164,10 +164,12 @@ impl Line {
     }
 }
 
-impl From<&str> for Line {
-    fn from(s: &str) -> Self {
+impl FromStr for Line {
+    type Err = !;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         let fragments = Self::str_to_fragments(s);
-        Self { fragments }
+        Ok(Self { fragments })
     }
 }
 

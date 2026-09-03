@@ -1,3 +1,5 @@
+#![feature(never_type)]
+
 use std::env;
 
 use crate::editor::Editor;

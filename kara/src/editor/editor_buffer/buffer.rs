@@ -12,8 +12,8 @@ impl Buffer {
             return;
         }
         if at.y == self.height() {
-            let str = char.to_string();
-            self.lines.push(str.as_str().into());
+            let Ok(line) = char.to_string().parse();
+            self.lines.push(line);
         } else if let Some(line) = self.lines.get_mut(at.y) {
             line.insert_char(char, at.x);
         }
@@ -62,7 +62,7 @@ impl Buffer {
 impl From<String> for Buffer {
     fn from(value: String) -> Self {
         Self {
-            lines: value.lines().map(Into::into).collect(),
+            lines: value.lines().map(|l| l.parse().unwrap()).collect(),
         }
     }
 }
