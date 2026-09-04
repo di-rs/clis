@@ -1,8 +1,6 @@
 [package]
-name = "biggie"
+name = "error"
 version = "0.1.0"
-description = "A tool to generate large files"
-homepage = "https://github.com/di-rs/clis/grep"
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,14 +9,9 @@ readme.workspace = true
 include.workspace = true
 
 [dependencies]
-clap = { workspace = true }
 color-eyre = { workspace = true }
 clap-verbosity-flag = { workspace = true }
 log = { workspace = true }
-error = { path = "../utils/error" }
-logging = { path = "../utils/logging" }
-rand = "0.10.2"
-thousands = "0.2.0"
 
 [lints]
 workspace = true

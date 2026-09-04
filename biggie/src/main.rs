@@ -1,5 +1,6 @@
 use biggie::gen_random_lines;
 use clap::Parser;
+use color_eyre::eyre::{Context, Result};
 use std::{
     fs::File,
     io::{BufWriter, Write},
@@ -8,30 +9,17 @@ use std::{
 use thousands::Separable;
 
 mod cli;
-use crate::cli::{Cli, CliError};
+use crate::cli::Cli;
 
-fn main() {
+fn main() -> Result<()> {
     let cli = Cli::parse();
-    let result = run(&cli);
-
-    match result {
-        Ok(()) => {
-            std::process::exit(exitcode::OK);
-        }
-        Err(CliError::FileCreate(_, e)) => {
-            eprintln!("{e}");
-            std::process::exit(exitcode::CONFIG);
-        }
-        Err(e) => {
-            eprintln!("Error: {e}");
-            std::process::exit(exitcode::DATAERR);
-        }
-    }
+    error::init(&cli.verbosity)?;
+    logging::init(&cli.verbosity);
+    run(&cli)
 }
 
-fn run(cli: &Cli) -> Result<(), CliError> {
+fn run(cli: &Cli) -> Result<()> {
     let writer = get_writer(&cli.file)?;
-
     gen_random_lines(writer, cli.lines)?;
 
     println!(
@@ -40,11 +28,13 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         if cli.lines == 1 { "" } else { "s" },
         cli.file.display()
     );
+    log::info!("Wrote {} to {}", cli.lines.separate_with_commas(), cli.file.display());
 
     Ok(())
 }
 
-fn get_writer(path: &Path) -> Result<impl Write, CliError> {
-    let file = File::create(path).map_err(|e| CliError::FileCreate(path.to_owned(), e))?;
+fn get_writer(path: &Path) -> Result<impl Write> {
+    let file =
+        File::create(path).wrap_err_with(|| format!("Cannot create file {}", path.display()))?;
     Ok(BufWriter::new(file))
 }
