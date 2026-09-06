@@ -7,7 +7,7 @@ use std::{
 
 mod cli;
 use crate::cli::{Cli, CliError};
-use cutr::{Extract};
+use cutr::Extract;
 
 fn main() {
     let cli = Cli::parse();

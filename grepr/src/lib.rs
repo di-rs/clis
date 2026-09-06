@@ -1,7 +1,10 @@
 #[cfg(not(test))]
 use log::warn;
 use regex::Regex;
-use std::{io::{BufRead, Write}, path::{Path, PathBuf}};
+use std::{
+    io::{BufRead, Write},
+    path::{Path, PathBuf},
+};
 use walkdir::WalkDir;
 
 #[derive(Debug, thiserror::Error)]

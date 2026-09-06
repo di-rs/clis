@@ -21,11 +21,11 @@ pub struct Args {
     pub number_nonblank_lines: bool,
 
     /// Squeeze multiple adjacent empty lines
-     #[arg(short('s'), long("squeeze-blank"))]
+    #[arg(short('s'), long("squeeze-blank"))]
     pub squeeze_blank: bool,
 
     /// Disable output buffering
-     #[arg(short('u'), long("unbuffered"))]
+    #[arg(short('u'), long("unbuffered"))]
     pub unbuffered: bool,
 }
 

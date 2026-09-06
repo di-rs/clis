@@ -1,8 +1,8 @@
 use assert_cmd::cargo::cargo_bin_cmd;
 use assert_fs::{NamedTempFile, fixture::FileTouch};
 use predicates::prelude::*;
-use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
 use pretty_assertions::assert_eq;
+use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
 
 const EMPTY: &str = "tests/inputs/empty.txt";
 const FOX: &str = "tests/inputs/fox.txt";
@@ -44,7 +44,7 @@ fn skip_bad_file() -> Result<()> {
 fn run(args: &[&str], expected_file: &str) -> Result<()> {
     let outfile: PathBuf = ["tests/expected", expected_file].iter().collect();
     let expected = std::fs::read_to_string(outfile)?;
-    
+
     let cmd = cargo_bin_cmd!().args(args).assert().success();
     let output = cmd.get_output();
     assert_eq!(String::from_utf8_lossy(&output.stdout), expected);

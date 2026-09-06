@@ -3,12 +3,12 @@ use regex::{Regex, RegexBuilder};
 use std::path::PathBuf;
 use thiserror::Error;
 
+mod reader;
 mod verbosity;
 mod writer;
-mod reader;
 
-pub use writer::get_writer;
 pub use reader::get_reader;
+pub use writer::get_writer;
 
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Parser, Debug)]

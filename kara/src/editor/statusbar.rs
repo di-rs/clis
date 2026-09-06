@@ -38,7 +38,10 @@ impl StatusBar {
         } = buffer.into();
 
         let filename_status = filename.map_or_else(String::new, |filename| {
-            format!("| {filename} {}", if is_modified { "(modified)" } else { "" })
+            format!(
+                "| {filename} {}",
+                if is_modified { "(modified)" } else { "" }
+            )
         });
 
         let mut status = format!("{mode} | {current_line_index}:{total_lines} {filename_status}");

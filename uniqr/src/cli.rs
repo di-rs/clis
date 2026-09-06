@@ -15,7 +15,7 @@ pub struct Cli {
 
     /// The count of the number of times the line occurred in input
     #[arg(short('c'), long)]
-    pub count: bool
+    pub count: bool,
 }
 
 #[derive(Error, Debug)]
@@ -23,10 +23,7 @@ pub enum CliError {
     #[error("incorrect config passed")]
     Config,
     #[error("failed to open the file")]
-    FileOpen {
-        err: std::io::Error,
-        path: String,
-    },
+    FileOpen { err: std::io::Error, path: String },
     #[error(transparent)]
     IO(#[from] std::io::Error),
 }

@@ -179,8 +179,7 @@ fn test_all_bytes_lines() -> Result<()> {
 #[test]
 fn atlamal_stdin() -> Result<()> {
     let input = fs::read_to_string(ATLAMAL)?;
-    let expected =
-        fs::read_to_string("tests/expected/atlamal.txt.stdin.out")?;
+    let expected = fs::read_to_string("tests/expected/atlamal.txt.stdin.out")?;
 
     let cmd = cargo_bin_cmd!().write_stdin(input).assert().success();
     let output = cmd.get_output();

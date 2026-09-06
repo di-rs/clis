@@ -13,8 +13,12 @@ pub trait Reporter {
 
 /// # Errors
 /// Throws error if unable to write to writer
-pub fn get_lines(reader1: impl BufRead, reader2: impl BufRead, insensitive: bool, reporter: &impl Reporter)
-{
+pub fn get_lines(
+    reader1: impl BufRead,
+    reader2: impl BufRead,
+    insensitive: bool,
+    reporter: &impl Reporter,
+) {
     let reader1 = get_lines_reader(reader1, insensitive);
     let reader2 = get_lines_reader(reader2, insensitive);
 

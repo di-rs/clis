@@ -20,8 +20,6 @@ pub struct Cli {
     pub entry_types: Vec<EntryType>,
 }
 
-
-
 #[derive(Error, Debug)]
 pub enum CliError {
     #[error(transparent)]

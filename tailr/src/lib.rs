@@ -1,5 +1,6 @@
 use std::{
-    io::{BufRead, BufReader, Read, Seek, SeekFrom, Write}, str::FromStr,
+    io::{BufRead, BufReader, Read, Seek, SeekFrom, Write},
+    str::FromStr,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]

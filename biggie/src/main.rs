@@ -28,7 +28,11 @@ fn run(cli: &Cli) -> Result<()> {
         if cli.lines == 1 { "" } else { "s" },
         cli.file.display()
     );
-    log::info!("Wrote {} to {}", cli.lines.separate_with_commas(), cli.file.display());
+    log::info!(
+        "Wrote {} to {}",
+        cli.lines.separate_with_commas(),
+        cli.file.display()
+    );
 
     Ok(())
 }

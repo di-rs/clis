@@ -56,7 +56,7 @@ impl EditorCommand {
             }) => match (code, modifiers) {
                 (Char('q'), &KeyModifiers::CONTROL) => Some(Self::Quit),
                 (Char('s'), &KeyModifiers::CONTROL) => Some(Self::Save),
-                
+
                 (KeyCode::Up, _) => Some(Self::Move(Direction::Up)),
                 (KeyCode::Down, _) => Some(Self::Move(Direction::Down)),
                 (KeyCode::Left, _) => Some(Self::Move(Direction::Left)),

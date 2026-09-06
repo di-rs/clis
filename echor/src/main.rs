@@ -7,7 +7,7 @@ struct Args {
     /// Input text
     #[arg(required(true))]
     text: Vec<String>,
-    
+
     /// Do not print newline
     #[arg(short('n'))]
     omit_newline: bool,

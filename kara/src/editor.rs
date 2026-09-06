@@ -1,14 +1,14 @@
-use editor_buffer::{EditorBuffer, Direction};
 use crossterm::event::{Event, KeyEvent, KeyEventKind, read};
+use editor_buffer::{Direction, EditorBuffer};
 use terminal::Terminal;
 use view::View;
 
 mod editor_buffer;
 mod editorcommand;
 mod editormode;
+mod statusbar;
 mod terminal;
 mod view;
-mod statusbar;
 
 mod prelude;
 pub use prelude::*;
