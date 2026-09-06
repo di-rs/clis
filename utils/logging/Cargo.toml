@@ -10,7 +10,7 @@ include.workspace = true
 
 [dependencies]
 clap-verbosity-flag = { workspace = true }
-env_logger = { workspace = true }
+env_logger = "0.11"
 
 [lints]
 workspace = true

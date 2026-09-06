@@ -1,4 +1,4 @@
-use chrono::{DateTime, Local};
+use jiff::Timestamp;
 
 #[derive(Default, Clone, Copy, Debug)]
 pub struct Size {
@@ -38,4 +38,4 @@ impl From<Location> for Position {
     }
 }
 
-pub type LocalTimestamp = DateTime<Local>;
+pub type LocalTimestamp = Timestamp;

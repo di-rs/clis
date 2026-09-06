@@ -9,8 +9,9 @@ keywords = ["rust", "text-editor"]
 categories = ["pratice", "pet"]
 
 [dependencies]
-chrono = "0.4.45"
 crossterm = "0.29.0"
+jiff = "0.2"
+color-eyre = "0.6"
 unicode-segmentation = "1.13.3"
 unicode-width = "0.2.2"
 

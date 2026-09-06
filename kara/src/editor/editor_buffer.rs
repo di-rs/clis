@@ -4,7 +4,7 @@ use crate::editor::{
     LocalTimestamp, Location,
     editor_buffer::{buffer::Buffer, buffer_kind::BufferKind, file_buffer::FileBuffer},
 };
-use chrono::Local;
+use jiff::Zoned;
 use line::Line;
 
 mod buffer;
@@ -183,7 +183,7 @@ impl EditorBuffer {
     }
 
     fn mark_modified(&mut self) {
-        self.modified_at = Some(Local::now());
+        self.modified_at = Some(Zoned::now().timestamp());
     }
 
     pub fn has_changed_since(&self, since: Option<LocalTimestamp>) -> bool {
