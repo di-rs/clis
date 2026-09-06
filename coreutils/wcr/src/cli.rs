@@ -7,7 +7,7 @@ use wcr::FileInfo;
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
-/// Rust minimal wc implementation
+/// Rust minimal `wc` implementation
 pub struct Cli {
     /// Input file(s), use `-` to read from stdin (must not be a tty)
     #[arg(value_name = "FILE", default_value = "-")]
