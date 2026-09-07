@@ -1183,6 +1183,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "parsu"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "clap",
+ "color-eyre",
+ "predicates",
+ "pretty_assertions",
+]
+
+[[package]]
 name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
