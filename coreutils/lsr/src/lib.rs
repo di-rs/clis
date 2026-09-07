@@ -1,5 +1,10 @@
 use chrono::{DateTime, Local};
-use std::{fmt::Display, fs, os::unix::fs::MetadataExt, path::PathBuf};
+use std::{
+    fmt::Display,
+    fs,
+    os::unix::fs::MetadataExt,
+    path::{Path, PathBuf},
+};
 use tabular::{Row, Table};
 
 mod owner;
@@ -44,8 +49,9 @@ pub fn get_formatted_output(paths: &[PathBuf]) -> Result<impl Display, std::io::
 
     for path in paths {
         let metadata = path.metadata()?;
+        let is_symlink = metadata.file_type().is_symlink();
 
-        let file_type = if path.is_dir() { "d" } else { "-" };
+        let file_type = format_file_type(path, is_symlink);
         let perms = format_mode(metadata.mode());
         let link_count = metadata.nlink();
 
@@ -64,7 +70,7 @@ pub fn get_formatted_output(paths: &[PathBuf]) -> Result<impl Display, std::io::
         let size = metadata.len();
         let modified: DateTime<Local> = DateTime::from(metadata.modified()?);
         let date = modified.format("%b %d %y %H:%M");
-        let full_path = path.display();
+        let full_path = format_full_path(path, is_symlink);
 
         table.add_row(
             Row::new()
@@ -80,6 +86,16 @@ pub fn get_formatted_output(paths: &[PathBuf]) -> Result<impl Display, std::io::
     }
 
     Ok(table)
+}
+
+fn format_file_type(path: &Path, is_symlink: bool) -> &str {
+    if is_symlink {
+        "l"
+    } else if path.is_dir() {
+        "d"
+    } else {
+        "-"
+    }
 }
 
 fn format_mode(mode: u32) -> String {
@@ -99,4 +115,16 @@ fn permission_triple(mode: u32, owner: Owner) -> String {
         if mode & write == 0 { "-" } else { "w" },
         if mode & execute == 0 { "-" } else { "x" },
     )
+}
+
+fn format_full_path(path: &Path, is_symlink: bool) -> String {
+    let path_str = path.display();
+    if is_symlink {
+        path.read_link().map_or_else(
+            |_| path_str.to_string(),
+            |target| format!("{path_str} -> {}", target.display()),
+        )
+    } else {
+        path_str.to_string()
+    }
 }

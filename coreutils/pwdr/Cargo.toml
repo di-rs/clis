@@ -1,0 +1,16 @@
+[package]
+name = "pwdr"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+include.workspace = true
+
+[dependencies]
+clap = { workspace = true }
+color-eyre = { workspace = true }
+
+[lints]
+workspace = true

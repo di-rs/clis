@@ -1063,6 +1063,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mkdirr"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "color-eyre",
+]
+
+[[package]]
 name = "nix"
 version = "0.31.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1261,6 +1269,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "pwdr"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "color-eyre",
 ]
 
 [[package]]
@@ -1639,6 +1655,15 @@ name = "toml_writer"
 version = "1.1.2+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
+
+[[package]]
+name = "touchr"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "color-eyre",
+]
 
 [[package]]
 name = "tracing"
