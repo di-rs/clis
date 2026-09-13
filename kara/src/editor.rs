@@ -16,7 +16,14 @@ mod prelude;
 pub use prelude::*;
 
 use crate::editor::{
-    editorcommand::EditorCommand, editormode::EditorMode, messagebar::MessageBar,
+    editorcommand::{
+        Edit,
+        EditorCommand::{self, System},
+        Move,
+        System::{Quit, Resize, Save},
+    },
+    editormode::EditorMode,
+    messagebar::MessageBar,
     statusbar::StatusBar,
 };
 
@@ -144,55 +151,26 @@ impl Editor {
     }
 
     fn handle_command(&mut self, command: EditorCommand) {
-        if command != EditorCommand::Quit {
-            self.reset_quit_attempts();
+        match command {
+            System(Quit) => self.quit(),
+            System(Resize(size)) => self.resize(size),
+            _ => self.reset_quit_attempts(),
         }
 
         match command {
-            EditorCommand::Move(direction) => {
-                self.move_caret(&direction);
-            }
-            EditorCommand::Resize(size) => {
-                self.resize(size);
-            }
-            EditorCommand::Insert(char) => {
-                self.buffer.insert_char(char);
-            }
-            EditorCommand::Delete => {
-                self.buffer.delete();
-            }
-            EditorCommand::Backspace => {
-                self.buffer.delete_backward();
-            }
-            EditorCommand::Enter => {
-                self.buffer.insert_newline();
-            }
+            System(Quit | Resize(_)) => {}
+            System(Save) => self.save(),
+            EditorCommand::Move(direction) => self.handle_move_command(&direction),
+            EditorCommand::Edit(edit) => self.handle_edit_command(&edit),
             EditorCommand::ChangeMode(mode) => {
                 self.change_mode(mode);
-            }
-            EditorCommand::Save => match self.buffer.save() {
-                Ok(()) => self.messagebar.set("File saved successfully.".to_owned()),
-                Err(e) => self.messagebar.set(format!("Error writing file! {e}")),
-            },
-            EditorCommand::Quit => {
-                self.quit();
             }
             EditorCommand::Unknown => (),
         }
     }
 
-    const fn resize(&mut self, size: Size) {
-        self.terminal_size = size;
-        let Size { height, width } = size;
-        self.view.resize(Size {
-            height: height.saturating_sub(2),
-            width,
-        });
-        self.statusbar.resize(Size { height: 1, width });
-    }
-
-    fn move_caret(&mut self, direction: &editorcommand::Direction) {
-        use editorcommand::Direction::{
+    fn handle_move_command(&mut self, direction: &Move) {
+        use editorcommand::Move::{
             Down, End, Home, Left, LineEnd, LineStart, PageDown, PageUp, Right, Up,
         };
 
@@ -216,11 +194,45 @@ impl Editor {
         }
     }
 
+    fn handle_edit_command(&mut self, edit_command: &Edit) {
+        match self.mode {
+            EditorMode::Edit(_) => match edit_command {
+                Edit::Insert(char) => self.buffer.insert_char(*char),
+                Edit::InsertNewline => self.buffer.insert_newline(),
+                Edit::Delete => self.buffer.delete(),
+                Edit::DeleteBackward => self.buffer.delete_backward(),
+            },
+            EditorMode::Command => {
+                // TODO: handle for command
+                self.messagebar
+                    .set("Command mode is not accesible yet".to_owned());
+            }
+            EditorMode::View => {}
+        }
+    }
+
+    const fn resize(&mut self, size: Size) {
+        self.terminal_size = size;
+        let Size { height, width } = size;
+        self.view.resize(Size {
+            height: height.saturating_sub(2),
+            width,
+        });
+        self.statusbar.resize(Size { height: 1, width });
+    }
+
     fn change_mode(&mut self, mode: EditorMode) {
         if let Some(direction) = self.mode.change_mode_movement(mode) {
             self.buffer.move_caret(direction);
         }
         self.mode = mode;
+    }
+
+    fn save(&mut self) {
+        match self.buffer.save() {
+            Ok(()) => self.messagebar.set("File saved successfully.".to_owned()),
+            Err(e) => self.messagebar.set(format!("Error writing file! {e}")),
+        }
     }
 
     fn quit(&mut self) {

@@ -10,7 +10,7 @@ use crate::editor::{
 };
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum Direction {
+pub enum Move {
     Up,
     Left,
     Right,
@@ -24,16 +24,62 @@ pub enum Direction {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum EditorCommand {
-    Move(Direction),
-    Resize(Size),
-    ChangeMode(EditorMode),
-    Insert(char),
-    Delete,
-    Backspace,
-    Enter,
+pub enum System {
     Save,
     Quit,
+    Resize(Size),
+}
+
+impl TryFrom<KeyEvent> for System {
+    type Error = String;
+
+    fn try_from(event: KeyEvent) -> Result<Self, Self::Error> {
+        match (event.code, event.modifiers) {
+            (Char('q'), KeyModifiers::CONTROL) => Ok(Self::Quit),
+            (Char('s'), KeyModifiers::CONTROL) => Ok(Self::Save),
+
+            _ => Err(format!(
+                "Unsupported key code {:?} with modifiers {:?}",
+                event.code, event.modifiers
+            )),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Edit {
+    Insert(char),
+    InsertNewline,
+    Delete,
+    DeleteBackward,
+}
+
+impl TryFrom<KeyEvent> for Edit {
+    type Error = String;
+
+    fn try_from(event: KeyEvent) -> Result<Self, Self::Error> {
+        match (event.code, event.modifiers) {
+            (Char(char), KeyModifiers::NONE | KeyModifiers::SHIFT) => Ok(Self::Insert(char)),
+
+            (KeyCode::Tab, KeyModifiers::NONE) => Ok(Self::Insert('\t')),
+            (KeyCode::Enter, KeyModifiers::NONE) => Ok(Self::InsertNewline),
+            (KeyCode::Backspace, _) => Ok(Self::DeleteBackward),
+            (KeyCode::Delete, _) => Ok(Self::Delete),
+
+            _ => Err(format!(
+                "Unsupported key code {:?} with modifiers {:?}",
+                event.code, event.modifiers
+            )),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum EditorCommand {
+    Move(Move),
+    ChangeMode(EditorMode),
+    Edit(Edit),
+    System(System),
     Unknown,
 }
 
@@ -43,81 +89,75 @@ impl EditorCommand {
         common_command.map_or_else(
             || match mode {
                 EditorMode::View => Ok(Self::match_event_view_mode(event)),
-                EditorMode::Edit(_) => Ok(Self::match_event_edit_mode(event)),
+                EditorMode::Edit(_) | EditorMode::Command => Ok(Self::match_event_edit_mode(event)),
             },
             Ok,
         )
     }
 
     fn match_common_event_mode(event: &Event) -> Option<Self> {
-        match event {
-            Event::Key(KeyEvent {
-                code, modifiers, ..
-            }) => match (code, modifiers) {
-                (Char('q'), &KeyModifiers::CONTROL) => Some(Self::Quit),
-                (Char('s'), &KeyModifiers::CONTROL) => Some(Self::Save),
-
-                (KeyCode::Up, _) => Some(Self::Move(Direction::Up)),
-                (KeyCode::Down, _) => Some(Self::Move(Direction::Down)),
-                (KeyCode::Left, _) => Some(Self::Move(Direction::Left)),
-                (KeyCode::Right, _) => Some(Self::Move(Direction::Right)),
-                _ => None,
-            },
-            Event::Resize(width, height) => Some(Self::Resize(Size {
-                height: (*height).into(),
-                width: (*width).into(),
-            })),
+        match *event {
+            Event::Key(key_event) => {
+                if let Ok(system) = System::try_from(key_event) {
+                    return Some(Self::System(system));
+                }
+                match (key_event.code, key_event.modifiers) {
+                    (KeyCode::Up, _) => Some(Self::Move(Move::Up)),
+                    (KeyCode::Down, _) => Some(Self::Move(Move::Down)),
+                    (KeyCode::Left, _) => Some(Self::Move(Move::Left)),
+                    (KeyCode::Right, _) => Some(Self::Move(Move::Right)),
+                    _ => None,
+                }
+            }
+            Event::Resize(width, height) => Some(Self::System(System::Resize(Size {
+                height: (height).into(),
+                width: (width).into(),
+            }))),
             _ => None,
         }
     }
 
     const fn match_event_view_mode(event: &Event) -> Self {
-        match event {
+        match *event {
             Event::Key(KeyEvent {
                 code, modifiers, ..
             }) => match (code, modifiers) {
-                (Char('u'), _) => Self::Move(Direction::Up),
-                (Char('j'), _) | (KeyCode::Enter, &KeyModifiers::NONE) => {
-                    Self::Move(Direction::Down)
-                }
-                (Char('h'), _) => Self::Move(Direction::Left),
-                (Char('k'), _) => Self::Move(Direction::Right),
-                (Char('s'), _) => Self::Move(Direction::LineStart),
-                (Char('e'), _) => Self::Move(Direction::LineEnd),
-                (Char('g'), _) => Self::Move(Direction::Home),
-                (Char('G'), _) => Self::Move(Direction::End),
-                (Char('p'), _) => Self::Move(Direction::PageUp),
-                (Char('P'), _) => Self::Move(Direction::PageDown),
+                (Char('u'), _) => Self::Move(Move::Up),
+                (Char('j'), _) | (KeyCode::Enter, KeyModifiers::NONE) => Self::Move(Move::Down),
+                (Char('h'), _) => Self::Move(Move::Left),
+                (Char('k'), _) => Self::Move(Move::Right),
+                (Char('s'), _) => Self::Move(Move::LineStart),
+                (Char('e'), _) => Self::Move(Move::LineEnd),
+                (Char('g'), _) => Self::Move(Move::Home),
+                (Char('G'), _) => Self::Move(Move::End),
+                (Char('p'), _) => Self::Move(Move::PageUp),
+                (Char('P'), _) => Self::Move(Move::PageDown),
 
                 (Char('i'), _) => Self::ChangeMode(EditorMode::Edit(Placement::Left)),
                 (Char('a'), _) => Self::ChangeMode(EditorMode::Edit(Placement::Right)),
                 (Char('I'), _) => Self::ChangeMode(EditorMode::Edit(Placement::Start)),
                 (Char('A'), _) => Self::ChangeMode(EditorMode::Edit(Placement::End)),
 
-                (Char('d'), _) => Self::Delete,
+                (Char(':'), _) => Self::ChangeMode(EditorMode::Command),
+
+                (Char('d'), _) => Self::Edit(Edit::Delete),
                 _ => Self::Unknown,
             },
             _ => Self::Unknown,
         }
     }
 
-    const fn match_event_edit_mode(event: &Event) -> Self {
-        match event {
-            Event::Key(KeyEvent {
-                code, modifiers, ..
-            }) => match (code, modifiers) {
-                (Char('c'), &KeyModifiers::CONTROL) | (KeyCode::Esc, _) => {
-                    Self::ChangeMode(EditorMode::View)
+    fn match_event_edit_mode(event: &Event) -> Self {
+        match *event {
+            Event::Key(key_event) => {
+                match (key_event.code, key_event.modifiers) {
+                    (Char('c'), KeyModifiers::CONTROL) | (KeyCode::Esc, _) => {
+                        return Self::ChangeMode(EditorMode::View);
+                    }
+                    _ => {}
                 }
-
-                (KeyCode::Tab, &KeyModifiers::NONE) => Self::Insert('\t'),
-                (KeyCode::Enter, &KeyModifiers::NONE) => Self::Enter,
-                (KeyCode::Backspace, _) => Self::Backspace,
-
-                (Char(char), &KeyModifiers::NONE | &KeyModifiers::SHIFT) => Self::Insert(*char),
-
-                _ => Self::Unknown,
-            },
+                Edit::try_from(key_event).map_or(Self::Unknown, Self::Edit)
+            }
             _ => Self::Unknown,
         }
     }
