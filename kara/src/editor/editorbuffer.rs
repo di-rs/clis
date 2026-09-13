@@ -2,13 +2,13 @@ use std::cmp::{max, min};
 
 use crate::editor::{
     LocalTimestamp, Location,
-    editor_buffer::{buffer::Buffer, buffer_kind::BufferKind, file_buffer::FileBuffer},
+    editorbuffer::{buffer::Buffer, bufferkind::BufferKind, file_buffer::FileBuffer},
 };
 use jiff::Zoned;
 use line::Line;
 
 mod buffer;
-mod buffer_kind;
+mod bufferkind;
 mod file_buffer;
 mod fileinfo;
 mod line;

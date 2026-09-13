@@ -2,7 +2,7 @@ use std::{fmt::Display, range::Range};
 
 mod welcome_message;
 use crate::editor::{
-    LocalTimestamp, Location, Size, editor_buffer::EditorBuffer, terminal::Terminal,
+    LocalTimestamp, Location, Size, editorbuffer::EditorBuffer, terminal::Terminal,
     view::welcome_message::WelcomeMessage,
 };
 

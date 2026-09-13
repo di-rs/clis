@@ -1,10 +1,10 @@
 use crossterm::event::{Event, KeyEvent, KeyEventKind, read};
-use editor_buffer::{Direction, EditorBuffer};
+use editorbuffer::{Direction, EditorBuffer};
 use terminal::Terminal;
 use view::View;
 
 mod documentstatus;
-mod editor_buffer;
+mod editorbuffer;
 mod editorcommand;
 mod editormode;
 mod messagebar;
