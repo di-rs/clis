@@ -1,6 +1,4 @@
-use jiff::Timestamp;
-
-#[derive(Default, Clone, Copy, Debug)]
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Size {
     pub height: usize,
     pub width: usize,
@@ -37,5 +35,3 @@ impl From<Location> for Position {
         }
     }
 }
-
-pub type LocalTimestamp = Timestamp;

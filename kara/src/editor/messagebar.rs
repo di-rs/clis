@@ -52,10 +52,14 @@ pub struct MessageBar {
 }
 
 impl MessageBar {
-    pub fn update_message(&mut self, new_message: String) {
+    pub fn set(&mut self, new_message: String) {
         self.current_message = Message::new(new_message);
         self.mark_redraw(true);
         self.cleared_after_expiration = false;
+    }
+
+    pub fn clear(&mut self) {
+        self.set(String::new());
     }
 
     pub fn render(&mut self, position_y: usize) {

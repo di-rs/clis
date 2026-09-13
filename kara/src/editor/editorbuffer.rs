@@ -1,10 +1,12 @@
-use std::cmp::{max, min};
+use std::{
+    cmp::{max, min},
+    time::Instant,
+};
 
 use crate::editor::{
-    LocalTimestamp, Location,
+    Location,
     editorbuffer::{buffer::Buffer, bufferkind::BufferKind, file_buffer::FileBuffer},
 };
-use jiff::Zoned;
 use line::Line;
 
 mod buffer;
@@ -29,7 +31,7 @@ pub struct EditorBuffer {
     buffer: BufferKind,
     text_location: Location,
     max_prev_x: usize,
-    pub modified_at: Option<LocalTimestamp>,
+    modified_at: Option<Instant>,
 }
 
 impl EditorBuffer {
@@ -184,11 +186,11 @@ impl EditorBuffer {
     }
 
     fn mark_modified(&mut self) {
-        self.modified_at = Some(Zoned::now().timestamp());
+        self.modified_at = Some(Instant::now());
     }
 
-    pub fn has_changed_since(&self, since: Option<LocalTimestamp>) -> bool {
-        self.modified_at != since
+    pub const fn is_modified(&self) -> bool {
+        self.modified_at.is_some()
     }
 
     pub fn height(&self) -> usize {

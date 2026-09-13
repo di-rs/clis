@@ -7,7 +7,7 @@ use crossterm::cursor::{
 
 use crate::editor::editorbuffer::Direction;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Placement {
     Start,
     End,
@@ -15,7 +15,7 @@ pub enum Placement {
     Right,
 }
 
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorMode {
     #[default]
     View,

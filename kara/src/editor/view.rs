@@ -2,7 +2,7 @@ use std::{fmt::Display, range::Range};
 
 mod welcome_message;
 use crate::editor::{
-    LocalTimestamp, Location, Size, editorbuffer::EditorBuffer, terminal::Terminal,
+    Location, Size, editorbuffer::EditorBuffer, terminal::Terminal,
     view::welcome_message::WelcomeMessage,
 };
 
@@ -11,7 +11,6 @@ pub struct View {
     needs_redraw: bool,
     size: Size,
     pub scroll_offset: Location,
-    last_modified_at: Option<LocalTimestamp>,
 }
 
 const Y_OVERSCAN: usize = 5;
@@ -24,7 +23,7 @@ impl View {
     }
 
     pub fn render(&mut self, buffer: &EditorBuffer) {
-        if !self.needs_redraw && !self.has_buffer_changed(buffer) {
+        if !self.needs_redraw && !buffer.is_modified() {
             return;
         }
 
@@ -47,7 +46,6 @@ impl View {
         }
 
         self.needs_redraw = false;
-        self.last_modified_at = buffer.modified_at;
     }
 
     pub const fn scroll_into_view(&mut self, current_location: Location) {
@@ -121,9 +119,5 @@ impl View {
     fn render_line(at: usize, line_text: impl Display) {
         let result = Terminal::print_row(at, line_text);
         debug_assert!(result.is_ok(), "Failed to render line");
-    }
-
-    fn has_buffer_changed(&self, buffer: &EditorBuffer) -> bool {
-        buffer.has_changed_since(self.last_modified_at)
     }
 }

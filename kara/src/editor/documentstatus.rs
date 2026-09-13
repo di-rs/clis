@@ -30,7 +30,7 @@ impl From<&EditorBuffer> for DocumentStatus {
     fn from(buffer: &EditorBuffer) -> Self {
         let total_lines = buffer.height();
         let current_line_index = buffer.caret_location().y;
-        let is_modified = buffer.modified_at.is_some();
+        let is_modified = buffer.is_modified();
         let filename = buffer.filename();
 
         Self {

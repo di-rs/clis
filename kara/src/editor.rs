@@ -21,6 +21,7 @@ use crate::editor::{
 };
 
 pub const APP_NAME: &str = env!("CARGO_PKG_NAME");
+const MAX_QUIT_ATTEMPTS: u8 = 2;
 
 #[derive(Default)]
 pub struct Editor {
@@ -28,6 +29,7 @@ pub struct Editor {
     terminal_size: Size,
     mode: EditorMode,
     should_quit: bool,
+    quit_attempts: Option<u8>,
     buffer: EditorBuffer,
     view: View,
     statusbar: StatusBar,
@@ -47,19 +49,29 @@ impl Editor {
         }));
 
         Terminal::initialize()?;
-        let buffer = file_name
-            .and_then(|file_name| EditorBuffer::open(&file_name).ok())
-            .unwrap_or_default();
-
         let mut editor = Self::default();
+
         let size = Terminal::size().unwrap_or_default();
         editor.resize(size);
-        editor.buffer = buffer;
         editor
             .messagebar
-            .update_message("Ctrl-s = save | Ctrl-q = quit".to_string());
+            .set("Ctrl-s = save | Ctrl-q = quit".to_string());
+
+        if let Some(filename) = file_name {
+            editor.open_file(&filename);
+        }
 
         Ok(editor)
+    }
+
+    fn open_file(&mut self, file_name: &str) {
+        match EditorBuffer::open(file_name) {
+            Ok(buffer) => self.buffer = buffer,
+            Err(e) => {
+                self.messagebar
+                    .set(format!("ERR: Could not open file `{file_name}` {e}"));
+            }
+        }
     }
 
     pub fn run(&mut self) {
@@ -132,6 +144,10 @@ impl Editor {
     }
 
     fn handle_command(&mut self, command: EditorCommand) {
+        if command != EditorCommand::Quit {
+            self.reset_quit_attempts();
+        }
+
         match command {
             EditorCommand::Move(direction) => {
                 self.move_caret(&direction);
@@ -154,11 +170,12 @@ impl Editor {
             EditorCommand::ChangeMode(mode) => {
                 self.change_mode(mode);
             }
-            EditorCommand::Save => {
-                let _ = self.buffer.save();
-            }
+            EditorCommand::Save => match self.buffer.save() {
+                Ok(()) => self.messagebar.set("File saved successfully.".to_owned()),
+                Err(e) => self.messagebar.set(format!("Error writing file! {e}")),
+            },
             EditorCommand::Quit => {
-                self.should_quit = true;
+                self.quit();
             }
             EditorCommand::Unknown => (),
         }
@@ -204,6 +221,32 @@ impl Editor {
             self.buffer.move_caret(direction);
         }
         self.mode = mode;
+    }
+
+    fn quit(&mut self) {
+        if !self.buffer.is_modified() {
+            self.should_quit = true;
+            return;
+        }
+
+        let attempt = self.quit_attempts.map_or(1, |x| x.saturating_add(1));
+        let left_attempts = MAX_QUIT_ATTEMPTS.saturating_sub(attempt);
+
+        if left_attempts == 0 {
+            self.should_quit = true;
+        } else {
+            self.messagebar.set(format!(
+                "WARNING! File has unsaved changes. Press Ctrl-Q {left_attempts} more times to quit."
+            ));
+            self.quit_attempts = Some(attempt);
+        }
+    }
+
+    fn reset_quit_attempts(&mut self) {
+        if self.quit_attempts.is_some() {
+            self.quit_attempts = None;
+            self.messagebar.clear();
+        }
     }
 }
 

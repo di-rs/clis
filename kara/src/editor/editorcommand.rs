@@ -9,7 +9,7 @@ use crate::editor::{
     editormode::{EditorMode, Placement},
 };
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Direction {
     Up,
     Left,
@@ -23,7 +23,7 @@ pub enum Direction {
     End,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum EditorCommand {
     Move(Direction),
     Resize(Size),
@@ -109,10 +109,13 @@ impl EditorCommand {
                 (Char('c'), &KeyModifiers::CONTROL) | (KeyCode::Esc, _) => {
                     Self::ChangeMode(EditorMode::View)
                 }
-                (Char(char), &KeyModifiers::NONE | &KeyModifiers::SHIFT) => Self::Insert(*char),
+
                 (KeyCode::Tab, &KeyModifiers::NONE) => Self::Insert('\t'),
                 (KeyCode::Enter, &KeyModifiers::NONE) => Self::Enter,
                 (KeyCode::Backspace, _) => Self::Backspace,
+
+                (Char(char), &KeyModifiers::NONE | &KeyModifiers::SHIFT) => Self::Insert(*char),
+
                 _ => Self::Unknown,
             },
             _ => Self::Unknown,
