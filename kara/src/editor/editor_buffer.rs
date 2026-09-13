@@ -10,6 +10,7 @@ use line::Line;
 mod buffer;
 mod buffer_kind;
 mod file_buffer;
+mod fileinfo;
 mod line;
 
 #[derive(Debug, Clone, Copy)]
@@ -48,7 +49,7 @@ impl EditorBuffer {
         })
     }
 
-    pub const fn filename(&self) -> Option<&String> {
+    pub fn filename(&self) -> String {
         self.buffer.filename()
     }
 

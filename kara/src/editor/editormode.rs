@@ -45,7 +45,7 @@ impl EditorMode {
 impl Display for EditorMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = match self {
-            Self::View => "NAVIGATION",
+            Self::View => "NAVIGATE",
             Self::Edit(_) => "EDIT",
         };
         f.write_str(name)

@@ -1,23 +1,26 @@
-use crate::editor::Size;
+use crate::editor::{APP_NAME, Size};
 
-const NAME: &str = env!("CARGO_PKG_NAME");
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub struct WelcomeMessage;
 
 impl WelcomeMessage {
-    pub fn draw(size: &Size) -> (usize, String) {
-        let Size { height, width } = *size;
+    pub fn draw(size: &Size) -> Option<String> {
+        let Size { width, .. } = *size;
 
-        let welcome_message = format!("{NAME} v{VERSION}");
+        if width == 0 {
+            return None;
+        }
+
+        let welcome_message = format!("{APP_NAME} v{VERSION}");
         let message_len = welcome_message.len();
+        let remaining_width = width.saturating_sub(1);
 
-        let y = height / 3;
-        let padding = width.saturating_sub(message_len).saturating_sub(1) / 2;
+        if remaining_width < message_len {
+            return Some("~".to_owned());
+        }
 
-        let mut message = format!("~{}{}", " ".repeat(padding), welcome_message);
-        message.truncate(width);
-
-        (y, message)
+        let message = format!("{:<1}{:^remaining_width$}", "~", welcome_message);
+        Some(message)
     }
 }

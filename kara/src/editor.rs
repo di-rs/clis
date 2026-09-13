@@ -3,6 +3,7 @@ use editor_buffer::{Direction, EditorBuffer};
 use terminal::Terminal;
 use view::View;
 
+mod documentstatus;
 mod editor_buffer;
 mod editorcommand;
 mod editormode;
@@ -15,12 +16,15 @@ pub use prelude::*;
 
 use crate::editor::{editorcommand::EditorCommand, editormode::EditorMode, statusbar::StatusBar};
 
+pub const APP_NAME: &str = env!("CARGO_PKG_NAME");
+
 pub struct Editor {
     mode: EditorMode,
     buffer: EditorBuffer,
     view: View,
     statusbar: StatusBar,
     should_quit: bool,
+    title: String,
 }
 
 impl Editor {
@@ -42,16 +46,19 @@ impl Editor {
 
         Ok(Self {
             should_quit: false,
-            view: View::new(),
             mode: EditorMode::View,
-            buffer,
+            view: View::new(),
             statusbar: StatusBar::new(),
+            buffer,
+            title: String::new(),
         })
     }
 
     pub fn run(&mut self) {
         loop {
             self.refresh_screen();
+            // TODO: Do it only if buffer was changed
+            self.refresh_title();
             if self.should_quit {
                 break;
             }
@@ -62,6 +69,13 @@ impl Editor {
                     debug_assert!(false, "Could not read event: {err:?}");
                 }
             }
+        }
+    }
+
+    fn refresh_title(&mut self) {
+        let title = format!("{} - {APP_NAME}", self.buffer.filename());
+        if title != self.title && matches!(Terminal::set_title(&title), Ok(())) {
+            self.title = title;
         }
     }
 

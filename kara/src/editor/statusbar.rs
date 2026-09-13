@@ -1,77 +1,71 @@
 use crate::editor::{
-    Size, editor_buffer::EditorBuffer, editormode::EditorMode, terminal::Terminal,
+    Size, documentstatus::DocumentStatus, editor_buffer::EditorBuffer, editormode::EditorMode,
+    terminal::Terminal,
 };
 
-const MARGIN_BOTTOM: usize = 1;
+const MARGIN_BOTTOM: usize = 0;
 
 pub struct StatusBar {
     width: usize,
     margin_bottom: usize,
     position_y: usize,
+    is_visible: bool,
 }
 
 impl StatusBar {
     pub fn new() -> Self {
-        let Size { height, width } = Terminal::size().unwrap_or_default();
+        let size = Terminal::size().unwrap_or_default();
         let margin_bottom = MARGIN_BOTTOM;
-        Self {
-            width,
+        let mut statusbar = Self {
+            width: size.width,
             margin_bottom,
-            position_y: height.saturating_sub(margin_bottom).saturating_sub(1),
-        }
+            position_y: 0,
+            is_visible: false,
+        };
+        statusbar.resize(size);
+        statusbar
     }
 
-    pub const fn resize(&mut self, size: Size) {
+    pub fn resize(&mut self, size: Size) {
         self.width = size.width;
-        self.position_y = size
+
+        let new_position = size
             .height
-            .saturating_sub(self.margin_bottom)
-            .saturating_sub(1);
+            .checked_sub(self.margin_bottom)
+            .and_then(|x| x.checked_sub(1));
+
+        self.is_visible = new_position.is_some();
+        self.position_y = new_position.unwrap_or(0);
     }
 
     pub fn render(&self, buffer: &EditorBuffer, mode: EditorMode) {
-        let DocumentStatus {
-            total_lines,
-            current_line_index,
-            filename,
-            is_modified,
-        } = buffer.into();
-
-        let filename_status = filename.map_or_else(String::new, |filename| {
-            format!(
-                "| {filename} {}",
-                if is_modified { "(modified)" } else { "" }
-            )
-        });
-
-        let mut status = format!("{mode} | {current_line_index}:{total_lines} {filename_status}");
-        status.truncate(self.width);
-
-        let result = Terminal::print_row(self.position_y, &status);
-        debug_assert!(result.is_ok(), "Failed to render status bar");
-    }
-}
-
-#[derive(Default, Eq, PartialEq, Debug)]
-pub struct DocumentStatus {
-    total_lines: usize,
-    current_line_index: usize,
-    is_modified: bool,
-    filename: Option<String>,
-}
-
-impl From<&EditorBuffer> for DocumentStatus {
-    fn from(buffer: &EditorBuffer) -> Self {
-        let total_lines = buffer.height();
-        let current_line_index = buffer.caret_location().y;
-        let is_modified = buffer.modified_at.is_some();
-        let filename = buffer.filename().map(std::borrow::ToOwned::to_owned);
-
-        Self {
-            total_lines,
-            current_line_index,
-            is_modified,
-            filename,
+        if !self.is_visible {
+            return;
         }
+        let Ok(size) = Terminal::size() else {
+            return;
+        };
+
+        let status: DocumentStatus = buffer.into();
+
+        let filename = &status.filename;
+        let file_status = status.modified_indicator_to_string();
+        let position = status.position_indicator_to_string();
+
+        let left = format!("{filename} {file_status}");
+        let right = format!("{mode} | {position}");
+
+        let remainder_len = size.width.saturating_sub(left.len()).saturating_sub(1);
+
+        let status = format!("{left}{right:>remainder_len$}");
+
+        let to_print = if status.len() <= size.width {
+            status
+        } else {
+            String::new()
+        };
+
+        let result = Terminal::print_inverted_row(self.position_y, to_print);
+        debug_assert!(result.is_ok(), "Failed to render status bar");
     }
 }

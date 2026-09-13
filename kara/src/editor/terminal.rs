@@ -1,7 +1,9 @@
 use crossterm::cursor::SetCursorStyle::BlinkingBlock;
 use crossterm::cursor::{self, Hide, MoveTo, Show};
-use crossterm::style::Print;
-use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
+use crossterm::style::{Attribute, Print};
+use crossterm::terminal::{
+    self, DisableLineWrap, EnableLineWrap, EnterAlternateScreen, LeaveAlternateScreen, SetTitle,
+};
 use crossterm::terminal::{Clear, ClearType, disable_raw_mode, enable_raw_mode};
 use std::fmt::Display;
 use std::io::{Write, stdout};
@@ -29,6 +31,7 @@ impl Terminal {
     pub fn initialize() -> Result<()> {
         enable_raw_mode()?;
         Self::enter_alternate_screen()?;
+        Self::enable_line_wrap()?;
         Self::clear_screen()?;
         Self::move_to(Position { col: 0, row: 0 })?;
         Self::execute()?;
@@ -37,6 +40,7 @@ impl Terminal {
 
     pub fn terminate() -> Result<()> {
         Self::leave_alternate_screen()?;
+        Self::disable_line_wrap()?;
         Self::show_caret(BlinkingBlock)?;
         Self::execute()?;
         disable_raw_mode()?;
@@ -49,6 +53,14 @@ impl Terminal {
 
     fn leave_alternate_screen() -> Result<()> {
         queue!(LeaveAlternateScreen)
+    }
+
+    fn enable_line_wrap() -> Result<()> {
+        queue!(EnableLineWrap)
+    }
+
+    fn disable_line_wrap() -> Result<()> {
+        queue!(DisableLineWrap)
     }
 
     pub fn clear_screen() -> Result<()> {
@@ -74,6 +86,10 @@ impl Terminal {
         queue!(Hide)
     }
 
+    pub fn set_title(title: &str) -> Result<()> {
+        queue!(SetTitle(title))
+    }
+
     pub fn print(data: impl Display) -> Result<()> {
         queue!(Print(data))
     }
@@ -82,6 +98,19 @@ impl Terminal {
         Self::move_to(Position { col: 0, row })?;
         Self::clear_line()?;
         Self::print(line_text)
+    }
+
+    pub fn print_inverted_row(row: usize, line_text: impl Display) -> Result<()> {
+        let width = Self::size()?.width;
+        Self::print_row(
+            row,
+            format!(
+                "{}{:width$.width$}{}",
+                Attribute::Reverse,
+                line_text,
+                Attribute::Reset
+            ),
+        )
     }
 
     pub fn size() -> Result<Size> {

@@ -13,10 +13,10 @@ impl BufferKind {
         }
     }
 
-    pub const fn filename(&self) -> Option<&String> {
+    pub fn filename(&self) -> String {
         match &self {
-            Self::File(file_buffer) => Some(&file_buffer.filename),
-            Self::Buffer(_) => None,
+            Self::File(file_buffer) => format!("{}", file_buffer.fileinfo),
+            Self::Buffer(_) => String::from("[No Name]"),
         }
     }
 }

@@ -15,7 +15,7 @@ pub struct View {
 
 const Y_OVERSCAN: usize = 5;
 const X_OVERSCAN: usize = 5;
-const MARGIN_BOTTOM: usize = 2;
+const MARGIN_BOTTOM: usize = 1;
 
 impl View {
     pub fn new() -> Self {
@@ -129,8 +129,10 @@ impl View {
     }
 
     fn draw_welcome_message(&self) {
-        let (y, message) = WelcomeMessage::draw(&self.size);
-        Self::render_line(y, message);
+        if let Some(message) = WelcomeMessage::draw(&self.size) {
+            let y = self.size.height / 3;
+            Self::render_line(y, message);
+        }
     }
 
     fn render_line(at: usize, line_text: impl Display) {

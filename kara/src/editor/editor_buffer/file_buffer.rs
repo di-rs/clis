@@ -1,11 +1,11 @@
 use std::io::Write;
 
-use super::Buffer;
+use super::{Buffer, fileinfo::FileInfo};
 
 #[derive(Default)]
 pub struct FileBuffer {
     buffer: Buffer,
-    pub(crate) filename: String,
+    pub(crate) fileinfo: FileInfo,
 }
 
 impl FileBuffer {
@@ -13,12 +13,12 @@ impl FileBuffer {
         let content = std::fs::read_to_string(file_name)?;
         Ok(Self {
             buffer: content.into(),
-            filename: file_name.to_owned(),
+            fileinfo: FileInfo::from(file_name),
         })
     }
 
     pub fn save(&self) -> Result<(), std::io::Error> {
-        let mut file = std::fs::File::create(&self.filename)?;
+        let mut file = std::fs::File::create(&self.fileinfo.path)?;
         for line in &self.buffer.lines {
             writeln!(file, "{line}")?;
         }
