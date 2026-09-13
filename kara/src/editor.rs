@@ -7,6 +7,7 @@ mod documentstatus;
 mod editor_buffer;
 mod editorcommand;
 mod editormode;
+mod messagebar;
 mod statusbar;
 mod terminal;
 mod view;
@@ -14,17 +15,23 @@ mod view;
 mod prelude;
 pub use prelude::*;
 
-use crate::editor::{editorcommand::EditorCommand, editormode::EditorMode, statusbar::StatusBar};
+use crate::editor::{
+    editorcommand::EditorCommand, editormode::EditorMode, messagebar::MessageBar,
+    statusbar::StatusBar,
+};
 
 pub const APP_NAME: &str = env!("CARGO_PKG_NAME");
 
+#[derive(Default)]
 pub struct Editor {
+    title: String,
+    terminal_size: Size,
     mode: EditorMode,
+    should_quit: bool,
     buffer: EditorBuffer,
     view: View,
     statusbar: StatusBar,
-    should_quit: bool,
-    title: String,
+    messagebar: MessageBar,
 }
 
 impl Editor {
@@ -44,14 +51,15 @@ impl Editor {
             .and_then(|file_name| EditorBuffer::open(&file_name).ok())
             .unwrap_or_default();
 
-        Ok(Self {
-            should_quit: false,
-            mode: EditorMode::View,
-            view: View::new(),
-            statusbar: StatusBar::new(),
-            buffer,
-            title: String::new(),
-        })
+        let mut editor = Self::default();
+        let size = Terminal::size().unwrap_or_default();
+        editor.resize(size);
+        editor.buffer = buffer;
+        editor
+            .messagebar
+            .update_message("Ctrl-s = save | Ctrl-q = quit".to_string());
+
+        Ok(editor)
     }
 
     pub fn run(&mut self) {
@@ -80,13 +88,24 @@ impl Editor {
     }
 
     fn refresh_screen(&mut self) {
+        let Size { width, height } = self.terminal_size;
+        if height == 0 || width == 0 {
+            return;
+        }
         let _ = Terminal::hide_caret();
 
         let caret_location = self.buffer.caret_location();
-
         self.view.scroll_into_view(caret_location);
-        self.view.render(&self.buffer);
-        self.statusbar.render(&self.buffer, self.mode);
+
+        self.messagebar.render(height.saturating_sub(1));
+        if height > 1 {
+            self.view.render(&self.buffer);
+        }
+        if height > 2 {
+            let statusbar_pos = height.saturating_sub(2);
+            self.statusbar
+                .render(statusbar_pos, &self.buffer, self.mode);
+        }
 
         let location = caret_location.saturation_sub(self.view.scroll_offset);
         let _ = Terminal::move_to(location.into());
@@ -118,8 +137,7 @@ impl Editor {
                 self.move_caret(&direction);
             }
             EditorCommand::Resize(size) => {
-                self.view.resize(size);
-                self.statusbar.resize(size);
+                self.resize(size);
             }
             EditorCommand::Insert(char) => {
                 self.buffer.insert_char(char);
@@ -146,6 +164,16 @@ impl Editor {
         }
     }
 
+    const fn resize(&mut self, size: Size) {
+        self.terminal_size = size;
+        let Size { height, width } = size;
+        self.view.resize(Size {
+            height: height.saturating_sub(2),
+            width,
+        });
+        self.statusbar.resize(Size { height: 1, width });
+    }
+
     fn move_caret(&mut self, direction: &editorcommand::Direction) {
         use editorcommand::Direction::{
             Down, End, Home, Left, LineEnd, LineStart, PageDown, PageUp, Right, Up,
@@ -161,11 +189,11 @@ impl Editor {
             Home => self.buffer.move_caret(Direction::StartOfBuffer),
             End => self.buffer.move_caret(Direction::EndOfBuffer),
             PageUp => {
-                let step = self.view.size.height / 2;
+                let step = self.terminal_size.height / 2;
                 self.buffer.move_caret(Direction::Up(step));
             }
             PageDown => {
-                let step = self.view.size.height / 2;
+                let step = self.terminal_size.height / 2;
                 self.buffer.move_caret(Direction::Down(step));
             }
         }

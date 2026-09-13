@@ -15,8 +15,9 @@ pub enum Placement {
     Right,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy)]
 pub enum EditorMode {
+    #[default]
     View,
     Edit(Placement),
 }

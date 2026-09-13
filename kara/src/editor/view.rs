@@ -6,31 +6,18 @@ use crate::editor::{
     view::welcome_message::WelcomeMessage,
 };
 
+#[derive(Default)]
 pub struct View {
     needs_redraw: bool,
-    pub size: Size,
+    size: Size,
     pub scroll_offset: Location,
     last_modified_at: Option<LocalTimestamp>,
 }
 
 const Y_OVERSCAN: usize = 5;
 const X_OVERSCAN: usize = 5;
-const MARGIN_BOTTOM: usize = 1;
 
 impl View {
-    pub fn new() -> Self {
-        let Size { height, width } = Terminal::size().unwrap_or_default();
-        Self {
-            needs_redraw: true,
-            size: Size {
-                height: height.saturating_sub(MARGIN_BOTTOM),
-                width,
-            },
-            scroll_offset: Location::default(),
-            last_modified_at: None,
-        }
-    }
-
     pub const fn resize(&mut self, to: Size) {
         self.size = to;
         self.needs_redraw = true;
@@ -42,10 +29,6 @@ impl View {
         }
 
         let Size { height, width } = self.size;
-        if height == 0 || width == 0 {
-            return;
-        }
-
         let top = self.scroll_offset.y;
 
         for i in 0..height {
