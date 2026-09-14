@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use super::{Buffer, FileBuffer};
 
 pub enum BufferKind {
@@ -13,11 +15,15 @@ impl BufferKind {
         }
     }
 
-    pub fn filename(&self) -> String {
+    pub fn filename(&self) -> Option<&Path> {
         match &self {
-            Self::File(file_buffer) => format!("{}", file_buffer.fileinfo),
-            Self::Buffer(_) => String::from("[No Name]"),
+            Self::File(file_buffer) => Some(&file_buffer.fileinfo.path),
+            Self::Buffer(_) => None,
         }
+    }
+
+    pub const fn has_file(&self) -> bool {
+        matches!(self, Self::File(_))
     }
 }
 

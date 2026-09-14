@@ -3,10 +3,12 @@ use editorbuffer::{Direction, EditorBuffer};
 use terminal::Terminal;
 use view::View;
 
+mod commandbar;
 mod documentstatus;
 mod editorbuffer;
 mod editorcommand;
 mod editormode;
+mod line;
 mod messagebar;
 mod statusbar;
 mod terminal;
@@ -16,11 +18,12 @@ mod prelude;
 pub use prelude::*;
 
 use crate::editor::{
+    commandbar::CommandBar,
     editorcommand::{
         Edit,
         EditorCommand::{self, System},
         Move,
-        System::{Quit, Resize, Save},
+        System::{Quit, QuitForce, Resize, Save, SaveAs},
     },
     editormode::EditorMode,
     messagebar::MessageBar,
@@ -41,6 +44,7 @@ pub struct Editor {
     view: View,
     statusbar: StatusBar,
     messagebar: MessageBar,
+    commandbar: Option<CommandBar>,
 }
 
 impl Editor {
@@ -100,7 +104,11 @@ impl Editor {
     }
 
     fn refresh_title(&mut self) {
-        let title = format!("{} - {APP_NAME}", self.buffer.filename());
+        let title = self.buffer.filename().map_or_else(
+            || APP_NAME.to_string(),
+            |p| format!("{} - {APP_NAME}", p.display()),
+        );
+
         if title != self.title && matches!(Terminal::set_title(&title), Ok(())) {
             self.title = title;
         }
@@ -116,7 +124,12 @@ impl Editor {
         let caret_location = self.buffer.caret_location();
         self.view.scroll_into_view(caret_location);
 
-        self.messagebar.render(height.saturating_sub(1));
+        let bottom_bar_row = height.saturating_sub(1);
+        if let Some(commandbar) = &mut self.commandbar {
+            commandbar.render(bottom_bar_row);
+        } else {
+            self.messagebar.render(bottom_bar_row);
+        }
         if height > 1 {
             self.view.render(&self.buffer);
         }
@@ -126,9 +139,16 @@ impl Editor {
                 .render(statusbar_pos, &self.buffer, self.mode);
         }
 
-        let location = caret_location.saturation_sub(self.view.scroll_offset);
-        let _ = Terminal::move_to(location.into());
+        let location = if let Some(commandbar) = &mut self.commandbar {
+            Location {
+                x: commandbar.caret_position_col(),
+                y: bottom_bar_row,
+            }
+        } else {
+            caret_location.saturation_sub(self.view.scroll_offset)
+        };
 
+        let _ = Terminal::move_to(location.into());
         let _ = Terminal::show_caret(self.mode.get_cursor_style());
         let _ = Terminal::execute();
     }
@@ -152,14 +172,18 @@ impl Editor {
 
     fn handle_command(&mut self, command: EditorCommand) {
         match command {
-            System(Quit) => self.quit(),
+            System(Quit) => self.quit(false),
+            System(QuitForce) => self.quit(true),
             System(Resize(size)) => self.resize(size),
             _ => self.reset_quit_attempts(),
         }
 
         match command {
-            System(Quit | Resize(_)) => {}
+            System(Quit | QuitForce | Resize(_)) => {}
             System(Save) => self.save(),
+            System(SaveAs(filename)) => {
+                let _ = self.buffer.save_as(&filename);
+            }
             EditorCommand::Move(direction) => self.handle_move_command(&direction),
             EditorCommand::Edit(edit) => self.handle_edit_command(&edit),
             EditorCommand::ChangeMode(mode) => {
@@ -203,9 +227,18 @@ impl Editor {
                 Edit::DeleteBackward => self.buffer.delete_backward(),
             },
             EditorMode::Command => {
-                // TODO: handle for command
-                self.messagebar
-                    .set("Command mode is not accesible yet".to_owned());
+                if let Some(commandbar) = &mut self.commandbar {
+                    match edit_command {
+                        Edit::InsertNewline => {
+                            match commandbar.produce_command(self.buffer.filename()) {
+                                Err(e) => self.messagebar.set(e),
+                                Ok(command) => self.handle_command(command),
+                            }
+                            self.change_mode(EditorMode::View);
+                        }
+                        edit => commandbar.handle_edit(edit),
+                    }
+                }
             }
             EditorMode::View => {}
         }
@@ -219,24 +252,38 @@ impl Editor {
             width,
         });
         self.statusbar.resize(Size { height: 1, width });
+        if let Some(commandbar) = &mut self.commandbar {
+            commandbar.resize(Size { height: 1, width });
+        }
     }
 
     fn change_mode(&mut self, mode: EditorMode) {
-        if let Some(direction) = self.mode.change_mode_movement(mode) {
-            self.buffer.move_caret(direction);
+        match mode {
+            EditorMode::Command => self.commandbar = Some(CommandBar::new("")),
+            mode => {
+                self.commandbar = None;
+                if let Some(direction) = self.mode.change_mode_movement(mode) {
+                    self.buffer.move_caret(direction);
+                }
+            }
         }
         self.mode = mode;
     }
 
     fn save(&mut self) {
-        match self.buffer.save() {
-            Ok(()) => self.messagebar.set("File saved successfully.".to_owned()),
-            Err(e) => self.messagebar.set(format!("Error writing file! {e}")),
+        if self.buffer.has_file() {
+            match self.buffer.save() {
+                Ok(()) => self.messagebar.set("File saved successfully.".to_owned()),
+                Err(e) => self.messagebar.set(format!("Error writing file! {e}")),
+            }
+        } else {
+            self.commandbar = Some(CommandBar::new("w "));
+            self.mode = EditorMode::Command;
         }
     }
 
-    fn quit(&mut self) {
-        if !self.buffer.is_modified() {
+    fn quit(&mut self, force: bool) {
+        if !self.buffer.is_modified() || force {
             self.should_quit = true;
             return;
         }

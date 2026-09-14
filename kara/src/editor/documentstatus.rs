@@ -31,7 +31,9 @@ impl From<&EditorBuffer> for DocumentStatus {
         let total_lines = buffer.height();
         let current_line_index = buffer.caret_location().y;
         let is_modified = buffer.is_modified();
-        let filename = buffer.filename();
+        let filename: String = buffer
+            .filename()
+            .map_or_else(|| "[No Name]".to_owned(), |p| format!("{}", p.display()));
 
         Self {
             total_lines,

@@ -17,14 +17,14 @@ impl GraphemeWidth {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct TextFragment {
     grapheme: String,
     rendered_width: GraphemeWidth,
     replacement: Option<char>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Line {
     fragments: Vec<TextFragment>,
 }
@@ -99,6 +99,14 @@ impl Line {
         self.fragments = Self::str_to_fragments(&concat);
     }
 
+    pub fn append_char(&mut self, character: char) {
+        self.insert_char(character, self.len());
+    }
+
+    pub fn delete_last(&mut self) {
+        self.delete(self.len().saturating_sub(1));
+    }
+
     pub fn prefix_whitespace_count(&self) -> usize {
         self.fragments
             .iter()
@@ -115,6 +123,10 @@ impl Line {
                 GraphemeWidth::Full => 2,
             })
             .sum()
+    }
+
+    pub fn width(&self) -> usize {
+        self.width_until(self.len())
     }
 
     fn replacement_character(for_str: &str) -> Option<char> {

@@ -1,19 +1,19 @@
 use std::{
     cmp::{max, min},
+    path::Path,
     time::Instant,
 };
 
 use crate::editor::{
     Location,
     editorbuffer::{buffer::Buffer, bufferkind::BufferKind, file_buffer::FileBuffer},
+    line::Line,
 };
-use line::Line;
 
 mod buffer;
 mod bufferkind;
 mod file_buffer;
 mod fileinfo;
-mod line;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Direction {
@@ -51,8 +51,23 @@ impl EditorBuffer {
         })
     }
 
-    pub fn filename(&self) -> String {
+    pub fn save_as(&mut self, filename: &str) -> Result<(), std::io::Error> {
+        if let BufferKind::Buffer(buffer) = &self.buffer {
+            let file_buffer = FileBuffer::new(buffer.clone(), filename);
+            self.buffer = BufferKind::File(file_buffer);
+        }
+
+        self.buffer.save().inspect(|()| {
+            self.modified_at = None;
+        })
+    }
+
+    pub fn filename(&self) -> Option<&Path> {
         self.buffer.filename()
+    }
+
+    pub const fn has_file(&self) -> bool {
+        self.buffer.has_file()
     }
 
     pub fn insert_char(&mut self, char: char) {

@@ -26,7 +26,9 @@ pub enum Move {
 #[derive(Debug, PartialEq, Eq)]
 pub enum System {
     Save,
+    SaveAs(String),
     Quit,
+    QuitForce,
     Resize(Size),
 }
 

@@ -9,6 +9,13 @@ pub struct FileBuffer {
 }
 
 impl FileBuffer {
+    pub fn new(buffer: Buffer, filename: &str) -> Self {
+        Self {
+            buffer,
+            fileinfo: FileInfo::from(filename),
+        }
+    }
+
     pub fn open(file_name: &str) -> Result<Self, std::io::Error> {
         let content = std::fs::read_to_string(file_name)?;
         Ok(Self {

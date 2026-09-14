@@ -1,7 +1,6 @@
-use super::line::Line;
-use crate::editor::Location;
+use crate::editor::{Location, line::Line};
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Buffer {
     pub(crate) lines: Vec<Line>,
 }
