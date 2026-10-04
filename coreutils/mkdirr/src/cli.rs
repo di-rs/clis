@@ -10,5 +10,6 @@ pub struct Cli {
     pub parent: bool,
 
     /// The name(s) of the directory(ies) to create
+    #[arg(required = true)]
     pub dirs: Vec<PathBuf>,
 }

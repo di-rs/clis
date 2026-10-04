@@ -16,6 +16,8 @@ fn usage() {
         cargo_bin_cmd!()
             .arg(flag)
             .assert()
+            .success()
+            .stderr("")
             .stdout(predicate::str::contains("Usage"));
     }
 }
@@ -69,9 +71,8 @@ fn dies_both_stdin() {
 fn run(args: &[&str], expected_file: &str) -> Result<()> {
     let outfile: PathBuf = ["tests/expected", expected_file].iter().collect();
     let expected = fs::read_to_string(outfile)?;
-    let output = cargo_bin_cmd!().args(args).output()?;
-
-    let stdout = String::from_utf8(output.stdout)?;
+    let cmd = cargo_bin_cmd!().args(args).assert().success().stderr("");
+    let stdout = String::from_utf8(cmd.get_output().stdout.clone())?;
     assert_eq!(stdout, expected);
     Ok(())
 }
@@ -81,11 +82,65 @@ fn run_stdin(args: &[&str], input_file: &str, expected_file: &str) -> Result<()>
     let outfile: PathBuf = ["tests/expected", expected_file].iter().collect();
     let expected = fs::read_to_string(outfile)?;
 
-    let output = cargo_bin_cmd!().write_stdin(input).args(args).output()?;
-
-    let stdout = String::from_utf8(output.stdout)?;
+    let cmd = cargo_bin_cmd!()
+        .write_stdin(input)
+        .args(args)
+        .assert()
+        .success()
+        .stderr("");
+    let stdout = String::from_utf8(cmd.get_output().stdout.clone())?;
     assert_eq!(stdout, expected);
     Ok(())
+}
+
+#[test]
+fn rejects_unknown_flag() {
+    cargo_bin_cmd!()
+        .args(["--unknown", EMPTY, EMPTY])
+        .assert()
+        .failure()
+        .stdout("")
+        .stderr(predicate::str::contains("--unknown"));
+}
+
+#[test]
+fn stdin_on_either_side_emits_visible_columns() {
+    for (args, expected) in [
+        (["-", FILE1], "\t\ta\n\tb\nbb\n\tc\n\td\nz\n"),
+        ([FILE1, "-"], "\t\ta\nb\n\tbb\nc\nd\n\tz\n"),
+    ] {
+        cargo_bin_cmd!()
+            .args(args)
+            .write_stdin("a\nbb\nz")
+            .assert()
+            .success()
+            .stdout(expected)
+            .stderr("");
+    }
+}
+
+#[test]
+fn custom_delimiter_handles_blank_common_line() {
+    for (delimiter, expected) in [("::", "::::\nα\n"), ("", "\nα\n")] {
+        cargo_bin_cmd!()
+            .args(["-d", delimiter, "-", BLANK])
+            .write_stdin("\nα")
+            .assert()
+            .success()
+            .stdout(expected)
+            .stderr("");
+    }
+}
+
+#[test]
+fn insensitive_stdin_matches_common_column() {
+    cargo_bin_cmd!()
+        .args(["-i", "-12", "-", FILE1])
+        .write_stdin("A\nC")
+        .assert()
+        .success()
+        .stdout("a\nc\n")
+        .stderr("");
 }
 
 #[test]

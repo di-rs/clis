@@ -18,6 +18,8 @@ fn usage() {
         cargo_bin_cmd!()
             .arg(flag)
             .assert()
+            .success()
+            .stderr("")
             .stdout(predicate::str::contains("Usage"));
     }
 }
@@ -88,7 +90,7 @@ fn run(args: &[&str], expected_file: &str) -> Result<()> {
     file.read_to_end(&mut buffer)?;
     let expected = String::from_utf8_lossy(&buffer);
 
-    let cmd = cargo_bin_cmd!().args(args).assert().success();
+    let cmd = cargo_bin_cmd!().args(args).assert().success().stderr("");
     let output = cmd.get_output();
     assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
 
@@ -109,11 +111,63 @@ fn run_stdin(input_file: &str, args: &[&str], expected_file: &str) -> Result<()>
         .write_stdin(input)
         .args(args)
         .assert()
-        .success();
+        .success()
+        .stderr("");
     let output = cmd.get_output();
     assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
 
     Ok(())
+}
+
+#[test]
+fn rejects_zero_counts_and_unknown_flag() {
+    for args in [["-n", "0"], ["-c", "0"], ["--unknown", "1"]] {
+        cargo_bin_cmd!()
+            .args(args)
+            .assert()
+            .failure()
+            .stdout("")
+            .stderr(predicate::str::contains("error:"));
+    }
+}
+
+#[test]
+fn explicit_stdin_preserves_line_endings_and_unterminated_line() {
+    for (count, expected) in [("1", "é\r\n"), ("2", "é\r\n世界"), ("9", "é\r\n世界")] {
+        cargo_bin_cmd!()
+            .args(["-n", count, "-"])
+            .write_stdin("é\r\n世界")
+            .assert()
+            .success()
+            .stdout(expected)
+            .stderr("");
+    }
+}
+
+#[test]
+fn stdin_byte_limit_handles_utf8_boundaries() {
+    for (count, expected) in [("1", "�"), ("2", "é"), ("3", "é�"), ("99", "é界")] {
+        cargo_bin_cmd!()
+            .args(["-c", count])
+            .write_stdin("é界")
+            .assert()
+            .success()
+            .stdout(expected)
+            .stderr("");
+    }
+}
+
+#[test]
+fn empty_stdin_in_line_and_byte_modes() {
+    for mode in ["-n", "-c"] {
+        cargo_bin_cmd!()
+            .args([mode, "1"])
+            .write_stdin("")
+            .assert()
+            .success()
+            .stdout("")
+            .stderr("");
+    }
 }
 
 #[test]

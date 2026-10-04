@@ -1,6 +1,8 @@
 use assert_cmd::cargo::cargo_bin_cmd;
+use assert_fs::{TempDir, prelude::*};
 use predicates::prelude::*;
 use pretty_assertions::assert_eq;
+use std::{fs, os::unix::fs::PermissionsExt};
 
 const HIDDEN: &str = "tests/inputs/.hidden";
 const EMPTY: &str = "tests/inputs/empty.txt";
@@ -9,12 +11,33 @@ const FOX: &str = "tests/inputs/fox.txt";
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+fn fixture_tree() -> Result<TempDir> {
+    let dir = TempDir::new()?;
+    let nested = dir.child("tests/inputs/dir");
+    nested.create_dir_all()?;
+    fs::set_permissions(nested.path(), fs::Permissions::from_mode(0o755))?;
+    for (source, mode) in [
+        (EMPTY, 0o644),
+        (BUSTLE, 0o644),
+        (FOX, 0o600),
+        (HIDDEN, 0o644),
+        ("tests/inputs/dir/spiders.txt", 0o644),
+        ("tests/inputs/dir/.gitkeep", 0o644),
+    ] {
+        let destination = dir.child(source);
+        fs::copy(source, destination.path())?;
+        fs::set_permissions(destination.path(), fs::Permissions::from_mode(mode))?;
+    }
+    Ok(dir)
+}
+
 #[test]
 fn usage() {
     for flag in &["-h", "--help"] {
         cargo_bin_cmd!()
             .arg(flag)
             .assert()
+            .success()
             .stdout(predicate::str::contains("Usage"));
     }
 }
@@ -52,10 +75,13 @@ fn run_short(arg: &str) {
 
 #[allow(clippy::unwrap_used)]
 fn run_long(filename: &str, permissions: &str, size: &str) -> Result<()> {
+    let dir = fixture_tree()?;
     let cmd = cargo_bin_cmd!()
+        .current_dir(dir.path())
         .args(["--long", filename])
         .assert()
-        .success();
+        .success()
+        .stderr("");
     let stdout = String::from_utf8(cmd.get_output().stdout.clone())?;
     let parts: Vec<_> = stdout.split_whitespace().collect();
     assert_eq!(parts.first().unwrap(), &permissions);
@@ -157,7 +183,13 @@ fn dir2_all() -> Result<()> {
 
 #[allow(suspicious_double_ref_op, clippy::unwrap_used)]
 fn dir_long(args: &[&str], expected: &[(&str, &str, &str)]) -> Result<()> {
-    let cmd = cargo_bin_cmd!().args(args).assert().success();
+    let dir = fixture_tree()?;
+    let cmd = cargo_bin_cmd!()
+        .current_dir(dir.path())
+        .args(args)
+        .assert()
+        .success()
+        .stderr("");
     let stdout = String::from_utf8(cmd.get_output().stdout.clone())?;
     let lines: Vec<&str> = stdout.split('\n').filter(|s| !s.is_empty()).collect();
     assert_eq!(lines.len(), expected.len());
@@ -225,4 +257,97 @@ fn dir2_long_all() -> Result<()> {
             ("tests/inputs/dir/.gitkeep", "-rw-r--r--", "0"),
         ],
     )
+}
+
+fn check_listing(dir: &TempDir, args: &[&str], expected: &[&str]) -> Result<()> {
+    let cmd = cargo_bin_cmd!()
+        .current_dir(dir.path())
+        .args(args)
+        .assert()
+        .success()
+        .stderr("");
+    let stdout = String::from_utf8(cmd.get_output().stdout.clone())?;
+    let mut lines: Vec<_> = stdout.lines().collect();
+    lines.sort_unstable();
+    let mut expected = expected.to_vec();
+    expected.sort_unstable();
+    assert_eq!(lines, expected);
+    Ok(())
+}
+
+#[test]
+fn empty_directory() -> Result<()> {
+    check_listing(&TempDir::new()?, &["."], &[])
+}
+
+#[test]
+fn default_path_hides_dotfiles() -> Result<()> {
+    let dir = TempDir::new()?;
+    dir.child("visible").touch()?;
+    dir.child(".hidden").touch()?;
+    check_listing(&dir, &[], &["./visible"])
+}
+
+#[test]
+fn hidden_only_directory_requires_all() -> Result<()> {
+    let dir = TempDir::new()?;
+    dir.child(".hidden").touch()?;
+    check_listing(&dir, &["."], &[])?;
+    check_listing(&dir, &["--all", "."], &["./.hidden"])
+}
+
+#[test]
+fn explicit_hidden_file_does_not_require_all() -> Result<()> {
+    let dir = TempDir::new()?;
+    dir.child(".hidden").touch()?;
+    check_listing(&dir, &[".hidden"], &[".hidden"])
+}
+
+#[test]
+fn multiple_files_and_directory_are_not_recursive() -> Result<()> {
+    let dir = TempDir::new()?;
+    dir.child("folder/nested").create_dir_all()?;
+    dir.child("folder/nested/not-listed").touch()?;
+    dir.child("folder/child").touch()?;
+    dir.child("first").touch()?;
+    dir.child("last").touch()?;
+    check_listing(
+        &dir,
+        &["first", "folder", "last"],
+        &["first", "folder/child", "folder/nested", "last"],
+    )
+}
+
+#[test]
+fn filename_with_spaces_is_preserved() -> Result<()> {
+    let dir = TempDir::new()?;
+    let file = dir.child("two words.txt");
+    file.write_str("hello")?;
+    fs::set_permissions(file.path(), fs::Permissions::from_mode(0o640))?;
+    check_listing(&dir, &["two words.txt"], &["two words.txt"])?;
+    cargo_bin_cmd!()
+        .current_dir(dir.path())
+        .args(["-l", "two words.txt"])
+        .assert()
+        .success()
+        .stderr("")
+        .stdout(predicate::str::starts_with("-rw-r-----"))
+        .stdout(predicate::str::ends_with(" two words.txt\n\n"));
+    Ok(())
+}
+
+#[test]
+fn missing_path_does_not_hide_valid_files() -> Result<()> {
+    let dir = TempDir::new()?;
+    dir.child("present").touch()?;
+    cargo_bin_cmd!()
+        .current_dir(dir.path())
+        .args(["missing", "present"])
+        .assert()
+        .success()
+        .stdout("present\n")
+        .stderr(predicate::str::contains(
+            "missing: No such file or directory",
+        ));
+    Ok(())
 }

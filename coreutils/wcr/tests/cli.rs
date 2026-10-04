@@ -16,6 +16,8 @@ fn usage() {
         cargo_bin_cmd!()
             .arg(flag)
             .assert()
+            .success()
+            .stderr("")
             .stdout(predicate::str::contains("Usage"));
     }
 }
@@ -53,12 +55,73 @@ fn run(args: &[&str], expected_file: &str) -> Result<()> {
     let outfile: PathBuf = ["tests/expected", expected_file].iter().collect();
     let expected = fs::read_to_string(&outfile)?;
 
-    let cmd = cargo_bin_cmd!().args(args).assert().success();
+    let cmd = cargo_bin_cmd!().args(args).assert().success().stderr("");
     let output = cmd.get_output();
     let stdout = String::from_utf8(output.stdout.clone())?;
     assert_eq!(stdout, expected);
 
     Ok(())
+}
+
+#[test]
+fn rejects_unknown_flag() {
+    cargo_bin_cmd!()
+        .arg("--unknown")
+        .assert()
+        .failure()
+        .stdout("")
+        .stderr(predicate::str::contains("--unknown"));
+}
+
+#[test]
+fn empty_stdin_has_zero_default_counts() {
+    cargo_bin_cmd!()
+        .write_stdin("")
+        .assert()
+        .success()
+        .stdout("       0       0       0\n")
+        .stderr("");
+}
+
+#[test]
+fn unicode_whitespace_separates_words_and_bytes_differ_from_chars() {
+    for (flag, expected) in [
+        ("-c", "      12\n"),
+        ("-m", "       6\n"),
+        ("-w", "       3\n"),
+        ("-lwm", "       1       3       6\n"),
+    ] {
+        cargo_bin_cmd!()
+            .args([flag, "-"])
+            .write_stdin("é\u{2003}猫\tβ\n")
+            .assert()
+            .success()
+            .stdout(expected)
+            .stderr("");
+    }
+}
+
+#[test]
+fn unterminated_stdin_counts_final_record() {
+    cargo_bin_cmd!()
+        .write_stdin("é x")
+        .assert()
+        .success()
+        .stdout("       1       2       4\n")
+        .stderr("");
+}
+
+#[test]
+fn mixed_stdin_and_file_totals_use_selected_counts() {
+    cargo_bin_cmd!()
+        .args(["-wm", "-", EMPTY])
+        .write_stdin("é x")
+        .assert()
+        .success()
+        .stdout(format!(
+            "       2       3\n       0       0 {EMPTY}\n       2       3 total\n"
+        ))
+        .stderr("");
 }
 
 #[test]
@@ -181,7 +244,11 @@ fn atlamal_stdin() -> Result<()> {
     let input = fs::read_to_string(ATLAMAL)?;
     let expected = fs::read_to_string("tests/expected/atlamal.txt.stdin.out")?;
 
-    let cmd = cargo_bin_cmd!().write_stdin(input).assert().success();
+    let cmd = cargo_bin_cmd!()
+        .write_stdin(input)
+        .assert()
+        .success()
+        .stderr("");
     let output = cmd.get_output();
 
     let stdout = String::from_utf8(output.stdout.clone())?;

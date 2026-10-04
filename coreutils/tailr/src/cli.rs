@@ -8,7 +8,7 @@ use tailr::TakeValue;
 #[command(author, version, about)]
 /// Rust minimal `tail` implementation
 pub struct Cli {
-    /// Input file(s), use `-` to read from stdin (must not be a tty)
+    /// Input file(s), use `-` to read from stdin
     #[arg(value_name = "FILES", required(true))]
     pub files: Vec<PathBuf>,
 

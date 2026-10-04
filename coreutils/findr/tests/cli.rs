@@ -1,9 +1,8 @@
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use pretty_assertions::assert_eq;
-use std::fs;
-#[cfg(not(windows))]
-use std::{borrow::Cow, path::Path};
+use std::{borrow::Cow, fs};
+use tempfile::TempDir;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -13,6 +12,7 @@ fn usage() {
         cargo_bin_cmd!()
             .arg(flag)
             .assert()
+            .success()
             .stdout(predicate::str::contains("Usage"));
     }
 }
@@ -234,24 +234,137 @@ fn path_g() -> Result<()> {
 #[cfg(not(windows))]
 #[allow(clippy::panic_in_result_fn)]
 fn unreadable_dir() -> Result<()> {
-    let dirname = "tests/inputs/cant-touch-this";
-    if !Path::new(dirname).exists() {
-        fs::create_dir(dirname)?;
-    }
+    use std::os::unix::fs::PermissionsExt;
 
-    std::process::Command::new("chmod")
-        .args(["000", dirname])
-        .status()?;
+    let dir = TempDir::new()?;
+    let unreadable = dir.path().join("cant-touch-this");
+    fs::create_dir(&unreadable)?;
+    fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o000))?;
 
-    let cmd = cargo_bin_cmd!().arg("tests/inputs").assert().success();
-    fs::remove_dir(dirname)?;
+    let cmd = cargo_bin_cmd!().arg(dir.path()).assert();
+    fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o700))?;
+    let cmd = cmd.success();
 
     let out = cmd.get_output();
     let stdout = String::from_utf8(out.stdout.clone())?;
 
-    assert_eq!(stdout.split('\n').filter(|s| !s.is_empty()).count(), 17);
+    assert_eq!(stdout.lines().count(), 2);
 
     let stderr = String::from_utf8(out.stderr.clone())?;
     assert!(stderr.contains("cant-touch-this: Permission denied"));
     Ok(())
+}
+
+fn filter_tree() -> Result<TempDir> {
+    let dir = TempDir::new()?;
+    fs::create_dir(dir.path().join("reports.txt"))?;
+    fs::write(dir.path().join("reports.txt/inside.csv"), "")?;
+    fs::write(dir.path().join("alpha.txt"), "")?;
+    fs::write(dir.path().join("beta.csv"), "")?;
+    fs::write(dir.path().join(".hidden.txt"), "")?;
+    Ok(dir)
+}
+
+fn run_tree(dir: &TempDir, args: &[&str], expected: &[&str]) -> Result<()> {
+    let cmd = cargo_bin_cmd!()
+        .current_dir(dir.path())
+        .args(args)
+        .assert()
+        .success()
+        .stderr("");
+    let stdout = String::from_utf8(cmd.get_output().stdout.clone())?;
+    let mut lines: Vec<_> = stdout.lines().collect();
+    lines.sort_unstable();
+    let mut expected: Vec<_> = expected
+        .iter()
+        .map(|path| path.replace('/', std::path::MAIN_SEPARATOR_STR))
+        .collect();
+    expected.sort_unstable();
+    assert_eq!(lines, expected);
+    Ok(())
+}
+
+#[test]
+fn default_path_in_empty_directory() -> Result<()> {
+    run_tree(&TempDir::new()?, &[], &["."])
+}
+
+#[test]
+fn name_and_type_filters_intersect() -> Result<()> {
+    run_tree(
+        &filter_tree()?,
+        &[".", "-t", "f", "-n", "[.]txt$"],
+        &["./alpha.txt", "./.hidden.txt"],
+    )
+}
+
+#[test]
+fn name_filter_does_not_prune_directories() -> Result<()> {
+    run_tree(
+        &filter_tree()?,
+        &[".", "-n", "^inside[.]csv$"],
+        &["./reports.txt/inside.csv"],
+    )
+}
+
+#[test]
+fn name_matches_basename_not_parent_path() -> Result<()> {
+    run_tree(
+        &filter_tree()?,
+        &["reports.txt", "-t", "f", "-n", "reports"],
+        &[],
+    )
+}
+
+#[test]
+fn empty_regex_matches_all_entry_names() -> Result<()> {
+    run_tree(
+        &filter_tree()?,
+        &[".", "-n", ""],
+        &[
+            ".",
+            "./reports.txt",
+            "./reports.txt/inside.csv",
+            "./alpha.txt",
+            "./beta.csv",
+            "./.hidden.txt",
+        ],
+    )
+}
+
+#[test]
+fn unmatched_name_produces_no_output() -> Result<()> {
+    run_tree(&filter_tree()?, &[".", "-n", "^absent$"], &[])
+}
+
+#[test]
+fn multiple_roots_apply_the_same_filter() -> Result<()> {
+    run_tree(
+        &filter_tree()?,
+        &["alpha.txt", "reports.txt", "-t", "f", "-n", "[.]csv$"],
+        &["reports.txt/inside.csv"],
+    )
+}
+
+#[test]
+fn invalid_regex_among_valid_names_is_rejected() {
+    cargo_bin_cmd!()
+        .args(["-n", "valid", "-n", "["])
+        .assert()
+        .failure()
+        .stdout("")
+        .stderr(predicate::str::contains("invalid value '['"));
+}
+
+#[test]
+#[cfg(unix)]
+fn symlink_filter_does_not_follow_directory_targets() -> Result<()> {
+    let dir = filter_tree()?;
+    std::os::unix::fs::symlink("reports.txt", dir.path().join("linked"))?;
+    run_tree(&dir, &[".", "-t", "l"], &["./linked"])?;
+    run_tree(
+        &dir,
+        &[".", "-t", "f", "-n", "^inside[.]csv$"],
+        &["./reports.txt/inside.csv"],
+    )
 }

@@ -1,3 +1,3 @@
-fn main() {
-    std::process::abort();
+const fn main() -> std::process::ExitCode {
+    std::process::ExitCode::FAILURE
 }

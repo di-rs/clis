@@ -18,6 +18,8 @@ fn usage() {
         cargo_bin_cmd!()
             .arg(flag)
             .assert()
+            .success()
+            .stderr("")
             .stdout(predicate::str::contains("Usage"));
     }
 }
@@ -56,6 +58,7 @@ fn dies(args: &[&str], expected: &str) {
         .args(args)
         .assert()
         .failure()
+        .stdout("")
         .stderr(predicate::str::contains(expected));
 }
 
@@ -137,9 +140,8 @@ fn dies_chars_bytes() {
 fn run(args: &[&str], expected_file: &str) -> Result<()> {
     let outfile: PathBuf = ["tests/expected", expected_file].iter().collect();
     let expected = fs::read_to_string(outfile)?;
-    let output = cargo_bin_cmd!().args(args).output()?;
-
-    let stdout = String::from_utf8(output.stdout)?;
+    let cmd = cargo_bin_cmd!().args(args).assert().success().stderr("");
+    let stdout = String::from_utf8(cmd.get_output().stdout.clone())?;
     assert_eq!(stdout, expected);
     Ok(())
 }
@@ -148,11 +150,73 @@ fn run_lossy(args: &[&str], expected_file: &str) -> Result<()> {
     let outfile: PathBuf = ["tests/expected", expected_file].iter().collect();
     let contents = fs::read(outfile)?;
     let expected = String::from_utf8_lossy(&contents);
-    let output = cargo_bin_cmd!().args(args).output()?;
-
-    let stdout = String::from_utf8(output.stdout)?;
+    let cmd = cargo_bin_cmd!().args(args).assert().success().stderr("");
+    let stdout = String::from_utf8(cmd.get_output().stdout.clone())?;
     assert_eq!(stdout, expected);
     Ok(())
+}
+
+#[test]
+fn stdin_chars_keep_requested_order_and_repetitions() {
+    cargo_bin_cmd!()
+        .args(["-c", "3,1-2,1,9"])
+        .write_stdin("é界x\n\n猫")
+        .assert()
+        .success()
+        .stdout("xé界é\n\n猫猫\n")
+        .stderr("");
+}
+
+#[test]
+fn stdin_bytes_use_lossy_utf8_at_split_boundaries() {
+    for (positions, expected) in [("1", "�\n"), ("1-2", "é\n"), ("9", "\n")] {
+        cargo_bin_cmd!()
+            .args(["-b", positions, "-"])
+            .write_stdin("éx")
+            .assert()
+            .success()
+            .stdout(expected)
+            .stderr("");
+    }
+}
+
+#[test]
+fn stdin_fields_parse_quoted_delimiters_and_empty_fields() {
+    cargo_bin_cmd!()
+        .args(["-d", ",", "-f", "2,1,3"])
+        .write_stdin("\"a,b\",,c\n\"é\n界\",x,y")
+        .assert()
+        .success()
+        .stdout(",\"a,b\",c\nx,\"é\n界\",y\n")
+        .stderr("");
+}
+
+#[test]
+fn empty_stdin_in_each_mode() {
+    for mode in ["-f", "-b", "-c"] {
+        cargo_bin_cmd!()
+            .args([mode, "1"])
+            .write_stdin("")
+            .assert()
+            .success()
+            .stdout("")
+            .stderr("");
+    }
+}
+
+#[test]
+fn rejects_invalid_lists_and_multibyte_delimiter() {
+    for positions in ["", "0", "2-1", "1,", "+1"] {
+        cargo_bin_cmd!()
+            .args(["-c", positions])
+            .write_stdin("abc")
+            .assert()
+            .failure()
+            .stdout("")
+            .stderr(predicate::str::contains("Error:"));
+    }
+    dies(&["-f", "1", "-d", "é"], "must be a single byte");
+    dies(&["--unknown"], "--unknown");
 }
 
 #[test]

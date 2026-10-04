@@ -1,17 +1,9 @@
-use color_eyre::{
-    Result,
-    eyre::{Context, bail},
-};
+use color_eyre::{Result, eyre::Context};
 use std::{fs, path::Path};
 
 /// # Errors
-/// Throws error if directory is exists or it's not p;ossible to create it
+/// Returns an error if creation fails or the path exists without parent creation.
 pub fn create_directory(path: &Path, with_parent: bool) -> Result<()> {
-    let metadata = fs::metadata(path);
-    if metadata.is_ok() {
-        bail!("{}: direcory already exists", path.display())
-    }
-
     let res = if with_parent {
         fs::create_dir_all(path)
     } else {

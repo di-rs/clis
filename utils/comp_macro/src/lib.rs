@@ -46,9 +46,7 @@ impl quote::ToTokens for Comp {
         let mut innermost_to_outermost = all_for_if_clauses.rev();
 
         let mut output = {
-            let innermost = innermost_to_outermost
-                .next()
-                .expect("At least one will be available");
+            let innermost = innermost_to_outermost.next().unwrap_or(&self.for_if_clause);
 
             let ForIfClause {
                 pattern,
@@ -157,7 +155,7 @@ impl Parse for Condition {
 
 impl ToTokens for Condition {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        self.0.to_tokens(tokens)
+        self.0.to_tokens(tokens);
     }
 }
 

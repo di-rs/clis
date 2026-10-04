@@ -1,0 +1,9 @@
+
+<root label="café 東京" empty="">
+    <group>
+        <leaf id="one"/>
+        <leaf id="two"></leaf>
+    </group>
+    <tail/>
+</root>
+

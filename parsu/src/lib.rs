@@ -11,13 +11,14 @@ mod parser;
 pub struct Element {
     name: String,
     attributes: Vec<(String, String)>,
-    children: Vec<Element>,
+    children: Vec<Self>,
 }
 
 fn match_literal<'a>(expected: &'static str) -> impl Parser<'a, ()> {
-    move |input: &'a str| match input.strip_prefix(expected) {
-        Some(rest) => Ok((rest, ())),
-        _ => Err(input),
+    move |input: &'a str| {
+        input
+            .strip_prefix(expected)
+            .map_or(Err(input), |rest| Ok((rest, ())))
     }
 }
 
@@ -28,7 +29,7 @@ fn identifier(input: &str) -> ParseResult<'_, String> {
     match chars.next() {
         Some(next) if next.is_alphabetic() => matched.push(next),
         _ => return Err(input),
-    };
+    }
 
     for next in chars {
         if next.is_alphanumeric() || next == '-' {
@@ -39,14 +40,16 @@ fn identifier(input: &str) -> ParseResult<'_, String> {
     }
 
     let next_index = matched.len();
-    Ok((&input[next_index..], matched))
+    input
+        .get(next_index..)
+        .map_or(Err(input), |rest| Ok((rest, matched)))
 }
 
 fn any_char(input: &str) -> ParseResult<'_, char> {
-    match input.chars().next() {
-        Some(next) => Ok((&input[next.len_utf8()..], next)),
-        _ => Err(input),
-    }
+    let mut chars = input.chars();
+    chars
+        .next()
+        .map_or(Err(input), |next| Ok((chars.as_str(), next)))
 }
 
 fn whitespace_char<'a>() -> impl Parser<'a, char> {
@@ -114,7 +117,11 @@ fn close_element<'a>(expected_name: String) -> impl Parser<'a, String> {
 
 fn parent_element<'a>() -> impl Parser<'a, Element> {
     open_element().and_then(|el| {
-        left(zero_or_more(element()), close_element(el.name.clone())).map(move |children| {
+        left(
+            zero_or_more(element()),
+            right(space0(), close_element(el.name.clone())),
+        )
+        .map(move |children| {
             let mut el = el.clone();
             el.children = children;
             el
@@ -126,9 +133,18 @@ fn element<'a>() -> impl Parser<'a, Element> {
     whitespace_wrap(either(single_element(), parent_element()))
 }
 
+/// Parses one element with optional surrounding whitespace.
+///
+/// # Errors
+///
+/// Returns an unparsed input slice if parsing fails or trailing input remains.
 pub fn parse_xml(input: &str) -> Result<Element, &str> {
-    let (_, element) = element().parse(input)?;
-    Ok(element)
+    let (rest, element) = element().parse(input)?;
+    if rest.is_empty() {
+        Ok(element)
+    } else {
+        Err(rest)
+    }
 }
 
 #[test]
@@ -225,7 +241,7 @@ fn attribute_parser() {
             ]
         )),
         attributes().parse(" one=\"1\" two=\"2\"      three=\"3\"")
-    )
+    );
 }
 
 #[test]
@@ -277,9 +293,9 @@ fn xml_parser() {
 
 #[test]
 fn mismatched_closing_tag() {
-    let doc = r#"
+    let doc = r"
         <top>
             <bottom/>
-        </middle>"#;
+        </middle>";
     assert_eq!(Err("</middle>"), element().parse(doc));
 }

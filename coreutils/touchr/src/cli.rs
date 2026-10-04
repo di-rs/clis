@@ -18,6 +18,7 @@ pub struct Cli {
     pub timestamp: Option<NaiveDateTime>,
 
     /// The name(s) of the file(s) to create
+    #[arg(required = true)]
     pub files: Vec<PathBuf>,
 }
 

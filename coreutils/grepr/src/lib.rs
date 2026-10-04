@@ -51,6 +51,7 @@ fn walk_dir_tree(dir: &PathBuf) -> Vec<Result<PathBuf, ParseError>> {
     WalkDir::new(dir)
         .into_iter()
         .skip(1)
+        .filter(|entry| !entry.as_ref().is_ok_and(|e| e.file_type().is_dir()))
         .map(|entry| {
             entry
                 .map(|e| e.into_path())

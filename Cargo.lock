@@ -148,12 +148,15 @@ dependencies = [
 name = "biggie"
 version = "0.1.0"
 dependencies = [
+ "assert_cmd",
+ "assert_fs",
  "clap",
  "clap-verbosity-flag",
  "color-eyre",
  "error",
  "log",
  "logging",
+ "predicates",
  "rand",
  "thousands",
 ]
@@ -184,6 +187,7 @@ name = "bool"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "predicates",
  "pretty_assertions",
 ]
 
@@ -327,16 +331,6 @@ name = "clap_lex"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
-
-[[package]]
-name = "clap_mangen"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c630ddc90572b3d9abd3f887f0007b4e048faf5c5a59ae607f8ac1c5e3790873"
-dependencies = [
- "clap",
- "roff",
-]
 
 [[package]]
 name = "color-eyre"
@@ -785,7 +779,6 @@ dependencies = [
  "assert_fs",
  "clap",
  "clap-verbosity-flag",
- "clap_mangen",
  "ctrlc",
  "env_logger",
  "exitcode",
@@ -1016,6 +1009,7 @@ name = "lsr"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "assert_fs",
  "chrono",
  "clap",
  "exitcode",
@@ -1057,8 +1051,11 @@ dependencies = [
 name = "mkdirr"
 version = "0.1.0"
 dependencies = [
+ "assert_cmd",
+ "assert_fs",
  "clap",
  "color-eyre",
+ "predicates",
 ]
 
 [[package]]
@@ -1266,8 +1263,11 @@ dependencies = [
 name = "pwdr"
 version = "0.1.0"
 dependencies = [
+ "assert_cmd",
+ "assert_fs",
  "clap",
  "color-eyre",
+ "predicates",
 ]
 
 [[package]]
@@ -1339,12 +1339,6 @@ name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
-
-[[package]]
-name = "roff"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "323c417e1d9665a65b263ec744ba09030cfb277e9daa0b018a4ab62e57bc8189"
 
 [[package]]
 name = "rustc-demangle"
@@ -1651,9 +1645,12 @@ checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
 name = "touchr"
 version = "0.1.0"
 dependencies = [
+ "assert_cmd",
+ "assert_fs",
  "chrono",
  "clap",
  "color-eyre",
+ "predicates",
 ]
 
 [[package]]

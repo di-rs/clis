@@ -25,12 +25,12 @@ fn run(cli: &Cli) -> Result<()> {
     let mut reader = get_reader(&cli.file)?;
 
     let mut buf = String::new();
-    let size = reader.read_to_string(&mut buf)?;
+    reader.read_to_string(&mut buf)?;
 
-    match parse_xml(&buf[..size]) {
-        Ok(parsed_doc) => writeln!(writer, "{:?}", parsed_doc)?,
+    match parse_xml(&buf) {
+        Ok(parsed_doc) => writeln!(writer, "{parsed_doc:?}")?,
         Err(e) => bail!("cannot parse part of the input: {e}"),
-    };
+    }
 
     Ok(())
 }
@@ -40,7 +40,7 @@ fn get_reader(path: &str) -> Result<Box<dyn BufRead>> {
         "-" => {
             if stdin().is_terminal() {
                 let _ = Cli::command().print_help();
-                bail!("`-` cannot be provided within tty")
+                bail!("`-` cannot be provided within tty");
             }
             Ok(Box::new(BufReader::new(stdin().lock())))
         }

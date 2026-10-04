@@ -1,5 +1,5 @@
 use assert_cmd::cargo::cargo_bin_cmd;
-use assert_fs::{NamedTempFile, fixture::FileWriteStr};
+use assert_fs::{NamedTempFile, TempDir, prelude::*};
 use predicates::prelude::*;
 use pretty_assertions::assert_eq;
 use std::{fs, path::PathBuf};
@@ -18,6 +18,7 @@ fn usage() {
         cargo_bin_cmd!()
             .arg(flag)
             .assert()
+            .success()
             .stdout(predicate::str::contains("Usage"));
     }
 }
@@ -50,16 +51,18 @@ fn warns_bad_file() {
     cargo_bin_cmd!()
         .args(["foo", &bad])
         .assert()
+        .success()
         .stderr(predicate::str::contains(expected));
 }
 
 fn run(args: &[&str], expected_file: &str) -> Result<()> {
     let outfile: PathBuf = ["tests/expected", expected_file].iter().collect();
     let expected = fs::read_to_string(outfile)?;
-    let output = cargo_bin_cmd!().args(args).output()?;
-
-    let stdout = String::from_utf8(output.stdout)?;
-    assert_eq!(stdout, expected);
+    cargo_bin_cmd!()
+        .args(args)
+        .assert()
+        .success()
+        .stdout(expected);
     Ok(())
 }
 
@@ -181,6 +184,7 @@ fn warns_dir_not_recursive() {
     cargo_bin_cmd!()
         .args(["fox", INPUTS_DIR, FOX])
         .assert()
+        .success()
         .stderr(predicate::str::contains("tests/inputs is a directory"))
         .stdout(predicate::str::contains(stdout));
 }
@@ -190,10 +194,12 @@ fn stdin() -> Result<()> {
     let input = fs::read_to_string(BUSTLE)?;
     let expected = fs::read_to_string("tests/expected/bustle.txt.the.capitalized")?;
 
-    let output = cargo_bin_cmd!().write_stdin(input).arg("The").output()?;
-
-    let stdout = String::from_utf8(output.stdout)?;
-    assert_eq!(stdout, expected);
+    cargo_bin_cmd!()
+        .write_stdin(input)
+        .arg("The")
+        .assert()
+        .success()
+        .stdout(expected);
     Ok(())
 }
 
@@ -209,13 +215,12 @@ fn stdin_insensitive_count() -> Result<()> {
     let expected_file = "tests/expected/the.recursive.insensitive.count.stdin";
     let expected = fs::read_to_string(expected_file)?;
 
-    let output = cargo_bin_cmd!()
+    cargo_bin_cmd!()
         .args(["-ci", "the", "-"])
         .write_stdin(input)
-        .output()?;
-
-    let stdout = String::from_utf8(output.stdout)?;
-    assert_eq!(stdout, expected);
+        .assert()
+        .success()
+        .stdout(expected);
     Ok(())
 }
 
@@ -247,5 +252,160 @@ fn empty_pattern_returns_all_file() -> Result<()> {
         .success()
         .stdout(predicate::str::contains(file_content));
 
+    Ok(())
+}
+
+fn check_stdin(args: &[&str], input: &str, expected: &str) {
+    cargo_bin_cmd!()
+        .args(args)
+        .write_stdin(input)
+        .assert()
+        .success()
+        .stdout(expected.to_owned())
+        .stderr("");
+}
+
+#[test]
+fn stdin_no_match() {
+    check_stdin(&["absent"], "alpha\nbeta\n", "");
+}
+
+#[test]
+fn stdin_no_match_count() {
+    check_stdin(&["-c", "absent", "-"], "alpha\nbeta\n", "0\n");
+}
+
+#[test]
+fn empty_stdin_empty_regex_count() {
+    check_stdin(&["--count", ""], "", "0\n");
+}
+
+#[test]
+fn empty_regex_counts_blank_and_unterminated_lines() {
+    check_stdin(&["-c", ""], "alpha\n\nomega", "3\n");
+}
+
+#[test]
+fn empty_regex_inverted_selects_nothing() {
+    check_stdin(&["-v", ""], "alpha\n\nomega", "");
+}
+
+#[test]
+fn invert_preserves_blank_lines_and_missing_final_newline() {
+    check_stdin(
+        &["--invert-match", "alpha", "-"],
+        "alpha\n\nomega",
+        "\nomega",
+    );
+}
+
+#[test]
+fn insensitive_inverted_count() {
+    check_stdin(&["-ivc", "alpha"], "ALPHA\nalpha\nbeta\n\n", "2\n");
+}
+
+#[test]
+fn count_counts_matching_lines_not_occurrences() {
+    check_stdin(&["-c", "cat"], "cat cat cat\ndog\ncat", "2\n");
+}
+
+#[test]
+fn stdin_invalid_regex_produces_no_output() {
+    cargo_bin_cmd!()
+        .arg("[")
+        .write_stdin("alpha\n")
+        .assert()
+        .failure()
+        .stdout("")
+        .stderr(predicate::str::contains("invalid pattern passed `[`"));
+}
+
+#[test]
+fn stdin_and_file_are_both_prefixed() -> Result<()> {
+    let dir = TempDir::new()?;
+    dir.child("sample.txt").write_str("skip\nmatch file\n")?;
+    cargo_bin_cmd!()
+        .current_dir(dir.path())
+        .args(["match", "-", "sample.txt"])
+        .write_stdin("match stdin\nskip\n")
+        .assert()
+        .success()
+        .stdout("-:match stdin\nsample.txt:match file\n")
+        .stderr("");
+    Ok(())
+}
+
+#[test]
+fn multiple_files_inverted_count_includes_zero() -> Result<()> {
+    let dir = TempDir::new()?;
+    dir.child("first.txt").write_str("cat\ndog\n\n")?;
+    dir.child("second.txt").write_str("CAT\n")?;
+    cargo_bin_cmd!()
+        .current_dir(dir.path())
+        .args(["-ivc", "cat", "first.txt", "second.txt"])
+        .assert()
+        .success()
+        .stdout("first.txt:2\nsecond.txt:0\n")
+        .stderr("");
+    Ok(())
+}
+
+#[test]
+fn recursive_search_skips_empty_nested_directories() -> Result<()> {
+    let dir = TempDir::new()?;
+    dir.child("tree/nested/empty").create_dir_all()?;
+    cargo_bin_cmd!()
+        .current_dir(dir.path())
+        .args(["-rc", "match", "tree"])
+        .assert()
+        .success()
+        .stdout("")
+        .stderr("");
+    Ok(())
+}
+
+#[test]
+fn recursive_search_preserves_explicit_files_and_missing_path_errors() -> Result<()> {
+    let dir = TempDir::new()?;
+    dir.child("sample.txt").write_str("match file\n")?;
+    cargo_bin_cmd!()
+        .current_dir(dir.path())
+        .args(["-r", "match", "missing.txt", "sample.txt"])
+        .assert()
+        .success()
+        .stdout("sample.txt:match file\n")
+        .stderr("missing.txt doesn't exists\n");
+    Ok(())
+}
+
+#[test]
+fn recursive_search_visits_nested_files_without_reading_directories() -> Result<()> {
+    let dir = TempDir::new()?;
+    dir.child("tree/top.txt").write_str("match top\n")?;
+    dir.child("tree/nested/bottom.txt")
+        .write_str("match bottom\n")?;
+    let cmd = cargo_bin_cmd!()
+        .current_dir(dir.path())
+        .args(["-r", "match", "tree"])
+        .assert()
+        .success()
+        .stderr("");
+    let stdout = String::from_utf8(cmd.get_output().stdout.clone())?;
+    let mut lines: Vec<_> = stdout.lines().collect();
+    lines.sort_unstable();
+    let expected = [
+        format!(
+            "{}:match bottom",
+            PathBuf::from("tree")
+                .join("nested")
+                .join("bottom.txt")
+                .display()
+        ),
+        format!(
+            "{}:match top",
+            PathBuf::from("tree").join("top.txt").display()
+        ),
+    ];
+    assert_eq!(lines, expected);
     Ok(())
 }

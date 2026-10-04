@@ -12,5 +12,10 @@ include.workspace = true
 clap = { workspace = true }
 color-eyre = { workspace = true }
 
+[dev-dependencies]
+assert_cmd = { workspace = true }
+assert_fs = { workspace = true }
+predicates = { workspace = true }
+
 [lints]
 workspace = true

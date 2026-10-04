@@ -1,17 +1,31 @@
- # Practicing Rust by building parsing combinators for simplified XML
+# parsu
 
-https://bodil.lol/parser-combinators/
+`parsu` parses a small XML-like language and prints the resulting element tree using Rust debug formatting.
 
-## Statement
+## Supported capabilities
 
-We're going to write a parser for a simplified version of XML. It looks like this:
+- Read one named UTF-8 file, or `-` for non-terminal stdin.
+- Parse nested elements, self-closing elements, and double-quoted attributes.
+- Names start with a letter, followed by letters, numbers, or hyphens.
+- Closing element names must match their opening names.
 
-```xml
-<parent-element>
-  <single-element attribute="value" />
-</parent-element>
-````
+## Example
 
-XML elements open with the symbol < and an identifier consisting of a letter followed by any number of letters, numbers and -. This is followed by some whitespace, and an optional list of attribute pairs: another identifier as defined previously, followed by a = and a double quoted string. Finally, there is either a closing /> to signify a single element with no children, or a > to signify there is a sequence of child elements following, and finally a closing tag starting with </, followed by an identifier which must match the opening tag, and a final >.
+From the workspace root:
 
-That's all we're going to support. No namespaces, no text nodes, none of the rest, and definitely no schema validation. We're not even going to bother supporting escape quotes for those strings - they start at the first double quote and they end at the next one, and that's it. If you want double quotes inside your actual strings, you can take your unreasonable demands somewhere else.
+```sh
+printf '<parent><child name="demo"/></parent>\n' | cargo run -p parsu -- -
+```
+
+## Limits and credit
+
+This is not a general XML parser: there are no text nodes, namespaces, comments,
+entity decoding, escaped quotes, or schema validation. Whitespace before `>` or
+`/>` is rejected (`<child/>` works; `<child />` does not). Input must contain
+exactly one root element, with optional surrounding whitespace; trailing non-whitespace
+input and additional roots are rejected. Empty parents may contain whitespace.
+
+There is no direct GNU Coreutils counterpart. Based on Bodil Stokke's tutorial,
+[Learning Parser Combinators With Rust](https://bodil.lol/parser-combinators/).
+
+[Workspace README](../README.md)

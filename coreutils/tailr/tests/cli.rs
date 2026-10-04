@@ -17,6 +17,8 @@ fn usage() {
         cargo_bin_cmd!()
             .arg(flag)
             .assert()
+            .success()
+            .stderr("")
             .stdout(predicate::str::contains("Usage"));
     }
 }
@@ -83,13 +85,176 @@ fn run(args: &[&str], expected_file: &str) -> Result<()> {
     let mut file = File::open(outfile)?;
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)?;
-    let expected = String::from_utf8_lossy(&buffer);
-
-    let output = cargo_bin_cmd!().args(args).output()?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(stdout, expected);
+    let cmd = cargo_bin_cmd!().args(args).assert().success().stderr("");
+    assert_eq!(&cmd.get_output().stdout, &buffer);
     Ok(())
+}
+
+#[test]
+fn rejects_unknown_flag() {
+    cargo_bin_cmd!()
+        .args(["--unknown", EMPTY])
+        .assert()
+        .failure()
+        .stdout("")
+        .stderr(predicate::str::contains("--unknown"));
+}
+
+#[test]
+fn explicit_stdin_returns_last_line() {
+    cargo_bin_cmd!()
+        .args(["-n", "1", "-"])
+        .write_stdin("first\né")
+        .assert()
+        .success()
+        .stdout("é")
+        .stderr("");
+}
+
+#[test]
+fn stdin_line_boundaries() {
+    for input in [&b"a\n\xff\n\nz"[..], &b"a\n\xff\n\nz\n"[..]] {
+        for (count, start) in [
+            ("1", 5),
+            ("-1", 5),
+            ("2", 4),
+            ("+3", 4),
+            ("+4", 5),
+            ("+5", input.len()),
+            ("0", input.len()),
+            ("-0", input.len()),
+            ("+0", 0),
+            ("+1", 0),
+            ("99", 0),
+            ("-9223372036854775808", 0),
+        ] {
+            cargo_bin_cmd!()
+                .args([&format!("--lines={count}"), "-"])
+                .write_stdin(input)
+                .assert()
+                .success()
+                .stderr("")
+                .stdout(input.iter().skip(start).copied().collect::<Vec<_>>());
+        }
+    }
+}
+
+#[test]
+fn stdin_byte_boundaries() {
+    let input = &b"a\n\xc3\xa9\0\xff"[..];
+    for (count, start) in [
+        ("1", 5),
+        ("-1", 5),
+        ("3", 3),
+        ("+4", 3),
+        ("+6", 5),
+        ("+7", 6),
+        ("0", 6),
+        ("-0", 6),
+        ("+0", 0),
+        ("+1", 0),
+        ("99", 0),
+        ("-9223372036854775808", 0),
+    ] {
+        cargo_bin_cmd!()
+            .args([&format!("--bytes={count}"), "-"])
+            .write_stdin(input)
+            .assert()
+            .success()
+            .stderr("")
+            .stdout(input.iter().skip(start).copied().collect::<Vec<_>>());
+    }
+}
+
+#[test]
+fn stdin_empty() {
+    for flag in ["--lines", "--bytes"] {
+        for count in ["0", "+0", "1", "+1", "-1"] {
+            cargo_bin_cmd!()
+                .args([&format!("{flag}={count}"), "-"])
+                .write_stdin("")
+                .assert()
+                .success()
+                .stdout("")
+                .stderr("");
+        }
+    }
+}
+
+#[test]
+fn stdin_crosses_read_boundaries() {
+    let mut input = vec![b'x'; 32_769];
+    input.extend_from_slice(b"\n\xff\0\nlast");
+    for (option, expected) in [
+        ("--lines=2", &b"\xff\0\nlast"[..]),
+        ("--lines=+2", &b"\xff\0\nlast"[..]),
+        ("--bytes=5", &b"\nlast"[..]),
+        ("--bytes=+32773", &b"\nlast"[..]),
+    ] {
+        cargo_bin_cmd!()
+            .args([option, "-"])
+            .write_stdin(input.clone())
+            .assert()
+            .success()
+            .stderr("")
+            .stdout(expected);
+    }
+}
+
+#[test]
+fn stdin_mixed_with_files_and_repeated() {
+    for quiet in [false, true] {
+        let mut cmd = cargo_bin_cmd!();
+        cmd.args(["-n", "1", EMPTY, "-", EMPTY, "-"]);
+        if quiet {
+            cmd.arg("-q");
+        }
+        let expected = if quiet {
+            "last\n".to_owned()
+        } else {
+            format!("==> {EMPTY} <==\n\n==> - <==\nlast\n\n==> {EMPTY} <==\n\n==> - <==\n")
+        };
+        cmd.write_stdin("first\nlast\n")
+            .assert()
+            .success()
+            .stderr("")
+            .stdout(expected);
+    }
+}
+
+#[test]
+fn unterminated_final_line_counts_toward_line_offsets() {
+    for (count, expected) in [
+        ("1", "γ"),
+        ("+2", "β\nγ"),
+        ("+3", "γ"),
+        ("+4", ""),
+        ("0", ""),
+    ] {
+        cargo_bin_cmd!()
+            .args(["-n", count, "tests/inputs/unterminated.txt"])
+            .assert()
+            .success()
+            .stdout(expected)
+            .stderr("");
+    }
+}
+
+#[test]
+fn byte_offsets_preserve_raw_utf8_fragments() {
+    for (count, expected) in [
+        ("1", &b"\xb3"[..]),
+        ("2", &b"\xce\xb3"[..]),
+        ("+2", &b"\xb1\n\xce\xb2\n\xce\xb3"[..]),
+        ("+9", &b""[..]),
+    ] {
+        cargo_bin_cmd!()
+            .args(["-c", count, "tests/inputs/unterminated.txt"])
+            .assert()
+            .success()
+            .stdout(expected)
+            .stderr("");
+    }
 }
 
 #[test]

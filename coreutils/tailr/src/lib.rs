@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     io::{BufRead, BufReader, Read, Seek, SeekFrom, Write},
     str::FromStr,
 };
@@ -75,6 +76,97 @@ pub fn print_bytes<R: Read + Seek>(
     if let Some(start) = get_start_index(num_bytes, total_bytes) {
         reader.seek(SeekFrom::Start(start))?;
         std::io::copy(&mut reader, &mut writer)?;
+    }
+    Ok(())
+}
+
+/// Print selected bytes from a non-seekable input, retaining only the tail.
+///
+/// # Errors
+/// Returns input read or output write errors.
+pub fn print_stream_bytes(
+    mut reader: impl BufRead,
+    mut writer: impl Write,
+    count: TakeValue,
+) -> Result<(), std::io::Error> {
+    match count {
+        TakeValue::PlusZero => {
+            std::io::copy(&mut reader, &mut writer)?;
+        }
+        TakeValue::TakeNum(n) if n > 0 => {
+            std::io::copy(
+                &mut reader.by_ref().take(n.unsigned_abs().saturating_sub(1)),
+                &mut std::io::sink(),
+            )?;
+            std::io::copy(&mut reader, &mut writer)?;
+        }
+        TakeValue::TakeNum(0) => {
+            std::io::copy(&mut reader, &mut std::io::sink())?;
+        }
+        TakeValue::TakeNum(n) => {
+            let limit = usize::try_from(n.unsigned_abs()).unwrap_or(usize::MAX);
+            let mut tail = VecDeque::new();
+            loop {
+                let chunk = reader.fill_buf()?;
+                if chunk.is_empty() {
+                    break;
+                }
+                let len = chunk.len();
+                let keep = len.min(limit);
+                let discard = tail.len().saturating_sub(limit.saturating_sub(keep));
+                tail.drain(..discard);
+                tail.extend(chunk.iter().skip(len.saturating_sub(keep)).copied());
+                reader.consume(len);
+            }
+            let (first, second) = tail.as_slices();
+            writer.write_all(first)?;
+            writer.write_all(second)?;
+        }
+    }
+    Ok(())
+}
+
+/// Print selected raw lines from a non-seekable input.
+///
+/// # Errors
+/// Returns input read or output write errors.
+pub fn print_stream_lines(
+    mut reader: impl BufRead,
+    mut writer: impl Write,
+    count: TakeValue,
+) -> Result<(), std::io::Error> {
+    match count {
+        TakeValue::PlusZero => {
+            std::io::copy(&mut reader, &mut writer)?;
+        }
+        TakeValue::TakeNum(n) if n > 0 => {
+            for _ in 1..n {
+                if reader.skip_until(b'\n')? == 0 {
+                    return Ok(());
+                }
+            }
+            std::io::copy(&mut reader, &mut writer)?;
+        }
+        TakeValue::TakeNum(0) => {
+            std::io::copy(&mut reader, &mut std::io::sink())?;
+        }
+        TakeValue::TakeNum(n) => {
+            let limit = usize::try_from(n.unsigned_abs()).unwrap_or(usize::MAX);
+            let mut tail = VecDeque::new();
+            loop {
+                let mut line = Vec::new();
+                if reader.read_until(b'\n', &mut line)? == 0 {
+                    break;
+                }
+                if tail.len() == limit {
+                    tail.pop_front();
+                }
+                tail.push_back(line);
+            }
+            for line in tail {
+                writer.write_all(&line)?;
+            }
+        }
     }
     Ok(())
 }

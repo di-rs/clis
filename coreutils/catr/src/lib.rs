@@ -26,7 +26,6 @@ pub fn write_lines(
         let is_empty = line.trim_end_matches(['\r', '\n']).is_empty();
 
         if args.squeeze_blank {
-            dbg!(is_empty, prev_empty);
             if is_empty && prev_empty {
                 line.clear();
                 continue;

@@ -1,0 +1,1 @@
+Element { name: "root", attributes: [("label", "café 東京"), ("empty", "")], children: [Element { name: "group", attributes: [], children: [Element { name: "leaf", attributes: [("id", "one")], children: [] }, Element { name: "leaf", attributes: [("id", "two")], children: [] }] }, Element { name: "tail", attributes: [], children: [] }] }

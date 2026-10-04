@@ -21,7 +21,8 @@ impl LineNode {
 
 impl PartialEq for LineNode {
     fn eq(&self, other: &Self) -> bool {
-        self.inner.trim_end() == other.inner.trim_end()
+        self.inner.strip_suffix('\n').unwrap_or(&self.inner)
+            == other.inner.strip_suffix('\n').unwrap_or(&other.inner)
     }
 }
 

@@ -146,10 +146,12 @@ fn partial_month() {
 
 fn run(args: &[&str], expected_file: &str) -> Result<()> {
     let expected = fs::read_to_string(expected_file)?;
-    let output = cargo_bin_cmd!().args(args).output()?;
-
-    let stdout = String::from_utf8(output.stdout)?;
-    assert_eq!(stdout, expected);
+    cargo_bin_cmd!()
+        .args(args)
+        .assert()
+        .success()
+        .stdout(expected)
+        .stderr("");
     Ok(())
 }
 
@@ -192,4 +194,81 @@ fn year() -> Result<()> {
     let lines = stdout.split('\n');
     assert_eq!(lines.count(), 37);
     Ok(())
+}
+
+#[test]
+fn usage() {
+    for flag in ["-h", "--help"] {
+        cargo_bin_cmd!()
+            .arg(flag)
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Usage"));
+    }
+}
+
+#[test]
+fn minimum_year_january() -> Result<()> {
+    run(&["1", "-m", "1"], "tests/expected/1-1.txt")
+}
+
+#[test]
+fn maximum_year_december() -> Result<()> {
+    run(&["9999", "-m", "12"], "tests/expected/12-9999.txt")
+}
+
+#[test]
+fn century_1900_is_not_leap_year() -> Result<()> {
+    run(&["1900", "-m", "2"], "tests/expected/2-1900.txt")
+}
+
+#[test]
+fn century_2000_is_leap_year() -> Result<()> {
+    run(&["2000", "-m", "2"], "tests/expected/2-2000.txt")
+}
+
+#[test]
+fn century_2100_is_not_leap_year() -> Result<()> {
+    run(&["2100", "-m", "2"], "tests/expected/2-2100.txt")
+}
+
+#[test]
+fn mixed_case_month_name() -> Result<()> {
+    run(&["2020", "-m", "aPrIl"], "tests/expected/4-2020.txt")
+}
+
+#[test]
+fn dies_ambiguous_or_empty_month() {
+    for month in ["", "m", "j", "a"] {
+        cargo_bin_cmd!()
+            .args(["2020", "-m", month])
+            .assert()
+            .failure()
+            .stdout("")
+            .stderr(predicate::str::contains("invalid value"));
+    }
+}
+
+#[test]
+fn dies_long_year_and_month_in_either_order() {
+    for args in [["--year", "-m", "December"], ["-m", "December", "--year"]] {
+        cargo_bin_cmd!()
+            .args(args)
+            .assert()
+            .failure()
+            .stdout("")
+            .stderr(predicate::str::contains("cannot be used with"));
+    }
+}
+
+#[test]
+fn dies_long_year_and_explicit_year_in_either_order() {
+    for args in [["--year", "2000"], ["2000", "--year"]] {
+        cargo_bin_cmd!()
+            .args(args)
+            .assert()
+            .failure()
+            .stdout("")
+            .stderr(predicate::str::contains("cannot be used with"));
+    }
 }

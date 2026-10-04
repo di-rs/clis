@@ -84,6 +84,8 @@ fn usage() {
         cargo_bin_cmd!()
             .arg(flag)
             .assert()
+            .success()
+            .stderr("")
             .stdout(predicate::str::contains("Usage"));
     }
 }
@@ -195,6 +197,65 @@ fn run_outfile_stdin_count(test: &Test) -> Result<()> {
         .stdout("");
     let contents = fs::read_to_string(outpath)?;
     assert_eq!(expected, contents);
+    Ok(())
+}
+
+#[test]
+fn rejects_unknown_flag() {
+    cargo_bin_cmd!()
+        .arg("--unknown")
+        .assert()
+        .failure()
+        .stdout("")
+        .stderr(predicate::str::contains("--unknown"));
+}
+
+#[test]
+fn counts_adjacent_unicode_runs_and_unterminated_last_line() {
+    cargo_bin_cmd!()
+        .args(["-c", "-"])
+        .write_stdin("é\né\n界\né")
+        .assert()
+        .success()
+        .stdout("   2 é\n   1 界\n   1 é")
+        .stderr("");
+}
+
+#[test]
+fn counts_blank_runs_without_merging_nonadjacent_runs() {
+    cargo_bin_cmd!()
+        .arg("-c")
+        .write_stdin("\n\nx\n\n")
+        .assert()
+        .success()
+        .stdout("   2 \n   1 x\n   1 \n")
+        .stderr("");
+}
+
+#[test]
+fn trailing_spaces_and_tabs_distinguish_lines() {
+    cargo_bin_cmd!()
+        .arg("-c")
+        .write_stdin("x\nx \nx\t\n")
+        .assert()
+        .success()
+        .stdout("   1 x\n   1 x \n   1 x\t\n")
+        .stderr("");
+}
+
+#[test]
+fn output_file_is_truncated_for_shorter_result() -> Result<()> {
+    let outfile = NamedTempFile::new()?;
+    fs::write(outfile.path(), "stale data that must not survive")?;
+    cargo_bin_cmd!()
+        .arg("-")
+        .arg(outfile.path())
+        .write_stdin("é\né\n")
+        .assert()
+        .success()
+        .stdout("")
+        .stderr("");
+    assert_eq!(fs::read_to_string(outfile.path())?, "é\n");
     Ok(())
 }
 

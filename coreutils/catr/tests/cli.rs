@@ -18,6 +18,8 @@ fn usage() {
         cargo_bin_cmd!()
             .arg(flag)
             .assert()
+            .success()
+            .stderr("")
             .stdout(predicate::str::contains("Usage"));
     }
 }
@@ -45,7 +47,7 @@ fn run(args: &[&str], expected_file: &str) -> Result<()> {
     let outfile: PathBuf = ["tests/expected", expected_file].iter().collect();
     let expected = std::fs::read_to_string(outfile)?;
 
-    let cmd = cargo_bin_cmd!().args(args).assert().success();
+    let cmd = cargo_bin_cmd!().args(args).assert().success().stderr("");
     let output = cmd.get_output();
     assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
 
@@ -61,6 +63,7 @@ fn run_stdin(input_file: &str, args: &[&str], expected_file: &str) -> Result<()>
         .args(args)
         .assert()
         .success()
+        .stderr("")
         .stdout(expected);
     Ok(())
 }
@@ -184,4 +187,50 @@ fn mutipspaces_s_b() -> Result<()> {
 #[test]
 fn bustle_u() -> Result<()> {
     run(&[BUSTLE, "-u"], "the-bustle.txt.out")
+}
+
+#[test]
+fn rejects_unknown_and_conflicting_flags() {
+    for args in [&["--unknown"][..], &["-n", "-b"]] {
+        cargo_bin_cmd!()
+            .args(args)
+            .assert()
+            .failure()
+            .stdout("")
+            .stderr(predicate::str::contains("error:"));
+    }
+}
+
+#[test]
+fn default_stdin_preserves_empty_and_unterminated_unicode() {
+    for input in ["", "é\r\n世界"] {
+        cargo_bin_cmd!()
+            .write_stdin(input)
+            .assert()
+            .success()
+            .stdout(input)
+            .stderr("");
+    }
+}
+
+#[test]
+fn number_nonblank_keeps_whitespace_only_lines() {
+    cargo_bin_cmd!()
+        .arg("--number-nonblank")
+        .write_stdin("\n \n\t\né")
+        .assert()
+        .success()
+        .stdout("\n     1\t \n     2\t\t\n     3\té")
+        .stderr("");
+}
+
+#[test]
+fn squeeze_and_number_preserve_whitespace_lines() {
+    cargo_bin_cmd!()
+        .args(["-s", "-n"])
+        .write_stdin("\n\n \n\n\né")
+        .assert()
+        .success()
+        .stdout("     1\t\n     2\t \n     3\t\n     4\té")
+        .stderr("");
 }
