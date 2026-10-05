@@ -1,17 +1,30 @@
 # Repository agent skills
 
-Skills live in `.agents/skills/<name>/SKILL.md`. Each has a focused description
-for discovery and self-contained instructions. They reuse `AGENTS.md`, the root
-README, and `prek.toml` as the sources of repository policy and check commands.
-No scripts, new dependencies, or global skill installations are needed.
+Skills live in `.agents/skills/<name>/SKILL.md` and are available to humans as
+repeatable workflows as well as to agents. The [north star](north-star.md) owns
+requirements, the [utility template](templates/utility.md) owns the contract shape,
+and [CONTRIBUTING](../CONTRIBUTING.md) owns check commands. Skills orchestrate those
+sources rather than duplicate their policies. No global installation is required.
 
-## Included
+## Choose a workflow
 
-| Skill | Use |
+| Skill | Use and result |
 | --- | --- |
-| [clis-git-delivery](../.agents/skills/clis-git-delivery/SKILL.md) | Name branches, commit a scoped diff, and publish or update a PR using the repository template. |
-| [clis-verify](../.agents/skills/clis-verify/SKILL.md) | Establish a baseline, run package checks before workspace checks, and report evidence and limitations. |
-| [clis-cli-regressions](../.agents/skills/clis-cli-regressions/SKILL.md) | Turn supported CLI behavior into deterministic integration tests, with byte assertions and isolated filesystem fixtures. |
+| [clis-explore](../.agents/skills/clis-explore/SKILL.md) | Research a utility, resolve product questions, and prepare its contract and next implementation slice. |
+| [clis-audit](../.agents/skills/clis-audit/SKILL.md) | Assess a utility against the standard, reporting scoped evidence, gaps, and concrete follow-ups. |
+| [clis-cli-regressions](../.agents/skills/clis-cli-regressions/SKILL.md) | Turn selected behavior into hermetic CLI tests and reviewed reference fixtures. |
+| [clis-verify](../.agents/skills/clis-verify/SKILL.md) | Run relevant checks and distinguish passing, failing, and unavailable verification. |
+| [clis-git-delivery](../.agents/skills/clis-git-delivery/SKILL.md) | Name branches, commit a scoped diff, and publish/update a PR using the shared template. |
+
+For example, ask an agent to “use clis-explore to prepare catr's contract” or
+“use clis-audit to assess tailr and report implementation follow-ups.” Exploration
+reuses prior findings; an audit can be scoped to a requirement or changed surface.
+Neither request by itself authorizes implementation fixes or publication. Accepted
+session decisions remain in force; skills do not add redundant approval stages.
+
+Ordinary fixes need only the relevant workflows. A typo does not require a full
+utility audit. Standards are established before utilities migrate, so an honest
+audit may contain many missing or unverified requirements.
 
 ## Git conventions
 
@@ -26,35 +39,18 @@ No scripts, new dependencies, or global skill installations are needed.
 - Resolve the actual default branch rather than assuming its name. It is
   currently `master`.
 
-## Research and further skills
+## Sources and maintenance
 
-Reviewed 2026-10-05. These are original repository-specific instructions, not
-vendored third-party skill packages. This note records the research; agents do
-not need to read it or fetch its sources during routine skill use.
+These are original repository-specific workflows. Keep skills focused on decisions
+that depend on this workspace; generic debugging and review remain separate skills.
+When changing a workflow, validate its frontmatter and links and try a realistic
+request, including a missing-evidence or scope-boundary case. Record what was
+actually exercised; structural validation alone does not establish useful behavior.
 
 [GitHub Flow](https://docs.github.com/en/get-started/using-github/github-flow)
-supports short descriptive branches, focused commits, and PR review.
-[Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/)
-defines commit types, optional scopes, and breaking-change notation. The branch
-format and matching PR-title format above are our chosen conventions; the
-specification governs commit messages.
+informs scoped branches and PR review.
+[Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) defines commit
+notation; using the same types in branch names and PR titles is a repository choice.
 [GitHub's template guidance](https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/creating-a-pull-request-template-for-your-repository)
-establishes `.github/pull_request_template.md` as a default PR template. It becomes
-available in GitHub's PR interface after it is committed to the remote default
-branch. The local delivery skill uses it immediately.
-
-Other candidates assessed against this workspace:
-
-| Candidate | Decision |
-| --- | --- |
-| Rust workspace verification | Included: nightly, nextest, and strict workspace Clippy make the exact check sequence useful across every app. |
-| CLI regression testing | Included: byte boundaries, stdin, permissions, and GNU/BSD differences require decisions beyond generic test advice. |
-| README maintenance | Keep in `AGENTS.md`: the app documentation contract is already concise; a separate skill would largely duplicate it. |
-| Systematic debugging and code review | Keep as general user-level skills for now; add a local workflow if recurring repository-specific gaps appear. |
-| [GitHub CI repair](https://github.com/openai/skills/tree/main/skills/.curated/gh-fix-ci) | Optional now that a PR workflow exists: inspect failing GitHub Actions logs when local checks cannot reproduce a failure. The official skill has additional approval steps; review before adopting. |
-| [PR review comments](https://github.com/openai/skills/tree/main/skills/.curated/gh-address-comments) | Optional later: useful with recurring PR reviews; requires authenticated `gh` and selection of comments to address. Review its instructions before adopting. |
-| Benchmarks | Defer: repository guidance excludes new benchmark work from tests-and-documentation tasks. |
-
-The two external candidates were inspected at their original source. They have
-not been installed or copied into this repo. Generic Rust best-practice packs,
-deployment skills, and automatic release skills are not essential to this setup.
+explains the default template location. The delivery skill uses the local template;
+GitHub's UI discovers it after it reaches the default branch.

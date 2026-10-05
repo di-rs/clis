@@ -20,7 +20,7 @@ cargo run -p findr -- coreutils/bool -n '\.rs$'
 
 ## Differences and limits
 
-Reference: the separate [GNU find manual](https://www.gnu.org/software/findutils/manual/html_mono/find.html).
+Reference: the separate [GNU find manual](https://www.gnu.org/software/findutils/manual/).
 Names are regexes, not GNU `find -name` shell patterns. There is no general
 expression language, `-exec`, or deletion action. Traversal does not follow
 nested symlink directories; traversal errors are printed without causing failure.
