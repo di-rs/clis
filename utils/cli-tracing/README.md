@@ -135,7 +135,7 @@ cargo bench --locked -p cli-tracing --bench overhead -- --log-level=debug 2>/dev
 ```
 
 These measure repeated stage instrumentation; initialization is outside the
-sample. [Recorded evidence](overhead.md) also distinguishes startup measurements
+sample. [Local measurement summary](overhead.md) distinguishes startup measurements
 from stage overhead and lists what remains unmeasured.
 
 [Shared policy](../../docs/observability.md) ·
