@@ -1,4 +1,4 @@
-use ansi_term::Style;
+use ansiterm::Style;
 use chrono::{Datelike, Local, NaiveDate};
 
 mod month;

@@ -5,7 +5,13 @@
 [[repos]]
 repo = "builtin"
 hooks = [
-    { id = "check-added-large-files" },
+    # CI checks committed files, so the staging-only default would miss additions.
+    # This existing benchmark dataset is intentionally larger than 500 KiB.
+    {
+      id = "check-added-large-files",
+      args = ["--enforce-all"],
+      exclude = '^coreutils/tailr/benches/data/1M\.txt$',
+    },
 ]
 
 [[repos]]

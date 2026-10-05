@@ -9,7 +9,7 @@ clap = { workspace = true }
 exitcode = { workspace = true }
 tabular = "0.2.0"
 thiserror = { workspace = true }
-users = "0.11.0"
+uzers = "0.11.0"
 
 [dev-dependencies]
 assert_cmd = { workspace = true }

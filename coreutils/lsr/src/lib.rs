@@ -9,7 +9,7 @@ use tabular::{Row, Table};
 
 mod owner;
 use owner::Owner;
-use users::get_user_by_uid;
+use uzers::get_user_by_uid;
 
 /// # Errors
 /// Throws error is unable to read path
