@@ -14,24 +14,11 @@ The workspace uses nightly from `rust-toolchain.toml`, rustfmt, Clippy, and
 cargo-nextest. Check missing prerequisites and report unavailable verification;
 do not silently substitute a smaller suite or install tools as incidental work.
 
-Before editing, establish a baseline for the affected packages, then workspace
-checks. After editing, repeat the relevant checks against the final diff. For a
-single package such as `tailr`, use:
-
-```sh
-cargo build --locked -p tailr
-cargo nextest run --locked -p tailr
-cargo test --locked -p tailr --doc
-cargo clippy --locked -p tailr --all-targets --all-features
-cargo fmt --all -- --check
-cargo nextest run --locked --workspace --hide-progress-bar --failure-output final
-cargo clippy --locked --workspace --all-targets --all-features
-cargo test --locked --workspace --doc
-```
-
-Select the actual package instead of copying `tailr`; package doctests require a
-library target. For changes affecting
-multiple packages, check each affected package before the workspace suite.
+Before editing Rust, establish the affected-package baseline. After editing, follow
+the package-then-workspace commands in CONTRIBUTING against the final diff; that
+guide is the single source for the command list. Select actual packages and include
+consumers of shared changes. Package doctests require a library target. Build the
+affected binary or consumer example when relevant to the change.
 Inspect `git diff --check` and the final status too. Formatting checks must not
 rewrite unrelated Rust files. A passing package command supports a package claim;
 a green workspace claim requires the workspace commands to pass.
@@ -51,3 +38,5 @@ interactive behavior in a terminal; automated checks alone do not cover it.
 
 Deliver a concise result: affected checks, workspace checks, baseline failures,
 and anything unverified. A skipped or failed required check remains a limitation.
+For a requested standards assessment, use [clis-audit](../clis-audit/SKILL.md) to map
+evidence to requirements; successful execution alone is not a compliance verdict.

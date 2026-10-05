@@ -2,10 +2,10 @@
 
 [Project overview](../README.md) · [Compatibility](compatibility.md)
 
-The goal is to match or outperform GNU/BSD reference utilities on representative,
-semantically equivalent workloads. This is a measured target, not a promise that
-Rust, every utility, or every input will be faster. Keep raw evidence and report
-regressions and memory trade-offs as carefully as improvements.
+The [north star's P4](north-star.md#p4--correctness-checked-benchmarks) sets the target:
+beat references on declared priority workloads, with explicit acceptance of measured
+regressions. This guide owns the measurement procedure. Every port needs a recipe;
+adding the standard does not mean missing recipes or results already exist.
 
 ## Correctness gate before timing
 
@@ -13,7 +13,7 @@ Confirm matching stdout bytes, expected status, diagnostics, and relevant side
 effects for every benchmark case before measuring it. Both commands must do the
 same work under the same options, input, locale, environment, and output policy.
 A missing flag, dropped binary data, ignored error, or omitted filesystem work
-invalidates the comparison. Apply the selected GNU/BSD conflict policy explicitly.
+invalidates the comparison. Select cases from the utility's documented contract.
 
 Do not use blanket Hyperfine `-i`/`--ignore-failure`: it can make a failed command
 look fast. Commands such as `false` and grep-like no-match cases legitimately return
@@ -26,12 +26,15 @@ setup is explicitly the workload being measured.
 
 Build release binaries before invoking Hyperfine; do not time `cargo run` or debug
 builds. Compare the new Rust implementation with both the previous Rust revision
-and the relevant GNU/BSD reference executable. Use separate output directories or
+and GNU (or the explicitly selected non-GNU baseline). For adopted BSD-only features,
+compare equivalent behavior to that named BSD reference where applicable; do not
+pass an unsupported flag to GNU and time its failure. Use separate output directories or
 retained artifacts so a rebuild cannot silently overwrite the old baseline.
 Run comparisons on the same host; timings from different machines/OSes cannot be
 combined into an implementation speedup. Identify every executable explicitly.
 
-A useful suite covers the applicable dimensions below, not every cross-product:
+Declare priority workloads before measuring, with their user purpose and resource
+constraints. A useful suite covers the applicable dimensions below, not every cross-product:
 
 | Dimension | Representative cases |
 | --- | --- |
@@ -45,6 +48,12 @@ A useful suite covers the applicable dimensions below, not every cross-product:
 
 Generate deterministic data once with recorded parameters/checksums. Keep large
 inputs and raw local outputs outside tracked fixtures, for example under `target/`.
+Use [biggie](../biggie/README.md) for large alphanumeric text workloads when suitable.
+It currently has no seed option: generate once, record its revision/command, and
+retain the exact input plus checksum for all compared binaries and later reruns.
+Regenerating the same line count does not reproduce the same bytes. Use explicit
+small fixtures or a deterministic generator for binary, Unicode, long-record, and
+other shapes it does not produce. Adding seed support is separate implementation work.
 For `mkdir`, `touch`, and other mutating tools, reset the sandbox before each run;
 otherwise later runs may measure a cheaper operation. Do not use destructive cache
 clearing or privileged machine-wide changes without explicit authorization.
@@ -67,12 +76,12 @@ validation before using that runner as evidence.
 The following POSIX-shell recipe is a local example, not a recorded result. It
 requires Python 3 for deterministic fixture generation, Hyperfine, `cmp`, and a
 chosen reference `tail`. Run from the workspace root; set `REF_TAIL` to its absolute
-executable path and record the reference version or BSD OS release separately.
+GNU executable path and record its version separately.
 Use paths without embedded quotes or shell metacharacters in this shell recipe.
 
 ```sh
 set -eu
-: "${REF_TAIL:?Set REF_TAIL to an absolute GNU or BSD tail executable path}"
+: "${REF_TAIL:?Set REF_TAIL to an absolute GNU tail executable path}"
 export LC_ALL=C TZ=UTC
 cargo build --locked --release -p tailr
 out="$(pwd)/target/benchmarks/tailr"
@@ -118,9 +127,12 @@ not measure allocations or peak memory; collect those separately when claiming t
 
 ## Review gate
 
-For performance-sensitive changes, add/update relevant cases and compare before
-and after under the same setup. A claimed win requires correctness and repeatable
-improvement; report regressions in other cases and explain resource trade-offs.
+For behavior or performance-sensitive changes, add/update relevant cases and compare
+before and after under the same setup. A claimed win requires correctness and
+repeatable improvement. Record regressions against both the previous Rust revision
+and references, their impact, and the reviewer's explicit acceptance of the trade-off.
+Documentation of a regression alone is not acceptance. Unmeasured or inconclusive
+cases stay visible, and cannot support a performance-success claim.
 Do not add complicated fast paths for noise-level gains. A parity fix may cost
 more because it now performs required work; disclose that instead of hiding it.
 
@@ -130,3 +142,5 @@ regression budgets can be added after a stable baseline is established. They are
 not configured by this document. When tools/hardware/references are unavailable,
 report what remains unmeasured and provide the reproduction recipe; never fabricate
 numbers or claim performance verification from a successful build.
+Documentation-only standards work does not require running timings or manufacturing
+benchmark results; report unavailable measurement rather than expanding that scope.

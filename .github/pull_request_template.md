@@ -1,7 +1,7 @@
 ## Summary
 
 <!-- Describe the problem and resulting behavior. Link a related issue if there is one.
-For compatibility changes, name the GNU/BSD references and affected behavior.
+For compatibility changes, name the GNU baseline, selected BSD additions, and affected behavior.
 For API changes, describe how CLI and Rust callers share the implementation. -->
 
 ## Validation
@@ -18,5 +18,7 @@ benchmarks were not run. -->
 
 <!-- State material limitations, breaking changes, or follow-up work. Write "None"
 when there are none. Link updated compatibility records and documentation. Mark
-proposed behavior and future infrastructure as planned. Keep the description
+proposed behavior and future infrastructure as planned. For a utility migration or
+standards audit, link its U1–U8/P1–P4 evidence and explicit acceptance of performance
+regressions; existing gaps remain visible. Keep the description
 proportional to the change. -->

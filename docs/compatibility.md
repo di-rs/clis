@@ -1,27 +1,32 @@
-# GNU and BSD compatibility
+# Compatibility and reference evidence
 
 [Project overview](../README.md) · [Architecture](architecture.md)
 
-The target is the combined GNU/BSD feature surface of the existing utilities,
-including semantics, not merely acceptance of short and long flags. Current
-implementations remain partial. This policy does not certify any utility or add
-new flags, compatibility modes, or supported platforms.
+The [north star](north-star.md#additional-requirements-for-ports) defines the policy:
+GNU is the baseline; named BSD implementations supply candidates for useful additions.
+This guide explains how to investigate behavior and build evidence for that contract.
+Current implementations remain partial.
 
 ## Name the references
 
-GNU and BSD are families, not interchangeable executables. Each utility's first
-compatibility audit must record exact targets: GNU program/package version and
-named BSD implementation plus OS release or source revision. macOS, FreeBSD,
-OpenBSD, and NetBSD results are separate evidence, not substitutes for one another.
-Expand the named target set deliberately; do not claim all BSD variants from one
-macOS run. Record executable paths so shell builtins, aliases, BusyBox, or uutils
-cannot silently replace the intended reference.
+Record the GNU program/package release and executable path. Use its versioned
+manual and observed behavior together; a rolling online manual may describe a newer
+release. Record build/platform differences and refresh the inventory deliberately
+when upgrading the reference. Shell builtins, aliases, BusyBox, uutils, or macOS's
+bundled command must not silently replace the chosen GNU executable.
+
+For BSD feature research, record each named implementation and OS release/source
+revision. macOS, FreeBSD, OpenBSD, and NetBSD observations are distinct. A manual-only
+review can identify a candidate; executable validation is still needed for an adopted
+behavior claim. Review relevant named implementations without requiring every BSD
+variant or installing another OS merely to complete an initial exploration.
 
 Use the appropriate upstream family: GNU Coreutils for its commands, GNU Grep for
-`grep`, GNU Findutils for `find`, and util-linux or named BSD implementations for
-`cal`. `biggie`, `parsu`, and `kara` have no direct GNU/BSD counterpart: document
+`grep`, GNU Findutils for `find`, and an explicitly selected reference for `cal`
+(currently util-linux in `calr`'s README). `biggie`, `parsu`, and `kara` have no direct
+GNU/BSD counterpart: document
 their own contracts and meaningful baselines instead of inventing parity claims.
-POSIX is useful common ground, not a substitute for GNU/BSD extension coverage.
+POSIX is useful context, not a replacement for the chosen command's contract.
 
 ## Resolve incompatible meanings explicitly
 
@@ -31,14 +36,18 @@ example, GNU `ls -G` suppresses the group column in long output, whereas FreeBSD
 [GNU manual, `-G`](https://www.gnu.org/software/coreutils/manual/coreutils.html#ls-G)
 and [FreeBSD manual](https://man.freebsd.org/cgi/man.cgi?query=ls&sektion=1).
 
-For each conflict, record both meanings, affected combinations, the chosen default,
-and how the other behavior will be exposed. An explicit compatibility policy or
-unambiguous option may be appropriate; no global mechanism is selected by this
-policy. Preserve the current default until a reviewed per-utility decision changes
-it. Do not silently switch semantics at compile time based on the host OS, infer
-GNU behavior from Linux alone, or document an unimplemented `--compat` flag.
-Library options should express the resolved operation, with an explicit policy
-value only where execution genuinely depends on it.
+Keep GNU's meaning for the GNU spelling. For a useful BSD addition, record its
+benefit, both meanings, affected combinations, and the proposed unambiguous interface
+in the app README. Ask the user to resolve unsettled product choices before adding
+it; a deferred or declined candidate is a valid review outcome. Do not introduce a
+global compatibility mode or switch meanings by host OS. Library options express
+the resolved operation rather than the conflicting spellings.
+
+When today's Rust default differs from GNU, record it as a migration gap. Change it
+through a scoped, documented behavior fix with regression evidence; a documentation
+edit does not silently change existing code or tests. GNU semantics are the target
+on both Linux and macOS. OS-dependent capabilities and diagnostics need explicit
+platform cases and limitations, not substitution of native BSD semantics.
 
 ## Per-utility compatibility record
 
@@ -54,15 +63,14 @@ Each behavior row must record:
 | Feature | Flag spellings, operands, default behavior, or an interaction. |
 | References | Manual sections and exact GNU/BSD versions or OS releases. |
 | Expected semantics | Meaning, precedence, output, errors, and side effects. |
-| Current status | `verified`, `partial`, `missing`, `divergent`, or `not audited`, separately for each target. |
+| Current status | A [north-star evidence status](north-star.md#evidence-and-adoption), separately for each relevant platform/reference. |
 | Evidence | Test names/fixtures and reference-capture provenance. |
 | Resolution | Remaining limitation, intentional difference, or follow-up decision. |
 
-`verified` means tested against the named reference for the stated cases, not
-proof of every input. `partial` means some required cases are missing; `divergent`
-means a known difference, which still needs explanation. `not audited` is unknown,
-not a pass or an automatic failure. Do not publish percentage coverage without a
-defined inventory/denominator and treatment of interactions and platform limits.
+Use the [utility template](templates/utility.md) for the record and a separate BSD
+candidate/decision table. Adopted additions join the required inventory; merely
+reviewed candidates do not. Do not publish percentage coverage without a defined
+inventory/denominator and treatment of interactions and platform limits.
 
 ## What must match
 
@@ -80,9 +88,9 @@ permissions, ownership where available, symlinks, timestamps, and partial effect
 Do not apply one generic exit-code or broken-pipe rule to every command without
 reference evidence. Preserve useful domain outcomes so adapters can map them.
 
-Include empty inputs, no final newline, CRLF, NUL bytes, invalid UTF-8, long records,
-non-UTF-8 paths, Unicode and locale boundaries, and overflow/underflow where
-relevant. Use byte-based comparisons for byte-based contracts. Test locale-sensitive
+Apply U4's [text and formatting matrix](north-star.md#u4--text-bytes-and-formatting),
+plus empty/long records and numeric overflow/underflow where relevant.
+Use byte-based comparisons for byte-based contracts. Test locale-sensitive
 behavior separately rather than making every test pass by forcing the C locale.
 Filesystem support is an implementation capability, not just a parsing decision.
 
@@ -95,9 +103,27 @@ and timestamps except when those are the behavior under test. Avoid privileged
 or host-mutating tests; make permission tests explicit about root-user limitations.
 
 Convert confirmed behavior into small hermetic Rust tests and reviewed fixtures.
-Tests must normally run without installed reference tools or Nushell. Use the
-existing `mk-outs.nu` scripts only for explicit regeneration; record provenance
-and inspect differences instead of accepting generated output blindly.
+For each port, provide a package-root `mk-outs.nu` (the repository's existing plural
+name). Its README documents the exact invocation, required Nushell version, and
+explicit reference executable selection. Require a recognizable implementation/
+version or explicit recorded identity; fail on a missing/wrong reference instead
+of falling back to PATH. Existing scripts need migration to this contract.
+
+Keep reusable inputs in `tests/inputs/` and captured results in `tests/expected/`.
+Use stable case IDs and a human-readable manifest, such as
+`tests/expected/README.md`, mapping every case to:
+
+- Reference identity, capture date/platform, command/argv, cwd and environment.
+- Input files/stdin and relevant initial filesystem state.
+- Exact stdout/stderr files, expected exit status, and resulting filesystem state.
+- Any narrowly justified normalization and remaining limitations.
+
+The script creates a disposable sandbox, captures expected nonzero statuses without
+masking unexpected failures, and leaves the checkout's input fixtures untouched.
+Use timeouts for commands that can wait/follow. Review regenerated diffs before
+adopting them; preserve raw capture evidence when normalization is necessary.
+Keep platform-specific expectations separate where the contract requires them.
+Ordinary tests consume the checked-in small fixtures without references or Nushell.
 Do not copy incompatible upstream source/tests into this MIT workspace.
 
 Direct library tests verify domain semantics; CLI tests verify the whole process
@@ -109,8 +135,11 @@ output in ways that hide a real compatibility defect.
 Live differential testing is a separate opt-in workflow, not an implemented shared
 harness today. A future harness should use explicit executable paths, safe temporary
 directories, timeouts for hanging/follow cases, and reproducible case metadata.
-Linux/GNU, macOS-native, and any claimed BSD OS need their own validation environments;
-missing references are reported as unavailable, never replaced by a different tool.
+Validate the Rust command on Linux and macOS with actual GNU references where
+available. Linux containers can provide GNU discovery evidence, not native macOS
+validation or comparable cross-host timings. An adopted BSD-only feature needs its
+own reference evidence; the research host need not become a supported Rust platform.
+Missing references stay unavailable, never replaced by a different tool.
 
 ## Completing a compatibility change
 

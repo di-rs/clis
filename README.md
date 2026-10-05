@@ -1,13 +1,13 @@
 # clis
 
 A Rust workspace building Unix-style commands and reusable libraries. The priority
-is to evolve the existing utilities toward GNU and BSD feature parity, then beat
-reference performance on measured workloads, while keeping the code readable,
+is to evolve existing utilities toward GNU parity with selected useful BSD additions,
+then beat reference performance on measured workloads, while keeping code readable,
 maintainable, and reusable by future Rust projects.
 
 **Current status:** these are partial implementations, not drop-in replacements.
-Library APIs exist in several packages but are not yet uniform. The [project goals](docs/project-goals.md)
-are a development contract, not a claim of complete compatibility, stable APIs,
+Library APIs exist in several packages but are not yet uniform. The [north star](docs/north-star.md)
+is a development contract, not a claim of complete compatibility, stable APIs,
 or demonstrated performance superiority. App READMEs describe current capabilities
 and limitations.
 
@@ -39,8 +39,8 @@ Reference manuals are linked from each app README. `grep`, `find`, and `cal` are
 not part of GNU Coreutils, regardless of their location in this repository.
 
 The table retains the existing reference mapping; it is not a compatibility
-scorecard. Named BSD targets and verified versions belong in each utility's
-compatibility record. `biggie`, `parsu`, and `kara` have no direct GNU/BSD counterpart,
+scorecard. GNU versions and BSD feature-review decisions belong in each utility's
+contract. `biggie`, `parsu`, and `kara` have no direct GNU/BSD counterpart,
 but the same library-reuse and code-quality goals apply to their useful operations.
 
 ## Development
@@ -49,7 +49,7 @@ Use Rust nightly, selected by [rust-toolchain.toml](rust-toolchain.toml), with
 `rustfmt` and `clippy`. The toolchain currently floats rather than pinning a date;
 record `rustc -Vv` when reproducing a result. Install
 [cargo-nextest](https://nexte.st/docs/installation/pre-built-binaries/) for the test commands below.
-Some code and tests use Unix-specific APIs; do not assume Windows support.
+Linux and macOS are the runtime targets; per-utility validation is still incremental.
 Kara requires an interactive terminal.
 
 Install [prek](https://prek.j178.dev/installation/) and enable the Git hook once
@@ -91,15 +91,17 @@ adapters, not in reusable domain operations.
 
 | Guide | Purpose |
 | --- | --- |
-| [Project goals and library use](docs/project-goals.md) | Priorities, evidence requirements, and a runnable Rust consumer example. |
+| [North star](docs/north-star.md) | Universal standards, port requirements, and evidence statuses. |
+| [Utility template](docs/templates/utility.md) | A reusable app contract with flags, limits, and audit evidence. |
 | [AGENTS.md](AGENTS.md) | Mandatory repository guidance for coding agents. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Change workflow, checks, and review requirements. |
-| [Architecture](docs/architecture.md) | Library/CLI boundaries and responsible sharing. |
-| [Compatibility](docs/compatibility.md) | GNU/BSD targets, conflicts, and test evidence. |
+| [Architecture](docs/architecture.md) | Library/CLI boundaries, sharing, and a Rust consumer example. |
+| [Compatibility](docs/compatibility.md) | GNU references, BSD additions, and fixture capture. |
 | [Benchmarking](docs/benchmarking.md) | Fair comparisons and performance acceptance. |
 
-Repository [agent skills](docs/agent-skills.md) cover Git delivery, verification,
-and CLI regression testing. Every PR uses the [shared template](.github/pull_request_template.md).
+Repository [agent skills](docs/agent-skills.md) cover exploration, standards audits,
+regression testing, verification, and Git delivery. Every PR uses the
+[shared template](.github/pull_request_template.md).
 
 See [LICENSE](LICENSE) for the MIT license. Retain existing tutorial and other
 attribution in individual packages when extending their implementations.

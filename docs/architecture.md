@@ -2,8 +2,9 @@
 
 [Project overview](../README.md) · [Contributing](../CONTRIBUTING.md)
 
-This is the target architecture for incremental changes, not a claim that every
-package already follows it. Every command's useful domain operation must become
+This guide explains the boundaries required by [U1 and U8](north-star.md#every-utility).
+It is a migration target, not a claim that every package already follows it.
+Every command's useful domain operation must become
 available to Rust consumers without invoking a subprocess or initializing a CLI.
 This includes custom apps; Kara's terminal frontend is separate from reusable
 editing operations. Do not refactor Kara as a side effect of unrelated utility work.
@@ -18,7 +19,7 @@ Rust caller --------------------> typed options -> library operation
 ```
 
 The dependency direction is inward. Domain libraries do not depend on a CLI
-adapter. CLI spelling and GNU/BSD option precedence are normalized before execution;
+adapter. CLI spelling and reference option precedence are normalized before execution;
 semantic invariants must also be enforced for direct library callers.
 
 A growing utility normally uses this layout:
@@ -34,11 +35,7 @@ A growing utility normally uses this layout:
     options.rs       # domain configuration, when it merits its own module
     error.rs         # typed errors, when more than io::Error is needed
     <operation>.rs   # focused implementation modules, when needed
-  tests/
-    cli.rs           # external behavior and process contract
-    library.rs       # direct public API tests, when useful
-    inputs/
-    expected/
+  tests/             # follow CONTRIBUTING's shared test conventions
   benches/           # CLI benchmark recipe and/or registered library benchmarks
 ```
 
@@ -106,7 +103,7 @@ operations when required, not as mandatory infrastructure for every utility.
 ## Sharing across utilities
 
 Share mechanisms whose contracts really match: for example, a byte-record reader,
-a tested numeric parser, or a filesystem primitive. Keep different GNU/BSD rules,
+a tested numeric parser, or a filesystem primitive. Keep utility-specific rules,
 defaults, option interactions, and exit policies local unless they are explicitly
 modeled and tested. The same flag spelling is not proof of shared semantics.
 
@@ -121,7 +118,8 @@ pinning the same dependencies in each package. Workspace declarations do not tak
 effect in a member without explicit inheritance; see the
 [Cargo workspace reference](https://doc.rust-lang.org/cargo/reference/workspaces.html).
 Do not broaden features or add heavyweight dependencies just to make interfaces look
-uniform. If library consumers need to avoid CLI-only dependencies, introduce and
+uniform. Use `[lints] workspace = true` where applicable; avoid blanket lint
+suppression, unchecked failure paths, and unjustified `unsafe`. If library consumers need to avoid CLI-only dependencies, introduce and
 test an optional CLI feature or separate adapter crate in that scoped change;
 no such feature is assumed to exist today.
 
@@ -142,8 +140,39 @@ not just feature additions.
 Current starting points include [catr's reader/writer API](../coreutils/catr/src/lib.rs)
 and [tailr's stream/seek APIs](../coreutils/tailr/src/lib.rs). They illustrate useful
 boundaries, not complete compatibility or a requirement to preserve every existing
-name. The [library example](project-goals.md#using-a-utility-as-a-library) shows the current
-`catr` API rather than a proposed interface.
+name. The consumer example below uses the current `catr` API.
+
+## Using a utility as a library
+
+The target for every app is a reusable operation behind the CLI, not a wrapper
+that launches a subprocess. Existing APIs vary; inspect the package's `src/lib.rs`
+and README before depending on it. For example, `catr` already accepts explicit
+readers, writers, and options:
+
+```rust
+fn main() -> std::io::Result<()> {
+    let options = catr::Flags {
+        number_lines: true,
+        number_nonblank_lines: false,
+        squeeze_blank: false,
+    };
+    let mut output = Vec::new();
+    catr::write_lines(&b"alpha\nbeta\n"[..], &mut output, &options)?;
+    assert_eq!(output, b"     1\talpha\n     2\tbeta\n");
+    Ok(())
+}
+```
+
+This example belongs in a consumer crate with a dependency on the local `catr`
+package. For a consumer beside this checkout, its `Cargo.toml` can use:
+
+```toml
+[dependencies]
+catr = { path = "../clis/coreutils/catr" }
+```
+
+The example demonstrates the existing UTF-8-oriented API, not full `cat` parity.
+Use the boundaries above when evolving this API for byte handling and full parity.
 
 ## Design references
 
