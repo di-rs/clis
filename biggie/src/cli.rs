@@ -3,7 +3,6 @@ use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
-/// Generate big text files
 pub struct Cli {
     /// Output filename
     #[arg(value_name = "FILE", default_value = "out.txt")]

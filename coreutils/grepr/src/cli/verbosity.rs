@@ -31,15 +31,10 @@ pub struct Verbosity<L: LogLevel = ErrorLevel> {
     phantom: std::marker::PhantomData<L>,
 }
 
-#[allow(
-    clippy::cast_lossless,
-    clippy::as_conversions,
-    clippy::arithmetic_side_effects
-)]
 impl<L: LogLevel> Verbosity<L> {
     /// Gets the filter that should be applied to the logger.
     pub fn filter(&self) -> VerbosityFilter {
-        let offset = self.verbose as i16 - self.quiet as i16;
+        let offset = i16::from(self.verbose).saturating_sub(i16::from(self.quiet));
         with_offset(L::default_filter(), offset)
     }
 }

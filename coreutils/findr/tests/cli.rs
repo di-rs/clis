@@ -232,7 +232,10 @@ fn path_g() -> Result<()> {
 
 #[test]
 #[cfg(not(windows))]
-#[allow(clippy::panic_in_result_fn)]
+#[allow(
+    clippy::panic_in_result_fn,
+    reason = "Assertions fail the test; Result propagates fixture I/O errors."
+)]
 fn unreadable_dir() -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
 

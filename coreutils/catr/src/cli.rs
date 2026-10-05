@@ -3,7 +3,10 @@ use thiserror::Error;
 
 use catr::Flags;
 
-#[allow(clippy::struct_excessive_bools)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "Clap models independent command-line switches as booleans."
+)]
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
 /// Rust minimal version of `cat`

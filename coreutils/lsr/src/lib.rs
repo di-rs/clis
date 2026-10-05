@@ -43,7 +43,10 @@ pub fn find_files(paths: &[PathBuf], show_hidden: bool) -> Result<Vec<PathBuf>, 
 /// # Errors
 /// Throws error is unable to read path
 pub fn get_formatted_output(paths: &[PathBuf]) -> Result<impl Display, std::io::Error> {
-    #[allow(clippy::literal_string_with_formatting_args)]
+    #[allow(
+        clippy::literal_string_with_formatting_args,
+        reason = "This is a tabular format string, interpreted by Table::new."
+    )]
     let fmt = "{:<}{:<}  {:>}  {:<}  {:<}  {:>}  {:<}  {:<}";
     let mut table = Table::new(fmt);
 

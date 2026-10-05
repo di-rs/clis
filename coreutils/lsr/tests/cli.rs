@@ -73,7 +73,6 @@ fn run_short(arg: &str) {
         .stdout(format!("{arg}\n"));
 }
 
-#[allow(clippy::unwrap_used)]
 fn run_long(filename: &str, permissions: &str, size: &str) -> Result<()> {
     let dir = fixture_tree()?;
     let cmd = cargo_bin_cmd!()
@@ -84,9 +83,9 @@ fn run_long(filename: &str, permissions: &str, size: &str) -> Result<()> {
         .stderr("");
     let stdout = String::from_utf8(cmd.get_output().stdout.clone())?;
     let parts: Vec<_> = stdout.split_whitespace().collect();
-    assert_eq!(parts.first().unwrap(), &permissions);
-    assert_eq!(parts.get(4).unwrap(), &size);
-    assert_eq!(parts.last().unwrap(), &filename);
+    assert_eq!(parts.first().copied(), Some(permissions));
+    assert_eq!(parts.get(4).copied(), Some(size));
+    assert_eq!(parts.last().copied(), Some(filename));
     Ok(())
 }
 
@@ -181,7 +180,6 @@ fn dir2_all() -> Result<()> {
     )
 }
 
-#[allow(suspicious_double_ref_op, clippy::unwrap_used)]
 fn dir_long(args: &[&str], expected: &[(&str, &str, &str)]) -> Result<()> {
     let dir = fixture_tree()?;
     let cmd = cargo_bin_cmd!()
@@ -197,11 +195,14 @@ fn dir_long(args: &[&str], expected: &[(&str, &str, &str)]) -> Result<()> {
     let mut check = vec![];
     for line in lines {
         let parts: Vec<&str> = line.split_whitespace().collect();
-        let path = parts.last().unwrap().clone();
-        let permissions = parts.first().unwrap().clone();
+        let path = parts.last().copied().ok_or("missing path in listing")?;
+        let permissions = parts
+            .first()
+            .copied()
+            .ok_or("missing permissions in listing")?;
         let size = match permissions.chars().next() {
             Some('d') => "",
-            _ => parts.get(4).unwrap().clone(),
+            _ => parts.get(4).copied().ok_or("missing size in listing")?,
         };
         check.push((path, permissions, size));
     }

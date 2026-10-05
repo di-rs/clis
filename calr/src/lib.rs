@@ -16,24 +16,12 @@ impl CalendarDate {
         Self { year, month, today }
     }
 
-    #[allow(clippy::unwrap_used)]
+    #[allow(
+        clippy::unwrap_used,
+        reason = "The infallible calendar API requires a valid Chrono year and a month in 1..=12."
+    )]
     const fn first_day(&self) -> NaiveDate {
         NaiveDate::from_ymd_opt(self.year, self.month.inner(), 1).unwrap()
-    }
-
-    #[allow(clippy::unwrap_used)]
-    const fn last_day_in_month(&self) -> NaiveDate {
-        let month = self.month.inner();
-        let (y, m) = if month == 12 {
-            (self.year.saturating_add(1), 1)
-        } else {
-            (self.year, month.saturating_add(1))
-        };
-
-        NaiveDate::from_ymd_opt(y, m, 1)
-            .unwrap()
-            .pred_opt()
-            .unwrap()
     }
 
     fn is_today(&self, day: u32) -> bool {
@@ -50,6 +38,10 @@ pub fn get_today() -> NaiveDate {
 
 const LINE_WIDTH: usize = 22;
 
+/// Format a month using a year representable by Chrono and a month in 1–12.
+///
+/// # Panics
+/// Panics if the calendar's year or month cannot form a valid Chrono date.
 #[must_use]
 pub fn format_month(date: &CalendarDate, print_year: bool) -> Vec<String> {
     let first = date.first_day();
@@ -57,15 +49,16 @@ pub fn format_month(date: &CalendarDate, print_year: bool) -> Vec<String> {
         .map(|_| "  ".to_string())
         .collect();
 
-    let last = date.last_day_in_month();
-    days.extend((first.day()..=last.day()).map(|num| {
-        let fmt = format!("{num:>2}");
-        if date.is_today(num) {
-            Style::new().reverse().paint(fmt).to_string()
-        } else {
-            fmt
-        }
-    }));
+    days.extend(
+        (first.day()..=u32::from(first.num_days_in_month())).map(|num| {
+            let fmt = format!("{num:>2}");
+            if date.is_today(num) {
+                Style::new().reverse().paint(fmt).to_string()
+            } else {
+                fmt
+            }
+        }),
+    );
 
     let mut lines = Vec::new();
 
@@ -103,9 +96,19 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     #[test]
-    #[allow(clippy::unwrap_used)]
-    fn format_month_leap_year() {
-        let today = NaiveDate::from_ymd_opt(0, 1, 1).unwrap();
+    fn format_month_at_maximum_chrono_year() {
+        let date = CalendarDate::new(NaiveDate::MAX.year(), Month::new(12), NaiveDate::MIN);
+        let lines = format_month(&date, true);
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.split_whitespace().any(|day| day == "31"))
+        );
+    }
+
+    #[test]
+    fn format_month_leap_year() -> Result<(), Box<dyn std::error::Error>> {
+        let today = NaiveDate::from_ymd_opt(0, 1, 1).ok_or("invalid fixture date")?;
         let date = CalendarDate::new(2020, Month::new(2), today);
 
         let leap_february = [
@@ -121,12 +124,12 @@ mod tests {
 
         let buf = format_month(&date, true);
         assert_eq!(buf.join("\n"), leap_february.join("\n"));
+        Ok(())
     }
 
     #[test]
-    #[allow(clippy::unwrap_used)]
-    fn test_format_month_selected_day() {
-        let today = NaiveDate::from_ymd_opt(2021, 4, 7).unwrap();
+    fn test_format_month_selected_day() -> Result<(), Box<dyn std::error::Error>> {
+        let today = NaiveDate::from_ymd_opt(2021, 4, 7).ok_or("invalid fixture date")?;
         let date = CalendarDate::new(2021, Month::new(4), today);
 
         let april_hl = [
@@ -142,5 +145,6 @@ mod tests {
 
         let buf = format_month(&date, true);
         assert_eq!(buf.join("\n"), april_hl.join("\n"));
+        Ok(())
     }
 }

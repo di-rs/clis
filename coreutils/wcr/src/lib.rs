@@ -1,6 +1,9 @@
 use std::io::BufRead;
 
-#[allow(clippy::struct_field_names)]
+#[allow(
+    clippy::struct_field_names,
+    reason = "Keep the existing public count-field names for library consumers."
+)]
 #[derive(Debug, PartialEq, Eq, Default)]
 pub struct FileInfo {
     pub num_lines: usize,

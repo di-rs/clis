@@ -46,7 +46,6 @@ pub fn find_files(paths: &[PathBuf], recursive: bool) -> Vec<Result<PathBuf, Par
     res
 }
 
-#[allow(clippy::redundant_closure_for_method_calls)]
 fn walk_dir_tree(dir: &PathBuf) -> Vec<Result<PathBuf, ParseError>> {
     WalkDir::new(dir)
         .into_iter()
@@ -54,7 +53,7 @@ fn walk_dir_tree(dir: &PathBuf) -> Vec<Result<PathBuf, ParseError>> {
         .filter(|entry| !entry.as_ref().is_ok_and(|e| e.file_type().is_dir()))
         .map(|entry| {
             entry
-                .map(|e| e.into_path())
+                .map(walkdir::DirEntry::into_path)
                 .map_err(ParseError::WalkDirError)
         })
         .collect()
@@ -124,11 +123,6 @@ where
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::indexing_slicing,
-    clippy::panic_in_result_fn
-)]
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
@@ -136,46 +130,47 @@ mod tests {
     use std::{error::Error, io::Cursor};
 
     #[test]
-    fn find_files_one_file() {
+    fn find_files_one_file() -> Result<(), Box<dyn Error>> {
         let files = find_files(&["./tests/inputs/fox.txt".into()], false);
-        assert_eq!(files.len(), 1);
-        assert_eq!(files[0].as_ref().unwrap(), "./tests/inputs/fox.txt");
+        let files = files.into_iter().collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(files, vec![PathBuf::from("./tests/inputs/fox.txt")]);
+        Ok(())
     }
 
     #[test]
     fn find_files_non_recursive_directory() {
         let files = find_files(&["./tests/inputs".into()], false);
-        assert_eq!(files.len(), 1);
-        assert_eq!(
-            files[0].as_ref().unwrap_err().to_string(),
-            "./tests/inputs is a directory"
-        );
+        assert!(matches!(files.as_slice(), [Err(error)]
+            if error.to_string() == "./tests/inputs is a directory"));
     }
 
     #[test]
-    fn find_files_in_directory() {
+    fn find_files_in_directory() -> Result<(), Box<dyn Error>> {
         let files = find_files(&["./tests/inputs".into()], true);
-        let mut files: Vec<_> = files.iter().map(|f| f.as_ref().unwrap()).collect();
+        let mut files = files.into_iter().collect::<Result<Vec<_>, _>>()?;
         files.sort();
 
         assert_eq!(files.len(), 4);
         assert_eq!(
             files,
             vec![
-                "./tests/inputs/bustle.txt",
-                "./tests/inputs/empty.txt",
-                "./tests/inputs/fox.txt",
-                "./tests/inputs/nobody.txt",
+                PathBuf::from("./tests/inputs/bustle.txt"),
+                PathBuf::from("./tests/inputs/empty.txt"),
+                PathBuf::from("./tests/inputs/fox.txt"),
+                PathBuf::from("./tests/inputs/nobody.txt"),
             ]
         );
+        Ok(())
     }
 
     #[test]
     fn find_files_bad_file() {
         let files = find_files(&["./tests/file/doesnt/exists".into()], true);
 
-        assert_eq!(files.len(), 1);
-        assert!(files[0].is_err());
+        assert!(
+            matches!(files.as_slice(), [Err(ParseError::PathNotExists(path))]
+            if path == "./tests/file/doesnt/exists")
+        );
     }
 
     #[test]
@@ -194,12 +189,13 @@ mod tests {
     fn find_another_match() -> Result<(), Box<dyn Error>> {
         let mut result = Vec::new();
         let text = b"Lorem\nIpsum\r\nDOLOR";
-        #[allow(clippy::trivial_regex)]
+        #[allow(
+            clippy::trivial_regex,
+            reason = "Exercise the Regex-based search API with a literal pattern."
+        )]
         let pattern = Regex::new("or")?;
 
-        let matches = find_matches(Cursor::new(&text), &mut result, &pattern, false);
-
-        assert!(matches.is_ok());
+        find_matches(Cursor::new(&text), &mut result, &pattern, false)?;
         assert_eq!(result, b"Lorem\n");
         Ok(())
     }
@@ -208,12 +204,13 @@ mod tests {
     fn find_another_match_inverted() -> Result<(), Box<dyn Error>> {
         let mut result = Vec::new();
         let text = b"Lorem\nIpsum\r\nDOLOR";
-        #[allow(clippy::trivial_regex)]
+        #[allow(
+            clippy::trivial_regex,
+            reason = "Exercise the Regex-based search API with a literal pattern."
+        )]
         let pattern = Regex::new("or")?;
 
-        let matches = find_matches(Cursor::new(&text), &mut result, &pattern, true);
-
-        assert!(matches.is_ok());
+        find_matches(Cursor::new(&text), &mut result, &pattern, true)?;
         assert_eq!(result, b"Ipsum\r\nDOLOR");
         Ok(())
     }
@@ -222,12 +219,13 @@ mod tests {
     fn find_math_case_insensitive() -> Result<(), Box<dyn Error>> {
         let mut result = Vec::new();
         let text = b"Lorem\nIpsum\r\nDOLOR";
-        #[allow(clippy::trivial_regex)]
+        #[allow(
+            clippy::trivial_regex,
+            reason = "Exercise the Regex-based search API with a case-insensitive literal pattern."
+        )]
         let pattern = RegexBuilder::new("or").case_insensitive(true).build()?;
 
-        let matches = find_matches(Cursor::new(&text), &mut result, &pattern, false);
-
-        assert!(matches.is_ok());
+        find_matches(Cursor::new(&text), &mut result, &pattern, false)?;
         assert_eq!(result, b"Lorem\nDOLOR");
         Ok(())
     }

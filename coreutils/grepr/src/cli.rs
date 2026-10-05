@@ -10,7 +10,10 @@ mod writer;
 pub use reader::get_reader;
 pub use writer::get_writer;
 
-#[allow(clippy::struct_excessive_bools)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "Clap models independent command-line switches as booleans."
+)]
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 /// Rust minimal `grep` implementation
