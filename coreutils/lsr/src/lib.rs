@@ -17,12 +17,15 @@ pub fn find_files(paths: &[PathBuf], show_hidden: bool) -> Result<Vec<PathBuf>, 
     let mut results = Vec::new();
 
     for path in paths {
-        if !path.exists() {
-            eprintln!("{}: {}", path.display(), std::io::Error::last_os_error());
-            continue;
-        }
+        let metadata = match path.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                eprintln!("{}: {error}", path.display());
+                continue;
+            }
+        };
 
-        if path.is_dir() {
+        if metadata.is_dir() {
             for entry in fs::read_dir(path)? {
                 let entry = entry?;
                 let path = entry.path();
