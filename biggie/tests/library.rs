@@ -86,10 +86,13 @@ fn partial_write_preserves_bytes_and_does_not_report_completed_generation()
     assert!(
         records
             .iter()
-            .any(|record| record.get("stage") == Some(&serde_json::json!("generate")))
+            .any(|record| record["target"] == "clis::timing"
+                && record["span"]["name"] == "generate"
+                && record["fields"]["message"] == "close")
     );
     for record in records {
         assert!(record.pointer("/fields/lines_written").is_none());
+        assert!(record.pointer("/span/lines_written").is_none());
         assert_ne!(
             record.pointer("/fields/message"),
             Some(&serde_json::json!("generation complete"))

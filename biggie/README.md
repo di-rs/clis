@@ -39,7 +39,8 @@ The completion message goes to stdout. Diagnostics and timing summaries go to st
 or the new log file; data stays in `FILE`. An output path aliasing the new log file
 is rejected before truncation. Successful generation emits an info event; debug
 records the requested count, trace completion. Timings include `generate` with
-requested/completed counts and `flush`. There are no per-line or input-content logs.
+requested/completed counts and `flush`, using built-in span-close records with
+timestamps and busy/idle duration strings. There are no per-line or input-content logs.
 Errors always go to stderr. CLI parsing errors exit 2; operation, diagnostic setup,
 write or flush errors exit 1. Success exits 0 after explicit data/diagnostic flushing.
 An error can leave a partial data file or a newly created diagnostic file.

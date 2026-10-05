@@ -198,20 +198,26 @@ The application must reject aliases between its data file and diagnostic file
 before opening data for truncation. `with_writer` leaves destination policy to
 the caller.
 
-Events use tracing-subscriber's text/JSON formatter with event fields and ordinary
-span context. There are no clock timestamps or ANSI styles. Only spans targeted
-at `clis::timing` produce stage summaries; ordinary spans do not. Timing spans are
-collected separately from event context, independent of the event severity level.
+Events and stage records use tracing-subscriber's built-in text/JSON formatter,
+including its default timestamps and span context. ANSI styling stays disabled.
+Only spans targeted at `clis::timing` produce close records; ordinary spans do not.
+Timing spans are collected separately from event context, independent of the
+event severity level.
 
-| Format | Stage record |
-| --- | --- |
-| Text | `TIMING stage=scan elapsed_ms=1.250` followed by recorded fields |
-| JSON | `{"kind":"timing","stage":"scan","elapsed_ms":1.25,"fields":{"records":3}}` |
+Stage records use [`FmtSpan::CLOSE`](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/struct.Layer.html#method.with_span_events).
+In JSON, `target` is `clis::timing`, `fields.message` is `close`, and `span` contains
+the stage name and recorded counts. `fields["time.busy"]` and
+`fields["time.idle"]` are duration strings with units, such as `12.3µs` or `1.00ms`.
+Text uses the same built-in formatter with `close`, `time.busy`, and `time.idle`.
+The format belongs to tracing-subscriber; this crate defines no separate timing
+record schema. Check consumers when upgrading the formatter dependency.
 
-Durations cover span creation to final close, including waiting; they are not CPU
-time and overlapping spans cannot be summed as total runtime. Fields can be
-updated before close. Counts come from the domain; an absent count does not mean
-zero. Disabled timing spans have no timer or retained fields under this subscriber.
+Busy time covers periods when a span is entered; idle time covers the rest of its
+lifetime. Waiting while a span is entered counts as busy, so neither value is CPU
+time. Nested/overlapping spans cannot be summed as total runtime. The final clone
+must close before the record appears. Counts come from the domain and can be
+updated before close; an absent count does not mean zero. Disabled timing spans
+have no timer or retained fields under this subscriber.
 
 Always close spans, stop/join workers, and call `finish()`, including when the
 operation failed. `finish()` flushes the sink and returns the first write/flush
@@ -236,12 +242,12 @@ packages would not remove their shared sink and lifecycle requirements.
 | `config` | Typed settings, strict parsing, injected environment, explicit precedence |
 | `session` | Construct filtered event/timing layers and expose an owned dispatch |
 | `sink` | Serialize records and retain failures that formatter callbacks cannot return |
-| `timing` | Collect final span fields and numeric elapsed milliseconds in the stage schema |
 
-Formatting ordinary events, dispatch, spans, and filtering use upstream `tracing`
-and `tracing-subscriber`. The custom timing layer exists for the elapsed-duration
-schema above. Tracing-subscriber's built-in span-close records are an alternative,
-but report busy/idle duration strings and have a different JSON shape.
+Event formatting, span-close records, timestamps, busy/idle timing, span fields,
+dispatch, and filtering use upstream `tracing` and `tracing-subscriber`. Keep
+library defaults unless a demonstrated caller requirement needs an extension.
+The remaining custom code implements the workspace's configuration and checked
+output policy; it does not implement a collector or formatter.
 
 There is no queue, rotation, history, aggregation, timeline export, panic hook,
 backtrace setup, or error-reporting framework. Writes are synchronous. Memory

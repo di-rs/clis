@@ -170,12 +170,21 @@ fn structured_timings_do_not_require_verbose_logging() -> Result<()> {
     let mut stages = Vec::new();
     for line in stderr.lines() {
         let record: serde_json::Value = serde_json::from_str(line)?;
-        assert_eq!(record.get("kind"), Some(&serde_json::json!("timing")));
+        assert_eq!(record["target"], "clis::timing");
+        assert_eq!(record["fields"]["message"], "close");
+        assert!(record["fields"]["time.busy"].is_string());
+        assert!(record["fields"]["time.idle"].is_string());
         stages.push(record);
     }
-    assert!(stages.iter().any(|record| record.get("stage")
+    assert_eq!(stages.len(), 2);
+    assert!(stages.iter().any(|record| record.pointer("/span/name")
         == Some(&serde_json::json!("generate"))
-        && record.pointer("/fields/lines_written") == Some(&serde_json::json!(2))));
+        && record.pointer("/span/lines_written") == Some(&serde_json::json!(2))));
+    assert!(
+        stages
+            .iter()
+            .any(|record| record["span"]["name"] == "flush")
+    );
     Ok(())
 }
 

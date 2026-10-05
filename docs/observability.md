@@ -58,12 +58,14 @@ Use spans with target `clis::timing` for bounded operation/stage summaries. Reco
 counts such as lines or bytes as structured fields. Fields describe completed work
 only when updated after success; label intended counts as requested. With timing
 collection disabled these spans have no timer or retained fields under the shared
-subscriber. With it enabled, closing a span emits its name, fields, and elapsed
-wall-clock milliseconds in the selected format, regardless of the log level.
-Elapsed time includes waiting and the span's whole lifetime; it is neither CPU time
-nor a sum that can safely combine nested/overlapping spans. Drop stage spans before
-finishing the subscriber. Summary records are per stage invocation, not an unbounded
-history or a timeline export.
+subscriber. With it enabled, use tracing-subscriber's built-in span-close records
+in the selected format, regardless of the log level. Keep its default timestamps
+and busy/idle durations; no custom timing schema is required. Busy time covers
+periods when a span is entered, including waiting inside that scope; idle time
+covers the rest of its lifetime. Neither is CPU time, and nested/overlapping spans
+cannot be summed as total runtime. Record formatting and duration units follow
+the dependency. Close all stage-span clones before finishing the subscriber.
+Records are per stage invocation, not an unbounded history or a timeline export.
 
 `cli-tracing` builds an explicit subscriber and provides a scoped dispatch; it
 never installs a process-global subscriber, panic hook, or logger. A host can

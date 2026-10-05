@@ -12,7 +12,7 @@ scoped subscriber, and formats events/stage summaries. Biggie's adapter uses any
 context and explicit exit handling; its domain API remains an io::Result operation.
 
 **Tech Stack:** Rust workspace nightly, anyhow, tracing, tracing-subscriber,
-serde_json, thiserror, Clap in the app only, nextest and Clippy.
+thiserror, Clap in the app only, nextest and Clippy.
 
 **Spec:** [Errors, diagnostics, and stage timings](../../observability.md).
 
@@ -51,20 +51,22 @@ OsString environment lookup and returns Result<Config, ConfigError>. No Clap typ
 
 ## Task 2: Subscriber, sinks and timings
 
-**Files:** utils/cli-tracing/src/{lib,session,sink,timing}.rs,
+**Files:** utils/cli-tracing/src/{lib,session,sink}.rs,
 tests/session.rs, benches/overhead.rs, README.md.
 
 **Interfaces:** TracingSession::new(&Config) opens destination; TracingSession::with_writer(&Config,
 impl Write + Send + 'static) injects an owned sink. dispatch() returns &Dispatch;
 finish() returns io::Result<()> and checks prior writes plus flush. TracingSession never
 installs global state. Stage spans have target clis::timing; close emits a timing
-record independently of normal event level. Built-in tracing formatter owns events.
+record independently of normal event level. The built-in tracing formatter owns
+events, timestamps, final fields, and span-close busy/idle durations.
 
 - [x] Add failing tests for formats, levels, timing, sink failure, scoped repeated
   use, threaded dispatch and safe file opening; run `cargo test -p cli-tracing`.
   Expected: session API missing before implementation.
-- [x] Implement a synchronized checked writer, filtered fmt layer, and a layer
-  retaining only currently open stage timestamps/fields.
+- [x] Implement a synchronized checked writer and filtered built-in fmt layers,
+  using FmtSpan::CLOSE for stage timing. Keep only caller-required configuration
+  and output glue; extend library defaults when concrete needs arise.
 - [x] Run package tests and Clippy; expected: all pass without broad suppressions.
 - [x] Add a standalone deterministic checksum benchmark for bare/disabled/enabled
   instrumentation, assert equivalent checksums, report raw repeated samples.
@@ -105,7 +107,7 @@ The clean starting revision is 0a10b46. All six baseline biggie tests passed.
 ## Execution evidence
 
 Implemented with biggie as the first consumer. Local macOS verification passed:
-729 workspace tests, 4 doctests, fmt and strict workspace Clippy. The shared
+730 workspace tests, 4 doctests, fmt and strict workspace Clippy. The shared
 [overhead record](../../../utils/cli-tracing/overhead.md) retains checked raw samples.
 Independent review led to regressions for partial writes without success
 instrumentation, retained first sink failures, and final-close timing records.

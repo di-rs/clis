@@ -1,10 +1,12 @@
-use crate::{Config, Destination, Format, sink::Sink, timing::Timings};
+use crate::{Config, Destination, Format, sink::Sink};
 use std::{
     fs::OpenOptions,
     io::{self, Write},
 };
-use tracing::Dispatch;
-use tracing_subscriber::{Layer, filter::filter_fn, layer::SubscriberExt};
+use tracing::{Dispatch, Subscriber};
+use tracing_subscriber::{
+    Layer, filter::filter_fn, fmt::format::FmtSpan, layer::SubscriberExt, registry::LookupSpan,
+};
 
 /// A scoped subscriber and owned diagnostic sink, with explicit checked finishing.
 ///
@@ -37,29 +39,17 @@ impl TracingSession {
         let level = config.level;
         let timings = config.timings;
         let sink = Sink::new(writer);
-        let timing = Timings {
-            sink: sink.clone(),
-            format: config.format,
-        }
-        .with_filter(filter_fn(move |metadata| {
-            timings && metadata.is_span() && metadata.target() == "clis::timing"
-        }));
-        let event_sink = sink.clone();
-        let formatter = tracing_subscriber::fmt::layer()
-            .with_ansi(false)
-            .without_time()
-            .log_internal_errors(false)
-            .with_writer(move || event_sink.clone());
-        let formatter = match config.format {
-            Format::Text => formatter.boxed(),
-            Format::Json => formatter.json().boxed(),
-        }
-        .with_filter(filter_fn(move |metadata| {
-            metadata.target() != "clis::timing" && *metadata.level() <= level
-        }));
+        let timing = formatter(config, sink.clone(), FmtSpan::CLOSE).with_filter(filter_fn(
+            move |metadata| timings && metadata.is_span() && metadata.target() == "clis::timing",
+        ));
+        let events = formatter(config, sink.clone(), FmtSpan::NONE).with_filter(filter_fn(
+            move |metadata| metadata.target() != "clis::timing" && *metadata.level() <= level,
+        ));
         let subscriber = tracing_subscriber::registry()
             .with(timing)
-            .with(formatter)
+            .with(events)
+            // Gate callsites too: disabled stage fields must not be evaluated when
+            // another active dispatch enables the same timing span.
             .with(filter_fn(move |metadata| {
                 if metadata.target() == "clis::timing" {
                     timings && metadata.is_span()
@@ -87,5 +77,24 @@ impl TracingSession {
     /// Returns a sink write/flush failure or poisoned sink-lock error.
     pub fn finish(&self) -> io::Result<()> {
         self.sink.finish()
+    }
+}
+
+fn formatter<S>(
+    config: &Config,
+    sink: Sink,
+    span_events: FmtSpan,
+) -> Box<dyn Layer<S> + Send + Sync>
+where
+    S: Subscriber + for<'lookup> LookupSpan<'lookup> + 'static,
+{
+    let formatter = tracing_subscriber::fmt::layer()
+        .with_ansi(false)
+        .with_span_events(span_events)
+        .log_internal_errors(false)
+        .with_writer(move || sink.clone());
+    match config.format {
+        Format::Text => formatter.boxed(),
+        Format::Json => formatter.json().boxed(),
     }
 }

@@ -7,5 +7,4 @@ mod config;
 pub use config::{Config, ConfigError, Destination, Format, Overrides, parse_level};
 mod session;
 mod sink;
-mod timing;
 pub use session::TracingSession;

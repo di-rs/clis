@@ -22,7 +22,7 @@ struct Diagnostics {
     /// Create a new file, or use - for stderr
     #[arg(long)]
     log_file: Option<PathBuf>,
-    /// Collect stage timings independently of logging
+    /// Collect stage busy/idle times independently of logging
     #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true)]
     timings: Option<bool>,
 }

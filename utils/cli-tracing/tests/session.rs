@@ -117,15 +117,16 @@ fn timings_work_with_logging_off_and_record_final_counts() -> Result {
         let text = capture.text()?;
         assert_eq!(text.lines().count(), 1);
         assert!(text.contains("scan"));
-        assert!(text.contains("elapsed_ms"));
+        assert!(text.contains("time.busy"));
+        assert!(text.contains("time.idle"));
         if format == Format::Json {
             let json: serde_json::Value = serde_json::from_str(&text)?;
-            assert_eq!(json.pointer("/fields/lines"), Some(&serde_json::json!(12)));
-            assert!(
-                json.get("elapsed_ms")
-                    .and_then(serde_json::Value::as_f64)
-                    .is_some_and(|n| n >= 0.0)
-            );
+            assert_eq!(json["fields"]["message"], "close");
+            assert_eq!(json["target"], "clis::timing");
+            assert_eq!(json["span"]["lines"], 12);
+            assert!(json["timestamp"].is_string());
+            assert!(json["fields"]["time.busy"].is_string());
+            assert!(json["fields"]["time.idle"].is_string());
         }
     }
     Ok(())
@@ -154,9 +155,54 @@ fn timing_summary_waits_for_the_last_span_clone_to_close() -> Result {
     let text = capture.text()?;
     assert_eq!(text.lines().count(), 1);
     let record: serde_json::Value = serde_json::from_str(&text)?;
-    assert_eq!(record["stage"], "scan");
-    assert_eq!(record["fields"]["lines"], 12);
-    assert!(record["elapsed_ms"].as_f64().is_some_and(|n| n >= 0.0));
+    assert_eq!(record["span"]["name"], "scan");
+    assert_eq!(record["span"]["lines"], 12);
+    assert_eq!(record["fields"]["message"], "close");
+    assert!(record["fields"]["time.busy"].is_string());
+    assert!(record["fields"]["time.idle"].is_string());
+    Ok(())
+}
+
+#[test]
+fn events_and_stage_closes_use_separate_filters_without_duplicate_records() -> Result {
+    let capture = Capture::default();
+    let session = TracingSession::with_writer(
+        &Config {
+            level: LevelFilter::INFO,
+            timings: true,
+            format: Format::Json,
+            ..Config::default()
+        },
+        capture.clone(),
+    );
+    with_default(session.dispatch(), || {
+        let _operation = tracing::info_span!("operation", worker = 4).entered();
+        tracing::info!("started");
+        let _stage = tracing::info_span!(target: "clis::timing", "scan", rows = 3).entered();
+        tracing::info!("scanned");
+        tracing::debug!("filtered event");
+    });
+    session.finish()?;
+    let text = capture.text()?;
+    let records = text
+        .lines()
+        .map(serde_json::from_str::<serde_json::Value>)
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    assert_eq!(records.len(), 3);
+    assert!(records.iter().all(|r| r["timestamp"].is_string()));
+    for message in ["started", "scanned", "close"] {
+        assert_eq!(
+            records
+                .iter()
+                .filter(|r| r["fields"]["message"] == message)
+                .count(),
+            1
+        );
+    }
+    let close = records.last().ok_or("missing close record")?;
+    assert_eq!(close["target"], "clis::timing");
+    assert_eq!(close["span"]["name"], "scan");
+    assert_eq!(close["span"]["rows"], 3);
     Ok(())
 }
 

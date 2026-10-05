@@ -31,7 +31,7 @@ pub struct Cli {
     #[arg(long)]
     pub log_file: Option<PathBuf>,
 
-    /// Collect stage elapsed times independently of logging
+    /// Collect stage busy/idle times independently of logging
     #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true)]
     pub timings: Option<bool>,
 
