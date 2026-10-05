@@ -1,7 +1,7 @@
 # CLI support
 
 Explicit diagnostic configuration, tracing collection and stage timing for CLI
-adapters. This replaces the old `error` and `logging` initialization helpers.
+adapters.
 It does not parse arguments, install globals, render application errors, or choose
 exit statuses. Domains depend only on `tracing`; applications own policy.
 

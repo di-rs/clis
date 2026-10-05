@@ -3,7 +3,7 @@
 > **For agentic workers:** Use the executing-plans skill to implement this plan
 > task by task. Execution is authorized in the user request; proceed after self-review.
 
-**Goal:** Replace the old error/logging crates with tested diagnostics and opt-in
+**Goal:** Provide shared, tested diagnostics and opt-in
 stage timing support, using biggie as the first real consumer.
 
 **Architecture:** Domain libraries emit tracing events/spans and retain typed errors.
@@ -71,10 +71,10 @@ record independently of normal event level. Built-in tracing formatter owns even
 - [x] Run `cargo bench -p cli-support --bench overhead`; expected: equal checksums
   and raw timings. Record platform/limits; make no reference CLI speed claim.
 
-## Task 3: Consumer migration and removal
+## Task 3: Consumer integration
 
 **Files:** biggie/Cargo.toml, src/{cli,main,lib}.rs, tests/{cli,library}.rs, README.md;
-remove utils/error and utils/logging. Update root README and Cargo.lock.
+root README and Cargo.lock.
 
 **Interfaces:** biggie keeps gen_random_lines(impl Write, u64) -> io::Result<()>;
 uses tracing only in domain code. CLI constructs Overrides and calls task 1/2 APIs.
@@ -83,9 +83,8 @@ uses tracing only in domain code. CLI constructs Overrides and calls task 1/2 AP
   off, invalid settings before output creation, file aliases, concise errors and
   unchanged default behavior; add domain write failure/repeated call tests.
 - [x] Run `cargo nextest run -p biggie`; expect new options/tests to fail first.
-- [x] Replace old helpers with shared runtime and anyhow at the CLI edge, preserve
+- [x] Use shared diagnostic collection and anyhow at the CLI edge, preserve
   aliases, explicitly flush data, close spans and check diagnostics before success.
-- [x] Remove obsolete crates after their sole consumer migrates.
 - [x] Run package tests/doctests/Clippy; expected: all pass.
 
 ## Task 4: Standards, evidence and delivery
@@ -101,8 +100,7 @@ utility template, AGENTS.md, PR template, explore/audit skills, relevant READMEs
 - Delivery: commit focused task paths, update the existing authorized PR against the
   current default branch, and verify CI. Do not merge.
 
-The clean starting revision is 0a10b46. Baseline affected checks:
-`cargo nextest run --locked -p biggie -p error -p logging`: 6 passed.
+The clean starting revision is 0a10b46. All six baseline biggie tests passed.
 
 ## Execution evidence
 

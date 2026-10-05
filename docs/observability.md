@@ -88,7 +88,7 @@ instrumentation off and on with identical correctness-checked work; logging outp
 and terminal costs need their own workload evidence. Timings locate candidates;
 [benchmark comparisons](benchmarking.md) establish performance claims.
 
-Replace the old `error` and `logging` initialization crates with `cli-support`.
+Use `cli-support` for CLI-side diagnostic collection and stage timing.
 Migrate remaining direct `color-eyre` consumers (`parsu`, `mkdirr`, `touchr`, `pwdr`,
 Kara) individually, preserving domain error contracts. Migrate `grepr`'s separate
 logger and input-content warnings with its GNU flag/error policy; do not turn its

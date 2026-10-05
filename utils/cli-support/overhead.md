@@ -21,7 +21,7 @@ scale; its slightly smaller median is not evidence of an improvement. Enabled
 JSON summaries add about 0.63 microseconds per stage in this tiny workload.
 That opt-in cost includes clock reads, span storage, formatting and synchronization.
 This is not a real-file/terminal benchmark or a GNU comparison. Memory usage,
-Linux overhead, full biggie throughput and old/new CLI startup costs remain unmeasured.
+Linux overhead, full biggie throughput and CLI startup comparisons remain unmeasured.
 
 The measured code is the shared implementation added after base `0a10b46`.
 For reproducibility, SHA-256 of the concatenated bytes of `benches/overhead.rs`,
