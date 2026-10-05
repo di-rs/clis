@@ -1,44 +1,40 @@
+use anyhow::{Context, Result};
 use biggie::gen_random_lines;
 use clap::Parser;
-use color_eyre::eyre::{Context, Result};
 use std::{
     fs::File,
-    io::{BufWriter, Write},
-    path::Path,
+    io::{self, BufWriter, Write},
+    process::ExitCode,
 };
 use thousands::Separable;
 
 mod cli;
 use crate::cli::Cli;
 
-fn main() -> Result<()> {
+fn main() -> ExitCode {
     let cli = Cli::parse();
-    error::init(&cli.verbosity)?;
-    logging::init(&cli.verbosity);
-    run(&cli)
+    cli_tracing::run::<Cli>(&cli.logging, || execute(&cli))
 }
 
-fn run(cli: &Cli) -> Result<()> {
-    let writer = get_writer(&cli.file)?;
-    gen_random_lines(writer, cli.lines)?;
-
-    println!(
+fn execute(cli: &Cli) -> Result<ExitCode> {
+    let file = File::create(&cli.file)
+        .with_context(|| format!("Cannot create file {}", cli.file.display()))?;
+    let mut writer = BufWriter::new(file);
+    gen_random_lines(&mut writer, cli.lines)?;
+    {
+        let _span = tracing::debug_span!("flush").entered();
+        writer.flush().context("Cannot flush generated output")?;
+    }
+    log::info!("generated output: {} lines", cli.lines);
+    let mut stdout = io::stdout().lock();
+    writeln!(
+        stdout,
         r#"Done, wrote {} line{} to "{}"."#,
         cli.lines.separate_with_commas(),
         if cli.lines == 1 { "" } else { "s" },
-        cli.file.display()
-    );
-    log::info!(
-        "Wrote {} to {}",
-        cli.lines.separate_with_commas(),
-        cli.file.display()
-    );
-
-    Ok(())
-}
-
-fn get_writer(path: &Path) -> Result<impl Write> {
-    let file =
-        File::create(path).wrap_err_with(|| format!("Cannot create file {}", path.display()))?;
-    Ok(BufWriter::new(file))
+        cli.file.display(),
+    )
+    .context("Cannot write completion message")?;
+    stdout.flush().context("Cannot flush completion message")?;
+    Ok(ExitCode::SUCCESS)
 }
