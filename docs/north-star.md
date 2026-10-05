@@ -106,6 +106,15 @@ compatibility. Optimize measured bottlenecks with correctness evidence and recor
 trade-offs. Follow [architecture](architecture.md#readability-and-performance) and
 [benchmarking](benchmarking.md).
 
+### U9 — Errors and observability
+
+Use typed domain errors and anyhow at the CLI boundary. Required diagnostics remain
+independent of optional logging. Offer explicit levels, text/JSON sinks and opt-in
+stage timings with documented precedence, without overriding GNU flags or data
+streams. Libraries emit tracing instrumentation without initializing a collector.
+Check sink/flush failures and finish owned resources before exit. Test the boundaries
+and measure instrumentation overhead; follow [observability](observability.md).
+
 ## Additional requirements for ports
 
 ### P1 — GNU baseline
@@ -165,7 +174,7 @@ Use these statuses for requirements and behavior rows:
 Keep adoption decisions (planned/deferred/declined) separate from evidence status.
 Deferring a required GNU flag leaves a gap. An unavailable reference leaves execution
 unverified. A justified platform limitation remains visible, not grounds for an
-unqualified full-parity claim. Custom apps apply U1–U8 and explicitly mark P1–P4
+unqualified full-parity claim. Custom apps apply U1–U9 and explicitly mark P1–P4
 inapplicable unless they adopt a reference contract.
 
 An audit records revision and scope, then maps each applicable ID to source/test

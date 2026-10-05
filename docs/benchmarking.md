@@ -144,3 +144,11 @@ report what remains unmeasured and provide the reproduction recipe; never fabric
 numbers or claim performance verification from a successful build.
 Documentation-only standards work does not require running timings or manufacturing
 benchmark results; report unavailable measurement rather than expanding that scope.
+
+## Instrumentation overhead
+
+Stage timings from [observability](observability.md) identify operations to investigate;
+they do not establish a speed improvement. Compare identical work with collection
+off and on, then test real stderr/file destinations separately. The shared
+[overhead harness](../utils/cli-support/README.md#verification-and-overhead) checks
+its deterministic result before accepting any timing sample.

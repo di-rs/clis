@@ -7,7 +7,7 @@ BSD additions, and beat reference performance on measured priority workloads.
 Correctness, reusable Rust operations, and readable code constrain every change.
 These are targets; the current workspace is not certified to meet them.
 
-The [north star](docs/north-star.md) owns requirements U1–U8 and P1–P4. Follow it
+The [north star](docs/north-star.md) owns requirements U1–U9 and P1–P4. Follow it
 and the linked procedures rather than treating existing inconsistencies as patterns
 to copy. Root and app READMEs distinguish current support from plans.
 
@@ -17,6 +17,7 @@ to copy. Root and app READMEs distinguish current support from plans.
 - [CONTRIBUTING](CONTRIBUTING.md): workflow, checks, test conventions.
 - [Architecture](docs/architecture.md): public APIs, boundaries, ownership, sharing.
 - [Compatibility](docs/compatibility.md): GNU baseline, BSD additions, reference capture.
+- [Observability](docs/observability.md): errors, logging, stage timings, lifecycle.
 - [Benchmarking](docs/benchmarking.md): workloads, correctness gates, evidence.
 - [Utility template](docs/templates/utility.md): per-app contract and audit record.
 - Read the app README, manifest, implementation, tests, and any nearer `AGENTS.md`.

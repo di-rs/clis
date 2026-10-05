@@ -84,7 +84,7 @@ The large-file hook checks tracked files in CI, with only the existing
 ## Workspace and contributor guides
 
 Commands live under `coreutils/` and in `calr/`, `biggie/`, `parsu/`, and `kara/`.
-`utils/error` and `utils/logging` provide initialization helpers;
+[`utils/cli-support`](utils/cli-support/README.md) provides explicit diagnostics and stage timings;
 [`utils/comp_macro`](utils/comp_macro/README.md) provides a comprehension macro.
 These helpers are libraries, not commands. Process initialization belongs in CLI
 adapters, not in reusable domain operations.
@@ -96,6 +96,7 @@ adapters, not in reusable domain operations.
 | [AGENTS.md](AGENTS.md) | Mandatory repository guidance for coding agents. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Change workflow, checks, and review requirements. |
 | [Architecture](docs/architecture.md) | Library/CLI boundaries, sharing, and a Rust consumer example. |
+| [Observability](docs/observability.md) | Errors, diagnostic levels and sinks, stage timing, and lifecycle. |
 | [Compatibility](docs/compatibility.md) | GNU references, BSD additions, and fixture capture. |
 | [Benchmarking](docs/benchmarking.md) | Fair comparisons and performance acceptance. |
 

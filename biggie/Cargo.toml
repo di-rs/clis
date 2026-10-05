@@ -12,15 +12,15 @@ include.workspace = true
 
 [dependencies]
 clap = { workspace = true }
-color-eyre = { workspace = true }
+anyhow.workspace = true
+tracing.workspace = true
+cli-support = { path = "../utils/cli-support" }
 clap-verbosity-flag = { workspace = true }
-log = { workspace = true }
-error = { path = "../utils/error" }
-logging = { path = "../utils/logging" }
 thousands = "0.2.0"
 rand = "0.10.3"
 
 [dev-dependencies]
+serde_json.workspace = true
 assert_cmd = { workspace = true }
 assert_fs = { workspace = true }
 predicates = { workspace = true }

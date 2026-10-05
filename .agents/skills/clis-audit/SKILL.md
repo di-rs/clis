@@ -16,7 +16,7 @@ Use the [utility template](../../../docs/templates/utility.md) for an absent or
 incomplete record. Identify port/custom scope, candidate revision and dirty changes,
 requested claims, and prior evidence. Reuse unchanged findings after comparing the
 recorded base; recheck changed files and unresolved claims. A full audit covers
-U1–U8 and applicable P1–P4; a focused audit labels the remaining scope unassessed.
+U1–U9 and applicable P1–P4; a focused audit labels the remaining scope unassessed.
 
 Inspect source, public APIs, tests, reference provenance, docs, and benchmark
 artifacts relevant to those claims. Treat implementation inspection, existing
@@ -37,6 +37,7 @@ required feature; a deferred GNU requirement still leaves a gap.
 | Library reuse | Direct typed operations used by CLI and Rust callers, explicit I/O/errors, direct tests, compiled consumer example. |
 | Text and usability | U4 cases, TTY/pipe behavior, presentation decisions and U6 review. |
 | Performance | Correctness gates, equivalent work, priority cases, previous/reference identities, raw results, variance, memory and accepted regressions. |
+| Observability | Typed errors, diagnostic/status mapping, level precedence, sinks, stage spans, flush failures and overhead; see [observability](../../../docs/observability.md). |
 
 Run relevant checks through [clis-verify](../clis-verify/SKILL.md) when execution is
 within scope. Use controlled probes and fixture guidance from

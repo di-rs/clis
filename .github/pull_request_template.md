@@ -19,6 +19,6 @@ benchmarks were not run. -->
 <!-- State material limitations, breaking changes, or follow-up work. Write "None"
 when there are none. Link updated compatibility records and documentation. Mark
 proposed behavior and future infrastructure as planned. For a utility migration or
-standards audit, link its U1–U8/P1–P4 evidence and explicit acceptance of performance
+standards audit, link its U1–U9/P1–P4 evidence and explicit acceptance of performance
 regressions; existing gaps remain visible. Keep the description
 proportional to the change. -->

@@ -64,6 +64,13 @@ state across calls, flushing, and memory bounds. Link API docs and direct tests.
 If unavailable, mark U1 missing/partial and describe the proposed boundary separately;
 do not publish planned APIs as working examples.]
 
+## Errors and observability
+
+[Record domain error types, diagnostic/status mapping, log levels/formats/destinations,
+CLI/environment precedence and verbosity conflicts. Identify stage spans/counts,
+flush and sink-failure behavior, privacy choices, instrumentation overhead evidence,
+and remaining U9 gaps. Follow the [shared contract](../observability.md).]
+
 ## Text and terminal behavior
 
 | Input or presentation case | Contract and applicability | Status/evidence |
@@ -108,7 +115,7 @@ relevant measurements or why a comparison is inapplicable.]
 
 ## Standards evidence and next work
 
-[One row per U1–U8 and, for ports, P1–P4. Split by platform where evidence differs.
+[One row per U1–U9 and, for ports, P1–P4. Split by platform where evidence differs.
 Link owning sections above instead of copying detail.]
 
 | Requirement ID | Scope/platform | Evidence status | Evidence and commands actually run | Gap or next step |

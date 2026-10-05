@@ -1,0 +1,25 @@
+[package]
+name = "cli-support"
+version = "0.1.0"
+description = "Explicit diagnostics and opt-in stage timings for CLI adapters"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+assert_fs.workspace = true
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "overhead"
+harness = false

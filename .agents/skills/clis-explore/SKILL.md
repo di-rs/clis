@@ -44,9 +44,9 @@ answers are pending; keep dependent proposals visibly unresolved. Do not ask aga
 about an accepted decision. Use actual reference identity and scoped capture evidence;
 do not substitute whatever command happens to be on PATH.
 
-Apply U1–U8 even for a narrow proposed implementation slice. Record unaudited areas
+Apply U1–U9 even for a narrow proposed implementation slice. Record unaudited areas
 as unverified. Include library boundaries, byte/Unicode semantics, terminal usability,
-the U6 design checklist, and platform evidence. GNU TTY defaults are parity work;
+the U6 design checklist, platform evidence, and the [U9 observability contract](../../../docs/observability.md). GNU TTY defaults are parity work;
 presentation beyond them is opt-in. A declined pager can be a reasoned decision,
 not a missing implementation of a universal pager requirement.
 
