@@ -1,68 +1,144 @@
 # Repository guidance
 
-## Layout and scope
+## Mission and priorities
 
-- See the [README](README.md) for the app index, workspace overview, and prerequisites.
-- Most apps use `src/cli.rs` for Clap arguments, `src/main.rs` for I/O and exit
-  handling, and `src/lib.rs` for reusable logic. Preserve simpler layouts where used.
-- Keep changes local. Do not add a shared framework, dependencies, or full GNU
-  compatibility unless the task needs them. Do not modify Kara for unrelated CLI work.
-- Reuse workspace dependencies and lints. Error handling varies (`thiserror`,
-  `color-eyre`, explicit exit codes); follow the app rather than rewriting it.
+Evolve the existing Rust utilities into compatible, fast, reusable building blocks
+for both command-line users and future Rust applications. These are targets, not
+claims that the current implementations already meet them.
 
-## Checks
+1. Close GNU and BSD option **and behavior** gaps in existing utilities first.
+2. Match or exceed reference performance on equivalent, reproducible workloads.
+3. Keep a consistent, readable, maintainable structure with reusable library APIs.
 
-Use the commands in [README → Development](README.md#development). Run
-affected-package checks first, then the workspace suite. Check formatting and
-Clippy as configured in `prek.toml`.
+Correctness, safety, and library boundaries are constraints throughout, not work
+postponed until after optimization. A faster incompatible result is not a win.
+Do not trade away existing behavior or maintainability for an unmeasured speedup.
 
-- Check a baseline before editing; distinguish existing failures from regressions.
-  Keep the regression suite passing when changing supported behavior.
-- Assert intended behavior. Do not weaken or ignore tests to hide a defect; report
-  failures and keep production fixes within the approved scope.
-- When changing Kara, also verify affected interactive behavior in a terminal.
+## Read before changing code
 
-## Test pattern
+- [README](README.md): app index, current status, quick start.
+- [CONTRIBUTING](CONTRIBUTING.md): checks and review workflow.
+- [Architecture](docs/architecture.md): read when changing APIs, structure, or reuse.
+- [Compatibility](docs/compatibility.md): read when changing flags or behavior.
+- [Benchmarking](docs/benchmarking.md): read when changing hot paths or claiming speed.
+- Read the affected app README, manifest, implementation, tests, and any nearer
+  `AGENTS.md`. Keep this root file focused; put utility-specific exceptions nearby.
 
-- Put CLI integration tests in each app's `tests/cli.rs`. Use
-  `assert_cmd::cargo::cargo_bin_cmd!`, `predicates`, and small local helpers.
-  Specify the binary for `bool`: `cargo_bin_cmd!("true")` or `cargo_bin_cmd!("false")`.
-- Check exit status, stdout, stderr, and filesystem effects as applicable.
-  For byte-oriented behavior compare bytes, not lossy UTF-8 conversions.
-- Use `tests/inputs/` and `tests/expected/` for reusable fixtures; inline small cases.
-  Cover supported flags, errors, empty input, stdin, and relevant text boundaries.
-- Use `assert_fs` or existing `tempfile` helpers for writable files. Set permissions
-  on temporary fixtures, not the checkout. Control child-process cwd/environment;
-  avoid changing process-global state. Use fixed dates and timestamps.
-- `mk-outs.nu` scripts generate expected output with reference commands. Review
-  outputs and GNU/BSD differences; record the reference/version when adding fixtures.
-  Normal tests must not require Nushell or installed GNU commands.
-- Examples: [catr](coreutils/catr/tests/cli.rs) for output/stdin assertions,
+## Scope and implementation workflow
+
+- Prefer one utility or one reusable capability per change. State the reference
+  behavior, affected library API, tests, and performance impact before editing.
+- Establish the affected-package baseline. Add a failing regression for a bug or
+  missing behavior, implement the library change, then connect the CLI adapter.
+- Preserve unrelated work and tutorial credits. Do not rewrite the workspace,
+  rename every package, or modify Kara for unrelated utility work.
+- Shared code and compatibility work are encouraged when relevant. Extract a
+  focused helper for real consumers; do not build a speculative universal framework.
+- Existing inconsistencies are migration work, not permission to copy a bad pattern.
+  Improve the touched boundary incrementally; report larger follow-up work.
+
+## GNU and BSD compatibility
+
+- Target the combined option surface of GNU and explicitly named BSD implementations.
+  Record exact reference versions and platforms; "BSD" alone is not a test target.
+- Acceptance includes parsing, defaults, option interactions, output bytes, stderr,
+  exit status, stdin/TTY behavior, environment, and filesystem effects as relevant.
+- Conflicting flag meanings need a documented per-utility resolution. Preserve the
+  current default until that decision is made. Do not silently choose by host OS,
+  reject valid combinations for parser convenience, or invent a compatibility flag.
+- Keep a per-utility compatibility table in its README or a linked document. Mark
+  unverified, partial, missing, and intentionally different behavior explicitly.
+  A listed flag or a passing old test suite does not prove reference parity.
+- Use manuals and executable behavior as references. Keep implementation original;
+  do not copy GNU implementation code into this MIT repository. Record attribution
+  and review licensing before importing third-party code, tests, or fixtures.
+
+## Library-first structure and code quality
+
+- `src/main.rs`: process setup, standard streams, diagnostic rendering, exit mapping.
+- `src/cli.rs`: Clap definitions and conversion into validated domain options.
+- `src/lib.rs`: public, CLI-independent API; move growing internals into named modules.
+  Small utilities may use fewer files, but still expose their useful operation as a
+  library. Consistent responsibilities matter more than identical file counts.
+- The CLI calls the same library implementation used by Rust consumers. An API
+  taking only argv or spawning the binary does not satisfy library reuse.
+- Do not expose Clap types in domain APIs. Accept typed options, `Path`/`PathBuf`,
+  and caller-owned readers/writers or explicit resources. Validate invariants for
+  direct Rust callers too, not only through Clap.
+- Domain code must not parse process arguments, terminate the process, initialize
+  global logging, change cwd/environment, or print to global stdout/stderr. Return
+  typed results/errors and meaningful outcomes; the adapter owns process policy.
+- Handle arbitrary bytes and non-UTF-8 paths where the command contract requires it.
+  Do not use lossy conversion or line/string APIs that change byte semantics.
+- Prefer streaming, buffer reuse, explicit ownership, and narrow APIs. State memory
+  bounds; do not read a whole input merely for convenience. Flush owned output
+  buffers and propagate write/flush failures before reporting CLI success.
+- Reuse `[workspace.dependencies]` and `[lints] workspace = true` when applicable.
+  Use existing error conventions at adapters; prefer matchable errors in libraries.
+  No blanket lint suppression, unchecked failure paths, or unjustified `unsafe`.
+- Extract shared mechanisms under focused `utils/` crates once real callers need
+  them. Keep utility-specific semantics local. Do not force unrelated commands
+  into a common runner, global error type, or identical option semantics.
+- Document public APIs with examples, error/side-effect behavior, and relevant
+  complexity. Test library use directly; preserve or explain API compatibility.
+
+## Tests and checks
+
+Run from the workspace root; replace `catr` with the affected package:
+
+```sh
+cargo nextest run --locked -p catr
+cargo test --locked -p catr --doc
+cargo clippy --locked -p catr --all-targets --all-features
+cargo fmt --all -- --check
+```
+
+Use the doctest command for packages with a library target. For Rust changes,
+follow with the workspace checks in [CONTRIBUTING](CONTRIBUTING.md#checks).
+For docs-only changes, check links, commands, examples, and the diff; report any
+example that was not compiled. Do not claim checks ran when tools are unavailable.
+
+- Put CLI integration tests in `tests/cli.rs`; use
+  `assert_cmd::cargo::cargo_bin_cmd!`, `predicates`, and small helpers. For `bool`,
+  select `cargo_bin_cmd!("true")` or `cargo_bin_cmd!("false")` explicitly.
+- Add direct library tests, including injected read/write errors where relevant.
+  Cover flag combinations, boundaries, stdin, empty and unterminated inputs,
+  invalid bytes, invalid options, and multi-file/partial-failure behavior.
+- Assert status, stdout, stderr, and side effects, not just successful parsing.
+  Compare byte-oriented output as bytes. Do not weaken or ignore tests to hide bugs.
+  Change an old expectation only with documented evidence of the intended behavior.
+- Use `tests/inputs/` and `tests/expected/` for reusable fixtures. Use `assert_fs` or
+  existing `tempfile` helpers for writes; never chmod or mutate checkout fixtures.
+  Control child cwd/environment, timestamps, timezone, and locale; avoid global state.
+- Keep ordinary tests hermetic. Reference comparisons and `mk-outs.nu` regeneration
+  are separate, explicit workflows; record reference versions and review each diff.
+- Existing examples: [catr](coreutils/catr/tests/cli.rs) for CLI I/O,
   [pwdr](coreutils/pwdr/tests/cli.rs) for environment isolation, and
   [lsr](coreutils/lsr/tests/cli.rs) for temporary permission fixtures.
+  Changes to Kara also need affected interactive behavior checked in a terminal.
 
-## Documentation
+## Performance evidence
 
-- Keep the root [README](README.md) as the app index; link each app README back to it.
-- App READMEs: one-sentence purpose, implemented capabilities, one or two runnable
-  examples, reference manual, and material limitations. State the working directory.
-- Use factual, concise prose. No buzzwords, unsupported compatibility claims, or
-  full copies of `--help`. Update docs when behavior changes; retain tutorial credits.
-- Link GNU Coreutils where applicable; use GNU Grep, GNU Findutils, and util-linux
-  references for `grep`, `find`, and `cal`. State when no direct counterpart exists.
-- Follow [AGENTS.md](https://agents.md/#examples) for concrete agent instructions,
-  [CLI Guidelines](https://clig.dev/#documentation) for examples and clear limits,
-  and [ripgrep's README](https://github.com/BurntSushi/ripgrep/blob/master/README.md)
-  for purpose/navigation/build-test structure, not its length or promotional copy.
+- Build release binaries before timing. Verify equivalent results first, then
+  compare the candidate with the previous Rust revision and each relevant GNU/BSD
+  reference on the same host. Record versions, commands, inputs, and environment.
+- Cover small/startup and large/throughput cases, streaming and seekable inputs,
+  relevant flags, and memory use. Include regressions, variance, and inconclusive
+  results; never claim every workload is faster from one favorable measurement.
+- Do not use blanket Hyperfine `--ignore-failure`, discard errors, or time less work.
+  Expected nonzero statuses require exact validation, not ignoring all failures.
+- For behavior/hot-path changes, add or update the affected benchmark and run it
+  when the environment permits. Report unavailable baselines as unmeasured.
+  Pure documentation changes do not require fabricated timing evidence.
 
-## Benchmarks
+## Documentation and review
 
-- Each CLI should be benchmarked against its original command using equivalent
-  inputs/options. Follow [tailr's Nushell/Hyperfine pattern](coreutils/tailr/benches/tail.bench.nu):
-  release binary, shared input, representative options, equivalent output handling.
-- Verify correctness before timing. Record the reference implementation/version,
-  platform, and commands; check paths against the current workspace layout.
-- If no direct original exists, document that and choose a meaningful baseline.
-  Do not invent comparisons for custom apps or the interactive editor.
-- Benchmark implementation for the other CLIs is deferred; do not add or run
-  benchmarks as part of a tests-and-documentation-only task.
+- Keep the root README as the app index and project contract. App READMEs link back
+  and describe implemented behavior, CLI and library examples, references, gaps,
+  and benchmark reproduction where available. Do not paste entire help output.
+- Report the scope, compatibility/API impact, commands actually run, outcomes,
+  benchmark evidence or reason not measured, and remaining gaps in the PR.
+- Follow the [Git conventions](docs/agent-skills.md#git-conventions) for branch
+  names, commit messages, and PR titles; use the relevant repository skills.
+- Use the [PR template](.github/pull_request_template.md). Do not present proposed
+  architecture, planned flags, future CI, or performance targets as implemented.

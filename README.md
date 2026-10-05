@@ -1,12 +1,19 @@
 # clis
 
-A Rust workspace of small Unix-style commands, a test-data generator, an XML-like
-parser, and a terminal editor. These are partial implementations, not drop-in
-replacements for the reference commands. App READMEs list capabilities and limits.
+A Rust workspace building Unix-style commands and reusable libraries. The priority
+is to evolve the existing utilities toward GNU and BSD feature parity, then beat
+reference performance on measured workloads, while keeping the code readable,
+maintainable, and reusable by future Rust projects.
+
+**Current status:** these are partial implementations, not drop-in replacements.
+Library APIs exist in several packages but are not yet uniform. The [project goals](docs/project-goals.md)
+are a development contract, not a claim of complete compatibility, stable APIs,
+or demonstrated performance superiority. App READMEs describe current capabilities
+and limitations.
 
 ## Apps
 
-| App | Purpose | Reference |
+| App | Purpose | Existing reference |
 | --- | --- | --- |
 | [bool](coreutils/bool/README.md) | `true` and `false` exit-status commands | GNU `true`, `false` |
 | [catr](coreutils/catr/README.md) | Concatenate and number text lines | GNU `cat` |
@@ -31,28 +38,38 @@ replacements for the reference commands. App READMEs list capabilities and limit
 Reference manuals are linked from each app README. `grep`, `find`, and `cal` are
 not part of GNU Coreutils, regardless of their location in this repository.
 
+The table retains the existing reference mapping; it is not a compatibility
+scorecard. Named BSD targets and verified versions belong in each utility's
+compatibility record. `biggie`, `parsu`, and `kara` have no direct GNU/BSD counterpart,
+but the same library-reuse and code-quality goals apply to their useful operations.
+
 ## Development
 
-Use Rust nightly, selected by `rust-toolchain.toml`, with `rustfmt` and `clippy`.
-The test commands below also require [cargo-nextest](https://nexte.st/docs/installation/).
+Use Rust nightly, selected by [rust-toolchain.toml](rust-toolchain.toml), with
+`rustfmt` and `clippy`. The toolchain currently floats rather than pinning a date;
+record `rustc -Vv` when reproducing a result. Install
+[cargo-nextest](https://nexte.st/docs/installation/pre-built-binaries/) for the test commands below.
 Some code and tests use Unix-specific APIs; do not assume Windows support.
-Run commands from the workspace root:
+Kara requires an interactive terminal.
 
 Install [prek](https://prek.j178.dev/installation/) and enable the Git hook once
 per clone with `prek install`. The configuration alone does not install the hook.
 
+Run from the workspace root:
+
 ```sh
-cargo build -p catr
-cargo run -p catr -- --help
-cargo nextest run -p catr
-cargo nextest run
+cargo build --locked -p catr
+cargo run --locked -p catr -- --help
+cargo nextest run --locked -p catr
+cargo test --locked -p catr --doc
+cargo build --locked --release -p catr
 ```
 
-Regression tests cover supported behavior and error handling. See app READMEs for
-capabilities and remaining limitations.
-Kara requires an interactive terminal.
+See [CONTRIBUTING](CONTRIBUTING.md) for workspace checks and fixture conventions.
+Benchmarks require additional tools described in the
+[benchmarking guide](docs/benchmarking.md); they are not prerequisites for ordinary tests.
 
-[CI](.github/workflows/ci.yml) runs all `prek.toml` hooks and documentation tests
+[CI](.github/workflows/pull-request-check.yml) runs all `prek.toml` hooks and documentation tests
 on Linux when pull requests targeting `master` are opened, reopened, or updated.
 It also audits
 `Cargo.lock` with RustSec, scans Git history for secrets with redacted output,
@@ -64,11 +81,25 @@ Action updates are automated; tool versions and binary checksums need manual upd
 The large-file hook checks tracked files in CI, with only the existing
 `coreutils/tailr/benches/data/1M.txt` benchmark dataset exempted.
 
-`utils/error` and `utils/logging` provide initialization helpers.
-[`utils/comp_macro`](utils/comp_macro/README.md) provides a comprehension macro;
-these are libraries, not commands.
+## Workspace and contributor guides
 
-See [AGENTS.md](AGENTS.md) for code, test, documentation, and benchmark conventions.
+Commands live under `coreutils/` and in `calr/`, `biggie/`, `parsu/`, and `kara/`.
+`utils/error` and `utils/logging` provide initialization helpers;
+[`utils/comp_macro`](utils/comp_macro/README.md) provides a comprehension macro.
+These helpers are libraries, not commands. Process initialization belongs in CLI
+adapters, not in reusable domain operations.
+
+| Guide | Purpose |
+| --- | --- |
+| [Project goals and library use](docs/project-goals.md) | Priorities, evidence requirements, and a runnable Rust consumer example. |
+| [AGENTS.md](AGENTS.md) | Mandatory repository guidance for coding agents. |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Change workflow, checks, and review requirements. |
+| [Architecture](docs/architecture.md) | Library/CLI boundaries and responsible sharing. |
+| [Compatibility](docs/compatibility.md) | GNU/BSD targets, conflicts, and test evidence. |
+| [Benchmarking](docs/benchmarking.md) | Fair comparisons and performance acceptance. |
+
 Repository [agent skills](docs/agent-skills.md) cover Git delivery, verification,
 and CLI regression testing. Every PR uses the [shared template](.github/pull_request_template.md).
-See [LICENSE](LICENSE) for the MIT license.
+
+See [LICENSE](LICENSE) for the MIT license. Retain existing tutorial and other
+attribution in individual packages when extending their implementations.

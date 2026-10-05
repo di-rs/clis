@@ -5,7 +5,7 @@ description: Use when checking a Rust change, investigating test or lint failure
 
 # Workspace verification
 
-Run from the workspace root. Read `AGENTS.md`, `README.md` Development, and
+Run from the workspace root. Read `AGENTS.md`, [CONTRIBUTING checks](../../../CONTRIBUTING.md#checks), and
 `prek.toml`; those files govern check commands if they change. Map edited paths
 to Cargo packages, including consumers of changed utility libraries. Preserve
 unrelated work and inspect the current diff before attributing failures.
@@ -19,15 +19,18 @@ checks. After editing, repeat the relevant checks against the final diff. For a
 single package such as `tailr`, use:
 
 ```sh
-cargo build -p tailr
-cargo nextest run -p tailr
-cargo clippy -p tailr --all-targets --all-features
-cargo fmt -- --check
-cargo nextest run --hide-progress-bar --failure-output final
-cargo clippy --workspace --all-targets --all-features
+cargo build --locked -p tailr
+cargo nextest run --locked -p tailr
+cargo test --locked -p tailr --doc
+cargo clippy --locked -p tailr --all-targets --all-features
+cargo fmt --all -- --check
+cargo nextest run --locked --workspace --hide-progress-bar --failure-output final
+cargo clippy --locked --workspace --all-targets --all-features
+cargo test --locked --workspace --doc
 ```
 
-Select the actual package instead of copying `tailr`. For changes affecting
+Select the actual package instead of copying `tailr`; package doctests require a
+library target. For changes affecting
 multiple packages, check each affected package before the workspace suite.
 Inspect `git diff --check` and the final status too. Formatting checks must not
 rewrite unrelated Rust files. A passing package command supports a package claim;
