@@ -27,13 +27,10 @@ pub struct Cli {
 
 impl Cli {
     fn parse_delimeter(value: &str) -> Result<u8, CliError> {
-        let delim_bytes = value.as_bytes();
-        if delim_bytes.len() != 1 {
-            return Err(CliError::BadDelimiter(value.to_owned()));
+        match value.as_bytes() {
+            [delimiter] => Ok(*delimiter),
+            _ => Err(CliError::BadDelimiter(value.to_owned())),
         }
-        #[allow(clippy::indexing_slicing)]
-        let delimeter = delim_bytes[0];
-        Ok(delimeter)
     }
 }
 
@@ -56,7 +53,6 @@ pub struct ArgsExtract {
 impl TryFrom<&ArgsExtract> for Extract {
     type Error = CliError;
 
-    #[allow(clippy::unreachable)]
     fn try_from(value: &ArgsExtract) -> Result<Self, Self::Error> {
         if let Some(fields) = &value.fields {
             Ok(Self::Fields(fields.parse()?))
@@ -65,7 +61,7 @@ impl TryFrom<&ArgsExtract> for Extract {
         } else if let Some(chars) = &value.chars {
             Ok(Self::Chars(chars.parse()?))
         } else {
-            unreachable!("Must have --fields, --bytes, or --chars");
+            Err(CliError::Config)
         }
     }
 }
@@ -80,4 +76,19 @@ pub enum CliError {
     IO(#[from] std::io::Error),
     #[error(transparent)]
     RangeParseParse(#[from] cutr::ParseError),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_extract_mode_returns_config_error() {
+        let args = ArgsExtract {
+            fields: None,
+            bytes: None,
+            chars: None,
+        };
+        assert!(matches!(Extract::try_from(&args), Err(CliError::Config)));
+    }
 }

@@ -156,14 +156,13 @@ fn run(args: &[&str], expected_file: &str) -> Result<()> {
 }
 
 #[test]
-#[allow(clippy::indexing_slicing)]
 fn default_one_month() -> Result<()> {
     let cmd = cargo_bin_cmd!().assert().success();
     let out = cmd.get_output();
     let stdout = String::from_utf8(out.stdout.clone())?;
     let lines: Vec<_> = stdout.split('\n').collect();
     assert_eq!(lines.len(), 9);
-    assert_eq!(lines[0].len(), 22);
+    assert_eq!(lines.first().map(|line| line.len()), Some(22));
     Ok(())
 }
 

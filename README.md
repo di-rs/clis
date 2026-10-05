@@ -69,18 +69,6 @@ See [CONTRIBUTING](CONTRIBUTING.md) for workspace checks and fixture conventions
 Benchmarks require additional tools described in the
 [benchmarking guide](docs/benchmarking.md); they are not prerequisites for ordinary tests.
 
-[CI](.github/workflows/pull-request-check.yml) runs all `prek.toml` hooks and documentation tests
-on Linux when pull requests targeting `master` are opened, reopened, or updated.
-It also audits
-`Cargo.lock` with RustSec, scans Git history for secrets with redacted output,
-and checks workflow syntax and security.
-[Dependabot](.github/dependabot.yml) proposes Cargo and action updates weekly.
-CI uses read-only permissions and pinned actions and tools. Vulnerabilities fail
-the audit; warnings such as yanked crates remain visible in its output.
-Action updates are automated; tool versions and binary checksums need manual updates.
-The large-file hook checks tracked files in CI, with only the existing
-`coreutils/tailr/benches/data/1M.txt` benchmark dataset exempted.
-
 ## Workspace and contributor guides
 
 Commands live under `coreutils/` and in `calr/`, `biggie/`, `parsu/`, and `kara/`.

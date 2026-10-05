@@ -65,7 +65,6 @@ impl PositionList {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
@@ -80,8 +79,8 @@ mod tests {
         let res = PositionList::from_str("0");
         assert!(res.is_err());
         assert_eq!(
-            res.unwrap_err().to_string(),
-            "illegal list value: `0`".to_string()
+            res.err().map(|error| error.to_string()),
+            Some("illegal list value: `0`".to_owned())
         );
     }
 
@@ -90,8 +89,8 @@ mod tests {
         let res = PositionList::from_str("0-1");
         assert!(res.is_err());
         assert_eq!(
-            res.unwrap_err().to_string(),
-            "illegal list value: `0`".to_string()
+            res.err().map(|error| error.to_string()),
+            Some("illegal list value: `0`".to_owned())
         );
     }
 
@@ -100,8 +99,8 @@ mod tests {
         let res = PositionList::from_str("+1");
         assert!(res.is_err());
         assert_eq!(
-            res.unwrap_err().to_string(),
-            "illegal list value: `+1`".to_string()
+            res.err().map(|error| error.to_string()),
+            Some("illegal list value: `+1`".to_owned())
         );
     }
 
@@ -110,8 +109,8 @@ mod tests {
         let res = PositionList::from_str("+1-2");
         assert!(res.is_err());
         assert_eq!(
-            res.unwrap_err().to_string(),
-            "illegal list value: `+1`".to_string()
+            res.err().map(|error| error.to_string()),
+            Some("illegal list value: `+1`".to_owned())
         );
     }
 
@@ -120,8 +119,8 @@ mod tests {
         let res = PositionList::from_str("1-+2");
         assert!(res.is_err());
         assert_eq!(
-            res.unwrap_err().to_string(),
-            "illegal list value: `+2`".to_string()
+            res.err().map(|error| error.to_string()),
+            Some("illegal list value: `+2`".to_owned())
         );
     }
 
@@ -130,8 +129,8 @@ mod tests {
         let res = PositionList::from_str("a");
         assert!(res.is_err());
         assert_eq!(
-            res.unwrap_err().to_string(),
-            "illegal list value: `a`".to_string()
+            res.err().map(|error| error.to_string()),
+            Some("illegal list value: `a`".to_owned())
         );
     }
 
@@ -140,8 +139,8 @@ mod tests {
         let res = PositionList::from_str("1,a");
         assert!(res.is_err());
         assert_eq!(
-            res.unwrap_err().to_string(),
-            "illegal list value: `a`".to_string()
+            res.err().map(|error| error.to_string()),
+            Some("illegal list value: `a`".to_owned())
         );
     }
 
@@ -150,8 +149,8 @@ mod tests {
         let res = PositionList::from_str("1-a");
         assert!(res.is_err());
         assert_eq!(
-            res.unwrap_err().to_string(),
-            "illegal list value: `a`".to_string()
+            res.err().map(|error| error.to_string()),
+            Some("illegal list value: `a`".to_owned())
         );
     }
 
@@ -160,8 +159,8 @@ mod tests {
         let res = PositionList::from_str("a-1");
         assert!(res.is_err());
         assert_eq!(
-            res.unwrap_err().to_string(),
-            "illegal list value: `a`".to_string()
+            res.err().map(|error| error.to_string()),
+            Some("illegal list value: `a`".to_owned())
         );
     }
 
@@ -206,8 +205,8 @@ mod tests {
         let res = PositionList::from_str("1-1");
         assert!(res.is_err());
         assert_eq!(
-            res.unwrap_err().to_string(),
-            "first number in range (1) must be lower than second number (1)"
+            res.err().map(|error| error.to_string()),
+            Some("first number in range (1) must be lower than second number (1)".to_owned())
         );
     }
 
@@ -216,72 +215,72 @@ mod tests {
         let res = PositionList::from_str("2-1");
         assert!(res.is_err());
         assert_eq!(
-            res.unwrap_err().to_string(),
-            "first number in range (2) must be lower than second number (1)"
+            res.err().map(|error| error.to_string()),
+            Some("first number in range (2) must be lower than second number (1)".to_owned())
         );
     }
 
     #[test]
-    fn parse_single_value_range() {
+    fn parse_single_value_range() -> Result<(), ParseError> {
         let res = PositionList::from_str("1");
         let expected = vec![Range::from(0..1)];
-        assert!(res.is_ok());
-        assert_eq!(res.unwrap().0, expected);
+        assert_eq!(res?.0, expected);
+        Ok(())
     }
 
     #[test]
-    fn parse_trailing_zero_single_value_range() {
+    fn parse_trailing_zero_single_value_range() -> Result<(), ParseError> {
         let res = PositionList::from_str("01");
         let expected = vec![Range::from(0..1)];
-        assert!(res.is_ok());
-        assert_eq!(res.unwrap().0, expected);
+        assert_eq!(res?.0, expected);
+        Ok(())
     }
 
     #[test]
-    fn parse_coma_separated_ranges() {
+    fn parse_coma_separated_ranges() -> Result<(), ParseError> {
         let res = PositionList::from_str("1,3");
         let expected = vec![Range::from(0..1), Range::from(2..3)];
-        assert!(res.is_ok());
-        assert_eq!(res.unwrap().0, expected);
+        assert_eq!(res?.0, expected);
+        Ok(())
     }
 
     #[test]
-    fn parse_coma_separated_trailing_zero_ranges() {
+    fn parse_coma_separated_trailing_zero_ranges() -> Result<(), ParseError> {
         let res = PositionList::from_str("001,0003");
         let expected = vec![Range::from(0..1), Range::from(2..3)];
-        assert!(res.is_ok());
-        assert_eq!(res.unwrap().0, expected);
+        assert_eq!(res?.0, expected);
+        Ok(())
     }
 
     #[test]
-    fn parse_single_range() {
+    fn parse_single_range() -> Result<(), ParseError> {
         let res = PositionList::from_str("1-3");
         let expected = vec![Range::from(0..3)];
-        assert!(res.is_ok());
-        assert_eq!(res.unwrap().0, expected);
+        assert_eq!(res?.0, expected);
+        Ok(())
     }
 
     #[test]
-    fn parse_trailing_zero_single_range() {
+    fn parse_trailing_zero_single_range() -> Result<(), ParseError> {
         let res = PositionList::from_str("0001-03");
         let expected = vec![Range::from(0..3)];
-        assert!(res.is_ok());
-        assert_eq!(res.unwrap().0, expected);
+        assert_eq!(res?.0, expected);
+        Ok(())
     }
 
     #[test]
-    fn parse_multiple_ranges() {
+    fn parse_multiple_ranges() -> Result<(), ParseError> {
         let res = PositionList::from_str("1,7,3-5");
         let expected = vec![Range::from(0..1), Range::from(6..7), Range::from(2..5)];
-        assert!(res.is_ok());
-        assert_eq!(res.unwrap().0, expected);
+        assert_eq!(res?.0, expected);
+        Ok(())
     }
 
     #[test]
-    fn parse_two_digit_ranges() {
+    fn parse_two_digit_ranges() -> Result<(), ParseError> {
         let res = PositionList::from_str("15,19-20");
         let expected = vec![Range::from(14..15), Range::from(18..20)];
-        assert!(res.is_ok());
-        assert_eq!(res.unwrap().0, expected);
+        assert_eq!(res?.0, expected);
+        Ok(())
     }
 }

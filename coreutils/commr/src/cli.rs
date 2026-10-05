@@ -4,7 +4,10 @@ use thiserror::Error;
 
 use commr::{Column, Reporter};
 
-#[allow(clippy::struct_excessive_bools)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "Clap models independent command-line switches as booleans."
+)]
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 /// Rust minimal `comm` implementation

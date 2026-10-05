@@ -12,8 +12,7 @@ pub struct Cli {
     #[arg(short = 'c')]
     pub skip_create: bool,
 
-    #[allow(clippy::doc_markdown)]
-    /// Set custom timestamp in the format [[CC]YY]MMDDhhmm[.ss]
+    /// Set custom timestamp in the format `[[CC]YY]MMDDhhmm[.ss]`
     #[arg(short = 't', value_parser(Cli::parse_custom_timestamp))]
     pub timestamp: Option<NaiveDateTime>,
 
