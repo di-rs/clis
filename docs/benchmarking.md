@@ -49,11 +49,13 @@ constraints. A useful suite covers the applicable dimensions below, not every cr
 Generate deterministic data once with recorded parameters/checksums. Keep large
 inputs and raw local outputs outside tracked fixtures, for example under `target/`.
 Use [biggie](../biggie/README.md) for large alphanumeric text workloads when suitable.
-It currently has no seed option: generate once, record its revision/command, and
-retain the exact input plus checksum for all compared binaries and later reruns.
-Regenerating the same line count does not reproduce the same bytes. Use explicit
-small fixtures or a deterministic generator for binary, Unicode, long-record, and
-other shapes it does not produce. Adding seed support is separate implementation work.
+Use `--seed` and record its revision, lockfile, platform, and complete command;
+the same seed/options reproduce bytes within the same build/platform, not across
+arbitrary upgrades. Retain the exact input plus checksum for all compared binaries
+and later reruns. Word-count/length ranges support short and long records, and
+line-ending options cover LF, CRLF and an unterminated final record. Use explicit
+small fixtures or another deterministic generator for binary, Unicode, sorted or
+other shapes it does not yet produce; its README records follow-up requirements.
 For `mkdir`, `touch`, and other mutating tools, reset the sandbox before each run;
 otherwise later runs may measure a cheaper operation. Do not use destructive cache
 clearing or privileged machine-wide changes without explicit authorization.

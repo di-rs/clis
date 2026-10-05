@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use biggie::gen_random_lines;
+use biggie::{GenerationOptions, generate};
 use clap::Parser;
 use std::{
     fs::File,
@@ -17,15 +17,15 @@ fn main() -> ExitCode {
 }
 
 fn execute(cli: &Cli) -> Result<ExitCode> {
+    let options = cli.generation_options();
+    options.validate()?;
+    if cli.file.as_os_str() == "-" {
+        write_output(io::stdout().lock(), &options)?;
+        return Ok(ExitCode::SUCCESS);
+    }
     let file = File::create(&cli.file)
         .with_context(|| format!("Cannot create file {}", cli.file.display()))?;
-    let mut writer = BufWriter::new(file);
-    gen_random_lines(&mut writer, cli.lines)?;
-    {
-        let _span = tracing::debug_span!("flush").entered();
-        writer.flush().context("Cannot flush generated output")?;
-    }
-    log::info!("generated output: {} lines", cli.lines);
+    write_output(file, &options)?;
     let mut stdout = io::stdout().lock();
     writeln!(
         stdout,
@@ -37,4 +37,15 @@ fn execute(cli: &Cli) -> Result<ExitCode> {
     .context("Cannot write completion message")?;
     stdout.flush().context("Cannot flush completion message")?;
     Ok(ExitCode::SUCCESS)
+}
+
+fn write_output(writer: impl Write, options: &GenerationOptions) -> Result<()> {
+    let mut writer = BufWriter::new(writer);
+    generate(&mut writer, options).context("Cannot write generated output")?;
+    {
+        let _span = tracing::debug_span!("flush").entered();
+        writer.flush().context("Cannot flush generated output")?;
+    }
+    log::info!("generated output: {} lines", options.lines);
+    Ok(())
 }
