@@ -96,7 +96,7 @@ where
                 )
             }
         };
-        // Sink latches failures; the CLI observes them through Runtime::finish.
+        // Sink latches failures; the CLI observes them through TracingSession::finish.
         let _ = self
             .sink
             .clone()

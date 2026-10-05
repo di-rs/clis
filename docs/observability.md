@@ -1,7 +1,7 @@
 # Errors, diagnostics, and stage timings
 
 [North star U9](north-star.md#u9--errors-and-observability) ·
-[Architecture](architecture.md) · [Shared implementation](../utils/cli-support/README.md)
+[Architecture](architecture.md) · [Shared implementation](../utils/cli-tracing/README.md)
 
 This is the shared contract. Adoption remains per utility: `biggie` is the first
 consumer; other commands, including Kara, need separate migrations and evidence.
@@ -65,7 +65,7 @@ nor a sum that can safely combine nested/overlapping spans. Drop stage spans bef
 finishing the subscriber. Summary records are per stage invocation, not an unbounded
 history or a timeline export.
 
-`cli-support` builds an explicit subscriber and provides a scoped dispatch; it
+`cli-tracing` builds an explicit subscriber and provides a scoped dispatch; it
 never installs a process-global subscriber, panic hook, or logger. A host can
 compose its own subscriber instead. Scoped dispatch applies to the current thread;
 pass a cloned dispatch explicitly to worker threads. For async code use the
@@ -88,7 +88,7 @@ instrumentation off and on with identical correctness-checked work; logging outp
 and terminal costs need their own workload evidence. Timings locate candidates;
 [benchmark comparisons](benchmarking.md) establish performance claims.
 
-Use `cli-support` for CLI-side diagnostic collection and stage timing.
+Use `cli-tracing` for CLI-side diagnostic collection and stage timing.
 Migrate remaining direct `color-eyre` consumers (`parsu`, `mkdirr`, `touchr`, `pwdr`,
 Kara) individually, preserving domain error contracts. Migrate `grepr`'s separate
 logger and input-content warnings with its GNU flag/error policy; do not turn its

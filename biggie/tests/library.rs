@@ -59,12 +59,12 @@ impl Write for FailsAfterPrefix {
 #[test]
 fn partial_write_preserves_bytes_and_does_not_report_completed_generation()
 -> Result<(), Box<dyn std::error::Error>> {
-    use cli_support::{Config, Destination, Format, Runtime};
+    use cli_tracing::{Config, Destination, Format, TracingSession};
     use tracing::level_filters::LevelFilter;
 
     let dir = assert_fs::TempDir::new()?;
     let log = dir.path().join("events.jsonl");
-    let runtime = Runtime::new(&Config {
+    let session = TracingSession::new(&Config {
         destination: Destination::File(log.clone()),
         level: LevelFilter::TRACE,
         format: Format::Json,
@@ -73,10 +73,10 @@ fn partial_write_preserves_bytes_and_does_not_report_completed_generation()
     let mut writer = FailsAfterPrefix {
         accepted: Vec::new(),
     };
-    let result = tracing::dispatcher::with_default(runtime.dispatch(), || {
+    let result = tracing::dispatcher::with_default(session.dispatch(), || {
         biggie::gen_random_lines(&mut writer, 2)
     });
-    runtime.finish()?;
+    session.finish()?;
     assert!(result.is_err_and(|error| error.kind() == io::ErrorKind::BrokenPipe));
     assert_eq!(writer.accepted.len(), 3);
     let records: Vec<serde_json::Value> = std::fs::read_to_string(log)?

@@ -1,4 +1,4 @@
-# Shared CLI support implementation plan
+# Shared CLI tracing implementation plan
 
 > **For agentic workers:** Use the executing-plans skill to implement this plan
 > task by task. Execution is authorized in the user request; proceed after self-review.
@@ -7,7 +7,7 @@
 stage timing support, using biggie as the first real consumer.
 
 **Architecture:** Domain libraries emit tracing events/spans and retain typed errors.
-A separate CLI support crate resolves typed configuration, owns a checked sink and
+A separate CLI tracing crate resolves typed configuration, owns a checked sink and
 scoped subscriber, and formats events/stage summaries. Biggie's adapter uses anyhow
 context and explicit exit handling; its domain API remains an io::Result operation.
 
@@ -36,7 +36,7 @@ serde_json, thiserror, Clap in the app only, nextest and Clippy.
 
 ## Task 1: Typed configuration
 
-**Files:** root Cargo.toml/Cargo.lock; utils/cli-support/Cargo.toml,
+**Files:** root Cargo.toml/Cargo.lock; utils/cli-tracing/Cargo.toml,
 src/lib.rs, src/config.rs, tests/config.rs.
 
 **Interfaces:** Config holds LevelFilter, Format, Destination, timings. Overrides
@@ -45,30 +45,30 @@ OsString environment lookup and returns Result<Config, ConfigError>. No Clap typ
 
 - [x] Add tests for defaults, per-field precedence, overridden bad environment,
   invalid effective values and non-UTF-8 destination paths.
-- [x] Run `cargo test -p cli-support --test config`; expect missing API failure.
+- [x] Run `cargo test -p cli-tracing --test config`; expect missing API failure.
 - [x] Implement config parsing with typed errors; retain native paths.
 - [x] Run the same command; expect all config tests pass.
 
 ## Task 2: Subscriber, sinks and timings
 
-**Files:** utils/cli-support/src/{lib,runtime,sink,timing}.rs,
-tests/runtime.rs, benches/overhead.rs, README.md.
+**Files:** utils/cli-tracing/src/{lib,session,sink,timing}.rs,
+tests/session.rs, benches/overhead.rs, README.md.
 
-**Interfaces:** Runtime::new(&Config) opens destination; Runtime::with_writer(&Config,
+**Interfaces:** TracingSession::new(&Config) opens destination; TracingSession::with_writer(&Config,
 impl Write + Send + 'static) injects an owned sink. dispatch() returns &Dispatch;
-finish() returns io::Result<()> and checks prior writes plus flush. Runtime never
+finish() returns io::Result<()> and checks prior writes plus flush. TracingSession never
 installs global state. Stage spans have target clis::timing; close emits a timing
 record independently of normal event level. Built-in tracing formatter owns events.
 
 - [x] Add failing tests for formats, levels, timing, sink failure, scoped repeated
-  use, threaded dispatch and safe file opening; run `cargo test -p cli-support`.
-  Expected: runtime API missing before implementation.
+  use, threaded dispatch and safe file opening; run `cargo test -p cli-tracing`.
+  Expected: session API missing before implementation.
 - [x] Implement a synchronized checked writer, filtered fmt layer, and a layer
   retaining only currently open stage timestamps/fields.
 - [x] Run package tests and Clippy; expected: all pass without broad suppressions.
 - [x] Add a standalone deterministic checksum benchmark for bare/disabled/enabled
   instrumentation, assert equivalent checksums, report raw repeated samples.
-- [x] Run `cargo bench -p cli-support --bench overhead`; expected: equal checksums
+- [x] Run `cargo bench -p cli-tracing --bench overhead`; expected: equal checksums
   and raw timings. Record platform/limits; make no reference CLI speed claim.
 
 ## Task 3: Consumer integration
@@ -105,8 +105,9 @@ The clean starting revision is 0a10b46. All six baseline biggie tests passed.
 ## Execution evidence
 
 Implemented with biggie as the first consumer. Local macOS verification passed:
-724 workspace tests, 2 doctests, fmt and strict workspace Clippy. The shared
-[overhead record](../../../utils/cli-support/overhead.md) retains checked raw samples.
-An independent review found one partial-write coverage gap; the added regression
-checks retained bytes, propagated failure and absence of success instrumentation.
+729 workspace tests, 4 doctests, fmt and strict workspace Clippy. The shared
+[overhead record](../../../utils/cli-tracing/overhead.md) retains checked raw samples.
+Independent review led to regressions for partial writes without success
+instrumentation, retained first sink failures, and final-close timing records.
+Clap and log-bridge examples validate application-owned setup.
 Hosted Linux validation and delivery status are recorded in the PR checks.

@@ -20,12 +20,12 @@ pub struct Cli {
     pub lines: u64,
 
     /// Diagnostic severity threshold (overrides legacy verbosity aliases)
-    #[arg(long, value_parser = cli_support::parse_level)]
+    #[arg(long, value_parser = cli_tracing::parse_level)]
     pub log_level: Option<tracing::level_filters::LevelFilter>,
 
     /// Diagnostic encoding: text or json
     #[arg(long)]
-    pub log_format: Option<cli_support::Format>,
+    pub log_format: Option<cli_tracing::Format>,
 
     /// Create a new diagnostic file, or use - for stderr
     #[arg(long)]
@@ -40,8 +40,8 @@ pub struct Cli {
 }
 
 impl Cli {
-    pub fn diagnostic_overrides(&self) -> cli_support::Overrides {
-        cli_support::Overrides {
+    pub fn diagnostic_overrides(&self) -> cli_tracing::Overrides {
+        cli_tracing::Overrides {
             level: self.log_level.or_else(|| {
                 self.verbosity
                     .is_present()
@@ -50,9 +50,9 @@ impl Cli {
             format: self.log_format,
             destination: self.log_file.as_ref().map(|path| {
                 if path.as_os_str() == "-" {
-                    cli_support::Destination::Stderr
+                    cli_tracing::Destination::Stderr
                 } else {
-                    cli_support::Destination::File(path.clone())
+                    cli_tracing::Destination::File(path.clone())
                 }
             }),
             timings: self.timings,

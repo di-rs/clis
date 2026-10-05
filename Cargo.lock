@@ -159,7 +159,7 @@ dependencies = [
  "assert_fs",
  "clap",
  "clap-verbosity-flag",
- "cli-support",
+ "cli-tracing",
  "predicates",
  "rand",
  "serde_json",
@@ -340,13 +340,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
-name = "cli-support"
+name = "cli-tracing"
 version = "0.1.0"
 dependencies = [
  "assert_fs",
+ "clap",
+ "log",
  "serde_json",
  "thiserror",
  "tracing",
+ "tracing-log",
  "tracing-subscriber",
 ]
 
@@ -1695,6 +1698,17 @@ checksum = "8b1581020d7a273442f5b45074a6a57d5757ad0a47dac0e9f0bd57b81936f3db"
 dependencies = [
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "tracing-log"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee855f1f400bd0e5c02d150ae5de3840039a3f54b025156404e34c23c03f47c3"
+dependencies = [
+ "log",
+ "once_cell",
+ "tracing-core",
 ]
 
 [[package]]

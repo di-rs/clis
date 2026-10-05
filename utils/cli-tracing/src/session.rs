@@ -11,24 +11,24 @@ use tracing_subscriber::{Layer, filter::filter_fn, layer::SubscriberExt};
 /// No global logger/subscriber or panic hook is installed. Use `dispatch()` with
 /// `tracing::dispatcher::with_default`; clone it explicitly for worker threads.
 /// Close spans and stop emitting before calling `finish()`.
-pub struct Runtime {
+pub struct TracingSession {
     dispatch: Dispatch,
     sink: Sink,
 }
 
-impl Runtime {
+impl TracingSession {
     /// Open the configured destination. Files are created exclusively, never truncated.
     ///
     /// # Errors
     /// Returns filesystem errors, including an existing diagnostic file or symlink.
     pub fn new(config: &Config) -> io::Result<Self> {
-        let writer: Box<dyn Write + Send> = match &config.destination {
-            Destination::Stderr => Box::new(io::stderr()),
+        match &config.destination {
+            Destination::Stderr => Ok(Self::with_writer(config, io::stderr())),
             Destination::File(path) => {
-                Box::new(OpenOptions::new().write(true).create_new(true).open(path)?)
+                let file = OpenOptions::new().write(true).create_new(true).open(path)?;
+                Ok(Self::with_writer(config, file))
             }
-        };
-        Ok(Self::with_writer(config, writer))
+        }
     }
 
     /// Build a subscriber around a caller-supplied owned sink instead of opening

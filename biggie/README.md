@@ -66,9 +66,9 @@ and checksums. Line count does not specify an exact file size. No Unicode/emoji 
 mode, stdout streaming, pager or styled table is implemented; the output is ASCII
 test data and the completion message is plain text. There is no direct GNU Coreutils
 counterpart. U1/U9 have direct [library](tests/library.rs), [CLI](tests/cli.rs), and
-compiled API-example coverage, plus shared runtime tests; this is not a complete
+compiled API-example coverage, plus shared tracing-session tests; this is not a complete
 U1–U9 audit or a performance claim. Other universal requirements remain unaudited.
 The Linux-only `/dev/full` regression checks buffered flush failure; local macOS
-runs cannot execute it. Shared overhead evidence is [recorded separately](../utils/cli-support/overhead.md).
+runs cannot execute it. Shared overhead evidence is [recorded separately](../utils/cli-tracing/overhead.md).
 
 [Workspace README](../README.md)

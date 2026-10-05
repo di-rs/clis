@@ -3,7 +3,7 @@
     reason = "Test assertions fail the test; Result propagates fixture I/O errors."
 )]
 
-use cli_support::{Config, Destination, Format, Runtime};
+use cli_tracing::{Config, Destination, Format, TracingSession};
 use std::{
     io::{self, Write},
     sync::{Arc, Mutex},
@@ -53,15 +53,15 @@ fn all_thresholds_filter_events_and_repeated_scopes_work() -> Result {
         (LevelFilter::TRACE, 5),
     ] {
         let capture = Capture::default();
-        let runtime = Runtime::with_writer(
+        let session = TracingSession::with_writer(
             &Config {
                 level,
                 ..Config::default()
             },
             capture.clone(),
         );
-        with_default(runtime.dispatch(), events);
-        runtime.finish()?;
+        with_default(session.dispatch(), events);
+        session.finish()?;
         assert_eq!(capture.text()?.lines().count(), expected);
     }
     Ok(())
@@ -70,7 +70,7 @@ fn all_thresholds_filter_events_and_repeated_scopes_work() -> Result {
 #[test]
 fn json_preserves_fields_and_escapes_messages() -> Result {
     let capture = Capture::default();
-    let runtime = Runtime::with_writer(
+    let session = TracingSession::with_writer(
         &Config {
             level: LevelFilter::INFO,
             format: Format::Json,
@@ -78,12 +78,12 @@ fn json_preserves_fields_and_escapes_messages() -> Result {
         },
         capture.clone(),
     );
-    with_default(runtime.dispatch(), || {
+    with_default(session.dispatch(), || {
         let span = tracing::info_span!("operation", count = 3);
         let _entered = span.enter();
         tracing::info!(answer = 42, "Unicode 🦀\nmessage");
     });
-    runtime.finish()?;
+    session.finish()?;
     let text = capture.text()?;
     assert_eq!(text.lines().count(), 1);
     let json: serde_json::Value = serde_json::from_str(&text)?;
@@ -99,7 +99,7 @@ fn json_preserves_fields_and_escapes_messages() -> Result {
 fn timings_work_with_logging_off_and_record_final_counts() -> Result {
     for format in [Format::Text, Format::Json] {
         let capture = Capture::default();
-        let runtime = Runtime::with_writer(
+        let session = TracingSession::with_writer(
             &Config {
                 timings: true,
                 format,
@@ -107,13 +107,13 @@ fn timings_work_with_logging_off_and_record_final_counts() -> Result {
             },
             capture.clone(),
         );
-        with_default(runtime.dispatch(), || {
+        with_default(session.dispatch(), || {
             events();
             let span =
                 tracing::info_span!(target: "clis::timing", "scan", lines = tracing::field::Empty);
             span.record("lines", 12_u64);
         });
-        runtime.finish()?;
+        session.finish()?;
         let text = capture.text()?;
         assert_eq!(text.lines().count(), 1);
         assert!(text.contains("scan"));
@@ -132,9 +132,38 @@ fn timings_work_with_logging_off_and_record_final_counts() -> Result {
 }
 
 #[test]
+fn timing_summary_waits_for_the_last_span_clone_to_close() -> Result {
+    let capture = Capture::default();
+    let session = TracingSession::with_writer(
+        &Config {
+            timings: true,
+            format: Format::Json,
+            ..Config::default()
+        },
+        capture.clone(),
+    );
+    let (span, held) = with_default(session.dispatch(), || {
+        let span = tracing::info_span!(target: "clis::timing", "scan", lines = 1);
+        (span.clone(), span)
+    });
+    drop(span);
+    assert_eq!(capture.text()?, "");
+    held.record("lines", 12_u64);
+    drop(held);
+    session.finish()?;
+    let text = capture.text()?;
+    assert_eq!(text.lines().count(), 1);
+    let record: serde_json::Value = serde_json::from_str(&text)?;
+    assert_eq!(record["stage"], "scan");
+    assert_eq!(record["fields"]["lines"], 12);
+    assert!(record["elapsed_ms"].as_f64().is_some_and(|n| n >= 0.0));
+    Ok(())
+}
+
+#[test]
 fn disabled_timings_do_not_evaluate_fields_even_when_logs_enabled() -> Result {
     let capture = Capture::default();
-    let runtime = Runtime::with_writer(
+    let session = TracingSession::with_writer(
         &Config {
             level: LevelFilter::TRACE,
             ..Config::default()
@@ -142,11 +171,11 @@ fn disabled_timings_do_not_evaluate_fields_even_when_logs_enabled() -> Result {
         capture.clone(),
     );
     let mut evaluated = false;
-    with_default(runtime.dispatch(), || {
+    with_default(session.dispatch(), || {
         let _span =
             tracing::info_span!(target: "clis::timing", "scan", count = { evaluated = true; 1 });
     });
-    runtime.finish()?;
+    session.finish()?;
     assert!(!evaluated);
     assert_eq!(capture.text()?, "");
     Ok(())
@@ -160,15 +189,14 @@ impl Write for Fails {
         if self.flush_only {
             Ok(bytes.len())
         } else {
-            Err(io::Error::other("write failed"))
+            Err(io::Error::new(io::ErrorKind::BrokenPipe, "write failed"))
         }
     }
     fn flush(&mut self) -> io::Result<()> {
-        if self.flush_only {
-            Err(io::Error::other("flush failed"))
-        } else {
-            Ok(())
-        }
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "flush failed",
+        ))
     }
 }
 
@@ -176,7 +204,7 @@ impl Write for Fails {
 fn finish_reports_write_and_flush_failures_in_both_formats() {
     for format in [Format::Text, Format::Json] {
         for flush_only in [false, true] {
-            let runtime = Runtime::with_writer(
+            let session = TracingSession::with_writer(
                 &Config {
                     level: LevelFilter::INFO,
                     format,
@@ -184,26 +212,40 @@ fn finish_reports_write_and_flush_failures_in_both_formats() {
                 },
                 Fails { flush_only },
             );
-            with_default(runtime.dispatch(), || tracing::info!("event"));
-            assert!(runtime.finish().is_err());
-            assert!(runtime.finish().is_err());
+            with_default(session.dispatch(), || tracing::info!("event"));
+            let (kind, message) = if flush_only {
+                (io::ErrorKind::PermissionDenied, "flush failed")
+            } else {
+                (io::ErrorKind::BrokenPipe, "write failed")
+            };
+            for _ in 0..2 {
+                assert!(
+                    session.finish().is_err_and(|error| {
+                        error.kind() == kind && error.to_string() == message
+                    })
+                );
+            }
         }
     }
 }
 
 #[test]
 fn timing_sink_errors_are_reported() {
-    let runtime = Runtime::with_writer(
+    let session = TracingSession::with_writer(
         &Config {
             timings: true,
             ..Config::default()
         },
         Fails { flush_only: false },
     );
-    with_default(runtime.dispatch(), || {
+    with_default(session.dispatch(), || {
         let _span = tracing::info_span!(target: "clis::timing", "scan");
     });
-    assert!(runtime.finish().is_err());
+    assert!(
+        session
+            .finish()
+            .is_err_and(|error| error.kind() == io::ErrorKind::BrokenPipe)
+    );
 }
 
 #[test]
@@ -215,10 +257,10 @@ fn file_destination_never_overwrites_existing_data() -> Result {
         level: LevelFilter::INFO,
         ..Config::default()
     };
-    let runtime = Runtime::new(&config)?;
-    with_default(runtime.dispatch(), || tracing::info!("retained"));
-    runtime.finish()?;
-    assert!(Runtime::new(&config).is_err());
+    let session = TracingSession::new(&config)?;
+    with_default(session.dispatch(), || tracing::info!("retained"));
+    session.finish()?;
+    assert!(TracingSession::new(&config).is_err());
     assert!(std::fs::read_to_string(path)?.contains("retained"));
     Ok(())
 }
@@ -226,7 +268,7 @@ fn file_destination_never_overwrites_existing_data() -> Result {
 #[test]
 fn explicit_dispatch_propagates_to_workers_without_mixed_json_records() -> Result {
     let capture = Capture::default();
-    let runtime = Runtime::with_writer(
+    let session = TracingSession::with_writer(
         &Config {
             level: LevelFilter::INFO,
             format: Format::Json,
@@ -236,7 +278,7 @@ fn explicit_dispatch_propagates_to_workers_without_mixed_json_records() -> Resul
     );
     std::thread::scope(|scope| {
         for worker in 0..4 {
-            let dispatch = runtime.dispatch().clone();
+            let dispatch = session.dispatch().clone();
             scope.spawn(move || {
                 with_default(&dispatch, || {
                     for sequence in 0..25 {
@@ -246,7 +288,7 @@ fn explicit_dispatch_propagates_to_workers_without_mixed_json_records() -> Resul
             });
         }
     });
-    runtime.finish()?;
+    session.finish()?;
     let text = capture.text()?;
     assert_eq!(text.lines().count(), 100);
     for line in text.lines() {

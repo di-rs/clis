@@ -14,7 +14,7 @@ include.workspace = true
 clap = { workspace = true }
 anyhow.workspace = true
 tracing.workspace = true
-cli-support = { path = "../utils/cli-support" }
+cli-tracing = { path = "../utils/cli-tracing" }
 clap-verbosity-flag = { workspace = true }
 thousands = "0.2.0"
 rand = "0.10.3"

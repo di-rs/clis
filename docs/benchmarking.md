@@ -150,5 +150,5 @@ benchmark results; report unavailable measurement rather than expanding that sco
 Stage timings from [observability](observability.md) identify operations to investigate;
 they do not establish a speed improvement. Compare identical work with collection
 off and on, then test real stderr/file destinations separately. The shared
-[overhead harness](../utils/cli-support/README.md#verification-and-overhead) checks
+[overhead harness](../utils/cli-tracing/README.md#verification-and-overhead) checks
 its deterministic result before accepting any timing sample.

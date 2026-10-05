@@ -3,7 +3,7 @@
     reason = "Test assertions fail the test; Result propagates fixture I/O errors."
 )]
 
-use cli_support::{Config, Destination, Format, Overrides};
+use cli_tracing::{Config, Destination, Format, Overrides};
 use std::{ffi::OsString, path::PathBuf};
 use tracing::level_filters::LevelFilter;
 

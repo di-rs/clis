@@ -5,7 +5,7 @@
 
 mod config;
 pub use config::{Config, ConfigError, Destination, Format, Overrides, parse_level};
-mod runtime;
+mod session;
 mod sink;
 mod timing;
-pub use runtime::Runtime;
+pub use session::TracingSession;

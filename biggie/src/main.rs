@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use biggie::gen_random_lines;
 use clap::Parser;
-use cli_support::{Config, Destination, Runtime};
+use cli_tracing::{Config, Destination, TracingSession};
 use std::{
     fs::File,
     io::{self, BufWriter, Write},
@@ -26,10 +26,10 @@ fn main() -> ExitCode {
 
 fn execute(cli: &Cli) -> Result<()> {
     let config = Config::resolve(cli.diagnostic_overrides(), |key| std::env::var_os(key))?;
-    let runtime = Runtime::new(&config).context("Cannot open diagnostics")?;
+    let session = TracingSession::new(&config).context("Cannot open diagnostics")?;
     let operation =
-        tracing::dispatcher::with_default(runtime.dispatch(), || run(cli, &config.destination));
-    let diagnostics = runtime.finish().context("Cannot finish diagnostics");
+        tracing::dispatcher::with_default(session.dispatch(), || run(cli, &config.destination));
+    let diagnostics = session.finish().context("Cannot finish diagnostics");
     match (operation, diagnostics) {
         (Err(operation), Err(diagnostics)) => {
             return Err(operation.context(format!("Additionally: {diagnostics:#}")));

@@ -1,4 +1,4 @@
-use cli_support::{Config, Format, Runtime};
+use cli_tracing::{Config, Format, TracingSession};
 use std::{hint::black_box, io, time::Instant};
 use tracing::dispatcher::with_default;
 
@@ -36,8 +36,8 @@ fn sample(mode: &str, repetition: u64, mut work: impl FnMut() -> u64) {
 
 fn main() -> io::Result<()> {
     let input = black_box([7_u8; 4096]);
-    let disabled = Runtime::with_writer(&Config::default(), io::sink());
-    let enabled = Runtime::with_writer(
+    let disabled = TracingSession::with_writer(&Config::default(), io::sink());
+    let enabled = TracingSession::with_writer(
         &Config {
             timings: true,
             format: Format::Json,
