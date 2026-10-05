@@ -38,6 +38,9 @@ The test commands below also require [cargo-nextest](https://nexte.st/docs/insta
 Some code and tests use Unix-specific APIs; do not assume Windows support.
 Run commands from the workspace root:
 
+Install [prek](https://prek.j178.dev/installation/) and enable the Git hook once
+per clone with `prek install`. The configuration alone does not install the hook.
+
 ```sh
 cargo build -p catr
 cargo run -p catr -- --help
