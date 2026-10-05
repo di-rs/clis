@@ -15,11 +15,12 @@ clap = { workspace = true }
 anyhow.workspace = true
 tracing.workspace = true
 cli-tracing = { path = "../utils/cli-tracing" }
-clap-verbosity-flag = { workspace = true }
+log.workspace = true
 thousands = "0.2.0"
 rand = "0.10.3"
 
 [dev-dependencies]
+tracing-subscriber = { workspace = true, features = ["json"] }
 serde_json.workspace = true
 assert_cmd = { workspace = true }
 assert_fs = { workspace = true }

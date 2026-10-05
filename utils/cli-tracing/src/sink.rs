@@ -56,3 +56,48 @@ impl Write for Sink {
         self.finish()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct FailingWriter {
+        on_flush: bool,
+    }
+    impl Write for FailingWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if self.on_flush {
+                Ok(bytes.len())
+            } else {
+                Err(io::ErrorKind::BrokenPipe.into())
+            }
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::ErrorKind::WriteZero.into())
+        }
+    }
+
+    #[test]
+    fn finish_retains_write_errors_swallowed_by_the_formatter() {
+        let mut sink = Sink::new(FailingWriter { on_flush: false });
+        assert!(sink.write_all(b"record\n").is_err());
+        assert!(
+            sink.finish()
+                .is_err_and(|error| error.kind() == io::ErrorKind::BrokenPipe)
+        );
+        assert!(
+            sink.finish()
+                .is_err_and(|error| error.kind() == io::ErrorKind::BrokenPipe)
+        );
+    }
+
+    #[test]
+    fn finish_reports_flush_failure_after_successful_writes() {
+        let mut sink = Sink::new(FailingWriter { on_flush: true });
+        assert!(sink.write_all(b"record\n").is_ok());
+        assert!(
+            sink.finish()
+                .is_err_and(|error| error.kind() == io::ErrorKind::WriteZero)
+        );
+    }
+}

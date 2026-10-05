@@ -109,9 +109,10 @@ trade-offs. Follow [architecture](architecture.md#readability-and-performance) a
 ### U9 — Errors and observability
 
 Use typed domain errors and anyhow at the CLI boundary. Required diagnostics remain
-independent of optional logging. Offer explicit levels, text/JSON sinks and opt-in
-stage timings with documented precedence, without overriding GNU flags or data
-streams. Libraries emit tracing instrumentation without initializing a collector.
+independent of optional logging. Use one shared CLI setup with `--log-level`, text
+on stderr, and automatic tracing installation; debug/trace enables stage timings.
+Preserve GNU flags and data streams. Libraries emit log events and tracing spans
+without initializing a collector.
 Check sink/flush failures and finish owned resources before exit. Test the boundaries
 and measure instrumentation overhead; follow [observability](observability.md).
 

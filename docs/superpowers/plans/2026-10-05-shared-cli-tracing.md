@@ -1,115 +1,55 @@
-# Shared CLI tracing implementation plan
+# Focused CLI setup implementation plan
 
-> **For agentic workers:** Use the executing-plans skill to implement this plan
-> task by task. Execution is authorized in the user request; proceed after self-review.
+Approved in conversation on 2026-10-05, including deriving the application name
+from Clap metadata. This plan replaces the broader subscriber configuration design;
+the [observability contract](../../observability.md) owns current requirements.
 
-**Goal:** Provide shared, tested diagnostics and opt-in
-stage timing support, using biggie as the first real consumer.
+Base revision: `cb4f703`. Continue the existing PR; do not migrate other utilities
+or modify Kara incidentally. Keep handoff and scratch files out of commits.
 
-**Architecture:** Domain libraries emit tracing events/spans and retain typed errors.
-A separate CLI tracing crate resolves typed configuration, owns a checked sink and
-scoped subscriber, and formats events/stage summaries. Biggie's adapter uses anyhow
-context and explicit exit handling; its domain API remains an io::Result operation.
+## Interface and scope
 
-**Tech Stack:** Rust workspace nightly, anyhow, tracing, tracing-subscriber,
-thiserror, Clap in the app only, nextest and Clippy.
+- Flatten `cli_tracing::LogArgs` and call `run::<Cli>(&cli.logging, operation)`.
+- `Cli: clap::CommandFactory` supplies the command name, including custom names.
+- One setting: flag > `CLIS_LOG_LEVEL` > off. Text stderr, no ANSI, no short aliases.
+- Install a global subscriber and log bridge once before the operation. Use upstream
+  formatting, debug stage spans, and close records; no separate timing switch.
+- Keep domain APIs typed and independent of setup. Biggie retains
+  `gen_random_lines(impl Write, u64) -> io::Result<()>`.
+- Return expected `ExitCode` outcomes unchanged. Unhandled anyhow/setup/sink failures
+  return 1; other utilities' GNU diagnostic/status semantics need reviewed adapters.
+- Keep a private checked writer so formatter callback errors cannot become success.
 
-**Spec:** [Errors, diagnostics, and stage timings](../../observability.md).
+## Tasks and acceptance
 
-## Global constraints
-
-- CLI > environment > default, field by field; off/text/stderr/false defaults.
-- Keep domain code free of argv, process-global initialization, streams and exits.
-- Preserve GNU verbosity meanings. Keep biggie's existing aliases with explicit
-  log-level precedence; do not alter unrelated apps or Kara.
-- File sinks create new files; stdout stays the data/status stream.
-- Sink errors are observable; timings are optional wall time, not a speed claim.
-- No handoff files or scratch staging directories enter commits.
+1. Establish the affected baseline and write process regressions for debug timing,
+   sole shared flag, precedence, name derivation, errors, and the log bridge.
+   Observe failures on the old implementation before replacing it.
+2. Replace public configuration/dispatch APIs with the shared arguments and entry.
+   Preserve checked writes; test all levels, workers, expected nonzero outcomes,
+   duplicate installation, disabled fields, cause chains and broken stderr.
+3. Migrate Biggie's adapter, use log messages and debug stage instrumentation.
+   Preserve direct API and partial-write tests, default output and data flushing.
+4. Reconcile current guides and examples. Remove obsolete configuration recipes;
+   document actual behavior and migration limits without duplicating the standard.
+5. Run package then workspace checks in [CONTRIBUTING](../../../CONTRIBUTING.md#checks),
+   rustdoc/example checks, links and diff review. Measure correctness-checked stage
+   overhead and before/after startup, with raw samples and limitations.
+6. Obtain a fresh review, resolve actionable defects, commit and update the existing
+   PR. Check CI and leave the PR unmerged.
 
 ## Review focus
 
-1. A log file that aliases data must never be truncated (task 3 regression).
-2. A sink that fails after successful writes must make finish fail (task 2 test).
-3. Logging off must still allow timings, but do no timing work otherwise (task 2).
-4. Concurrent callers must use explicit dispatch and serialize records (task 2).
-5. Failure after partial data output must not report success (task 3 injected I/O).
+- Log records must reach the subscriber, including from joined worker threads.
+- Required errors must appear once with the Clap name even with logging off.
+- An expected nonzero outcome must retain its status without becoming an error report.
+- Setup failure must prevent the operation; output failures must not become success.
+- No removed configuration remains presented as current, and domain APIs do not
+  acquire process setup or Clap dependencies in their implementation.
+- Distinguish disabled instrumentation, stage collection, and startup measurements.
 
-## Task 1: Typed configuration
+## Evidence
 
-**Files:** root Cargo.toml/Cargo.lock; utils/cli-tracing/Cargo.toml,
-src/lib.rs, src/config.rs, tests/config.rs.
-
-**Interfaces:** Config holds LevelFilter, Format, Destination, timings. Overrides
-holds optional versions of each. Config::resolve takes Overrides and an injected
-OsString environment lookup and returns Result<Config, ConfigError>. No Clap types.
-
-- [x] Add tests for defaults, per-field precedence, overridden bad environment,
-  invalid effective values and non-UTF-8 destination paths.
-- [x] Run `cargo test -p cli-tracing --test config`; expect missing API failure.
-- [x] Implement config parsing with typed errors; retain native paths.
-- [x] Run the same command; expect all config tests pass.
-
-## Task 2: Subscriber, sinks and timings
-
-**Files:** utils/cli-tracing/src/{lib,session,sink}.rs,
-tests/session.rs, benches/overhead.rs, README.md.
-
-**Interfaces:** TracingSession::new(&Config) opens destination; TracingSession::with_writer(&Config,
-impl Write + Send + 'static) injects an owned sink. dispatch() returns &Dispatch;
-finish() returns io::Result<()> and checks prior writes plus flush. TracingSession never
-installs global state. Stage spans have target clis::timing; close emits a timing
-record independently of normal event level. The built-in tracing formatter owns
-events, timestamps, final fields, and span-close busy/idle durations.
-
-- [x] Add failing tests for formats, levels, timing, sink failure, scoped repeated
-  use, threaded dispatch and safe file opening; run `cargo test -p cli-tracing`.
-  Expected: session API missing before implementation.
-- [x] Implement a synchronized checked writer and filtered built-in fmt layers,
-  using FmtSpan::CLOSE for stage timing. Keep only caller-required configuration
-  and output glue; extend library defaults when concrete needs arise.
-- [x] Run package tests and Clippy; expected: all pass without broad suppressions.
-- [x] Add a standalone deterministic checksum benchmark for bare/disabled/enabled
-  instrumentation, assert equivalent checksums, report raw repeated samples.
-- [x] Run `cargo bench -p cli-tracing --bench overhead`; expected: equal checksums
-  and raw timings. Record platform/limits; make no reference CLI speed claim.
-
-## Task 3: Consumer integration
-
-**Files:** biggie/Cargo.toml, src/{cli,main,lib}.rs, tests/{cli,library}.rs, README.md;
-root README and Cargo.lock.
-
-**Interfaces:** biggie keeps gen_random_lines(impl Write, u64) -> io::Result<()>;
-uses tracing only in domain code. CLI constructs Overrides and calls task 1/2 APIs.
-
-- [x] Add CLI regressions for explicit/environment diagnostics, timing with logging
-  off, invalid settings before output creation, file aliases, concise errors and
-  unchanged default behavior; add domain write failure/repeated call tests.
-- [x] Run `cargo nextest run -p biggie`; expect new options/tests to fail first.
-- [x] Use shared diagnostic collection and anyhow at the CLI edge, preserve
-  aliases, explicitly flush data, close spans and check diagnostics before success.
-- [x] Run package tests/doctests/Clippy; expected: all pass.
-
-## Task 4: Standards, evidence and delivery
-
-**Files:** docs/observability.md, north-star.md (U9), architecture.md, benchmarking.md,
-utility template, AGENTS.md, PR template, explore/audit skills, relevant READMEs.
-
-- [x] Establish docs before code and reconcile with the final implementation.
-- [x] Validate local links, examples, skills and final diff. Run CONTRIBUTING's
-  workspace fmt/Clippy/nextest/doctest checks, retaining actual commands/counts.
-- [x] Obtain one independent final review; fix consequential findings with
-  regressions. Record limitations and any implementation rulings.
-- Delivery: commit focused task paths, update the existing authorized PR against the
-  current default branch, and verify CI. Do not merge.
-
-The clean starting revision is 0a10b46. All six baseline biggie tests passed.
-
-## Execution evidence
-
-Implemented with biggie as the first consumer. Local macOS verification passed:
-730 workspace tests, 4 doctests, fmt and strict workspace Clippy. The shared
-[overhead record](../../../utils/cli-tracing/overhead.md) retains checked raw samples.
-Independent review led to regressions for partial writes without success
-instrumentation, retained first sink failures, and final-close timing records.
-Clap and log-bridge examples validate application-owned setup.
-Hosted Linux validation and delivery status are recorded in the PR checks.
+The clean baseline passed 36 affected tests. Three new Biggie process regressions
+failed as expected before implementation. Final checks and measurement limitations
+are recorded in the PR and [overhead record](../../../utils/cli-tracing/overhead.md).

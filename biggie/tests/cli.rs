@@ -133,150 +133,99 @@ fn reports_output_path_errors() -> Result<()> {
 }
 
 #[test]
-fn explicit_level_overrides_environment_and_aliases() -> Result<()> {
+fn explicit_level_overrides_environment() -> Result<()> {
     let dir = TempDir::new()?;
     command()
         .current_dir(dir.path())
-        .args(["-n", "1", "-vv", "--log-level=off"])
+        .args(["-n", "1", "--log-level=off"])
         .env("CLIS_LOG_LEVEL", "invalid")
         .assert()
         .success()
         .stderr("");
     command()
         .current_dir(dir.path())
-        .args(["-n", "1", "-q", "--log-level=info"])
+        .args(["-n", "1"])
+        .env("CLIS_LOG_LEVEL", "info")
         .assert()
         .success()
-        .stderr(predicate::str::contains("generated"));
+        .stderr(
+            predicate::str::contains("generated output")
+                .and(predicate::str::contains("close").not()),
+        );
     Ok(())
 }
 
-#[allow(
-    clippy::panic_in_result_fn,
-    reason = "Assertions verify captured records; Result propagates fixture errors."
-)]
 #[test]
-fn structured_timings_do_not_require_verbose_logging() -> Result<()> {
+fn debug_verbosity_collects_stage_timings() -> Result<()> {
     let dir = TempDir::new()?;
-    let output = command()
+    command()
         .current_dir(dir.path())
-        .args(["-n", "2", "--timings", "--log-format=json"])
+        .args(["-n", "2", "--log-level=debug"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Done, wrote 2 lines"))
-        .get_output()
-        .clone();
-    let stderr = String::from_utf8(output.stderr)?;
-    let mut stages = Vec::new();
-    for line in stderr.lines() {
-        let record: serde_json::Value = serde_json::from_str(line)?;
-        assert_eq!(record["target"], "clis::timing");
-        assert_eq!(record["fields"]["message"], "close");
-        assert!(record["fields"]["time.busy"].is_string());
-        assert!(record["fields"]["time.idle"].is_string());
-        stages.push(record);
-    }
-    assert_eq!(stages.len(), 2);
-    assert!(stages.iter().any(|record| record.pointer("/span/name")
-        == Some(&serde_json::json!("generate"))
-        && record.pointer("/span/lines_written") == Some(&serde_json::json!(2))));
-    assert!(
-        stages
-            .iter()
-            .any(|record| record["span"]["name"] == "flush")
-    );
-    Ok(())
+        .stderr(
+            predicate::str::contains("generate")
+                .and(predicate::str::contains("lines_written=2"))
+                .and(predicate::str::contains("flush"))
+                .and(predicate::str::contains("time.busy="))
+                .and(predicate::str::contains("time.idle="))
+                .and(predicate::str::contains("\u{1b}").not()),
+        );
+    assert_text(&dir.path().join("out.txt"), 2)
 }
 
-#[allow(
-    clippy::panic_in_result_fn,
-    reason = "Assertions verify captured records; Result propagates fixture errors."
-)]
 #[test]
-fn environment_logging_can_be_redirected_and_disabled_explicitly() -> Result<()> {
+fn invalid_environment_level_does_not_create_data() -> Result<()> {
     let dir = TempDir::new()?;
     command()
         .current_dir(dir.path())
-        .args(["-n", "1", "--log-file=events.jsonl"])
-        .env("CLIS_LOG_LEVEL", "info")
-        .env("CLIS_LOG_FORMAT", "json")
+        .args(["output", "-n", "1"])
+        .env("CLIS_LOG_LEVEL", "invalid")
         .assert()
-        .success()
-        .stderr("");
-    let text = fs::read_to_string(dir.path().join("events.jsonl"))?;
-    let record: serde_json::Value = serde_json::from_str(text.trim())?;
-    assert_eq!(record.get("level"), Some(&serde_json::json!("INFO")));
-    command()
-        .current_dir(dir.path())
-        .args([
-            "-n",
-            "1",
-            "--log-level=off",
-            "--timings=false",
-            "--log-file=-",
-        ])
-        .env("CLIS_LOG_FILE", "events.jsonl")
-        .env("CLIS_TIMINGS", "true")
-        .assert()
-        .success()
-        .stderr("");
-    Ok(())
-}
-
-#[test]
-fn invalid_diagnostics_do_not_create_data() -> Result<()> {
-    let dir = TempDir::new()?;
-    for key in ["CLIS_LOG_LEVEL", "CLIS_LOG_FORMAT", "CLIS_TIMINGS"] {
-        command()
-            .current_dir(dir.path())
-            .args(["output", "-n", "1"])
-            .env(key, "invalid")
-            .assert()
-            .failure()
-            .stdout("")
-            .stderr(predicate::str::contains(key));
-        dir.child("output").assert(predicate::path::missing());
-    }
-    Ok(())
-}
-
-#[test]
-fn rejects_existing_or_overlapping_log_destinations() -> Result<()> {
-    let dir = TempDir::new()?;
-    dir.child("existing").write_str("keep me")?;
-    for destination in ["existing", "output", "missing/events"] {
-        command()
-            .current_dir(dir.path())
-            .args([
-                "output",
-                "-n",
-                "1",
-                "--log-level=info",
-                "--log-file",
-                destination,
-            ])
-            .assert()
-            .failure()
-            .stdout("");
-    }
-    dir.child("existing").assert("keep me");
-    dir.child("output").assert("");
-    Ok(())
-}
-
-#[cfg(unix)]
-#[test]
-fn refuses_symlink_alias_between_data_and_new_log() -> Result<()> {
-    let dir = TempDir::new()?;
-    std::os::unix::fs::symlink("events", dir.path().join("data"))?;
-    command()
-        .current_dir(dir.path())
-        .args(["data", "-n", "1", "--log-file=events"])
-        .assert()
-        .failure()
+        .code(2)
         .stdout("")
-        .stderr(predicate::str::contains("same file"));
-    dir.child("events").assert("");
+        .stderr(predicate::str::contains("--log-level"));
+    dir.child("output").assert(predicate::path::missing());
+    Ok(())
+}
+
+#[test]
+fn unsupported_diagnostic_options_do_not_modify_output() -> Result<()> {
+    let dir = TempDir::new()?;
+    dir.child("output").write_str("keep me")?;
+    for option in [
+        "--log-format=json",
+        "--log-file=events",
+        "--timings",
+        "-v",
+        "-q",
+    ] {
+        command()
+            .current_dir(dir.path())
+            .args(["output", "-n", "1", option])
+            .assert()
+            .code(2)
+            .stdout("");
+        dir.child("output").assert("keep me");
+        dir.child("events").assert(predicate::path::missing());
+    }
+    Ok(())
+}
+
+#[test]
+fn required_errors_are_reported_once_at_every_level() -> Result<()> {
+    let dir = TempDir::new()?;
+    for level in ["off", "error", "debug", "trace"] {
+        command()
+            .current_dir(dir.path())
+            .args(["missing/output", "-n", "1"])
+            .arg(format!("--log-level={level}"))
+            .assert()
+            .code(1)
+            .stdout("")
+            .stderr(predicate::str::contains("biggie: Cannot create file missing/output").count(1));
+    }
     Ok(())
 }
 

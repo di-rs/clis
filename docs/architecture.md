@@ -110,9 +110,10 @@ modeled and tested. The same flag spelling is not proof of shared semantics.
 Before adding a shared crate under `utils/`, identify its actual callers, smallest
 API, dependency cost, and tests. Prefer extracting from two concrete consumers;
 a smaller justified extraction is acceptable, but speculation about future projects
-is not enough. Shared crates must not depend back on utility crates or implicitly install
-process-wide state. CLI support is an adapter capability: domains depend only on
-the tracing facade, not on configuration, collectors, or diagnostic sinks. Follow
+is not enough. Shared domain crates must not depend back on utilities or install
+process-wide state. The explicit `cli_tracing::run` entry is a CLI adapter: it owns
+global diagnostic initialization. Domains depend only on the log/tracing facades,
+not on this entry helper, Clap, configuration, collectors, or diagnostic sinks. Follow
 [observability](observability.md) for typed errors, anyhow at the CLI boundary, and
 subscriber ownership. Test affected consumers whenever a shared contract changes.
 

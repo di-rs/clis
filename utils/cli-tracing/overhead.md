@@ -1,99 +1,92 @@
-# Shared instrumentation overhead
+# Shared setup overhead
 
-Measured on 2026-10-05 on macOS 27.0.1 (26A434), arm64, rustc 1.101.0-nightly
-(db8f076d2 2026-10-03), Cargo bench/release profile. CPU model was unavailable
-to the sandbox. No other repository builds/tests ran during measurement.
+Measured on 2026-10-05, macOS 27.0.1 (26A434), arm64, rustc
+1.101.0-nightly (db8f076d2 2026-10-03), release profile and default features.
+No repository builds/tests ran during measurement. CPU model and memory size were
+unavailable in the sandbox; this is an uncontrolled workstation, not a dedicated
+performance runner. Temporary data used the local system temporary filesystem;
+no cache controls or storage profiling were applied.
 
-The same harness checksums a 4 KiB buffer (all bytes 7) 100,000 times per sample.
-Three warm-up rounds precede six reported rounds, rotating mode order. Every
-sample asserts checksum 2,867,200,000. Input allocation, subscriber construction,
-and startup are outside the timed region. JSON records go to `io::sink()`.
+## Repeated stage collection
 
-Before: the retained release benchmark executable from `8f7360f`, using custom
-numeric elapsed-time records. After: built-in span-close records, timestamps,
-busy/idle durations, and span context. Both versions ran sequentially on the same
-host, with identical domain work; versions were not interleaved. The output work
-changes intentionally, so this comparison measures its cost, not equivalent
-formatting throughput.
+The [Rust harness](benches/overhead.rs) checksums a fixed 4 KiB buffer of bytes equal
+to 7, 100,000 times per sample. Every sample must return 2,867,200,000. Each process
+has three warm-up rounds and six reported rounds. Construction/global installation
+happens before timing. The same checksum runs bare, with a disabled debug span,
+and with debug span-close formatting. Text stderr is redirected to `/dev/null`;
+formatting, checked writes, and system-call costs are included. Modes run sequentially.
 
-Reproduce each revision from its own checkout with:
+| Mode | Median ns/operation | Min–max ns/operation |
+| --- | ---: | ---: |
+| bare | 168.71 | 168.62–171.40 |
+| disabled | 168.74 | 168.29–168.97 |
+| debug | 1506.62 | 1459.45–1630.76 |
+
+Disabled spans are within measurement noise of bare work. Debug collection costs
+about 1.34 microseconds more per stage in this workload. This is instrumentation
+cost, not a speedup or a comparison with the previous JSON-to-memory-sink harness,
+whose output and destination performed different work.
+
+[Raw stage samples](benches/results/stages.csv). Reproduce from the workspace root:
 
 ```sh
-cargo bench --locked -p cli-tracing --bench overhead
+cargo bench --locked -p cli-tracing --bench overhead -- --bare --log-level=off
+cargo bench --locked -p cli-tracing --bench overhead -- --log-level=off
+cargo bench --locked -p cli-tracing --bench overhead -- --log-level=debug 2>/dev/null
 ```
 
-| Version | Mode | Median ns/operation | Min–max ns/operation |
-| --- | --- | ---: | ---: |
-| before | bare | 168.76 | 168.28–189.25 |
-| before | disabled | 169.00 | 168.30–187.89 |
-| before | timings_json_sink | 850.25 | 818.44–945.49 |
-| after | bare | 168.40 | 168.25–168.74 |
-| after | disabled | 168.55 | 168.06–168.86 |
-| after | timings_json_sink | 1354.04 | 1340.86–1385.46 |
+The recorded runs executed the built benchmark directly after
+`cargo bench --locked -p cli-tracing --bench overhead --no-run --message-format=json`;
+Cargo build/launch messages are excluded from the CSV.
 
-Disabled instrumentation remains within noise of bare work. Enabled collection
-increases from about 0.85 to 1.35 microseconds per stage: approximately 0.50
-microseconds, or 59%, more in this small workload. The after version adds about
-1.19 microseconds over bare work. The trade-off buys upstream timing/formatting
-and removes the custom collector; it is a measured regression, not a speed claim.
-Explicit reviewer acceptance of this cost remains part of PR review.
+## Small-command startup
 
-This is not a real-file/terminal benchmark or a GNU comparison. Memory usage,
-Linux overhead, full biggie throughput, startup, and logging-only costs remain
-unmeasured. The before run had greater variation; retain the raw samples rather
-than treating these medians as universal costs.
+Compare a retained release `biggie` at base `cb4f703` with the focused setup.
+The [Python runner](benches/startup.py) alternates process order, performs five
+warm-ups per version, then records fifty samples each. Every invocation creates
+one line in a fresh temporary output file. The timed region includes process
+launch, Clap/setup, random generation, writing/flushing, captured stdout/stderr,
+and waiting for exit. It is not a pure subscriber-initialization measurement.
 
-The after implementation is the change following `8f7360f`. SHA-256 of the
-concatenated bytes of `benches/overhead.rs`, `src/session.rs`, and `src/sink.rs`
-(in that order, within this crate):
-`25ce661ef0d8a876b9d322195e7f349189e71429dfe853804890a9847c6ace4d`.
+Outside timing, every invocation checks status 0, exact completion stdout, empty
+stderr, one newline, and the documented ASCII word/count/length constraints.
+Random bytes differ; there is no seed API. Both versions perform the same bounded
+one-line workload, and each starts without a destination file.
 
-## Before: raw samples
+| Version | Median ms/process | Min–max ms/process |
+| --- | ---: | ---: |
+| before | 2.401 | 1.978–2.951 |
+| after | 2.312 | 1.954–2.909 |
 
-```csv
-mode,repetition,operations,elapsed_ns,checksum
-bare,0,100000,16888333,2867200000
-disabled,0,100000,16838250,2867200000
-timings_json_sink,0,100000,82602167,2867200000
-disabled,1,100000,16861584,2867200000
-timings_json_sink,1,100000,82377333,2867200000
-bare,1,100000,16867875,2867200000
-timings_json_sink,2,100000,81844125,2867200000
-bare,2,100000,16828333,2867200000
-disabled,2,100000,16830125,2867200000
-bare,3,100000,16852792,2867200000
-disabled,3,100000,17946208,2867200000
-timings_json_sink,3,100000,91791292,2867200000
-disabled,4,100000,18789458,2867200000
-timings_json_sink,4,100000,94549125,2867200000
-bare,4,100000,18925250,2867200000
-timings_json_sink,5,100000,87448250,2867200000
-bare,5,100000,16884083,2867200000
-disabled,5,100000,16939084,2867200000
+[Raw startup samples](benches/results/startup.csv). The small difference is
+inconclusive: distributions overlap and its sign changed across preliminary reruns.
+There is no demonstrated startup win or regression. The current setup adds global
+initialization but removes configuration paths; these results do not isolate them.
+
+Reproduce after building each revision separately and retaining the base binary:
+
+```sh
+python3 utils/cli-tracing/benches/startup.py /private/tmp/clis-focused-biggie-before target/release/biggie
 ```
 
-## After: raw samples
+Recorded executable SHA-256 values:
 
-```csv
-mode,repetition,operations,elapsed_ns,checksum
-bare,0,100000,16833208,2867200000
-disabled,0,100000,16874417,2867200000
-timings_json_sink,0,100000,134628708,2867200000
-disabled,1,100000,16806334,2867200000
-timings_json_sink,1,100000,136015042,2867200000
-bare,1,100000,16874042,2867200000
-timings_json_sink,2,100000,134086125,2867200000
-bare,2,100000,16846042,2867200000
-disabled,2,100000,16860875,2867200000
-bare,3,100000,16862541,2867200000
-disabled,3,100000,16848834,2867200000
-timings_json_sink,3,100000,138545750,2867200000
-disabled,4,100000,16886459,2867200000
-timings_json_sink,4,100000,134792958,2867200000
-bare,4,100000,16830833,2867200000
-timings_json_sink,5,100000,136997167,2867200000
-bare,5,100000,16824750,2867200000
-disabled,5,100000,16830625,2867200000
-```
+- Before: `d3c92b5f9515c71c47d2081075da7e1bc0ceec1b45427f290e18664ceb50abec`.
+- After: `ac84ae165cc24aff0f5aff293dc5e5f385baa8d4ade00f097269ed91dac3b5f9`.
 
-[Harness and interpretation](README.md#verification-and-overhead)
+The candidate is the change after `cb4f703`. SHA-256 of the concatenated files
+below, in order, is `ef3e4e372bc26a42dd2796275038c33f5eb2aa4fec1f5ddbf6e33a930897af00`:
+
+- `Cargo.toml`
+- `Cargo.lock`
+- `utils/cli-tracing/src/lib.rs`
+- `utils/cli-tracing/src/sink.rs`
+- `utils/cli-tracing/benches/overhead.rs`
+- `biggie/Cargo.toml`
+- `biggie/src/cli.rs`
+- `biggie/src/lib.rs`
+- `biggie/src/main.rs`
+
+Full throughput, memory/allocations, terminal rendering cost, Linux performance,
+and GNU/BSD comparisons remain unmeasured. These results do not certify utility
+performance or justify hot-path logging. See the [measurement procedure](../../docs/benchmarking.md).

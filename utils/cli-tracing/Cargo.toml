@@ -1,7 +1,7 @@
 [package]
 name = "cli-tracing"
 version = "0.1.0"
-description = "Explicit diagnostics and opt-in stage timings for CLI adapters"
+description = "Shared CLI logging, tracing, and error reporting"
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,23 +9,16 @@ repository.workspace = true
 readme = "README.md"
 
 [dependencies]
-thiserror.workspace = true
+anyhow.workspace = true
+clap = { workspace = true, features = ["env"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
-clap.workspace = true
 log.workspace = true
-tracing-log.workspace = true
-assert_fs.workspace = true
 
 [lints]
 workspace = true
-
-[[example]]
-name = "clap"
-test = true
 
 [[bench]]
 name = "overhead"

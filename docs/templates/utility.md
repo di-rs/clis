@@ -66,7 +66,7 @@ do not publish planned APIs as working examples.]
 
 ## Errors and observability
 
-[Record domain error types, diagnostic/status mapping, log levels/formats/destinations,
+[Record domain error types, diagnostic/status mapping, shared log-level integration,
 CLI/environment precedence and verbosity conflicts. Identify stage spans/counts,
 flush and sink-failure behavior, privacy choices, instrumentation overhead evidence,
 and remaining U9 gaps. Follow the [shared contract](../observability.md).]

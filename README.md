@@ -84,7 +84,7 @@ The large-file hook checks tracked files in CI, with only the existing
 ## Workspace and contributor guides
 
 Commands live under `coreutils/` and in `calr/`, `biggie/`, `parsu/`, and `kara/`.
-[`utils/cli-tracing`](utils/cli-tracing/README.md) provides explicit diagnostics and stage timings;
+[`utils/cli-tracing`](utils/cli-tracing/README.md) provides shared CLI logging, tracing, and error reporting;
 [`utils/comp_macro`](utils/comp_macro/README.md) provides a comprehension macro.
 These helpers are libraries, not commands. Process initialization belongs in CLI
 adapters, not in reusable domain operations.

@@ -1,280 +1,144 @@
 # cli-tracing
 
-A CLI-side adapter for diagnostic events and opt-in stage timings. It resolves
-configuration, builds a `tracing` subscriber, and checks diagnostic write/flush
-failures. `TracingSession` owns that subscriber and its sink; it is not an async
-runtime and creates no worker threads.
+One application setup for logging, tracing, and errors. Flatten `LogArgs` into
+Clap and call `run::<Cli>` once. The command name comes from Clap metadata,
+including `#[command(name = "...")]`; no repeated name string is needed.
 
-Use this crate when an application needs the workspace's diagnostic policy.
-Domain libraries emit through `tracing` and return their own errors; they need no
-`cli-tracing` dependency or initialization. Applications already owning a
-subscriber can collect those same events and spans themselves.
+## Integration
 
-## Dependencies and boundaries
+Within this workspace, add `cli-tracing` by path and inherit `anyhow`, `clap`,
+`log`, and `tracing`. Enable Clap's `derive` and tracing's `attributes` features
+when declaring these dependencies outside the workspace.
 
-For a sibling application in this workspace:
+```rust,no_run
+use anyhow::{Context, Result};
+use clap::Parser;
+use std::{io::{self, Write}, process::ExitCode};
 
-```toml
-[dependencies]
-cli-tracing = { path = "../utils/cli-tracing" }
-tracing.workspace = true
-# Only if the application parses arguments or accepts log-facade records:
-clap.workspace = true
-log.workspace = true
-tracing-log.workspace = true
+#[derive(Parser)]
+#[command(name = "example")]
+struct Cli {
+    #[command(flatten)]
+    logging: cli_tracing::LogArgs,
+    // Utility-specific arguments belong here.
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    cli_tracing::run::<Cli>(&cli.logging, execute)
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+fn execute() -> Result<ExitCode> {
+    log::info!("processing three items");
+    let mut stdout = io::stdout().lock();
+    writeln!(stdout, "3").context("Cannot write result")?;
+    stdout.flush().context("Cannot flush result")?;
+    Ok(ExitCode::SUCCESS)
+}
 ```
 
-Adjust the path for nested applications. This is a workspace crate, not an
-instruction to install a published package.
-
-| Concern | Owner |
-| --- | --- |
-| Operations, typed errors, event/span instrumentation | Domain library |
-| Argument parsing, error context, diagnostics and exit status | CLI adapter |
-| Typed settings, subscriber construction, checked sink | `cli-tracing` |
-| Global subscriber/logger installation, worker lifecycle | Application host |
-
-Clap, `log`, and `tracing-log` are only development dependencies of this crate,
-used to verify the integrations below. There is no required Clap trait, `log`
-wrapper, shared application error type, or automatic process initialization.
-`anyhow` remains a separate choice at the CLI orchestration boundary.
-
-## Choose a setup
-
-Logging and timing are independent. No Cargo feature selection is needed.
-
-| Need | Setup |
-| --- | --- |
-| Library use under a host's subscriber | Depend on `tracing`; do not create a session |
-| No diagnostics or timing | Default config: level `off`, timings `false` |
-| Diagnostic events only | Set `level`; leave `timings: false` |
-| Stage durations only | Set `timings: true`; leave level `off` |
-| Both | Set `level` and `timings: true` |
-| Embedding, isolated synchronous call, test | `with_default(session.dispatch(), operation)` |
-| Standalone app with process-wide collection | Install a global dispatch explicitly, once |
-| An owned writer instead of stderr/file | `TracingSession::with_writer(&config, writer)` |
-
-### Programmatic and environment configuration
-
-Construct `Config` directly when the host supplies policy. This does not read the
-environment. This example collects both events and timings within one scope:
-
-```rust
-use cli_tracing::{Config, TracingSession};
-use tracing::level_filters::LevelFilter;
-
-let config = Config {
-    level: LevelFilter::INFO,
-    timings: true,
-    ..Config::default()
-};
-let session = TracingSession::new(&config)?;
-tracing::dispatcher::with_default(session.dispatch(), || {
-    let stage = tracing::info_span!(target: "clis::timing", "scan", records = 3);
-    let _entered = stage.enter();
-    tracing::info!("scan completed");
-}); // Stage spans close before finish.
-session.finish()?;
-# Ok::<(), std::io::Error>(())
-```
-
-For environment-only integration, resolve an empty `Overrides` at the application
-boundary. Tests can inject a lookup without modifying the process environment:
-
-```rust
-use cli_tracing::{Config, Overrides};
-
-let config = Config::resolve(Overrides::default(), |key| std::env::var_os(key))?;
-# Ok::<(), cli_tracing::ConfigError>(())
-```
-
-Each field resolves independently: explicit override, supplied environment, then
-default. An overridden invalid environment value is ignored; an effective invalid
-value is an error. `RUST_LOG` and target-specific filter expressions are not read.
-
-| Override | Environment | Accepted values; default |
-| --- | --- | --- |
-| `level` | `CLIS_LOG_LEVEL` | `off`, `error`, `warn`, `info`, `debug`, `trace`; `off` |
-| `format` | `CLIS_LOG_FORMAT` | `text`, `json`; `text` |
-| `destination` | `CLIS_LOG_FILE` | Native filesystem path or `-` for stderr; stderr |
-| `timings` | `CLIS_TIMINGS` | `true`, `false`; `false` |
-
-### Clap integration
-
-Clap stays in the application. A local `#[derive(clap::Args)]` group can be
-included in a parser with `#[command(flatten)]`. It produces `Overrides`, then
-`Config::resolve` applies environment values and defaults. See the complete,
-executable [Clap example](examples/clap.rs), including precedence tests.
-
-Keep the parsed fields as `Option<T>` and do not set ordinary Clap defaults on
-them: defaults would look like explicit overrides and hide environment values.
-For a boolean, `Option<bool>` distinguishes absence from explicit `false`;
-the example accepts both `--timings` and `--timings=false`. It maps
-`--log-file=-` to `Destination::Stderr` explicitly.
-
-The crate deliberately does not add `-v`, `-q`, or other flags. The application
-must preserve its reference command's meanings. Existing custom verbosity aliases
-can be mapped to `Overrides.level`; [biggie's adapter](../../biggie/src/cli.rs)
-shows explicit `--log-level` taking precedence over its existing aliases.
-
-Run from the workspace root (these examples write no data to stdout):
+For an operation needing parsed arguments, pass a closure:
+`cli_tracing::run::<Cli>(&cli.logging, || execute(&cli))`.
+[Biggie](../../biggie/src/main.rs) is the first consumer. The complete
+[example](examples/clap.rs) can be run from the workspace root:
 
 ```sh
 cargo run --locked -p cli-tracing --example clap -- --log-level=info
-CLIS_LOG_LEVEL=debug cargo run --locked -p cli-tracing --example clap -- --log-level=off --timings --log-format=json
-CLIS_TIMINGS=true cargo run --locked -p cli-tracing --example clap -- --timings=false
+cargo run --locked -p cli-tracing --example clap -- --log-level=debug
+CLIS_LOG_LEVEL=trace cargo run --locked -p cli-tracing --example clap -- --log-level=off
 ```
 
-### Accepting the log facade and choosing a global subscriber
+## Configuration and output
 
-Yes: ordinary `log::error!`, `warn!`, `info!`, `debug!`, and `trace!` records can
-reach this subscriber through [`tracing-log::LogTracer`](https://docs.rs/tracing-log/0.2.0/tracing_log/struct.LogTracer.html).
-The application adds `log` and `tracing-log` dependencies and calls
-`tracing_log::LogTracer::init()` once. This installs the process-global `log`
-logger; `cli-tracing` never installs it on the caller's behalf.
+There is one shared flag: `--log-level=off|error|warn|info|debug|trace`.
+Clap resolves explicit flag > `CLIS_LOG_LEVEL` > `off`. Invalid effective values
+are parsing errors; an explicit flag overrides even an invalid environment value.
+There are no shared short aliases, file/JSON settings, or separate timing switch.
+`RUST_LOG` and other `CLIS_*` variables are not read by this setup.
 
-The bridge forwards to the active tracing dispatch. It works with a scoped
-dispatch; outside that scope, records need another active subscriber to collect
-them. A standalone application may instead explicitly call
-`tracing::dispatcher::set_global_default(session.dispatch().clone())` once.
-The executable [log bridge example](examples/log-bridge.rs) demonstrates both
-global installations, all five severities, native tracing events, and a worker:
+Logs use tracing-subscriber's built-in text formatter, timestamps, and stderr,
+with ANSI disabled. The helper never writes stdout. Redirect stderr through the
+shell when needed. Required error messages remain plain `command: context: cause`
+at every log level, appear once, and are not timestamped optional log events.
+Backtrace capture remains governed by `RUST_BACKTRACE`/`RUST_LIB_BACKTRACE`;
+the concise reporter prints the cause chain, not a backtrace.
 
-```sh
-cargo run --locked -p cli-tracing --example log-bridge
-```
+The helper installs a global subscriber and the `log` bridge before calling the
+operation, even at level off. Calls such as `log::info!` work automatically;
+dependencies using `log` feed the same collector. Native tracing events work too.
+Do not install another logger/subscriber or a reverse tracing-to-log bridge.
+A second initialization fails before the operation; this helper is for process
+entry, not repeated library calls. Clap handles help, version, and parsing errors
+before `run`; those paths do not install diagnostics.
 
-A second installation returns an error; it cannot replace an existing logger or
-subscriber. An embedded library must use the host's setup. Keep the session alive
-until workers stop and call `finish()` before application exit; a global dispatch
-cannot be uninstalled by dropping the session.
+## Instrumentation
 
-“Everything” still means records that survive the producer's compile-time
-filters, `log`'s maximum level, and `Config.level`. The bridge initializes the
-`log` maximum to `Trace`; the session's configured threshold still applies.
-It cannot restore suppressed records or create stage spans from log messages.
-Use `tracing` for structured domain fields and stage timing. With this crate's
-formatter features, bridged source metadata appears as `log.target`, `log.module_path`
-and `log.file` fields, with top-level target `log`; native tracing records retain
-their own target. Arbitrary `log` key-value extensions are not a supported schema.
-Do not enable a reverse tracing-to-log bridge alongside this direction.
+Use `log` for messages and `tracing` spans for operation boundaries. A log message
+alone has no duration. `#[tracing::instrument(level = "debug", skip_all)]` adds a
+stage span without dumping function arguments. Add explicit bounded count fields
+when useful; record completed counts only after success. When updating fields,
+keep an explicit span handle: `Span::current()` may refer to the caller
+when your stage is filtered out.
 
-### Custom sinks and worker threads
+At debug/trace verbosity the built-in span-close records include busy and idle
+times. The helper adds a `command` span around the operation. Debug spans are
+disabled at lower verbosity, including their field evaluation. Span timings are
+elapsed time, not CPU time; nested/overlapping durations must not be summed.
+They locate work to investigate, not prove a speedup.
 
-`with_writer` takes ownership of a `Write + Send + 'static` writer and ignores
-`Config.destination`. It performs no I/O during construction. A scoped dispatch
-is thread-local: explicitly clone it for workers and join them before finishing.
-This example uses `io::sink()`; tests can supply an inspectable writer instead.
+Worker threads see the global subscriber, but parent span context still needs
+explicit propagation when desired. Join workers and drop stage spans before the
+operation returns. This synchronous entry helper does not drive an async runtime;
+async consumers need a separate, deliberate integration.
 
-```rust
-use cli_tracing::{Config, TracingSession};
-use tracing::level_filters::LevelFilter;
+Domain libraries may emit `log` events and tracing spans but must not depend on
+this adapter, parse arguments, or initialize global state. Return typed errors;
+convert them to `anyhow` with context at the CLI boundary. Library calls remain
+usable without any collector, or with a host-provided subscriber.
 
-let session = TracingSession::with_writer(
-    &Config { level: LevelFilter::INFO, ..Config::default() },
-    std::io::sink(),
-);
-std::thread::scope(|scope| {
-    let dispatch = session.dispatch().clone();
-    scope.spawn(move || {
-        tracing::dispatcher::with_default(&dispatch, || tracing::info!("worker done"));
-    });
-});
-session.finish()?;
-# Ok::<(), std::io::Error>(())
-```
+## Errors and lifecycle
 
-For async applications, use tracing's future instrumentation and dispatch
-propagation; do not hold a span entry guard across `.await`. This crate supplies
-no async runtime or task lifecycle management.
+`run` returns `Ok(ExitCode)` from the operation unchanged, including expected
+nonzero outcomes. An unhandled `anyhow` error, initialization error, or reported
+diagnostic write/flush failure returns 1. The operation must flush its own data
+buffers. The helper closes its command span, reports any operation error once,
+and checks diagnostic writes/flush before returning. Partial data may already exist.
+It neither calls `process::exit` nor installs panic hooks.
 
-## Output and lifecycle contract
+The small private checked writer retains errors that formatter callbacks cannot
+return to the caller. It uses synchronous `std::io::stderr`, including Rust's
+handling of invalid standard-stream descriptors. There is no background queue or
+public sink/subscriber configuration API. If both operation and diagnostics fail,
+both reports are attempted; a broken stderr may prevent their delivery.
 
-`new` opens stderr or creates a diagnostic file exclusively, even if both event
-logging and timings are off. Existing files and symlinks are errors. For a fresh
-JSON file, set `format: Format::Json` and `destination: Destination::File(path)`.
-Relative paths resolve against the process working directory when `new` opens them.
-The application must reject aliases between its data file and diagnostic file
-before opening data for truncation. `with_writer` leaves destination policy to
-the caller.
-
-Events and stage records use tracing-subscriber's built-in text/JSON formatter,
-including its default timestamps and span context. ANSI styling stays disabled.
-Only spans targeted at `clis::timing` produce close records; ordinary spans do not.
-Timing spans are collected separately from event context, independent of the
-event severity level.
-
-Stage records use [`FmtSpan::CLOSE`](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/struct.Layer.html#method.with_span_events).
-In JSON, `target` is `clis::timing`, `fields.message` is `close`, and `span` contains
-the stage name and recorded counts. `fields["time.busy"]` and
-`fields["time.idle"]` are duration strings with units, such as `12.3µs` or `1.00ms`.
-Text uses the same built-in formatter with `close`, `time.busy`, and `time.idle`.
-The format belongs to tracing-subscriber; this crate defines no separate timing
-record schema. Check consumers when upgrading the formatter dependency.
-
-Busy time covers periods when a span is entered; idle time covers the rest of its
-lifetime. Waiting while a span is entered counts as busy, so neither value is CPU
-time. Nested/overlapping spans cannot be summed as total runtime. The final clone
-must close before the record appears. Counts come from the domain and can be
-updated before close; an absent count does not mean zero. Disabled timing spans
-have no timer or retained fields under this subscriber.
-
-Always close spans, stop/join workers, and call `finish()`, including when the
-operation failed. `finish()` flushes the sink and returns the first write/flush
-error, even if a tracing callback swallowed it. Repeated calls retain that error.
-Dropping a session is not checked finishing; `finish()` neither unregisters
-cloned dispatches nor prevents later writes, and does not `fsync` files.
-If both the operation and diagnostics fail, preserve both errors. See
-[biggie's orchestration](../../biggie/src/main.rs) for the complete error path.
-
-Required command errors remain independent of optional logging. The
-[observability contract](../../docs/observability.md) owns severity policy, privacy,
-exit behavior, and workspace flag conventions.
-
-## Why these modules exist
-
-One package keeps configuration, subscriber ownership, and checked output together.
-Callers enable only the capabilities they need; separate logging and timing
-packages would not remove their shared sink and lifecycle requirements.
-
-| Module | Necessary work |
-| --- | --- |
-| `config` | Typed settings, strict parsing, injected environment, explicit precedence |
-| `session` | Construct filtered event/timing layers and expose an owned dispatch |
-| `sink` | Serialize records and retain failures that formatter callbacks cannot return |
-
-Event formatting, span-close records, timestamps, busy/idle timing, span fields,
-dispatch, and filtering use upstream `tracing` and `tracing-subscriber`. Keep
-library defaults unless a demonstrated caller requirement needs an extension.
-The remaining custom code implements the workspace's configuration and checked
-output policy; it does not implement a collector or formatter.
-
-There is no queue, rotation, history, aggregation, timeline export, panic hook,
-backtrace setup, or error-reporting framework. Writes are synchronous. Memory
-scales with live spans, their fields and formatted records, not prior records.
-Record bounded metadata rather than input contents. Diagnostic I/O and enabled
-formatting still cost time; stage timings are not benchmark evidence by themselves.
+Ports with other failure codes, per-operand reporting, or exact GNU diagnostic
+formatting need an adapter reviewed against that contract before adoption. The
+current helper is not a universal exit-policy implementation. Full-screen apps
+also need a terminal-safe diagnostic policy before migration.
 
 ## Verification and overhead
 
-From the workspace root:
+Process tests exercise actual installation, the log bridge, level filtering,
+worker events, Clap naming, error causes, nonzero statuses, repeated installation,
+and broken stderr. Private writer tests cover retained write/flush errors.
+Biggie adds precedence, validation-before-mutation, stage, and direct-library tests.
+
+The [benchmark](benches/overhead.rs) checks a deterministic checksum on every
+sample. Build and run separately for each level; capture CSV from stdout and
+redirect verbose stderr away from the terminal:
 
 ```sh
-cargo nextest run --locked -p cli-tracing -p biggie
-cargo test --locked -p cli-tracing -p biggie --doc
-cargo test --locked -p cli-tracing --example clap
-cargo build --locked -p cli-tracing --examples
-cargo doc --locked -p cli-tracing --no-deps
-cargo bench --locked -p cli-tracing --bench overhead
+cargo bench --locked -p cli-tracing --bench overhead -- --bare --log-level=off
+cargo bench --locked -p cli-tracing --bench overhead -- --log-level=off
+cargo bench --locked -p cli-tracing --bench overhead -- --log-level=debug 2>/dev/null
 ```
 
-Tests cover precedence, severity thresholds, scoped log bridging, JSON escaping,
-final timing counts, disabled field evaluation, file collisions, writer/flush
-failures, and explicit worker propagation. Biggie tests exercise an actual CLI
-consumer and direct domain calls without initialization.
+These measure repeated stage instrumentation; initialization is outside the
+sample. [Recorded evidence](overhead.md) also distinguishes startup measurements
+from stage overhead and lists what remains unmeasured.
 
-The benchmark compares the same deterministic 4 KiB checksum without
-instrumentation, with timing disabled, and with JSON timings sent to `io::sink()`.
-Every sample checks its result. See [raw measurements and limits](overhead.md).
-Startup, disk/terminal throughput, memory, and full utility/reference performance
-need separate workload evidence.
+[Shared policy](../../docs/observability.md) ·
+[Upstream initialization and log bridge](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/util/trait.SubscriberInitExt.html) ·
+[Clap reusable arguments](https://docs.rs/clap/latest/clap/_derive/) ·
+[Span timing](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/struct.Layer.html#method.with_span_events)

@@ -1,108 +1,107 @@
-# Errors, diagnostics, and stage timings
+# Errors, logging, and tracing
 
 [North star U9](north-star.md#u9--errors-and-observability) ·
-[Architecture](architecture.md) · [Shared implementation](../utils/cli-tracing/README.md)
+[Architecture](architecture.md) · [Setup and API](../utils/cli-tracing/README.md)
 
-This is the shared contract. Adoption remains per utility: `biggie` is the first
-consumer; other commands, including Kara, need separate migrations and evidence.
+Use one shared application setup: Clap `LogArgs` plus `cli_tracing::run::<Cli>`.
+The helper gets the command name from Clap and installs logging and tracing before
+running the operation. `biggie` is the first consumer; other utilities require
+individual migrations and evidence. A standard is not proof of adoption.
 
 ## Errors belong to the caller
 
 Domain APIs return `io::Error` when sufficient, otherwise a typed `thiserror`
 error with sources and relevant context. CLI orchestration uses `anyhow::Result`
-and `.context(...)`; it maps failures to the utility's diagnostics and exit codes.
-Do not expose `anyhow::Error` as the default domain error or add a catch-all shared
-error enum. Preserve GNU diagnostic/status semantics in ports.
+and `.context(...)`. Do not add a catch-all shared domain error enum or make
+`anyhow::Error` the default public domain error.
 
-Required error messages are independent of optional logging. Print each failure
-once; a lower log level must not suppress it. Use concise context and causes by
-default. Backtraces are a separate diagnostic choice (`RUST_BACKTRACE` and
-`RUST_LIB_BACKTRACE`); never change process environment to enable them or equate
-verbosity with backtrace policy. CLI adapters may offer a separate developer
-report, but normal diagnostics must not contain a panic-style report.
+Required diagnostics are independent of optional logs. Report a failure once,
+with concise context and causes, even at log level off. Returning an error to
+the shared runner replaces separate `eprintln!`/`log::error!` calls for that same
+failure. Recoverable conditions and useful progress remain ordinary log events.
+Do not log an error at every `?` propagation boundary.
 
-## Configuration and output
+Keep each utility's diagnostic/status contract. The initial runner preserves
+explicit successful outcomes (including expected nonzero statuses) and maps
+unhandled errors to exit 1. Ports needing other error codes, multiple-operand
+reporting or exact GNU diagnostic wording must adapt those semantics before
+migration; do not silently normalize them to this helper's default.
 
-Use explicit `--log-level=off|error|warn|info|debug|trace`, `--log-format=text|json`,
-`--log-file=PATH`, and `--timings=true|false` where the command's grammar permits.
-`--log-file=-` selects stderr. Environment counterparts are `CLIS_LOG_LEVEL`,
-`CLIS_LOG_FORMAT`, `CLIS_LOG_FILE`, and `CLIS_TIMINGS`. Resolve each field as
-explicit CLI value, then environment, then default. Defaults are off, text, stderr,
-and false. Reject invalid effective values before performing the domain operation;
-an overridden invalid environment value is irrelevant. Environment-only integration
-is appropriate for commands that cannot accept extra flags.
+Backtraces are separate from verbosity. Respect `RUST_BACKTRACE` and
+`RUST_LIB_BACKTRACE`; do not change process environment to enable them. The
+shared concise reporter prints causes without a backtrace or panic-style report.
 
-Preserve GNU meanings of `-v`, `-q`, `--verbose`, and `--quiet`. Existing aliases
-on custom apps may remain, with documented precedence. No workspace-wide short
-verbosity flags are imposed. Full-screen apps must route diagnostics to an explicit
-file or their UI; stderr logging must not corrupt the display.
+## One configuration contract
 
-Logging and timing use stderr by default, never the data stream. File destinations
-create a new file and fail if it already exists, including symlinks; they never
-truncate an existing file. Reject a data destination that aliases the diagnostic
-file before opening it for truncation. Files are synchronous: no unbounded queue,
-background worker, automatic rotation, or promise of crash durability. The caller
-owns retention and filesystem permissions. Do not log input contents, credentials,
-or full argv by default. Plain text has no automatic ANSI styling; JSON is one
-object per line. JSON diagnostics do not change the command's data format.
+Expose `--log-level=off|error|warn|info|debug|trace` through the shared Clap group.
+Precedence is explicit flag > `CLIS_LOG_LEVEL` > off. Reject invalid effective
+values before the domain operation. Preserve GNU meanings of `-v`, `-q`,
+`--verbose`, and `--quiet`; there are no shared short verbosity aliases.
+
+Use built-in text formatting on stderr, without ANSI. Keep stdout for the
+utility's data/status contract. There are no file/JSON options or separate timing
+switch; debug/trace verbosity enables stage-close timing records. Users can
+redirect stderr. Extra configuration belongs in a future demonstrated requirement,
+not a menu of per-utility subscriber setups.
+
+Clap handles help, version, and parsing errors before diagnostics installation.
+Commands whose reference grammar cannot accept extra flags need a reviewed
+integration before migration. Full-screen apps, including Kara, must not corrupt
+the display with stderr logs; their diagnostic routing remains separate work.
 
 ## Instrumentation and lifecycle
 
-Domain crates depend only on the `tracing` facade. Emit useful operation events:
-error for an actual failed action when the caller is not also reporting it, warn
-for a recoverable exceptional condition, info for completion/progress milestones,
-debug for decisions/counts, and trace for detailed control flow. Do not manufacture
-messages just to exercise every level or log every record in a hot loop.
+Use `log` for messages and `tracing` for spans. The installed bridge attaches log
+records to the active tracing span. It cannot infer operation boundaries or turn
+formatted message values into structured span fields. Domain libraries use these
+facades without initializing a collector or depending on `cli-tracing`.
 
-Use spans with target `clis::timing` for bounded operation/stage summaries. Record
-counts such as lines or bytes as structured fields. Fields describe completed work
-only when updated after success; label intended counts as requested. With timing
-collection disabled these spans have no timer or retained fields under the shared
-subscriber. With it enabled, use tracing-subscriber's built-in span-close records
-in the selected format, regardless of the log level. Keep its default timestamps
-and busy/idle durations; no custom timing schema is required. Busy time covers
-periods when a span is entered, including waiting inside that scope; idle time
-covers the rest of its lifetime. Neither is CPU time, and nested/overlapping spans
-cannot be summed as total runtime. Record formatting and duration units follow
-the dependency. Close all stage-span clones before finishing the subscriber.
-Records are per stage invocation, not an unbounded history or a timeline export.
+Severity should describe useful information: error for a failed action when the
+caller is not also reporting it, warn for a recoverable exceptional condition,
+info for progress/completion, debug for decisions/counts, and trace for detailed
+control flow. Do not manufacture messages to exercise every level or emit per-record
+logs in hot loops. Do not log credentials, input contents or full argv by default.
 
-`cli-tracing` builds an explicit subscriber and provides a scoped dispatch; it
-never installs a process-global subscriber, panic hook, or logger. A host can
-compose its own subscriber instead. Scoped dispatch applies to the current thread;
-pass a cloned dispatch explicitly to worker threads. For async code use the
-tracing future instrumentation/dispatch facilities rather than holding a span
-entry guard across `.await`. Domains must work without any subscriber.
+Instrument bounded stages at debug, for example with
+`#[tracing::instrument(level = "debug", skip_all)]`. Add explicit count fields;
+record completed work only after success and label intended counts as requested.
+Update fields through the stage handle, not an implicitly current parent span.
+The shared runner adds a command span. At debug/trace, use the formatter's built-in
+close records with timestamps and busy/idle durations; no custom timing schema.
+Busy time includes waiting while a span is entered; idle time covers the rest of
+its lifetime. Neither is CPU time, and nested/overlapping durations are not additive.
 
-The CLI boundary opens the sink, enters the dispatch, runs the operation, closes
-spans, calls `finish()` to check write/flush errors, and returns an exit status.
-Do not bypass destructors with `process::exit` while owning buffered resources.
-If operation and sink both fail, retain both diagnostics. Sink failure is a command
-failure, even when domain output succeeded; partial output may already exist.
+Initialize once at the CLI boundary. The global subscriber also collects worker
+logs; propagate parent span context explicitly when needed. Join workers and drop
+spans before returning. Do not hold entered-span guards across `.await`; the
+current synchronous helper is not an async runtime. Library calls must work
+without initialization and with their host's subscriber.
+
+Flush owned data buffers before returning. The runner closes the command span,
+reports an operation error, and checks diagnostic writes/flush. Diagnostic errors
+reported by the underlying writer make the command fail; partial data may exist.
+Both operation and sink errors must remain visible when stderr permits delivery.
+Use normal returns so destructors run; do not bypass cleanup with `process::exit`.
 
 ## Evidence and migration
 
-Test configuration precedence and invalid values, all severity thresholds, text and
-JSON records, timing with logging off, library calls without setup, repeated scoped
-use, file collisions, write/flush failures, and unchanged ordinary stdout/stderr.
-Test actual worker propagation when introducing concurrent consumers. Benchmark
-instrumentation off and on with identical correctness-checked work; logging output
-and terminal costs need their own workload evidence. Timings locate candidates;
-[benchmark comparisons](benchmarking.md) establish performance claims.
+Test effective configuration/precedence, every severity, the log bridge, spans at
+debug/trace, disabled field evaluation, library calls without setup, command naming,
+expected statuses, duplicate initialization, diagnostic write/flush failures, and
+unchanged ordinary stdout/stderr. Test workers when introducing concurrent consumers.
+Compare correctness-checked instrumentation and startup costs; timing logs identify
+candidates, while [benchmarks](benchmarking.md) establish performance claims.
 
-Use `cli-tracing` for CLI-side diagnostic collection and stage timing.
 Migrate remaining direct `color-eyre` consumers (`parsu`, `mkdirr`, `touchr`, `pwdr`,
-Kara) individually, preserving domain error contracts. Migrate `grepr`'s separate
-logger and input-content warnings with its GNU flag/error policy; do not turn its
-`-v` into verbosity. These migrations are follow-ups, not evidence supplied by the
-shared crate's tests.
+Kara) individually. Review `grepr`'s separate logger and input-content warnings with
+its GNU flag/error policy. These are follow-ups, not evidence provided by this crate.
 
 ## Design sources
 
-[Anyhow](https://docs.rs/anyhow/latest/anyhow/) covers contextual application errors;
-[thiserror](https://docs.rs/thiserror/latest/thiserror/) covers typed library errors.
-[Tracing](https://docs.rs/tracing/latest/tracing/) separates instrumentation from
-collection. [Tracing subscriber formatting](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/)
-provides the event formats; the shared adapter selects its sink explicitly.
-[Rust process exit](https://doc.rust-lang.org/std/process/fn.exit.html) explains why
-owned resources must finish before termination.
+[Anyhow](https://docs.rs/anyhow/latest/anyhow/) supplies application error context;
+[thiserror](https://docs.rs/thiserror/latest/thiserror/) supplies typed library errors.
+[Clap](https://docs.rs/clap/latest/clap/_derive/) supports flattened shared arguments.
+[Tracing initialization](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/util/trait.SubscriberInitExt.html)
+can install the log bridge, and [tracing-log](https://docs.rs/tracing-log/latest/tracing_log/)
+describes event conversion. The [formatter](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/)
+owns text output and stage timings.
