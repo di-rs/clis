@@ -390,6 +390,9 @@ pub struct ResolvedBuildPolicy {
     pub target: String,
     pub settings: BuildPolicy,
     pub cargo_config_hashes: Vec<FileIdentity>,
+    /// Normalized effective build environment, absent only for legacy/unknown records.
+    #[serde(default)]
+    pub environment_hash: Option<String>,
 }
 
 /// Provenance supplied by a verified build operation, never inferred from a prebuilt file.
@@ -401,6 +404,29 @@ pub struct BuildRecord {
     pub policy: ResolvedBuildPolicy,
     pub command: Vec<String>,
     pub resolved_features: Vec<String>,
+    /// Redacted Cargo compiler-artifact and dependency resolution evidence.
+    #[serde(default)]
+    pub evidence: Option<CargoEvidence>,
+}
+
+/// Allowlisted Cargo evidence; URL/config/environment secrets are retained only as hashes.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CargoEvidence {
+    pub package: String,
+    pub binary: String,
+    pub artifact: serde_json::Value,
+    pub dependencies: Vec<CargoDependency>,
+    pub environment_hash: String,
+}
+
+/// One resolved package. Source URLs are hashed, never published verbatim.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CargoDependency {
+    pub name: String,
+    pub version: String,
+    pub source_hash: Option<String>,
 }
 
 /// Immutable retained executable. Missing build data explicitly means unknown provenance.
@@ -549,11 +575,54 @@ pub struct AttemptRecord {
     pub request: ExperimentRequest,
 }
 
+impl CargoEvidence {
+    fn validate(&self, features: &[String]) -> Result<(), crate::BenchError> {
+        crate::artifact::validate_identity(&FileIdentity {
+            sha256: self.environment_hash.clone(),
+            bytes: 0,
+        })?;
+        for dependency in &self.dependencies {
+            if let Some(hash) = &dependency.source_hash {
+                crate::artifact::validate_identity(&FileIdentity {
+                    sha256: hash.clone(),
+                    bytes: 0,
+                })?;
+            }
+        }
+        if self.package.is_empty()
+            || self.binary.is_empty()
+            || self
+                .artifact
+                .get("reason")
+                .and_then(serde_json::Value::as_str)
+                != Some("compiler-artifact")
+            || self
+                .artifact
+                .pointer("/target/name")
+                .and_then(serde_json::Value::as_str)
+                != Some(self.binary.as_str())
+            || self.artifact.get("features") != Some(&serde_json::to_value(features)?)
+        {
+            return Err(crate::BenchError::Evidence(
+                "inconsistent Cargo artifact evidence".into(),
+            ));
+        }
+        Ok(())
+    }
+}
 impl BuildRecord {
     pub(crate) fn validate(&self) -> Result<(), crate::BenchError> {
         validate_sha(&self.source_sha)?;
         crate::artifact::validate_identity(&self.lockfile)?;
         self.policy.validate()?;
+        if let Some(evidence) = &self.evidence {
+            evidence.validate(&self.resolved_features)?;
+            if self.policy.environment_hash.as_ref() != Some(&evidence.environment_hash) {
+                return Err(crate::BenchError::Evidence(
+                    "Cargo evidence and build policy environments differ".into(),
+                ));
+            }
+        }
         if self.command.is_empty() || self.command.iter().any(|arg| arg.contains('\0')) {
             return Err(crate::BenchError::Evidence("invalid build command".into()));
         }
@@ -568,6 +637,12 @@ impl ResolvedBuildPolicy {
                     "unresolved build policy".into(),
                 ));
             }
+        }
+        if let Some(hash) = &self.environment_hash {
+            crate::artifact::validate_identity(&FileIdentity {
+                sha256: hash.clone(),
+                bytes: 0,
+            })?;
         }
         for identity in &self.cargo_config_hashes {
             crate::artifact::validate_identity(identity)?;
@@ -627,6 +702,50 @@ pub struct ToolPaths {
 #[cfg(test)]
 mod tests {
     use super::{MeasurementPolicy, MeasurementProfile};
+
+    #[test]
+    fn cargo_evidence_rejects_unresolved_hashes_and_mismatched_binary_features()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let evidence = super::CargoEvidence {
+            package: "tiny".into(),
+            binary: "tiny".into(),
+            dependencies: vec![],
+            environment_hash: "a".repeat(64),
+            artifact: serde_json::json!({"reason":"compiler-artifact", "target":{"name":"tiny"}, "features":["fast"]}),
+        };
+        evidence.validate(&["fast".into()])?;
+        if evidence.validate(&[]).is_ok() {
+            return Err("changed resolved features accepted".into());
+        }
+        let mut changed = evidence.clone();
+        changed.environment_hash = "unknown".into();
+        if changed.validate(&["fast".into()]).is_ok() {
+            return Err("invalid environment identity accepted".into());
+        }
+        let mut changed = evidence;
+        changed.binary = "other".into();
+        if changed.validate(&["fast".into()]).is_ok() {
+            return Err("wrong binary artifact accepted".into());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn resolved_policy_rejects_malformed_environment_identity()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let policy = super::ResolvedBuildPolicy {
+            compiler: "compiler".into(),
+            cargo: "cargo".into(),
+            target: "target".into(),
+            settings: super::BuildPolicy::default(),
+            cargo_config_hashes: vec![],
+            environment_hash: Some("unknown".into()),
+        };
+        if policy.validate().is_ok() {
+            return Err("invalid policy environment hash accepted".into());
+        }
+        Ok(())
+    }
 
     #[test]
     fn full_policy_requires_checked_forward_reverse_observations() {

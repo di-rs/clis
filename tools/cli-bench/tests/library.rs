@@ -83,6 +83,7 @@ fn resolved_manifest(
         target: "test target".into(),
         settings: suite.build.clone(),
         cargo_config_hashes: vec![],
+        environment_hash: None,
     };
     let previous = register_binary(
         source,
@@ -97,6 +98,7 @@ fn resolved_manifest(
                 "--locked".into(),
             ],
             resolved_features: vec![],
+            evidence: None,
         }),
         store,
     )?;
@@ -448,6 +450,8 @@ fn tagged_known_role_policy_drift_is_rejected_and_attempts_are_retained()
         (Role::Candidate, "compiler", true),
         (Role::Candidate, "target", true),
         (Role::Candidate, "flags", true),
+        (Role::Candidate, "features", true),
+        (Role::Candidate, "environment", true),
         (Role::Reference, "compiler", true),
         (Role::Candidate, "compiler", false),
     ] {
@@ -459,6 +463,8 @@ fn tagged_known_role_policy_drift_is_rejected_and_attempts_are_retained()
         match changed_field {
             "compiler" => changed.policy.compiler = "different compiler".into(),
             "target" => changed.policy.target = "different target".into(),
+            "features" => changed.policy.settings.features.push("fast".into()),
+            "environment" => changed.policy.environment_hash = Some("a".repeat(64)),
             "flags" => changed
                 .policy
                 .settings
@@ -505,7 +511,7 @@ fn tagged_known_role_policy_drift_is_rejected_and_attempts_are_retained()
     )?;
     run.finish(&manifest, &complete())?;
     require(
-        std::fs::read_dir(store.root().join("experiments/known-policies/attempts"))?.count() == 7,
+        std::fs::read_dir(store.root().join("experiments/known-policies/attempts"))?.count() == 9,
         "policy rejection lost an attempt reference",
     )?;
     Ok(())
@@ -546,5 +552,319 @@ fn untagged_known_policy_differences_remain_product_comparisons()
         "untagged build differences were not retained",
     )?;
     store.load_run(&bundle.manifest.run_id)?;
+    Ok(())
+}
+
+#[path = "common/build.rs"]
+mod build_support;
+
+#[test]
+fn builds_resolved_revisions_with_isolated_outputs_and_ignores_dirty_edits()
+-> Result<(), Box<dyn std::error::Error>> {
+    use build_support::{Fixture, command, runner};
+    use cli_bench::*;
+    let mut fixture = Fixture::new()?;
+    fixture.tools.environment.insert(
+        "BUILD_PRIVATE_TOKEN".into(),
+        "secret-value-never-publish".into(),
+    );
+    let runner = runner();
+    let first_revision = resolve_revision(&fixture.repo, "HEAD", &fixture.git, &runner)?;
+    std::fs::write(
+        fixture.repo.join("src/main.rs"),
+        "fn main() { println!(\"second\"); }\n",
+    )?;
+    let manifest =
+        std::fs::read_to_string(fixture.repo.join("Cargo.toml"))?.replace("0.1.0", "0.2.0");
+    let lock = std::fs::read_to_string(fixture.repo.join("Cargo.lock"))?.replace("0.1.0", "0.2.0");
+    std::fs::write(fixture.repo.join("Cargo.toml"), manifest)?;
+    std::fs::write(fixture.repo.join("Cargo.lock"), lock)?;
+    command(
+        &fixture.repo,
+        &fixture.git.tool.path,
+        &["commit", "-am", "second", "--quiet"],
+    )?;
+    let second_revision = resolve_revision(&fixture.repo, "HEAD", &fixture.git, &runner)?;
+    std::fs::write(
+        fixture.repo.join("src/main.rs"),
+        "this dirty source does not compile",
+    )?;
+    let dirty = resolve_revision(&fixture.repo, "HEAD", &fixture.git, &runner)?;
+    require(
+        dirty.dirty && dirty.sha == second_revision.sha,
+        "dirty HEAD was not resolved to committed tree",
+    )?;
+    let store = Store::open(&fixture.root.path().join("evidence"))?;
+    let first = build_revision(&fixture.request(first_revision.clone()), &store, &runner)?;
+    require(
+        !serde_json::to_string(&first)?.contains("secret-value-never-publish"),
+        "build environment secret leaked into artifact",
+    )?;
+    let second = build_revision(&fixture.request(second_revision), &store, &runner)?;
+    require(
+        first.build.as_ref().map(|build| &build.policy)
+            == second.build.as_ref().map(|build| &build.policy),
+        "ephemeral snapshot paths changed shared build policy",
+    )?;
+    require(
+        first.file != second.file,
+        "new build overwrote or reused old output",
+    )?;
+    require(
+        command(&fixture.repo, &store.artifact_path(&first), &[])? == "first",
+        "moving HEAD replaced resolved revision",
+    )?;
+    require(
+        command(&fixture.repo, &store.artifact_path(&second), &[])? == "second",
+        "dirty edits entered committed build",
+    )?;
+    require(
+        std::fs::read_to_string(fixture.repo.join("src/main.rs"))?
+            == "this dirty source does not compile",
+        "active checkout was modified",
+    )?;
+    require(
+        first.build.as_ref().map(|build| &build.lockfile)
+            != second.build.as_ref().map(|build| &build.lockfile),
+        "different revision lockfiles were lost",
+    )?;
+    let mut featured_request = fixture.request(first_revision.clone());
+    featured_request.policy.features = vec!["fast".into()];
+    let featured = build_revision(&featured_request, &store, &runner)?;
+    require(
+        featured.id != first.id
+            && featured
+                .build
+                .as_ref()
+                .is_some_and(|build| build.resolved_features == ["fast"]),
+        "changed features reused old build provenance",
+    )?;
+    let cached = build_revision(&fixture.request(first_revision.clone()), &store, &runner)?;
+    require(cached == first, "verified cache changed provenance")?;
+    std::fs::write(store.artifact_path(&first), b"overwritten baseline")?;
+    require(
+        build_revision(&fixture.request(first_revision), &store, &runner).is_err(),
+        "corrupt baseline cache reused",
+    )?;
+    Ok(())
+}
+
+#[test]
+fn binds_prebuilt_roles_without_inventing_compiler_provenance_or_missing_reference()
+-> Result<(), Box<dyn std::error::Error>> {
+    use cli_bench::*;
+    use std::os::unix::fs::PermissionsExt;
+    let root = assert_fs::TempDir::new()?;
+    let executable = root.path().join("tool");
+    std::fs::write(&executable, "#!/bin/sh\nexit 0\n")?;
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755))?;
+    let home = root.path().join("home");
+    let config = root.path().join("config");
+    std::fs::create_dir(&home)?;
+    std::fs::create_dir(&config)?;
+    let store = Store::open(&root.path().join("evidence"))?;
+    let suite = parse_suite(include_str!("inputs/minimal-suite.toml"))?;
+    let mut request = RunRequest {
+        repository: root.path().into(),
+        candidate: ExecutableSource::Prebuilt(executable.clone()),
+        previous: None,
+        reference: Some(executable.clone()),
+        generator: Some(ExecutableSource::Prebuilt(executable)),
+        git: None,
+        tools: None,
+        cache_root: root.path().join("target/cli-bench"),
+        home,
+        config,
+        pipeline: None,
+    };
+    let bindings = bind_roles(&request, &suite, &store, &build_support::runner())?;
+    require(
+        bindings.roles.len() == 2
+            && bindings
+                .roles
+                .values()
+                .all(|role| role.artifact.build.is_none()),
+        "prebuilt role was omitted or given invented compiler provenance",
+    )?;
+    request.reference = Some(root.path().join("missing-reference"));
+    require(
+        bind_roles(&request, &suite, &store, &build_support::runner()).is_err(),
+        "missing explicit reference was silently ignored",
+    )?;
+    request.reference = None;
+    require(
+        bind_roles(&request, &suite, &store, &build_support::runner()).is_err(),
+        "comparison without baseline was accepted",
+    )?;
+    Ok(())
+}
+
+#[test]
+fn rejects_unsupported_committed_sources_and_literal_malicious_refs()
+-> Result<(), Box<dyn std::error::Error>> {
+    use build_support::{Fixture, command, runner};
+    use cli_bench::*;
+    let fixture = Fixture::new()?;
+    let runner = runner();
+    for revision in [
+        "--help",
+        "-cfoo=bar",
+        "HEAD;touch marker",
+        "$(touch marker)",
+    ] {
+        require(
+            resolve_revision(&fixture.repo, revision, &fixture.git, &runner).is_err(),
+            "unsafe ref was accepted",
+        )?;
+    }
+    require(
+        !fixture.repo.join("marker").exists(),
+        "ref text executed as shell source",
+    )?;
+    let original = resolve_revision(&fixture.repo, "HEAD", &fixture.git, &runner)?;
+    command(
+        &fixture.repo,
+        &fixture.git.tool.path,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{},module", original.sha),
+        ],
+    )?;
+    command(
+        &fixture.repo,
+        &fixture.git.tool.path,
+        &["commit", "--quiet", "-m", "submodule"],
+    )?;
+    let store = Store::open(&fixture.root.path().join("evidence"))?;
+    let submodule = resolve_revision(&fixture.repo, "HEAD", &fixture.git, &runner)?;
+    let error = build_revision(&fixture.request(submodule), &store, &runner)
+        .err()
+        .ok_or("accepted submodule")?;
+    require(
+        error.to_string().contains("submodule"),
+        "submodule failure was not actionable",
+    )?;
+    command(
+        &fixture.repo,
+        &fixture.git.tool.path,
+        &["update-index", "--force-remove", "module"],
+    )?;
+    std::fs::write(
+        fixture.repo.join("large.dat"),
+        "version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 4\n",
+    )?;
+    command(&fixture.repo, &fixture.git.tool.path, &["add", "large.dat"])?;
+    command(
+        &fixture.repo,
+        &fixture.git.tool.path,
+        &["commit", "--quiet", "-m", "LFS"],
+    )?;
+    let lfs = resolve_revision(&fixture.repo, "HEAD", &fixture.git, &runner)?;
+    let error = build_revision(&fixture.request(lfs), &store, &runner)
+        .err()
+        .ok_or("accepted LFS")?;
+    require(
+        error.to_string().contains("LFS"),
+        "LFS failure was not actionable",
+    )?;
+    Ok(())
+}
+
+#[test]
+fn fake_cargo_cannot_hide_missing_artifacts_lockfile_or_compiler_changes()
+-> Result<(), Box<dyn std::error::Error>> {
+    use build_support::{Fixture, runner};
+    use cli_bench::*;
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = Fixture::new()?;
+    let runner = runner();
+    let revision = resolve_revision(&fixture.repo, "HEAD", &fixture.git, &runner)?;
+    let store = Store::open(&fixture.root.path().join("evidence"))?;
+    for (mode, expected) in [
+        ("missing", "omitted requested"),
+        ("lock", "identity mismatch"),
+        ("compiler", "identity mismatch"),
+    ] {
+        let mut request = fixture.request(revision.clone());
+        let cargo = fixture.root.path().join(format!("cargo-{mode}"));
+        let rustc = fixture.root.path().join(format!("rustc-{mode}"));
+        let compiler_script = format!(
+            "#!/bin/sh\nexec '{}' \"$@\"\n",
+            fixture.tools.rustc.path.display()
+        );
+        std::fs::write(&rustc, compiler_script)?;
+        std::fs::set_permissions(&rustc, std::fs::Permissions::from_mode(0o755))?;
+        let action = match mode {
+            "missing" => "printf '%s\\n' '{\"reason\":\"build-finished\",\"success\":true}'".into(),
+            "lock" => format!(
+                "'{}' \"$@\" || exit $?\nprintf '# changed\\n' >> Cargo.lock",
+                fixture.tools.cargo.path.display()
+            ),
+            "compiler" => format!(
+                "'{}' \"$@\" || exit $?\nprintf '# changed\\n' >> '{}'",
+                fixture.tools.cargo.path.display(),
+                rustc.display()
+            ),
+            _ => return Err("invalid mode".into()),
+        };
+        std::fs::write(
+            &cargo,
+            format!(
+                "#!/bin/sh\nif [ \"$1\" = build ]; then\n{action}\nelse\nexec '{}' \"$@\"\nfi\n",
+                fixture.tools.cargo.path.display()
+            ),
+        )?;
+        std::fs::set_permissions(&cargo, std::fs::Permissions::from_mode(0o755))?;
+        request.tools.cargo.path = cargo.clone();
+        request.tools.cargo.identity.file = fingerprint(&cargo)?;
+        request.tools.rustc.path = rustc.clone();
+        request.tools.rustc.identity.file = fingerprint(&rustc)?;
+        let error = build_revision(&request, &store, &runner)
+            .err()
+            .ok_or("fake Cargo hid invalid build evidence")?;
+        require(
+            error.to_string().contains(expected),
+            &format!("wrong {mode} rejection: {error}"),
+        )?;
+    }
+    Ok(())
+}
+
+#[test]
+fn committed_cargo_target_config_cannot_override_the_selected_build_target()
+-> Result<(), Box<dyn std::error::Error>> {
+    use build_support::{Fixture, command, runner};
+    use cli_bench::*;
+    let fixture = Fixture::new()?;
+    std::fs::create_dir(fixture.repo.join(".cargo"))?;
+    std::fs::write(
+        fixture.repo.join(".cargo/config.toml"),
+        "[build]\ntarget = 'cli-bench-nonexistent-target'\n[env]\nPRIVATE_VALUE = 'configuration-secret'\n",
+    )?;
+    command(&fixture.repo, &fixture.git.tool.path, &["add", ".cargo"])?;
+    command(
+        &fixture.repo,
+        &fixture.git.tool.path,
+        &["commit", "--quiet", "-m", "config"],
+    )?;
+    let runner = runner();
+    let revision = resolve_revision(&fixture.repo, "HEAD", &fixture.git, &runner)?;
+    let store = Store::open(&fixture.root.path().join("evidence"))?;
+    let artifact = build_revision(&fixture.request(revision), &store, &runner)?;
+    let build = artifact.build.as_ref().ok_or("missing provenance")?;
+    require(
+        build.policy.cargo_config_hashes.len() == 1,
+        "Cargo config identity omitted",
+    )?;
+    require(
+        !serde_json::to_string(&artifact)?.contains("configuration-secret"),
+        "configuration secret published",
+    )?;
+    require(
+        command(&fixture.repo, &store.artifact_path(&artifact), &[])? == "first",
+        "recorded native target did not build",
+    )?;
     Ok(())
 }

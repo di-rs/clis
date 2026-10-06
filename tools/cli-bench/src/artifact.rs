@@ -136,6 +136,49 @@ mod tests {
         }
     }
     #[test]
+    fn identical_bytes_retain_distinct_compiler_and_feature_provenance()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = assert_fs::TempDir::new()?;
+        let path = root.path().join("binary");
+        std::fs::write(&path, b"same executable bytes")?;
+        let store = Store::open(&root.path().join("evidence"))?;
+        let mut build = BuildRecord {
+            source_sha: "a".repeat(40),
+            lockfile: fingerprint(&path)?,
+            policy: crate::ResolvedBuildPolicy {
+                compiler: "rustc hash-one".into(),
+                cargo: "cargo version".into(),
+                target: "test-target".into(),
+                settings: crate::BuildPolicy::default(),
+                cargo_config_hashes: vec![],
+                environment_hash: None,
+            },
+            command: vec![
+                "cargo".into(),
+                "build".into(),
+                "--release".into(),
+                "--locked".into(),
+            ],
+            resolved_features: vec![],
+            evidence: None,
+        };
+        let baseline = register_binary(&path, Some(build.clone()), &store)?;
+        build.policy.compiler = "rustc hash-two".into();
+        let compiler = register_binary(&path, Some(build.clone()), &store)?;
+        build.policy.settings.features.push("fast".into());
+        build.resolved_features.push("fast".into());
+        let feature = register_binary(&path, Some(build), &store)?;
+        require(
+            baseline.id != compiler.id && compiler.id != feature.id,
+            "build policy change reused old provenance",
+        )?;
+        for record in [&baseline, &compiler, &feature] {
+            store.verify_artifact(record)?;
+        }
+        Ok(())
+    }
+
+    #[test]
     fn tampered_copy_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
         let root = assert_fs::TempDir::new()?;
         let path = root.path().join("binary");

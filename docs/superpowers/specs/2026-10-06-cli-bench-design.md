@@ -95,7 +95,7 @@ target/release/cli-bench replay -i "$BUNDLE_DIR" -g "$BIGGIE"
 
 | Command | Contract |
 | --- | --- |
-| `build` | `-p/--package`, `-r/--revision`, `-t/--toolchain`, `-F/--features`, `-N/--no-default-features`, `-d/--data-dir`; produce an immutable artifact record. |
+| `build` | `-p/--package`, `-r/--revision`, `-t/--toolchain`, `-F/--features`, `-N/--no-default-features`, `-d/--data-dir`; select the package's sole binary and produce an immutable artifact record. Reject packages with multiple binaries; suites and the Rust build API retain explicit binary selection. |
 | `check` | Same selection arguments as run; resolve/build/generate and execute all correctness gates, without timing/RSS. |
 | `run` | Require candidate plus at least one comparator; save one complete run bundle. |
 | `compare` | Select roles inside one saved run with `-i/--input`, `-b/--baseline`, `-a/--candidate`; compute offline results. It does not divide timings from unrelated runs. |
@@ -239,6 +239,8 @@ rewriting old records or committing generated datasets to the default branch.
 
 Resolve refs through Git to commit SHAs before side effects. Build from isolated
 detached worktrees/snapshots, never switch the user's checkout or stash work.
+The library receives an explicit Git context with the selected executable identity
+and child environment; the CLI resolves that context once.
 `HEAD` means the committed tree; if the working tree is dirty, say explicitly
 that those edits are excluded and suggest prebuilt mode. Do not invent a dirty
 working-tree build identity. Reject unsupported submodule/LFS inputs initially

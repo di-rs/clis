@@ -29,6 +29,8 @@ pub struct PipelineTools {
 #[derive(Clone, Debug)]
 pub struct RoleBindings {
     pub roles: BTreeMap<Role, BoundExecutable>,
+    /// Retained fixture generator; invocation-only callers may omit it.
+    pub generator: Option<BoundExecutable>,
     pub environment: BTreeMap<String, String>,
     pub home: PathBuf,
     pub config: PathBuf,
@@ -309,6 +311,7 @@ mod tests {
         std::fs::create_dir(root.join("home"))?;
         std::fs::create_dir(root.join("config"))?;
         let bindings = RoleBindings {
+            generator: None,
             roles,
             environment: BTreeMap::from([
                 ("LC_ALL".into(), "C".into()),

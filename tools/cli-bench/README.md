@@ -5,8 +5,8 @@
 An original benchmark harness under development. The current slice provides
 strict suite parsing/validation, immutable evidence/artifact storage for Rust
 callers, bounded child execution, role/profile invocation resolution, and CLI
-help/version/logging.
-Benchmark execution commands are planned in the linked design.
+help/version/logging, isolated Cargo revision builds, and executable binding.
+Full run/check execution remains planned in the linked design.
 
 ## Quick start
 
@@ -28,7 +28,7 @@ color policy or benchmark output in this slice.
 
 ## Evidence and limits
 
-Source-local model/suite/store/artifact/host/process/invocation tests, real child lifecycle
+Source-local model/suite/store/artifact/host/process/invocation/build tests, real child lifecycle
 tests in `tests/process.rs`, `tests/cli.rs`, and the public
 consumer lifecycle in `tests/library.rs` cover the implemented interface. Native macOS 27.0.1 arm64 checks are recorded in the task report; Linux
 has not been run. No performance measurement or GNU/BSD compatibility claim is
@@ -85,8 +85,8 @@ performance conclusions.
 
 Generator argv checks explicit deterministic seed/pattern/schedule forms and one
 output token. Biggie's complete argument validation is deferred to execution;
-no generator or selected comparator is discovered or invoked by this library
-slice. Named correctness targets are modeled now; their availability and actual
+`bind_roles` now resolves explicit binaries and the generator, but does not
+execute generator recipes or comparator workloads. Named correctness targets are modeled now; their availability and actual
 assertions are checked when execution bindings are implemented. Directory effects
 currently model directories only; file/symlink/content effects require an extension.
 
@@ -100,7 +100,7 @@ environment/globs, or interpret embedded tokens. Invocation resolution rejects n
 scratch paths; caller-owned execution roots must be real directories. This is
 containment validation for cooperative workloads, not a hostile-filesystem sandbox.
 
-Current output is plain help/version text with no pager or prompt. Shared logging
+Current output is plain help/version text and build JSON, with no pager or prompt. Shared logging
 uses stderr and is initialized only by the CLI. No timing or optimization gain is
 claimed. The harness currently makes no standards-compliance certification; this
 slice implements its configuration/adapter foundation and records platform gaps.
@@ -119,8 +119,8 @@ its incomplete evidence. No operation changes the process cwd or environment.
 `fingerprint(path)` streams SHA-256 with an 8 KiB buffer and records logical size.
 `register_binary(path, build, &store)` copies and checks bytes and provenance before
 publishing an immutable artifact. `None` build provenance means unknown prebuilt
-identity; no current compiler is attributed to it. Build records are explicit
-caller-supplied provenance: the build stage must resolve and verify them. Hashes
+identity; no current compiler is attributed to it. Build records can be supplied by library callers; `build_revision` produces them
+from verified isolated builds. Hashes
 identify executable contents, not dynamic dependencies or the kernel.
 
 `RunWriter::append_event` durably appends typed events. `finish` checks manifest
@@ -252,3 +252,82 @@ early-exit pipe policies are rejected by suite validation. Correctness callers m
 select `CommandOutput::Capture` while retaining the same stdin/argv boundary.
 The ordinary fixtures probe FIFO versus regular-file descriptors and producer
 failure without requiring benchmark tools.
+
+## Building committed revisions
+
+From the repository root, `build -p/--package NAME -r/--revision REF` builds a
+committed package and writes an immutable `ArtifactRecord` as JSON to stdout.
+`-t/--toolchain` selects an already installed Rust toolchain; the default resolves
+the active installed toolchain once. `-F/--features` accepts comma-separated
+features, `-N/--no-default-features` disables defaults, and `-d/--data-dir` defaults
+to `.cli-bench`. The package must have exactly one binary; multi-binary packages
+require a suite or a Rust `BuildRequest` naming the exact binary. There is no
+standalone binary-selection flag. Tool discovery uses the adapter's PATH;
+unavailable tools or toolchains fail without installation or fallback.
+
+```sh
+cargo run --locked -p cli-bench -- build --help
+# Example for a committed utility; compilation is outside measurement:
+cargo run --locked -p cli-bench -- build -p tailr -r HEAD
+```
+
+`HEAD` selects committed source. Dirty HEAD builds explicitly warn that uncommitted
+edits are excluded and suggest prebuilt mode. Ref resolution passes literal argv
+with Git's `--end-of-options`; subsequent work uses only the resolved full SHA.
+Builds use owned detached local snapshots outside the active repository and fresh
+target directories under `target/cli-bench`. They never switch/stash/reset the
+active checkout. Submodules, LFS pointers, escaped source symlinks and external
+local path dependencies are rejected. Snapshot cleanup is best effort and touches
+only the newly owned directory; build captures and targets remain disposable cache
+files. This is source isolation for cooperative builds, not a hostile-code sandbox.
+
+Cargo uses release/locked builds and each commit's own `Cargo.lock`. Differing
+lockfiles are recorded revision provenance. Compiler/Cargo version output and
+executable hashes are checked before and after builds. Git optional index writes
+are disabled. Only PATH/HOME/TMPDIR/locale/timezone values from `GitContext` reach
+Git; global/system Git config and prompting are disabled. Cargo receives explicit
+`HOME`/`CARGO_HOME` (owned defaults when omitted), the selected RUSTC, requested flags,
+strip policy and target directory. Ambient compiler wrappers are disabled.
+
+The selected executable comes from Cargo JSON, with exact workspace package/binary
+matching and containment checks. Provenance retains a redacted compiler-artifact
+projection (target, profile, features, freshness), package/version dependency
+records, configuration hashes and a hash of the effective build environment. Source
+URLs and configuration/environment contents are not published. Raw build logs under
+`target/cli-bench` are local diagnostics and may contain tool output; they are not
+copied into immutable artifact records. Lockfile, configuration and source edits
+during compilation fail verification. Cache keys cover commit, lockfile, selected
+toolchain identities, target, requested features/flags/strip, configuration,
+dependencies, environment and package/binary; reuse verifies retained provenance
+and executable contents. There is no cache eviction.
+The environment hash is also part of `ResolvedBuildPolicy`, so tagged experiments
+reject its drift. It hashes the effective explicit child map after policy overrides;
+the selected compiler path and owned target/default `HOME`/`CARGO_HOME` paths become
+stable markers. Supplied environment values remain hashed, including explicit
+user-home/cache/PATH settings. Legacy or caller-supplied records may have no hash;
+verified builds always supply one matching their Cargo evidence.
+
+`resolve_revision(repository, reference, &git_context, &runner)`,
+`build_revision(&request, &store, &runner)` and
+`bind_roles(&request, &suite, &store, &runner)` are public Rust operations. All
+execution paths are absolute UTF-8; callers supply an existing scratch directory
+outside the repository, Git identity, frozen Cargo/rustc identities and child
+settings. These APIs use the supplied runner's deadline/cancellation/stream limits.
+`BuildRequest.binary = None` uses sole-binary selection; `Some(name)` is exact.
+`RunRequest` uses typed revision/prebuilt choices and optional build tools so
+all-prebuilt bindings need no compiler. `bind_roles` retains candidate, selected
+comparators and `RoleBindings.generator`; invocation-only callers may leave that
+generator field absent. Prebuilt provenance stays unknown, and a requested missing
+reference fails. No GNU/BSD substitution is performed.
+
+`run` and `check` currently validate only `-s/--suite`, candidate `-r/--candidate-ref`
+or `-a/--candidate`, previous `-b/--previous-ref` or `-p/--previous`, explicit
+`-x/--reference`, and generator `-G/--generator-ref` or `-g/--biggie` selections.
+They require a candidate plus comparator and reject ref/path conflicts. Valid
+selections return operational failure explaining that execution is not implemented;
+they do not claim to produce benchmark evidence. Other planned selection flags,
+generation, correctness orchestration and measurements remain later work.
+
+Tests use tiny temporary Git/Cargo repositories and fake Cargo fault cases; they
+generate no benchmark data. Native macOS execution is verified in the task report;
+Linux remains unverified. No performance claim is made for build orchestration.

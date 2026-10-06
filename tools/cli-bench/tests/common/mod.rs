@@ -92,6 +92,7 @@ pub fn invocation_inputs(
     fs::create_dir(root.join("home"))?;
     fs::create_dir(root.join("config"))?;
     let bindings = RoleBindings {
+        generator: None,
         roles: BTreeMap::from([(
             Role::Candidate,
             BoundExecutable {

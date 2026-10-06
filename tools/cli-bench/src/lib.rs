@@ -27,3 +27,9 @@ pub use invocation::{
     BoundExecutable, BoundTool, DatasetSet, Invocation, InvocationScope, PipelineTools,
     RoleBindings, resolve_invocation,
 };
+
+mod build;
+pub use build::{
+    BuildRequest, BuildTools, ExecutableSource, GitContext, ResolvedRevision, RunRequest,
+    bind_roles, build_revision, resolve_revision,
+};
