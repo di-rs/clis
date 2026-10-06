@@ -55,118 +55,14 @@ arbitrary upgrades. Retain the exact input plus checksum for all compared binari
 and later reruns. Word-count/length ranges support short and long records, and
 line-ending options cover LF, CRLF and an unterminated final record. Biggie also
 supplies Unicode/custom alphabets, literal record schedules, delimited/CSV fields,
-raw byte budgets and sorted overlapping pairs. Use small explicit fixtures
-for permanent regressions; its README records each shape and its limits.
+raw byte budgets and sorted overlapping pairs. Its README records these contracts
+and the optional CSV feature. Use small explicit fixtures for permanent regressions.
 For `mkdir`, `touch`, and other mutating tools, reset the sandbox before each run;
 otherwise later runs may measure a cheaper operation. Do not use destructive cache
 clearing or privileged machine-wide changes without explicit authorization.
 Custom apps use a prior implementation or another justified baseline, not an
 invented GNU/BSD original. Kara needs operation-level measurements rather than an
 uncontrolled interactive-session comparison.
-
-## Required workflow for CLI changes
-
-Use the [benchmark report template](templates/benchmark-report.md) for recorded
-results. This procedure applies to custom apps as well as ports; it supplements
-the correctness checks in [CONTRIBUTING](../CONTRIBUTING.md#checks). Scale workload
-coverage to the affected behavior. Documentation-only changes need no timing;
-a change with no credible runtime/size impact should explain that instead of
-manufacturing a benchmark.
-
-1. **Freeze the comparison.** Declare the user workload and metric before timing.
-   Retain separate release binaries for the previous Rust revision, candidate and
-   applicable external reference. Record source/lockfile/binary hashes, toolchain,
-   target, profile, Cargo features, compiler/linker flags and stripping policy.
-   Use the same settings across Rust revisions; vary only the intended factor.
-2. **Pass the correctness gate.** Check bytes, status, diagnostics and filesystem
-   effects for the exact benchmark workload. For synthetic datasets, additionally
-   check shape/count/order constraints independently and retain checksums. A shared
-   implementation used as both generator and oracle is not independent evidence.
-3. **Measure elapsed time.** Use three warmups and at least 20 measured runs per
-   case as the default. Record and justify exceptions, particularly expensive
-   workloads; do not hide small sample counts. Export every sample to JSON, specify
-   shell mode explicitly and preserve equivalent input/output handling.
-4. **Measure other metrics separately.** Record executable file size for changes
-   to dependencies, features, code generation or distribution. Measure peak memory
-   when changing buffering, retained state or algorithms. Build time, allocations,
-   compressed package size and on-disk allocation are distinct metrics; collect
-   them only when relevant and do not infer one from another.
-5. **Verify features and platforms.** Test supported default/minimal and affected
-   explicit-feature builds, including CLI behavior and direct library use. Check
-   the selected package dependency graph when claiming a dependency was excluded.
-   Report Linux/macOS separately; a configured CI job is not execution evidence.
-6. **Publish evidence for the final code.** Link a readable report and compact raw
-   records in the PR. After code, dependencies, build flags or features change,
-   rerun affected measurements. Documentation-only edits may reuse measurements
-   when the measured source/artifact identity is unchanged. Earlier measurements
-   remain historical evidence, with their narrower scope stated explicitly.
-
-### Timing controls and interpretation
-
-Use a quiet host without simultaneous builds/tests, fixed locale/timezone and the
-same sink, input access method and cache policy for every comparator. Explicitly
-select the shell: for example `--shell=sh` when using redirection, or
-`--shell=none` for direct invocation without shell syntax. Record the Hyperfine
-version; defaults can change. Separate process-startup cases from throughput cases.
-If the tool warns about shell calibration on tiny cases, use equivalent direct
-invocations or enlarge a throughput workload; do not silently redefine the startup
-measurement as a batched in-process loop.
-
-Report mean, median, standard deviation, sample count and the candidate/baseline
-ratio; name the statistic used for conclusions. A standard deviation is not a
-confidence interval. Preserve outliers and warnings; investigate interference
-instead of dropping samples. Before claiming a gain or accepting a regression,
-repeat the comparison in a second batch with command order reversed (or a recorded
-interleaving method). Record the practical impact in time/throughput as well as
-percent. If noise or run order changes the conclusion, mark it inconclusive.
-
-`/dev/null` measures generation/processing with discarded output; it does not prove
-disk throughput. Cached regular-file writes do not prove durable storage performance.
-Use a separate declared file/pipe/durability case when that is the user workload.
-Measure diagnostic levels off/debug/trace separately if instrumentation is affected,
-and distinguish redirected diagnostics from terminal rendering.
-
-### Executable size and memory
-
-For size comparisons, copy each completed release binary to its own named path
-before rebuilding another configuration. Record its SHA-256 and logical file size
-in bytes, using an OS metadata API such as Python `Path.stat().st_size`. Do not use
-`du` as an executable-byte metric: allocated blocks are a different measurement.
-Record both absolute and percentage differences against the declared baseline.
-Repeated statistical sampling is unnecessary for a fixed file's byte count.
-
-Hold target, profile, optimization/LTO/codegen settings, toolchain and stripping
-policy constant. Feature comparisons intentionally vary only the feature selection.
-If stripped sizes are useful, measure separate copies with an identical stripping
-procedure and record the tool/version; never compare stripped to unstripped results.
-[Cargo profile controls](https://doc.rust-lang.org/cargo/reference/profiles.html)
-can change artifact size. A smaller file does not demonstrate lower peak RSS,
-faster startup or higher throughput. A disabled dependency can remain in the
-workspace lockfile or another utility's build; inspect the selected package graph.
-
-For memory, collect at least five fresh process measurements per selected workload
-and report the median and range of process peak RSS, retaining raw outputs and
-native units. Use the platform's tool explicitly (for example `/usr/bin/time -l`
-on macOS or GNU `/usr/bin/time -v` on Linux); verify unit conversions from that
-implementation's output/documentation. Do not treat platform-specific peak RSS
-and memory-footprint fields as interchangeable. Compare input scales when claiming
-bounded memory; one small run cannot establish scaling. Document who owns any
-retained buffers and count them alongside output size and workload parameters.
-
-### Evidence bundle
-
-Keep large datasets and binaries in disposable storage. Publish compact timing
-JSON, raw resource output, checksums, exact commands/correctness checker and a
-manifest with the identities above, either in the repository's app-specific
-`benches/results/` directory or as a linked, retained PR/CI artifact. A path under
-an author's local `target/` or `/tmp` is not accessible review evidence. State
-artifact retention/expiry and how to regenerate inputs. Avoid personal data and
-secrets in captured environments; record only relevant variables.
-
-Ordinary CI runs correctness, feature-matrix and dependency-exclusion checks.
-Benchmark smoke runs can validate the harness, but unstable shared-runner timings
-must not become unexplained merge thresholds. Stable-host performance gates remain
-separate infrastructure, not something this document claims to have installed.
 
 ## Tooling and a correctness-first recipe
 
@@ -205,7 +101,7 @@ PYDATA
 cmp "$out/reference.out" "$out/candidate.out"
 test ! -s "$out/reference.err"
 test ! -s "$out/candidate.err"
-hyperfine --shell=sh --warmup 3 --runs 20 --export-json "$out/result.json" \
+hyperfine --warmup 3 --runs 20 --export-json "$out/result.json" \
   --command-name reference "\"$REF_TAIL\" -n 10 \"$data\" > /dev/null" \
   --command-name candidate "\"$candidate\" -n 10 \"$data\" > /dev/null"
 ```
@@ -259,19 +155,3 @@ they do not establish a speed improvement. Compare identical work with collectio
 off and on, then distinguish redirected stderr costs from terminal costs. The shared
 [overhead harness](../utils/cli-tracing/README.md#verification-and-overhead) checks
 its deterministic result before accepting any timing sample.
-
-## Additional Biggie input shapes
-
-From the workspace root, generate disposable inputs outside measured runs:
-
-```sh
-cargo run --locked -p biggie -- bytes -b 8193 -p 00ff1b0d0a target/boundary.bin
-cargo run --locked -p biggie -- records -r miss -r Hit -p 2 -c 100 target/records.txt
-cargo run --locked -p biggie -- fields -F csv -d , -n 100 -s 42 target/fields.csv
-cargo run --locked -p biggie -- pair -l target/left.txt -r target/right.txt -a 20 -j 30 -b 10
-```
-
-Validate budgets, record/field counts and consumer semantics before timing.
-Byte fixtures deliberately include data that some current consumers cannot preserve;
-a matching byte count alone does not prove correct output. See Biggie's README for
-units, quoting, resource limits and reproducibility scope.

@@ -274,7 +274,8 @@ change across versions/platforms; there is no long-term byte-format promise.
 Record revision, lockfile, platform, full command and checksum. Generate once and
 reuse exact inputs for candidate/reference timing; retain datasets for long-term
 replay. Large data belongs under `target/` or disposable paths, not tracked fixtures.
-See [benchmarking](../docs/benchmarking.md) and [generation measurements](benchmarks.md).
+See [benchmarking](../docs/benchmarking.md). Shared benchmark-tooling research,
+measurements and examples are tracked separately in [issue #9](https://github.com/di-rs/clis/issues/9).
 
 The former follow-up shapes—Unicode/whitespace, repeated records, known literal
 matches, fields, raw byte budgets and sorted pairs—are now supported within the
@@ -289,6 +290,6 @@ including direct validation and short/erroring writers; they do not establish
 full U1–U9 certification. Local execution is macOS arm64; Linux-only `/dev/full`
 checks require Linux execution. Biggie has no direct GNU/BSD counterpart, so port
 requirements P1–P4 are inapplicable. See the [north star](../docs/north-star.md) for
-the shared U1–U9 requirements and the benchmark report for measured limitations.
+the shared U1–U9 requirements. Platform and feature limitations are recorded above.
 
 [Workspace README](../README.md)

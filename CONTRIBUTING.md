@@ -117,9 +117,7 @@ Record standards evidence and follow-ups without claiming a utility has migrated
 merely because its README follows the template.
 
 Use the [PR template](.github/pull_request_template.md). Performance-sensitive work
-must follow the [shared measurement procedure](docs/benchmarking.md#required-workflow-for-cli-changes),
-use its [report template](docs/templates/benchmark-report.md), and link raw results
-or state why it was not measured. Compatibility claims must
+must link raw results or state why it was not measured. Compatibility claims must
 name tested references. A future CI matrix, a planned API, or a benchmark target
 is not an implemented capability merely because documentation describes it.
 
