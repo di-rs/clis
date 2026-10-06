@@ -75,7 +75,7 @@ when tooling or a platform is unavailable; an unrun command is not a passing che
 ## CI jobs
 
 PRs and pushes to `master` run `quality`, native `tests (linux)` and
-`tests (macos)`, `packages`, `dependencies`, `workflows` and `secrets`.
+`tests (macos)`, `packages`, `dependencies`, `workflows`, `secrets` and `docs-policy`.
 Compiler/test jobs deny warnings. `quality` checks formatting, Clippy and
 workspace rustdoc; nextest and doctests run separately on each platform.
 `packages` uses cargo-hack 0.6.45 to compile each member independently and check
@@ -87,6 +87,31 @@ introduction. Required workflows have no path filters.
 Run policy-script tests with `python3 -m unittest discover -s scripts/tests`
 (Python 3.11 or newer). Workflow syntax/security checks use actionlint 1.7.12 and
 `zizmor --offline --no-progress .github/workflows` (1.30.1).
+
+`docs-policy` checks manifest lint/license inheritance, Python policy tests, local
+Markdown links/anchors (lychee 0.24.2) and prose spelling (typos 1.50.3).
+Use `git ls-files -z -- '*.md' | xargs -0 lychee --offline --include-fragments=anchor-only --`
+and `git ls-files -- '*.md' | typos --force-exclude --file-list -` locally.
+Fixtures and generated data keep their intentional bytes; they are excluded from
+spelling. Remote links run weekly with bounded retries and remain non-required.
+The [guardrail evidence record](docs/ci-guardrails-status.md) distinguishes
+implemented checks, verified runs and remaining limitations.
+
+## Dependency policy
+
+Run `bash scripts/check-dependencies.sh` with cargo-audit 0.22.2,
+cargo-deny 0.20.2 and cargo-machete 0.9.2. It refreshes RustSec into a fresh
+temporary database, fails on vulnerabilities or yanked crates, and checks the
+root and any consumer/fuzz lockfiles. Network/database failures fail the check.
+`deny.toml` permits the observed MIT, Apache-2.0 and Unicode-3.0 license options,
+rejects unknown registries/Git sources, and reports duplicate versions for review.
+Any exception needs an exact crate/version, reason and removal condition.
+Scheduled audit also catches advisories when no PR is open.
+
+The `master` ruleset requires PRs, current-base passing Actions checks and resolved
+conversations, and prevents deletion/force-push. No additional approving reviewer
+is required. Update required check names only after successful runs of the new
+names, and read settings back; YAML does not itself enable merge protection.
 
 ## Test conventions
 

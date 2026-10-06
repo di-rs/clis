@@ -41,4 +41,20 @@ hooks = [
     files = '(\.rs$|(^|/)Cargo\.(toml|lock)$|(^|/)(rust-toolchain|clippy|prek)\.toml$|(^|/)tests/|^\.config/nextest\.toml$)',
     pass_filenames = false,
   },
+  {
+    id = "workspace-policy",
+    name = "workspace metadata policy",
+    language = "system",
+    entry = "python3 scripts/check_workspace.py",
+    files = '((^|/)Cargo\.toml$|^scripts/check_workspace\.py$)',
+    pass_filenames = false,
+  },
+  {
+    id = "policy-tests",
+    name = "policy script tests",
+    language = "system",
+    entry = "python3 -m unittest discover -s scripts/tests",
+    files = '^scripts/.*\.py$',
+    pass_filenames = false,
+  },
 ]
