@@ -373,6 +373,257 @@ fn deserialize_environment<'de, D: Deserializer<'de>>(
     Ok(environment)
 }
 
+/// Streaming SHA-256 of file contents and logical byte length.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileIdentity {
+    pub sha256: String,
+    pub bytes: u64,
+}
+
+/// Explicitly resolved, release/locked build policy. No local paths in its identity.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResolvedBuildPolicy {
+    pub compiler: String,
+    pub cargo: String,
+    pub target: String,
+    pub settings: BuildPolicy,
+    pub cargo_config_hashes: Vec<FileIdentity>,
+}
+
+/// Provenance supplied by a verified build operation, never inferred from a prebuilt file.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct BuildRecord {
+    pub source_sha: String,
+    pub lockfile: FileIdentity,
+    pub policy: ResolvedBuildPolicy,
+    pub command: Vec<String>,
+    pub resolved_features: Vec<String>,
+}
+
+/// Immutable retained executable. Missing build data explicitly means unknown provenance.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactRecord {
+    pub schema_version: u32,
+    pub id: String,
+    pub file: FileIdentity,
+    pub build: Option<BuildRecord>,
+}
+
+/// Executable identity plus an observed version, independent of installation path.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolIdentity {
+    pub file: FileIdentity,
+    pub version: String,
+}
+
+/// Complete frozen experimental policy; candidate and selected cases are run bindings.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct MeasurementContract {
+    pub schema_version: u32,
+    pub suite: Suite,
+    pub harness: ToolIdentity,
+    pub generator: ToolIdentity,
+    pub engine: ToolIdentity,
+    pub validator_policy: String,
+    pub analysis_policy: String,
+    pub build: ResolvedBuildPolicy,
+    pub profile: MeasurementProfile,
+}
+
+/// Observable metadata; inability to probe is explicit, never an invented value.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(
+    tag = "status",
+    content = "value",
+    rename_all = "kebab-case",
+    deny_unknown_fields
+)]
+pub enum HostValue {
+    Available(String),
+    Unavailable(String),
+}
+
+/// Bounded platform observations and only allowlisted/redacted child settings.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostMetadata {
+    pub os: String,
+    pub architecture: String,
+    pub kernel: HostValue,
+    pub cpu: HostValue,
+    pub memory: HostValue,
+    pub filesystem: HostValue,
+    pub inherited_umask: HostValue,
+    pub settings: BTreeMap<String, String>,
+}
+
+/// One actual input path and expected content identity, verified during finalization.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct InputRecord {
+    pub dataset: String,
+    pub path: std::path::PathBuf,
+    pub file: FileIdentity,
+}
+
+/// Optional optimization metadata, retained even if resolution fails.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExperimentRequest {
+    pub id: String,
+    pub hypothesis: String,
+    pub change_summary: String,
+    pub requested_previous: String,
+    pub requested_candidate: String,
+}
+
+/// Resolved run identities may be absent on early failure.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunManifest {
+    pub schema_version: u32,
+    pub run_id: String,
+    pub contract: Option<MeasurementContract>,
+    pub roles: BTreeMap<Role, ArtifactRecord>,
+    pub inputs: Vec<InputRecord>,
+    pub selected_cases: Vec<String>,
+    pub host: Option<HostMetadata>,
+    pub tool_paths: Option<ToolPaths>,
+    pub experiment: Option<ExperimentRequest>,
+}
+
+/// Terminal execution outcome; incomplete is also the initial on-disk state.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub enum RunOutcome {
+    Complete,
+    Failed,
+    Incomplete,
+}
+
+/// Evidence status. Measurement and analysis records are added by their owning stages.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunResult {
+    pub schema_version: u32,
+    pub outcome: RunOutcome,
+    pub message: Option<String>,
+}
+
+/// Typed append-only lifecycle event. Text must already be safe for publication.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(
+    tag = "kind",
+    content = "detail",
+    rename_all = "kebab-case",
+    deny_unknown_fields
+)]
+pub enum RunEvent {
+    Stage(String),
+    Warning(String),
+    Failure(String),
+}
+
+/// Immutable experiment anchor; written only after identity resolution succeeds.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExperimentRecord {
+    pub schema_version: u32,
+    pub starting_sha: String,
+    pub contract: MeasurementContract,
+    pub contract_id: String,
+}
+
+/// One invocation reference; its run status is authoritative even after interruption.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AttemptRecord {
+    pub schema_version: u32,
+    pub run_id: String,
+    pub request: ExperimentRequest,
+}
+
+impl BuildRecord {
+    pub(crate) fn validate(&self) -> Result<(), crate::BenchError> {
+        validate_sha(&self.source_sha)?;
+        crate::artifact::validate_identity(&self.lockfile)?;
+        self.policy.validate()?;
+        if self.command.is_empty() || self.command.iter().any(|arg| arg.contains('\0')) {
+            return Err(crate::BenchError::Evidence("invalid build command".into()));
+        }
+        Ok(())
+    }
+}
+impl ResolvedBuildPolicy {
+    pub(crate) fn validate(&self) -> Result<(), crate::BenchError> {
+        for text in [&self.compiler, &self.cargo, &self.target] {
+            if text.trim().is_empty() || text.contains('\0') {
+                return Err(crate::BenchError::Evidence(
+                    "unresolved build policy".into(),
+                ));
+            }
+        }
+        for identity in &self.cargo_config_hashes {
+            crate::artifact::validate_identity(identity)?;
+        }
+        Ok(())
+    }
+}
+fn validate_sha(sha: &str) -> Result<(), crate::BenchError> {
+    if sha.len() != 40 || !sha.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(crate::BenchError::Evidence(
+            "expected a full source SHA".into(),
+        ));
+    }
+    Ok(())
+}
+impl MeasurementContract {
+    /// Stable identity over the complete declared suite and resolved tool/build policies.
+    /// Actual paths, selected cases and candidate identity are intentionally run bindings.
+    ///
+    /// # Errors
+    /// Rejects unresolved/invalid policies, identities and suites.
+    pub fn identity(&self) -> Result<String, crate::BenchError> {
+        if self.schema_version != 1 {
+            return Err(crate::BenchError::Evidence(
+                "unsupported contract schema".into(),
+            ));
+        }
+        crate::validate_suite(&self.suite)?;
+        self.build.validate()?;
+        let mut resolved = self.suite.clone();
+        resolved.build.clone_from(&self.build.settings);
+        crate::validate_suite(&resolved)?;
+        for tool in [&self.harness, &self.generator, &self.engine] {
+            crate::artifact::validate_identity(&tool.file)?;
+            if tool.version.trim().is_empty() {
+                return Err(crate::BenchError::Evidence("missing tool version".into()));
+            }
+        }
+        if self.validator_policy.is_empty() || self.analysis_policy.is_empty() {
+            return Err(crate::BenchError::Evidence(
+                "missing validation/analysis policy".into(),
+            ));
+        }
+        crate::artifact::json_identity(self)
+    }
+}
+
+/// Actual paths whose bytes must match the frozen tool identities at finalization.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolPaths {
+    pub harness: std::path::PathBuf,
+    pub generator: std::path::PathBuf,
+    pub engine: std::path::PathBuf,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{MeasurementPolicy, MeasurementProfile};
@@ -405,5 +656,25 @@ mod tests {
                 performance_conclusions: false,
             }
         );
+    }
+    #[test]
+    fn early_failure_fixture_preserves_absent_identities_and_is_strict()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let text = include_str!("../tests/inputs/failed-manifest.json");
+        let manifest: super::RunManifest = serde_json::from_str(text)?;
+        if manifest.contract.is_some() || !manifest.roles.is_empty() || manifest.host.is_some() {
+            return Err("early failure fabricated provenance".into());
+        }
+        let mut json = serde_json::to_value(manifest)?;
+        json["unexpected"] = serde_json::json!(true);
+        if serde_json::from_value::<super::RunManifest>(json).is_ok() {
+            return Err("unknown manifest field accepted".into());
+        }
+        let mut json: serde_json::Value = serde_json::from_str(text)?;
+        json["experiment"]["unexpected"] = serde_json::json!(true);
+        if serde_json::from_value::<super::RunManifest>(json).is_ok() {
+            return Err("unknown experiment field accepted".into());
+        }
+        Ok(())
     }
 }

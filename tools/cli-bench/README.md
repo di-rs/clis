@@ -3,7 +3,8 @@
 [Workspace](../../README.md) · [Design](../../docs/superpowers/specs/2026-10-06-cli-bench-design.md)
 
 An original benchmark harness under development. The current slice provides
-strict suite parsing/validation for Rust callers and CLI help/version/logging.
+strict suite parsing/validation, immutable evidence/artifact storage for Rust
+callers, and CLI help/version/logging.
 Benchmark execution commands are planned in the linked design.
 
 ## Quick start
@@ -26,8 +27,8 @@ color policy or benchmark output in this slice.
 
 ## Evidence and limits
 
-Source-local model/suite/parser tests and `tests/cli.rs` cover the implemented
-interface. Native macOS 27.0.1 arm64 checks are recorded in the task report; Linux
+Source-local model/suite/store/artifact/host tests, `tests/cli.rs`, and the public
+consumer lifecycle in `tests/library.rs` cover the implemented interface. Native macOS 27.0.1 arm64 checks are recorded in the task report; Linux
 has not been run. No performance measurement or GNU/BSD compatibility claim is
 made for this custom harness. Full benchmark execution remains pending.
 
@@ -57,7 +58,8 @@ Both functions perform no I/O, launch no tools, and initialize no process state.
 They retain memory proportional to the supplied configuration. Callers own suite
 text and models; validation leaves direct-call models unchanged. `BenchError`
 retains TOML parse sources and exposes `kind()` with `UnsupportedSchema` and
-`InvalidSuite` classifications. Process statuses belong to the CLI adapter.
+`InvalidSuite` classifications. Evidence operations additionally expose `Evidence`
+and `Io`; I/O and JSON errors retain their sources. Process statuses belong to the CLI adapter.
 
 The [approved v1 contract](../../docs/superpowers/specs/2026-10-06-cli-bench-suite-v1.md)
 defines every model field and default. Public model types represent roles,
@@ -96,3 +98,50 @@ Current output is plain help/version text with no pager or prompt. Shared loggin
 uses stderr and is initialized only by the CLI. No timing or optimization gain is
 claimed. The harness currently makes no standards-compliance certification; this
 slice implements its configuration/adapter foundation and records platform gaps.
+
+
+## Evidence library
+
+`Store::open(path)` creates or opens a marked evidence root. Use `.cli-bench/`
+for local evidence; only that root path is ignored. Cargo caches remain separate.
+Nonempty unmarked roots and evidence symlinks are rejected. `begin_run(&suite)`
+allocates a never-reused directory with an OS-backed ownership lock and incomplete
+status. `begin_run_source(text)` additionally preserves the exact submitted TOML;
+the model-only API stores an equivalent serialization. Dropping a writer leaves
+its incomplete evidence. No operation changes the process cwd or environment.
+
+`fingerprint(path)` streams SHA-256 with an 8 KiB buffer and records logical size.
+`register_binary(path, build, &store)` copies and checks bytes and provenance before
+publishing an immutable artifact. `None` build provenance means unknown prebuilt
+identity; no current compiler is attributed to it. Build records are explicit
+caller-supplied provenance: the build stage must resolve and verify them. Hashes
+identify executable contents, not dynamic dependencies or the kernel.
+
+`RunWriter::append_event` durably appends typed events. `finish` checks manifest
+bindings, required input identities, tool identities and all retained artifacts,
+then flushes evidence and its checksum inventory before publishing terminal status.
+I/O failure retains an incomplete status; no empty successful result is substituted.
+`record_failure` retains failed/incomplete outcomes with unresolved identities absent.
+`Store::load_run` verifies finalized evidence for offline consumers without executing
+it. The outcome record is a storage foundation; timing/RSS/analysis records and
+actual benchmark execution remain pending.
+
+`begin_tagged_run` immediately records an attempt under `experiments/ID/` with
+its hypothesis, change summary and requested revisions. A resolved experiment
+requires a known Git-built previous role. The first resolved attempt fixes the
+starting SHA and the `MeasurementContract` identity over the complete suite,
+full/smoke profile, harness/generator/engine identities, validator/analysis versions
+and resolved build policy. Candidate identity, selected declared cases and physical
+paths remain run bindings. Actual input identities are retained in each manifest
+and frozen on first observation per declared dataset; subsequently observed
+confirmation datasets can extend that registry without changing the suite. Policy,
+starting SHA or known input drift fails and keeps the attempt reference.
+
+`collect_host` performs bounded native OS/CPU/RAM probes, exposes unavailable fields
+explicitly, and copies only allowlisted/redacted child settings supplied by the
+caller. It never enumerates the environment or mutates umask. Store transaction and
+per-run locks protect evidence operations; the host-wide measurement-session lock
+belongs to the future execution layer. Do not infer host idleness from these locks.
+
+Storage operations take time proportional to copied/verified evidence. No performance
+claim is made for this foundation. Native Linux execution is still unverified.

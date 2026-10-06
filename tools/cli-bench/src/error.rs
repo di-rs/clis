@@ -3,6 +3,8 @@
 pub enum ErrorKind {
     UnsupportedSchema,
     InvalidSuite,
+    Evidence,
+    Io,
 }
 
 /// A suite configuration failure; process status belongs to the CLI adapter.
@@ -14,6 +16,12 @@ pub enum BenchError {
     InvalidSuite(String),
     #[error("invalid suite TOML: {0}")]
     Parse(#[from] toml::de::Error),
+    #[error("evidence error: {0}")]
+    Evidence(String),
+    #[error("evidence I/O: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("evidence JSON: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 impl BenchError {
@@ -21,6 +29,8 @@ impl BenchError {
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
+            Self::Evidence(_) | Self::Json(_) => ErrorKind::Evidence,
+            Self::Io(_) => ErrorKind::Io,
             Self::UnsupportedSchema(_) => ErrorKind::UnsupportedSchema,
             Self::InvalidSuite(_) | Self::Parse(_) => ErrorKind::InvalidSuite,
         }
