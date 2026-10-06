@@ -1,5 +1,6 @@
 //! Streaming synthetic data generators with typed options and caller-owned writers.
 mod ending;
+mod random;
 mod text;
 pub use ending::LineEnding;
 pub use text::{

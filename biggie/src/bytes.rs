@@ -1,6 +1,7 @@
+use crate::random::rng_from_seed;
 use crate::{CONTENT_LIMIT, invalid};
 use anyhow::{Context, Result};
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand::Rng;
 use std::io::Write;
 /// Random bytes or a repeating literal pattern (1 byte through 8 MiB).
 #[derive(Clone, Debug)]
@@ -41,9 +42,7 @@ impl ByteOptions {
 pub fn generate_bytes(mut writer: impl Write, options: &ByteOptions) -> Result<()> {
     options.validate()?;
     let mut rng = match options.source {
-        ByteSource::Random { seed } => {
-            Some(seed.map_or_else(|| StdRng::from_rng(&mut rand::rng()), StdRng::seed_from_u64))
-        }
+        ByteSource::Random { seed } => Some(rng_from_seed(seed)),
         ByteSource::Pattern(_) => None,
     };
     let span = tracing::debug_span!(

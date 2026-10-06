@@ -782,3 +782,25 @@ fn csv_random_quote_overhead_is_included_in_row_limit() {
     }));
     assert_eq!(out, b"keep");
 }
+
+#[test]
+fn seeded_fields_preserve_delimiter_rejection_sequence() -> anyhow::Result<()> {
+    let mut output = Vec::new();
+    biggie::generate_fields(
+        &mut output,
+        &biggie::FieldOptions {
+            lines: 2,
+            fields: 3,
+            word_length: 12..=12,
+            delimiter: b'A',
+            seed: Some(42),
+            ..Default::default()
+        },
+    )?;
+    // Captured before helper extraction with the locked rand implementation.
+    assert_eq!(
+        output,
+        b"hPi3oZCnaWvLAoIe07mg3ZtJzA0NoKhdDqpQ2d\ngaDFWTcIylNhAKp3bM477b3ppAOWkYYmEGbCym\n"
+    );
+    Ok(())
+}

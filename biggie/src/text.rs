@@ -1,12 +1,14 @@
 use anyhow::{Context, Result};
-use rand::distr::Alphanumeric;
-use rand::{RngExt, SeedableRng, rngs::StdRng};
+use rand::{RngExt, rngs::StdRng};
 use std::{
     io::{self, Write},
     ops::RangeInclusive,
 };
 
-use crate::LineEnding;
+use crate::{
+    LineEnding,
+    random::{alphanumeric_bytes, rng_from_seed},
+};
 
 /// Settings for ASCII alphanumeric records separated by line endings.
 #[derive(Clone, Debug)]
@@ -167,9 +169,7 @@ fn generate_words<W: Write>(
     separator: impl AsRef<[u8]>,
     mut word: impl FnMut(&mut W, &mut StdRng, u32, &mut [u8; 8192]) -> io::Result<()>,
 ) -> io::Result<()> {
-    let mut rng = options
-        .seed
-        .map_or_else(|| StdRng::from_rng(&mut rand::rng()), StdRng::seed_from_u64);
+    let mut rng = rng_from_seed(options.seed);
     let num_lines = options.lines;
     let stage = tracing::debug_span!(
         "generate",
@@ -209,8 +209,8 @@ fn write_random_word(
         let bytes = buffer
             .get_mut(..usize::try_from(length).map_err(io::Error::other)?)
             .ok_or_else(|| io::Error::other("word chunk exceeds buffer"))?;
-        for byte in bytes.iter_mut() {
-            *byte = rng.sample(Alphanumeric);
+        for (byte, random) in bytes.iter_mut().zip(alphanumeric_bytes(rng, None)) {
+            *byte = random;
         }
         writer.write_all(bytes)?;
         remaining = remaining.saturating_sub(length);

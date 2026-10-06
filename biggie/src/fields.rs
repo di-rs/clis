@@ -1,6 +1,7 @@
+use crate::random::{alphanumeric_bytes, rng_from_seed};
 use crate::{CONTENT_LIMIT, LineEnding, invalid};
 use anyhow::{Context, Result};
-use rand::{RngExt, SeedableRng, distr::Alphanumeric, rngs::StdRng};
+use rand::{RngExt, rngs::StdRng};
 use std::{io::Write, ops::RangeInclusive};
 
 /// Plain separators versus CSV quoting/escaping, without headers.
@@ -135,9 +136,7 @@ impl FieldOptions {
 /// Invalid options fail before writing; write errors preserve partial output.
 pub fn generate_fields(mut writer: impl Write, options: &FieldOptions) -> Result<()> {
     options.validate()?;
-    let mut rng = options
-        .seed
-        .map_or_else(|| StdRng::from_rng(&mut rand::rng()), StdRng::seed_from_u64);
+    let mut rng = rng_from_seed(options.seed);
     let span = tracing::debug_span!(
         "generate_fields",
         requested_records = options.lines,
@@ -206,11 +205,8 @@ fn cell_value<'a>(
         let length = rng.random_range(options.word_length.clone());
         scratch.clear();
         let count = usize::try_from(length)?;
-        scratch.extend(
-            std::iter::repeat_with(|| rng.sample(Alphanumeric))
-                .filter(|byte| options.format.is_csv() || *byte != options.delimiter)
-                .take(count),
-        );
+        let excluded = (!options.format.is_csv()).then_some(options.delimiter);
+        scratch.extend(alphanumeric_bytes(rng, excluded).take(count));
         Ok(scratch)
     } else {
         let count = u64::try_from(options.values.len())?;

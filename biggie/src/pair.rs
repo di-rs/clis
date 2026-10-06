@@ -1,6 +1,7 @@
+use crate::random::rng_from_seed;
 use crate::{LineEnding, invalid};
 use anyhow::{Context, Result};
-use rand::{RngExt, SeedableRng, rngs::StdRng};
+use rand::RngExt;
 use std::io::Write;
 /// Counts of distinct sorted keys; copies supplies each key's multiplicity.
 #[derive(Clone, Debug)]
@@ -85,7 +86,7 @@ pub fn generate_pair(
     );
     let _entered = span.enter();
     let prefix = options.seed.map(|seed| {
-        let mut rng = StdRng::seed_from_u64(seed);
+        let mut rng = rng_from_seed(Some(seed));
         format!("{:016x}", rng.random::<u64>())
     });
     let left_end = options.left_only.saturating_add(options.shared);
