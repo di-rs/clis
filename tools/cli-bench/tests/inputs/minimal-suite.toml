@@ -1,0 +1,35 @@
+schema_version = 1
+id = "tailr-minimal"
+package = "tailr"
+binary = "tailr"
+
+[generator]
+revision = "0d8caa8387d446e91ef263c1ecab88870b735eb5"
+package = "biggie"
+binary = "biggie"
+features = []
+no_default_features = false
+
+[environment]
+LC_ALL = "C"
+TZ = "UTC"
+CLIS_LOG_LEVEL = "off"
+
+[[datasets]]
+id = "tiny"
+argv = ["text", "--lines", "2", "--words-per-line", "1", "--word-length", "4", "--seed", "42", "@output"]
+output = "tiny.txt"
+checks = [{ kind = "text-shape", records = 2, words_per_record = 1, word_length = 4 }]
+
+[[cases]]
+id = "last-line"
+purpose = "Read the final line from a tiny regular file"
+argv = ["-n", "1", "@input:tiny"]
+expected_status = 0
+correctness = [{ kind = "comparator", target = "selected-baselines", stream = "stdout" }, { kind = "tail-slice", dataset = "tiny", unit = "lines", count = 1, stream = "stdout" }, { kind = "empty-stderr" }]
+
+[cases.io.stdin]
+kind = "null"
+
+[cases.io.stdout]
+kind = "drained-pipe"
