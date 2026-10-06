@@ -45,6 +45,18 @@ jobs:
         run: prek run --all-files --show-diff-on-failure
       - name: 📚 Run documentation tests
         run: cargo test --workspace --doc --locked
+      - name: 🧩 Check Biggie without CSV
+        run: |
+          cargo nextest run --locked -p biggie --no-default-features
+          cargo test --locked -p biggie --no-default-features --doc
+          cargo clippy --locked -p biggie --no-default-features --all-targets
+          cargo tree --locked -p biggie --no-default-features --edges normal,build --prefix none > "$RUNNER_TEMP/biggie-no-csv-deps.txt"
+          if grep -Eq '^csv(-core)? ' "$RUNNER_TEMP/biggie-no-csv-deps.txt"; then
+            echo "CSV dependencies must be absent from Biggie's no-default-features build" >&2
+            exit 1
+          fi
+      - name: 🧩 Check Biggie with CSV explicitly enabled
+        run: cargo nextest run --locked -p biggie --no-default-features --features csv
       - name: 🧹 Verify checks left tracked files unchanged
         run: git diff --exit-code
 

@@ -468,3 +468,716 @@ fn rejects_undocumented_log_levels_before_creating_output() -> Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn default_and_explicit_text_preserve_seeded_ascii() {
+    for prefix in [vec![], vec!["text"]] {
+        command()
+            .args(prefix)
+            .args(["-", "-s", "42", "-n", "2", "-w", "2", "-l", "3"])
+            .assert()
+            .success()
+            .stdout("Pi3 ZCn\nvL2 IeA\n")
+            .stderr("");
+    }
+}
+
+#[test]
+fn text_custom_alphabet_and_short_flags() {
+    command()
+        .args([
+            "text", "-", "-A", "猫", "-u", "scalars", "-n", "2", "-w", "2", "-l", "2", "-d", "\t",
+            "-e", "crlf", "-N", "-s", "0", "-L", "off",
+        ])
+        .assert()
+        .success()
+        .stdout("猫猫\t猫猫\r\n猫猫\t猫猫")
+        .stderr("");
+    command()
+        .args([
+            "-L",
+            "off",
+            "text",
+            "-",
+            "--alphabet-chars",
+            "a",
+            "--word-separator",
+            "records",
+            "-n",
+            "1",
+            "-w",
+            "2",
+            "-l",
+            "1",
+        ])
+        .assert()
+        .success()
+        .stdout("arecordsa\n")
+        .stderr("");
+}
+
+#[test]
+fn text_validation_preserves_destinations() -> Result<()> {
+    let dir = TempDir::new()?;
+    dir.child("keep").write_str("original")?;
+    for args in [
+        vec!["-A", ""],
+        vec!["-A", "aa"],
+        vec!["-A", "a\n"],
+        vec!["-A", "猫"],
+        vec!["-a", "unicode"],
+        vec!["-A", "a", "-a", "ascii"],
+        vec!["-d", "\r"],
+        vec!["-r", "x"],
+    ] {
+        command()
+            .current_dir(dir.path())
+            .args(["text", "keep", "-n", "0"])
+            .args(args)
+            .assert()
+            .code(2)
+            .stdout("");
+        dir.child("keep").assert("original");
+    }
+    command()
+        .current_dir(dir.path())
+        .args(["-n", "0", "text", "keep"])
+        .assert()
+        .code(2);
+    dir.child("keep").assert("original");
+    Ok(())
+}
+
+#[test]
+fn reserved_names_can_be_text_destinations() -> Result<()> {
+    let dir = TempDir::new()?;
+    for args in [
+        vec!["text", "records", "-n", "0"],
+        vec!["./records", "-n", "0"],
+        vec!["-n", "0", "--", "records"],
+    ] {
+        command()
+            .current_dir(dir.path())
+            .args(args)
+            .assert()
+            .success()
+            .stderr("");
+        dir.child("records").assert(b"".as_slice());
+    }
+    Ok(())
+}
+
+#[test]
+fn text_help_and_version_do_not_generate_files() -> Result<()> {
+    let dir = TempDir::new()?;
+    for flag in ["-h", "--help", "-V", "--version"] {
+        command()
+            .current_dir(dir.path())
+            .args(["text", flag])
+            .assert()
+            .success()
+            .stderr("");
+        dir.child("out.txt").assert(predicate::path::missing());
+    }
+    Ok(())
+}
+
+#[test]
+fn records_schedule_has_exact_runs_and_positions() {
+    for args in [
+        vec!["-r", "miss", "-r", "Hit", "-r", "", "-p", "2", "-c", "2"],
+        vec![
+            "--record", "miss", "--record", "Hit", "--record", "", "--repeat", "2", "--cycles", "2",
+        ],
+    ] {
+        command()
+            .args(["records", "-"])
+            .args(args)
+            .assert()
+            .success()
+            .stdout("miss\nmiss\nHit\nHit\n\n\nmiss\nmiss\nHit\nHit\n\n\n")
+            .stderr("");
+    }
+    command()
+        .args([
+            "records",
+            "-",
+            "-r",
+            "e\u{301}👨‍👩‍👧",
+            "-r",
+            "",
+            "-e",
+            "crlf",
+            "-N",
+        ])
+        .assert()
+        .success()
+        .stdout("e\u{301}👨‍👩‍👧\r\n")
+        .stderr("");
+}
+
+#[test]
+fn records_files_validate_before_output_and_preserve_aliases() -> Result<()> {
+    use std::os::unix::fs::symlink;
+    let dir = TempDir::new()?;
+    let input = dir.child("input");
+    input.write_binary(b"a\r\nb\n")?;
+    for flag in ["-f", "--records-file"] {
+        command()
+            .current_dir(dir.path())
+            .args(["records", "-", flag, "input"])
+            .assert()
+            .success()
+            .stdout("a\r\nb\n")
+            .stderr("");
+    }
+    fs::hard_link(input.path(), dir.child("hard").path())?;
+    symlink(input.path(), dir.child("link").path())?;
+    for output in ["input", "hard", "link"] {
+        command()
+            .current_dir(dir.path())
+            .args(["records", output, "-f", "input"])
+            .assert()
+            .code(1)
+            .stdout("");
+        input.assert(b"a\r\nb\n".as_slice());
+    }
+    input.write_binary(&[0xff])?;
+    command()
+        .current_dir(dir.path())
+        .args(["records", "out", "-f", "input"])
+        .assert()
+        .code(1);
+    dir.child("out").assert(predicate::path::missing());
+    Ok(())
+}
+
+#[test]
+fn records_reject_inapplicable_flags_and_overflow() -> Result<()> {
+    let dir = TempDir::new()?;
+    dir.child("keep").write_str("keep")?;
+    for args in [
+        vec!["-n", "0"],
+        vec!["-s", "1"],
+        vec!["-p", "0"],
+        vec!["-r", "a\nb"],
+        vec!["-r", "a", "-p", "18446744073709551615", "-c", "2"],
+    ] {
+        command()
+            .current_dir(dir.path())
+            .args(["records", "keep"])
+            .args(args)
+            .assert()
+            .code(2);
+        dir.child("keep").assert("keep");
+    }
+    Ok(())
+}
+
+#[test]
+fn fields_preserve_empty_cells() {
+    command()
+        .args([
+            "fields", "-", "-n", "1", "-f", "3", "-v", "a", "-v", "", "-v", "c",
+        ])
+        .assert()
+        .success()
+        .stdout("a\t\tc\n")
+        .stderr("");
+    command()
+        .args([
+            "fields", "-", "-n", "2", "-f", "3", "-v", "a", "-v", "b", "-v", "c", "-E", "2",
+        ])
+        .assert()
+        .success()
+        .stdout("a\t\tc\n\tb\t\n")
+        .stderr("");
+}
+
+#[cfg(feature = "csv")]
+#[test]
+fn csv_fields_preserve_quoting_and_embedded_newlines() {
+    command()
+        .args([
+            "fields", "-", "-n", "1", "-F", "csv", "-f", "3", "-d", ",", "-v", "a,b", "-v", "",
+            "-v", "a\"b",
+        ])
+        .assert()
+        .success()
+        .stdout("\"a,b\",,\"a\"\"b\"\n")
+        .stderr("");
+    command()
+        .args([
+            "fields",
+            "-",
+            "--lines",
+            "1",
+            "--format",
+            "csv",
+            "--fields",
+            "1",
+            "--delimiter",
+            ",",
+            "--field-value",
+            "a\r\n",
+            "--line-ending",
+            "crlf",
+            "--no-final-newline",
+        ])
+        .assert()
+        .success()
+        .stdout("\"a\r\n\"")
+        .stderr("");
+}
+
+#[test]
+fn fields_reject_invalid_options_before_truncation() -> Result<()> {
+    let dir = TempDir::new()?;
+    dir.child("keep").write_str("keep")?;
+    for args in [
+        vec!["-f", "0"],
+        vec!["-d", "é"],
+        vec!["-d", "\""],
+        vec!["-v", "a\tb"],
+        vec!["-v", "x\ny"],
+        vec!["-v", "x", "-s", "1"],
+        vec!["-v", "x", "-l", "2"],
+        vec!["-E", "0"],
+        vec!["-f", "4294967295", "-l", "4294967295"],
+        vec!["-w", "3"],
+    ] {
+        command()
+            .current_dir(dir.path())
+            .args(["fields", "keep", "-n", "0"])
+            .args(args)
+            .assert()
+            .code(2);
+        dir.child("keep").assert("keep");
+    }
+    Ok(())
+}
+
+#[test]
+fn byte_patterns_obey_exact_budget() {
+    for args in [
+        vec!["-b", "7", "-p", "00ff1b0d0a"],
+        vec!["--bytes", "7", "--pattern-hex", "00ff1b0d0a"],
+    ] {
+        command()
+            .args(["bytes", "-"])
+            .args(args)
+            .assert()
+            .success()
+            .stdout(vec![0, 255, 27, 13, 10, 0, 255])
+            .stderr("");
+    }
+    command()
+        .args(["bytes", "-", "-b", "1", "-p", "0d0a"])
+        .assert()
+        .success()
+        .stdout(vec![13])
+        .stderr("");
+}
+
+#[test]
+fn byte_options_preserve_destinations_on_invalid_input() -> Result<()> {
+    let dir = TempDir::new()?;
+    dir.child("keep").write_str("keep")?;
+    for args in [
+        vec!["-p", ""],
+        vec!["-p", "a"],
+        vec!["-p", "zz"],
+        vec!["-p", "00", "-s", "1"],
+        vec!["-n", "0"],
+        vec!["-N"],
+        vec!["-e", "lf"],
+    ] {
+        command()
+            .current_dir(dir.path())
+            .args(["bytes", "keep", "-b", "0"])
+            .args(args)
+            .assert()
+            .code(2);
+        dir.child("keep").assert("keep");
+    }
+    command()
+        .current_dir(dir.path())
+        .args(["bytes", "keep"])
+        .assert()
+        .code(2);
+    dir.child("keep").assert("keep");
+    Ok(())
+}
+
+#[test]
+fn pair_streams_are_sorted_with_exact_overlap() -> Result<()> {
+    let dir = TempDir::new()?;
+    command()
+        .current_dir(dir.path())
+        .args([
+            "pair", "-l", "left", "-r", "right", "-a", "2", "-j", "3", "-b", "1", "-c", "2",
+        ])
+        .assert()
+        .success()
+        .stderr("");
+    dir.child("left").assert("biggie-0000000000000000\nbiggie-0000000000000000\nbiggie-0000000000000001\nbiggie-0000000000000001\nbiggie-0000000000000002\nbiggie-0000000000000002\nbiggie-0000000000000003\nbiggie-0000000000000003\nbiggie-0000000000000004\nbiggie-0000000000000004\n");
+    dir.child("right").assert("biggie-0000000000000002\nbiggie-0000000000000002\nbiggie-0000000000000003\nbiggie-0000000000000003\nbiggie-0000000000000004\nbiggie-0000000000000004\nbiggie-0000000000000005\nbiggie-0000000000000005\n");
+    Ok(())
+}
+
+#[test]
+fn pair_rejects_aliases_and_invalid_counts() -> Result<()> {
+    use std::os::unix::fs::symlink;
+    let dir = TempDir::new()?;
+    dir.child("keep").write_str("original")?;
+    fs::hard_link(dir.child("keep").path(), dir.child("hard").path())?;
+    symlink(dir.child("keep").path(), dir.child("link").path())?;
+    for right in ["keep", "./keep", "hard", "link"] {
+        command()
+            .current_dir(dir.path())
+            .args([
+                "pair", "-l", "keep", "-r", right, "-a", "1", "-j", "0", "-b", "0",
+            ])
+            .assert()
+            .code(1)
+            .stdout("");
+        dir.child("keep").assert("original");
+    }
+    for args in [
+        vec!["-a", "18446744073709551615", "-j", "1", "-b", "0"],
+        vec!["-a", "0", "-j", "0", "-b", "1", "-c", "0"],
+        vec!["-a", "0", "-j", "0", "-b", "0", "-n", "1"],
+    ] {
+        command()
+            .current_dir(dir.path())
+            .args(["pair", "-l", "keep", "-r", "other"])
+            .args(args)
+            .assert()
+            .code(2);
+        dir.child("keep").assert("original");
+        dir.child("other").assert(predicate::path::missing());
+    }
+    Ok(())
+}
+
+#[test]
+fn pair_second_destination_failure_reports_partial_effects() -> Result<()> {
+    let dir = TempDir::new()?;
+    command()
+        .current_dir(dir.path())
+        .args([
+            "pair",
+            "-l",
+            "left",
+            "-r",
+            "missing/right",
+            "-a",
+            "1",
+            "-j",
+            "0",
+            "-b",
+            "1",
+        ])
+        .assert()
+        .code(1)
+        .stdout("");
+    dir.child("left").assert(b"".as_slice());
+    dir.child("missing").assert(predicate::path::missing());
+    Ok(())
+}
+
+#[test]
+fn command_help_is_scoped_and_every_command_has_version() -> Result<()> {
+    let dir = TempDir::new()?;
+    for name in ["text", "records", "fields", "bytes", "pair"] {
+        for flag in ["-h", "--help", "-V", "--version"] {
+            command()
+                .current_dir(dir.path())
+                .args([name, flag])
+                .assert()
+                .success()
+                .stderr("");
+        }
+        dir.child("out.txt").assert(predicate::path::missing());
+    }
+    command()
+        .args(["records", "--help"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("--record")
+                .and(predicate::str::contains("--word-length").not()),
+        );
+    command()
+        .args(["bytes", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--bytes").and(predicate::str::contains("--lines").not()));
+    Ok(())
+}
+
+#[test]
+#[allow(
+    clippy::panic_in_result_fn,
+    reason = "Assertions compare actual command output bytes."
+)]
+fn short_and_long_flags_produce_identical_streams() -> Result<()> {
+    let dir = TempDir::new()?;
+    let format = "delimited";
+    for (name, short, long) in [
+        (
+            "text",
+            vec![
+                "-n", "2", "-s", "42", "-w", "2", "-l", "3", "-a", "unicode", "-u", "scalars",
+                "-d", "\u{2003}", "-e", "crlf", "-N",
+            ],
+            vec![
+                "--lines",
+                "2",
+                "--seed",
+                "42",
+                "--words-per-line",
+                "2",
+                "--word-length",
+                "3",
+                "--alphabet",
+                "unicode",
+                "--length-unit",
+                "scalars",
+                "--word-separator",
+                "\u{2003}",
+                "--line-ending",
+                "crlf",
+                "--no-final-newline",
+            ],
+        ),
+        (
+            "fields",
+            vec![
+                "-n", "2", "-s", "42", "-f", "3", "-l", "5", "-F", format, "-d", ",", "-E", "2",
+                "-e", "crlf", "-N",
+            ],
+            vec![
+                "--lines",
+                "2",
+                "--seed",
+                "42",
+                "--fields",
+                "3",
+                "--word-length",
+                "5",
+                "--format",
+                format,
+                "--delimiter",
+                ",",
+                "--empty-every",
+                "2",
+                "--line-ending",
+                "crlf",
+                "--no-final-newline",
+            ],
+        ),
+        (
+            "bytes",
+            vec!["-b", "16385", "-s", "42"],
+            vec!["--bytes", "16385", "--seed", "42"],
+        ),
+    ] {
+        let first = command()
+            .args([name, "-"])
+            .args(&short)
+            .args(["-L", "off"])
+            .env("CLIS_LOG_LEVEL", "invalid")
+            .assert()
+            .success()
+            .stderr("")
+            .get_output()
+            .stdout
+            .clone();
+        command()
+            .args(["--log-level", "off", name, "-"])
+            .args(&long)
+            .env("CLIS_LOG_LEVEL", "invalid")
+            .assert()
+            .success()
+            .stdout(first.clone())
+            .stderr("");
+        command()
+            .current_dir(dir.path())
+            .args([name, "data"])
+            .args(long)
+            .assert()
+            .success()
+            .stderr("");
+        assert_eq!(fs::read(dir.child("data").path())?, first);
+    }
+    Ok(())
+}
+
+#[test]
+#[allow(
+    clippy::panic_in_result_fn,
+    reason = "Assertions compare files generated with short and long aliases."
+)]
+fn pair_short_and_long_flags_are_equivalent() -> Result<()> {
+    let dir = TempDir::new()?;
+    for args in [
+        vec![
+            "-l", "left", "-r", "right", "-a", "1", "-j", "1", "-b", "1", "-c", "2", "-s", "42",
+            "-e", "crlf", "-N",
+        ],
+        vec![
+            "--left",
+            "left2",
+            "--right",
+            "right2",
+            "--left-only",
+            "1",
+            "--shared",
+            "1",
+            "--right-only",
+            "1",
+            "--copies",
+            "2",
+            "--seed",
+            "42",
+            "--line-ending",
+            "crlf",
+            "--no-final-newline",
+        ],
+    ] {
+        command()
+            .current_dir(dir.path())
+            .arg("pair")
+            .args(args)
+            .assert()
+            .success()
+            .stderr("");
+    }
+    assert_eq!(
+        fs::read(dir.child("left").path())?,
+        fs::read(dir.child("left2").path())?
+    );
+    assert_eq!(
+        fs::read(dir.child("right").path())?,
+        fs::read(dir.child("right2").path())?
+    );
+    Ok(())
+}
+
+#[test]
+fn record_corpus_empty_limits_and_trailing_terminators() -> Result<()> {
+    let dir = TempDir::new()?;
+    for (input, expected) in [
+        (b"".as_slice(), b"".as_slice()),
+        (b"\n", b"\n"),
+        (b"a\n", b"a\n"),
+        (b"a", b"a\n"),
+        (b"\n\n", b"\n\n"),
+    ] {
+        dir.child("input").write_binary(input)?;
+        command()
+            .current_dir(dir.path())
+            .args(["records", "-", "-f", "input"])
+            .assert()
+            .success()
+            .stdout(expected)
+            .stderr("");
+    }
+    for content in [vec![b'\n'; 100_001], vec![b'x'; 8 * 1024 * 1024 + 1]] {
+        dir.child("input").write_binary(&content)?;
+        command()
+            .current_dir(dir.path())
+            .args(["records", "out", "-f", "input"])
+            .assert()
+            .code(1);
+        dir.child("out").assert(predicate::path::missing());
+    }
+    Ok(())
+}
+
+#[test]
+fn default_text_flag_values_are_never_subcommands() {
+    for flag in ["-d", "--word-separator"] {
+        for name in ["text", "records", "fields", "bytes", "pair", "help"] {
+            command()
+                .args([flag, name, "-A", "a", "-n", "1", "-w", "2", "-l", "1", "-"])
+                .assert()
+                .success()
+                .stdout(format!("a{name}a\n"))
+                .stderr("");
+        }
+    }
+}
+
+#[test]
+#[allow(
+    clippy::panic_in_result_fn,
+    reason = "Assertions verify delimiter count in actual bytes."
+)]
+fn random_plain_fields_exclude_alphanumeric_delimiters() {
+    for delimiter in ["A", "z", "0"] {
+        let assertion = command()
+            .args([
+                "fields", "-n", "4", "-f", "3", "-l", "100", "-d", delimiter, "-s", "42", "-",
+            ])
+            .assert()
+            .success()
+            .stderr("");
+        let bytes = &assertion.get_output().stdout;
+        let separator = delimiter.as_bytes().first().copied();
+        assert_eq!(
+            bytes
+                .iter()
+                .filter(|byte| Some(**byte) == separator)
+                .count(),
+            8
+        );
+        assert_eq!(bytes.len(), 1212);
+    }
+}
+
+#[cfg(feature = "csv")]
+#[test]
+fn csv_random_quote_overhead_is_validated_before_truncation() -> Result<()> {
+    let dir = TempDir::new()?;
+    dir.child("keep").write_str("keep")?;
+    command()
+        .current_dir(dir.path())
+        .args([
+            "fields", "keep", "-n", "0", "-F", "csv", "-f", "2", "-l", "4194302", "-d", "A", "-s",
+            "42",
+        ])
+        .assert()
+        .code(2)
+        .stdout("");
+    dir.child("keep").assert("keep");
+    Ok(())
+}
+
+#[cfg(not(feature = "csv"))]
+#[test]
+fn disabled_csv_is_rejected_before_creating_or_truncating_output() -> Result<()> {
+    let dir = TempDir::new()?;
+    dir.child("keep").write_str("keep")?;
+    for path in ["keep", "missing"] {
+        for flag in ["-F", "--format"] {
+            command()
+                .current_dir(dir.path())
+                .args(["fields", path, "-n", "0", flag, "csv"])
+                .assert()
+                .code(2)
+                .stdout("")
+                .stderr(predicate::str::contains("invalid value 'csv'"));
+            dir.child("keep").assert("keep");
+            dir.child("missing").assert(predicate::path::missing());
+        }
+    }
+    command()
+        .args(["fields", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[possible values: delimited]"))
+        .stderr("");
+    Ok(())
+}

@@ -53,9 +53,9 @@ Use `--seed` and record its revision, lockfile, platform, and complete command;
 the same seed/options reproduce bytes within the same build/platform, not across
 arbitrary upgrades. Retain the exact input plus checksum for all compared binaries
 and later reruns. Word-count/length ranges support short and long records, and
-line-ending options cover LF, CRLF and an unterminated final record. Use explicit
-small fixtures or another deterministic generator for binary, Unicode, sorted or
-other shapes it does not yet produce; its README records follow-up requirements.
+line-ending options cover LF, CRLF and an unterminated final record. Biggie also supplies Unicode/custom alphabets, literal record schedules,
+delimited/CSV fields, raw byte budgets and sorted overlapping pairs. Use small explicit fixtures
+for permanent regressions; its README records each shape and its limits.
 For `mkdir`, `touch`, and other mutating tools, reset the sandbox before each run;
 otherwise later runs may measure a cheaper operation. Do not use destructive cache
 clearing or privileged machine-wide changes without explicit authorization.
@@ -154,3 +154,19 @@ they do not establish a speed improvement. Compare identical work with collectio
 off and on, then distinguish redirected stderr costs from terminal costs. The shared
 [overhead harness](../utils/cli-tracing/README.md#verification-and-overhead) checks
 its deterministic result before accepting any timing sample.
+
+## Additional Biggie input shapes
+
+From the workspace root, generate disposable inputs outside measured runs:
+
+```sh
+cargo run --locked -p biggie -- bytes -b 8193 -p 00ff1b0d0a target/boundary.bin
+cargo run --locked -p biggie -- records -r miss -r Hit -p 2 -c 100 target/records.txt
+cargo run --locked -p biggie -- fields -F csv -d , -n 100 -s 42 target/fields.csv
+cargo run --locked -p biggie -- pair -l target/left.txt -r target/right.txt -a 20 -j 30 -b 10
+```
+
+Validate budgets, record/field counts and consumer semantics before timing.
+Byte fixtures deliberately include data that some current consumers cannot preserve;
+a matching byte count alone does not prove correct output. See Biggie's README for
+units, quoting, resource limits and reproducibility scope.
