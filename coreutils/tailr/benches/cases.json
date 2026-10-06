@@ -1,0 +1,5 @@
+[
+  {"id": "file-last-lines", "argv": ["-n", "10", "input.txt"], "input": "file"},
+  {"id": "file-last-bytes", "argv": ["-c", "1000", "input.txt"], "input": "file"},
+  {"id": "stream-last-lines", "argv": ["-n", "10", "-"], "input": "stdin"}
+]

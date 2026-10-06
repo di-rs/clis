@@ -1,0 +1,64 @@
+name: Fuzz
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  schedule:
+    - cron: '23 4 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  fuzz:
+    name: fuzz (${{ matrix.target }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [parsu_xml, tail_bytes]
+    env:
+      FUZZ_TARGET: ${{ matrix.target }}
+      FUZZ_SECONDS: ${{ github.event_name == 'pull_request' && '15' || '300' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup component add rust-src
+      - name: Install verified cargo-fuzz 0.13.2
+        run: |
+          curl --fail --silent --show-error --location --max-time 120 \
+            https://github.com/rust-fuzz/cargo-fuzz/releases/download/0.13.2/cargo-fuzz-0.13.2-x86_64-unknown-linux-musl.tar.gz \
+            --output "$RUNNER_TEMP/cargo-fuzz.tar.gz"
+          echo "b5b704018b63e0f151c17a057ac53b5111e1db545d1b9f72fee79f08a545931c  $RUNNER_TEMP/cargo-fuzz.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/cargo-fuzz.tar.gz" -C "$RUNNER_TEMP" cargo-fuzz
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Replay and bounded fuzz run
+        run: |
+          mkdir -p "fuzz/runs/$FUZZ_TARGET"
+          rustc -Vv > "fuzz/runs/$FUZZ_TARGET/environment.txt"
+          git rev-parse HEAD >> "fuzz/runs/$FUZZ_TARGET/environment.txt"
+          cargo fuzz --version >> "fuzz/runs/$FUZZ_TARGET/environment.txt"
+          bash scripts/fuzz.sh "$FUZZ_TARGET" "$FUZZ_SECONDS" 2>&1 | tee "fuzz/runs/$FUZZ_TARGET/run.log"
+      - name: Preserve failures and corpus
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-${{ matrix.target }}
+          path: |
+            fuzz/artifacts/${{ matrix.target }}/
+            fuzz/runs/${{ matrix.target }}/
+          retention-days: 14
+          if-no-files-found: error

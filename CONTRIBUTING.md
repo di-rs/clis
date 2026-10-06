@@ -97,6 +97,16 @@ spelling. Remote links run weekly with bounded retries and remain non-required.
 The [guardrail evidence record](docs/ci-guardrails-status.md) distinguishes
 implemented checks, verified runs and remaining limitations.
 
+The `domain-clippy` hook runs `bash scripts/check-domain.sh` for biggie/tailr
+library targets. Its separate Clippy configuration prohibits global streams,
+process arguments/environment and diagnostic initialization without applying
+those domain restrictions to legitimate CLI adapters. Other workspace lints
+still apply to all targets. `tests/consumers` is a separately locked workspace:
+`cargo run --locked --manifest-path tests/consumers/Cargo.toml` proves repeated
+API calls without CLI setup and without workspace feature unification.
+Macro compile-fail snapshots use trybuild and the pinned compiler; review actual
+diagnostics before accepting new snapshots during toolchain updates.
+
 ## Dependency policy
 
 Run `bash scripts/check-dependencies.sh` with cargo-audit 0.22.2,
@@ -112,6 +122,26 @@ The `master` ruleset requires PRs, current-base passing Actions checks and resol
 conversations, and prevents deletion/force-push. No additional approving reviewer
 is required. Update required check names only after successful runs of the new
 names, and read settings back; YAML does not itself enable merge protection.
+
+## Scheduled investigations
+
+`Maintenance` refreshes dependencies daily and checks remote links, coverage,
+optimized-profile correctness, moving nightly/stable/beta and a pure-library Miri
+subset weekly/manual. Stable/beta failures are readiness findings; Kara still
+requires nightly. Miri runs parsu unit tests and tailr direct API tests, with
+normal isolation. CodeQL analyzes Rust/Actions on PRs, master and weekly; scan
+execution and alerts are reported before considering additional merge rules.
+
+Coverage uses cargo-llvm-cov 0.9.1 and the pinned compiler's llvm-tools-preview:
+create `target/coverage`, run `cargo llvm-cov nextest --locked --workspace --all-features --lcov --output-path target/coverage/lcov.info`, then
+`cargo llvm-cov report --html --output-dir target/coverage`. Reports include
+instrumented CLI subprocesses; doctests are tested separately and are not in
+these coverage totals. There is no percentage threshold or third-party upload.
+
+[Fuzz instructions](fuzz/README.md) describe corpus replay, short PR smoke and
+longer scheduled runs. [Tail reference provenance](coreutils/tailr/tests/expected/README.md)
+describes the separate GNU comparisons. Neither references nor Nushell are
+required for ordinary tests. Missing tools or failed probes remain visible.
 
 ## Test conventions
 

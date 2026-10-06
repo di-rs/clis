@@ -43,6 +43,7 @@ jobs:
       - run: prek run check-added-large-files --all-files --show-diff-on-failure
       - run: prek run cargo-fmt --all-files --show-diff-on-failure
       - run: prek run cargo-clippy --all-files --show-diff-on-failure
+      - run: prek run domain-clippy --all-files --show-diff-on-failure
       - run: cargo doc --locked --workspace --all-features --no-deps
       - run: git diff --exit-code
 
@@ -111,6 +112,7 @@ jobs:
       - run: cargo hack check --locked --workspace --feature-powerset
       - run: python3 -m unittest discover -s scripts/tests
       - run: python3 scripts/check_features.py
+      - run: cargo run --locked --manifest-path tests/consumers/Cargo.toml
       - run: git diff --exit-code
 
   docs-policy:
@@ -126,8 +128,10 @@ jobs:
           python-version: '3.13'
       - uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
-          tool: prek@0.5.5,lychee@0.24.2,typos@1.50.3
+          tool: prek@0.5.5,typos@1.50.3
           fallback: none
+      - name: Install verified lychee
+        run: bash scripts/install-lychee.sh
       - run: prek run workspace-policy --all-files --show-diff-on-failure
       - run: prek run policy-tests --all-files --show-diff-on-failure
       - name: Local links and anchors

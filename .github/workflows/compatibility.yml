@@ -1,0 +1,63 @@
+name: GNU compatibility
+
+on:
+  schedule:
+    - cron: '23 4 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  tail:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - name: GNU reference on macOS
+        if: runner.os == 'macOS'
+        run: brew install coreutils
+      - run: cargo build --locked -p tailr
+      - name: Record environment
+        run: |
+          mkdir -p target/reference-environment
+          rustc -Vv > target/reference-environment/environment.txt
+          git rev-parse HEAD >> target/reference-environment/environment.txt
+          uname -a >> target/reference-environment/environment.txt
+      - name: Compare supported byte and line cases
+        run: |
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            reference="$(brew --prefix coreutils)/bin/gtail"
+          else
+            reference=/usr/bin/tail
+          fi
+          python3 scripts/reference_check.py --reference "$reference" \
+            --candidate "$PWD/target/debug/tailr" \
+            --cases coreutils/tailr/tests/reference_cases.json \
+            --output-dir target/reference
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: tail-reference-${{ matrix.os }}
+          path: |
+            target/reference/
+            target/reference-environment/
+          retention-days: 14
+          if-no-files-found: error

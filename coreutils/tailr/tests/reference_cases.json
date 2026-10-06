@@ -1,0 +1,1174 @@
+[
+  {
+    "id": "empty-lines-0-file",
+    "argv": [
+      "--lines=0",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": ""
+      }
+    }
+  },
+  {
+    "id": "empty-lines-0-stdin",
+    "argv": [
+      "--lines=0",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": ""
+  },
+  {
+    "id": "empty-lines-1-file",
+    "argv": [
+      "--lines=1",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": ""
+      }
+    }
+  },
+  {
+    "id": "empty-lines-1-stdin",
+    "argv": [
+      "--lines=1",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": ""
+  },
+  {
+    "id": "empty-lines-99-file",
+    "argv": [
+      "--lines=99",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": ""
+      }
+    }
+  },
+  {
+    "id": "empty-lines-99-stdin",
+    "argv": [
+      "--lines=99",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": ""
+  },
+  {
+    "id": "empty-lines-plus0-file",
+    "argv": [
+      "--lines=+0",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": ""
+      }
+    }
+  },
+  {
+    "id": "empty-lines-plus0-stdin",
+    "argv": [
+      "--lines=+0",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": ""
+  },
+  {
+    "id": "empty-lines-plus1-file",
+    "argv": [
+      "--lines=+1",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": ""
+      }
+    }
+  },
+  {
+    "id": "empty-lines-plus1-stdin",
+    "argv": [
+      "--lines=+1",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": ""
+  },
+  {
+    "id": "empty-lines-plus2-file",
+    "argv": [
+      "--lines=+2",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": ""
+      }
+    }
+  },
+  {
+    "id": "empty-lines-plus2-stdin",
+    "argv": [
+      "--lines=+2",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": ""
+  },
+  {
+    "id": "empty-bytes-0-file",
+    "argv": [
+      "--bytes=0",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": ""
+      }
+    }
+  },
+  {
+    "id": "empty-bytes-0-stdin",
+    "argv": [
+      "--bytes=0",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": ""
+  },
+  {
+    "id": "empty-bytes-1-file",
+    "argv": [
+      "--bytes=1",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": ""
+      }
+    }
+  },
+  {
+    "id": "empty-bytes-1-stdin",
+    "argv": [
+      "--bytes=1",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": ""
+  },
+  {
+    "id": "empty-bytes-99-file",
+    "argv": [
+      "--bytes=99",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": ""
+      }
+    }
+  },
+  {
+    "id": "empty-bytes-99-stdin",
+    "argv": [
+      "--bytes=99",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": ""
+  },
+  {
+    "id": "empty-bytes-plus0-file",
+    "argv": [
+      "--bytes=+0",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": ""
+      }
+    }
+  },
+  {
+    "id": "empty-bytes-plus0-stdin",
+    "argv": [
+      "--bytes=+0",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": ""
+  },
+  {
+    "id": "empty-bytes-plus1-file",
+    "argv": [
+      "--bytes=+1",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": ""
+      }
+    }
+  },
+  {
+    "id": "empty-bytes-plus1-stdin",
+    "argv": [
+      "--bytes=+1",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": ""
+  },
+  {
+    "id": "empty-bytes-plus2-file",
+    "argv": [
+      "--bytes=+2",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": ""
+      }
+    }
+  },
+  {
+    "id": "empty-bytes-plus2-stdin",
+    "argv": [
+      "--bytes=+2",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": ""
+  },
+  {
+    "id": "binary-lines-0-file",
+    "argv": [
+      "--lines=0",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "6100ff0d0a6c617374"
+      }
+    }
+  },
+  {
+    "id": "binary-lines-0-stdin",
+    "argv": [
+      "--lines=0",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "6100ff0d0a6c617374"
+  },
+  {
+    "id": "binary-lines-1-file",
+    "argv": [
+      "--lines=1",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "6100ff0d0a6c617374"
+      }
+    }
+  },
+  {
+    "id": "binary-lines-1-stdin",
+    "argv": [
+      "--lines=1",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "6100ff0d0a6c617374"
+  },
+  {
+    "id": "binary-lines-99-file",
+    "argv": [
+      "--lines=99",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "6100ff0d0a6c617374"
+      }
+    }
+  },
+  {
+    "id": "binary-lines-99-stdin",
+    "argv": [
+      "--lines=99",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "6100ff0d0a6c617374"
+  },
+  {
+    "id": "binary-lines-plus0-file",
+    "argv": [
+      "--lines=+0",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "6100ff0d0a6c617374"
+      }
+    }
+  },
+  {
+    "id": "binary-lines-plus0-stdin",
+    "argv": [
+      "--lines=+0",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "6100ff0d0a6c617374"
+  },
+  {
+    "id": "binary-lines-plus1-file",
+    "argv": [
+      "--lines=+1",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "6100ff0d0a6c617374"
+      }
+    }
+  },
+  {
+    "id": "binary-lines-plus1-stdin",
+    "argv": [
+      "--lines=+1",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "6100ff0d0a6c617374"
+  },
+  {
+    "id": "binary-lines-plus2-file",
+    "argv": [
+      "--lines=+2",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "6100ff0d0a6c617374"
+      }
+    }
+  },
+  {
+    "id": "binary-lines-plus2-stdin",
+    "argv": [
+      "--lines=+2",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "6100ff0d0a6c617374"
+  },
+  {
+    "id": "binary-bytes-0-file",
+    "argv": [
+      "--bytes=0",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "6100ff0d0a6c617374"
+      }
+    }
+  },
+  {
+    "id": "binary-bytes-0-stdin",
+    "argv": [
+      "--bytes=0",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "6100ff0d0a6c617374"
+  },
+  {
+    "id": "binary-bytes-1-file",
+    "argv": [
+      "--bytes=1",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "6100ff0d0a6c617374"
+      }
+    }
+  },
+  {
+    "id": "binary-bytes-1-stdin",
+    "argv": [
+      "--bytes=1",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "6100ff0d0a6c617374"
+  },
+  {
+    "id": "binary-bytes-99-file",
+    "argv": [
+      "--bytes=99",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "6100ff0d0a6c617374"
+      }
+    }
+  },
+  {
+    "id": "binary-bytes-99-stdin",
+    "argv": [
+      "--bytes=99",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "6100ff0d0a6c617374"
+  },
+  {
+    "id": "binary-bytes-plus0-file",
+    "argv": [
+      "--bytes=+0",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "6100ff0d0a6c617374"
+      }
+    }
+  },
+  {
+    "id": "binary-bytes-plus0-stdin",
+    "argv": [
+      "--bytes=+0",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "6100ff0d0a6c617374"
+  },
+  {
+    "id": "binary-bytes-plus1-file",
+    "argv": [
+      "--bytes=+1",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "6100ff0d0a6c617374"
+      }
+    }
+  },
+  {
+    "id": "binary-bytes-plus1-stdin",
+    "argv": [
+      "--bytes=+1",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "6100ff0d0a6c617374"
+  },
+  {
+    "id": "binary-bytes-plus2-file",
+    "argv": [
+      "--bytes=+2",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "6100ff0d0a6c617374"
+      }
+    }
+  },
+  {
+    "id": "binary-bytes-plus2-stdin",
+    "argv": [
+      "--bytes=+2",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "6100ff0d0a6c617374"
+  },
+  {
+    "id": "crlf-lines-0-file",
+    "argv": [
+      "--lines=0",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610d0a620d0a"
+      }
+    }
+  },
+  {
+    "id": "crlf-lines-0-stdin",
+    "argv": [
+      "--lines=0",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610d0a620d0a"
+  },
+  {
+    "id": "crlf-lines-1-file",
+    "argv": [
+      "--lines=1",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610d0a620d0a"
+      }
+    }
+  },
+  {
+    "id": "crlf-lines-1-stdin",
+    "argv": [
+      "--lines=1",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610d0a620d0a"
+  },
+  {
+    "id": "crlf-lines-99-file",
+    "argv": [
+      "--lines=99",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610d0a620d0a"
+      }
+    }
+  },
+  {
+    "id": "crlf-lines-99-stdin",
+    "argv": [
+      "--lines=99",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610d0a620d0a"
+  },
+  {
+    "id": "crlf-lines-plus0-file",
+    "argv": [
+      "--lines=+0",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610d0a620d0a"
+      }
+    }
+  },
+  {
+    "id": "crlf-lines-plus0-stdin",
+    "argv": [
+      "--lines=+0",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610d0a620d0a"
+  },
+  {
+    "id": "crlf-lines-plus1-file",
+    "argv": [
+      "--lines=+1",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610d0a620d0a"
+      }
+    }
+  },
+  {
+    "id": "crlf-lines-plus1-stdin",
+    "argv": [
+      "--lines=+1",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610d0a620d0a"
+  },
+  {
+    "id": "crlf-lines-plus2-file",
+    "argv": [
+      "--lines=+2",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610d0a620d0a"
+      }
+    }
+  },
+  {
+    "id": "crlf-lines-plus2-stdin",
+    "argv": [
+      "--lines=+2",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610d0a620d0a"
+  },
+  {
+    "id": "crlf-bytes-0-file",
+    "argv": [
+      "--bytes=0",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610d0a620d0a"
+      }
+    }
+  },
+  {
+    "id": "crlf-bytes-0-stdin",
+    "argv": [
+      "--bytes=0",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610d0a620d0a"
+  },
+  {
+    "id": "crlf-bytes-1-file",
+    "argv": [
+      "--bytes=1",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610d0a620d0a"
+      }
+    }
+  },
+  {
+    "id": "crlf-bytes-1-stdin",
+    "argv": [
+      "--bytes=1",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610d0a620d0a"
+  },
+  {
+    "id": "crlf-bytes-99-file",
+    "argv": [
+      "--bytes=99",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610d0a620d0a"
+      }
+    }
+  },
+  {
+    "id": "crlf-bytes-99-stdin",
+    "argv": [
+      "--bytes=99",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610d0a620d0a"
+  },
+  {
+    "id": "crlf-bytes-plus0-file",
+    "argv": [
+      "--bytes=+0",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610d0a620d0a"
+      }
+    }
+  },
+  {
+    "id": "crlf-bytes-plus0-stdin",
+    "argv": [
+      "--bytes=+0",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610d0a620d0a"
+  },
+  {
+    "id": "crlf-bytes-plus1-file",
+    "argv": [
+      "--bytes=+1",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610d0a620d0a"
+      }
+    }
+  },
+  {
+    "id": "crlf-bytes-plus1-stdin",
+    "argv": [
+      "--bytes=+1",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610d0a620d0a"
+  },
+  {
+    "id": "crlf-bytes-plus2-file",
+    "argv": [
+      "--bytes=+2",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610d0a620d0a"
+      }
+    }
+  },
+  {
+    "id": "crlf-bytes-plus2-stdin",
+    "argv": [
+      "--bytes=+2",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610d0a620d0a"
+  },
+  {
+    "id": "unterminated-lines-0-file",
+    "argv": [
+      "--lines=0",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610ac3a9"
+      }
+    }
+  },
+  {
+    "id": "unterminated-lines-0-stdin",
+    "argv": [
+      "--lines=0",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610ac3a9"
+  },
+  {
+    "id": "unterminated-lines-1-file",
+    "argv": [
+      "--lines=1",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610ac3a9"
+      }
+    }
+  },
+  {
+    "id": "unterminated-lines-1-stdin",
+    "argv": [
+      "--lines=1",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610ac3a9"
+  },
+  {
+    "id": "unterminated-lines-99-file",
+    "argv": [
+      "--lines=99",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610ac3a9"
+      }
+    }
+  },
+  {
+    "id": "unterminated-lines-99-stdin",
+    "argv": [
+      "--lines=99",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610ac3a9"
+  },
+  {
+    "id": "unterminated-lines-plus0-file",
+    "argv": [
+      "--lines=+0",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610ac3a9"
+      }
+    }
+  },
+  {
+    "id": "unterminated-lines-plus0-stdin",
+    "argv": [
+      "--lines=+0",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610ac3a9"
+  },
+  {
+    "id": "unterminated-lines-plus1-file",
+    "argv": [
+      "--lines=+1",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610ac3a9"
+      }
+    }
+  },
+  {
+    "id": "unterminated-lines-plus1-stdin",
+    "argv": [
+      "--lines=+1",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610ac3a9"
+  },
+  {
+    "id": "unterminated-lines-plus2-file",
+    "argv": [
+      "--lines=+2",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610ac3a9"
+      }
+    }
+  },
+  {
+    "id": "unterminated-lines-plus2-stdin",
+    "argv": [
+      "--lines=+2",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610ac3a9"
+  },
+  {
+    "id": "unterminated-bytes-0-file",
+    "argv": [
+      "--bytes=0",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610ac3a9"
+      }
+    }
+  },
+  {
+    "id": "unterminated-bytes-0-stdin",
+    "argv": [
+      "--bytes=0",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610ac3a9"
+  },
+  {
+    "id": "unterminated-bytes-1-file",
+    "argv": [
+      "--bytes=1",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610ac3a9"
+      }
+    }
+  },
+  {
+    "id": "unterminated-bytes-1-stdin",
+    "argv": [
+      "--bytes=1",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610ac3a9"
+  },
+  {
+    "id": "unterminated-bytes-99-file",
+    "argv": [
+      "--bytes=99",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610ac3a9"
+      }
+    }
+  },
+  {
+    "id": "unterminated-bytes-99-stdin",
+    "argv": [
+      "--bytes=99",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610ac3a9"
+  },
+  {
+    "id": "unterminated-bytes-plus0-file",
+    "argv": [
+      "--bytes=+0",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610ac3a9"
+      }
+    }
+  },
+  {
+    "id": "unterminated-bytes-plus0-stdin",
+    "argv": [
+      "--bytes=+0",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610ac3a9"
+  },
+  {
+    "id": "unterminated-bytes-plus1-file",
+    "argv": [
+      "--bytes=+1",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610ac3a9"
+      }
+    }
+  },
+  {
+    "id": "unterminated-bytes-plus1-stdin",
+    "argv": [
+      "--bytes=+1",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610ac3a9"
+  },
+  {
+    "id": "unterminated-bytes-plus2-file",
+    "argv": [
+      "--bytes=+2",
+      "input"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "files": {
+      "input": {
+        "hex": "610ac3a9"
+      }
+    }
+  },
+  {
+    "id": "unterminated-bytes-plus2-stdin",
+    "argv": [
+      "--bytes=+2",
+      "-"
+    ],
+    "expected_status": 0,
+    "timeout_seconds": 5,
+    "stdin_hex": "610ac3a9"
+  },
+  {
+    "id": "quiet-multiple",
+    "argv": [
+      "-q",
+      "-n",
+      "1",
+      "first",
+      "second"
+    ],
+    "files": {
+      "first": {
+        "hex": "610a620a"
+      },
+      "second": {
+        "hex": "630a64"
+      }
+    },
+    "expected_status": 0,
+    "timeout_seconds": 5
+  }
+]
