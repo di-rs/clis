@@ -299,6 +299,33 @@ fn valid_hex(hex: &str, empty_allowed: bool) -> bool {
         && hex.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+fn has_literal_records(argv: &[String]) -> Result<bool, BenchError> {
+    let mut has_records = false;
+    let mut arguments = argv.iter().skip(1);
+    while let Some(argument) = arguments.next() {
+        if argument == "--" {
+            break;
+        }
+        if argument == "--record" || argument == "-r" {
+            // A consumed record is literal data, even when it resembles a file option.
+            arguments
+                .next()
+                .ok_or_else(|| BenchError::invalid(format!("{argument} requires a value")))?;
+            has_records = true;
+        } else if argument.starts_with("--record=") {
+            has_records = true;
+        } else {
+            require(
+                !argument.starts_with("-f")
+                    && argument != "--records-file"
+                    && !argument.starts_with("--records-file="),
+                "external record source files are unsupported",
+            )?;
+        }
+    }
+    Ok(has_records)
+}
+
 fn validate_generator_arguments(argv: &[String]) -> Result<(), BenchError> {
     validate_arguments(argv, &BTreeSet::new(), true)?;
     let command = argv
@@ -327,15 +354,7 @@ fn validate_generator_arguments(argv: &[String]) -> Result<(), BenchError> {
             }
             !seeds.is_empty() || !patterns.is_empty()
         }
-        "records" => {
-            require(
-                !argv.iter().any(|arg| {
-                    arg == "-f" || arg == "--records-file" || arg.starts_with("--records-file=")
-                }),
-                "external record source files are unsupported",
-            )?;
-            !generator_values(argv, "--record", "-r")?.is_empty()
-        }
+        "records" => has_literal_records(argv)?,
         "fields" => !seeds.is_empty() || !generator_values(argv, "--field-value", "-v")?.is_empty(),
         _ => !seeds.is_empty(),
     };
@@ -776,6 +795,111 @@ mod tests {
         ] {
             assert!(parse_suite(&MINIMAL.replace(text, argv)).is_ok());
         }
+    }
+
+    #[test]
+    fn rejects_attached_external_record_sources_when_parsing() {
+        let text = "\"text\", \"--lines\", \"2\", \"--words-per-line\", \"1\", \"--word-length\", \"4\", \"--seed\", \"42\", \"@output\"";
+        for source in ["-fcorpus.txt", "-f=corpus.txt"] {
+            rejects(&MINIMAL.replace(
+                text,
+                &format!("\"records\", \"-r\", \"literal\", \"{source}\", \"@output\""),
+            ));
+        }
+    }
+
+    #[test]
+    fn rejects_attached_external_record_sources_for_direct_recipes() -> TestResult {
+        for source in ["-fcorpus.txt", "-f=corpus.txt"] {
+            let argv = vec![
+                "records".into(),
+                source.into(),
+                "-r".into(),
+                "literal".into(),
+                "@output".into(),
+            ];
+            let mut suite = parse_suite(MINIMAL)?;
+            suite
+                .datasets
+                .first_mut()
+                .ok_or("fixture dataset absent")?
+                .argv = argv;
+            check_equal(
+                validate_suite(&suite).err().map(|error| error.kind()),
+                Some(ErrorKind::InvalidSuite),
+            )?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_attached_external_record_sources_for_profile_recipes() -> TestResult {
+        for source in ["-fcorpus.txt", "-f=corpus.txt"] {
+            for profile in [MeasurementProfile::Full, MeasurementProfile::Smoke] {
+                let mut suite = parse_suite(MINIMAL)?;
+                suite
+                    .datasets
+                    .first_mut()
+                    .ok_or("fixture dataset absent")?
+                    .profiles
+                    .insert(
+                        profile,
+                        DatasetRecipe {
+                            argv: vec![
+                                "records".into(),
+                                source.into(),
+                                "-r".into(),
+                                "literal".into(),
+                                "@output".into(),
+                            ],
+                            checks: vec![CorrectnessRule::EmptyStderr {}],
+                        },
+                    );
+                check_equal(
+                    validate_suite(&suite).err().map(|error| error.kind()),
+                    Some(ErrorKind::InvalidSuite),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn preserves_external_source_spellings_used_as_literal_records() -> TestResult {
+        for literal in [
+            "-f",
+            "-fcorpus.txt",
+            "-f=corpus.txt",
+            "--records-file",
+            "--records-file=corpus.txt",
+        ] {
+            for record_option in ["-r", "--record"] {
+                let mut suite = parse_suite(MINIMAL)?;
+                suite
+                    .datasets
+                    .first_mut()
+                    .ok_or("fixture dataset absent")?
+                    .argv = vec![
+                    "records".into(),
+                    record_option.into(),
+                    literal.into(),
+                    "@output".into(),
+                ];
+                validate_suite(&suite)?;
+            }
+            let mut suite = parse_suite(MINIMAL)?;
+            suite
+                .datasets
+                .first_mut()
+                .ok_or("fixture dataset absent")?
+                .argv = vec![
+                "records".into(),
+                format!("--record={literal}"),
+                "@output".into(),
+            ];
+            validate_suite(&suite)?;
+        }
+        Ok(())
     }
 
     #[test]
