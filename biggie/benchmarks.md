@@ -160,3 +160,24 @@ verification logs are `/private/tmp/biggie-feature-final-verify.log` and
 `/private/tmp/biggie-feature-matrix.log`. The new CI step scripts were executed
 locally and checked with `bash -n`, and the workflow parsed as YAML. Standalone
 `actionlint` and `zizmor` were unavailable locally; CI/Linux execution is pending.
+
+## Method review and publication validation
+
+The [shared procedure](../docs/benchmarking.md#required-workflow-for-cli-changes)
+now standardizes subsequent measurements. This record predates those detailed
+minimums; it is not retroactively presented as satisfying all of them.
+
+| Area | Evidence obtained | Limitation and next measurement |
+| --- | --- | --- |
+| Correctness | Complete million-line seeded ASCII byte comparison, independent shape/count/order checks and dataset hashes | Retain these gates for every changed workload and final build. |
+| Time | Release binaries, same host/sinks, off/debug/trace, two warmups, 20 ASCII runs and 10 new-shape runs; all samples retained | No second batch with reversed order. Small records timing has shell/startup noise. Repeat affected cases on final feature-enabled code before making a current performance claim. |
+| Executable size | Same local release build settings; 1,625,296 versus 1,665,696 bytes; named copies and hashes; optional dependency graph/artifacts checked | Logical executable size only. No separate stripped, compressed, startup-time or memory claim follows. |
+| Memory | One macOS peak-RSS sample per workload; roughly 3.1–3.2 MiB | No repeated distribution or input-scaling study. Future memory claims require repeated samples and relevant input scales. |
+| Reproducibility | Source/binary/lockfile identity, commands, host/toolchain, checksums and published raw distributions | No CPU affinity/power isolation or full storage metadata. Original checks use a machine-local baseline path; future runners should accept explicit binary paths. |
+
+Publication verification for implementation commit `bc3af30182d1a04b11576f531dd11469f7036726`:
+[GitHub Actions run 37445866974](https://github.com/di-rs/clis/actions/runs/37445866974)
+passed all four jobs: Ubuntu 24.04 checks/doctests (including both CSV configurations),
+dependency audit, workflow lint/security and secret scanning. This adds Linux CI
+correctness evidence; it supplies no Linux performance measurements. The earlier
+local-only limitations above describe what was available when those checks ran.

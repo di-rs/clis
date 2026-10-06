@@ -106,7 +106,8 @@ For ports, document `mk-outs.nu`:
 
 ## Benchmarks
 
-[Ports: link the checked recipe and raw results. Define priority workloads before
+[Use the [benchmark report template](benchmark-report.md). Ports: link the checked
+recipe and raw results. Define priority workloads before
 timing, small/large/streaming/flag/memory cases, candidate/previous/reference identities,
 correctness gate, host/environment, generation and checksum, statistic/variance,
 regressions and explicit acceptance. Use biggie where suitable; keep large data
