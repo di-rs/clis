@@ -1,0 +1,221 @@
+# CLI benchmark suite v1 schema
+
+Accepted by the maintainer on 2026-10-06. This is the initial serialized suite
+contract for the [harness design](2026-10-06-cli-bench-design.md). Execution and
+CLI role bindings are implemented in later tasks. All serialized structs and
+tagged enums reject unknown fields.
+
+## Complete minimal valid suite
+
+```toml
+schema_version = 1
+id = "tailr-minimal"
+package = "tailr"
+binary = "tailr"
+
+[generator]
+revision = "0d8caa8387d446e91ef263c1ecab88870b735eb5"
+package = "biggie"
+binary = "biggie"
+features = []
+no_default_features = false
+
+[environment]
+LC_ALL = "C"
+TZ = "UTC"
+CLIS_LOG_LEVEL = "off"
+
+[[datasets]]
+id = "tiny"
+argv = ["text", "--lines", "2", "--words-per-line", "1", "--word-length", "4", "--seed", "42", "@output"]
+output = "tiny.txt"
+checks = [{ kind = "text-shape", records = 2, words_per_record = 1, word_length = 4 }]
+
+[[cases]]
+id = "last-line"
+purpose = "Read the final line from a tiny regular file"
+argv = ["-n", "1", "@input:tiny"]
+expected_status = 0
+correctness = [{ kind = "comparator", target = "selected-baselines", stream = "stdout" }, { kind = "tail-slice", dataset = "tiny", unit = "lines", count = 1, stream = "stdout" }, { kind = "empty-stderr" }]
+
+[cases.io.stdin]
+kind = "null"
+
+[cases.io.stdout]
+kind = "drained-pipe"
+```
+
+## Public Rust mappings
+
+- `Role`: closed `reference`, `previous`, `candidate` enum, serialized with those
+  spellings; usable as a `BTreeMap` key.
+- `MeasurementProfile`: closed `full`, `smoke` enum. Its policy accessor returns
+  checked warmups/samples per role and batch/RSS samples: full 3/20/2/5; smoke
+  1/2/2/1. The policy labels smoke-only and disallows performance conclusions.
+  This enum is available to later consumers; no measurement CLI is exposed yet.
+- `Limits`: `max_cases: u64 = 128`, `max_stream_bytes: u64 = 268435456`,
+  `max_generated_bytes: u64 = 8589934592`,
+  `max_evidence_bytes: u64 = 2147483648`,
+  `sample_timeout_seconds: u64 = 120`, `build_timeout_seconds: u64 = 1800`,
+  `timeout_reason: Option<String> = None`. Every numeric limit is positive;
+  changing either deadline requires a nonempty reason. Missing `[limits]` uses
+  defaults, and partial tables use defaults for omitted fields.
+- `BuildPolicy`: `toolchain: Option<String> = None`,
+  `target: Option<String> = None`, `features: Vec<String> = []`,
+  `no_default_features: bool = false`, `rustflags: Vec<String> = []`,
+  `strip: StripPolicy = none`. Strip policy is closed `none`, `debuginfo`,
+  `symbols`. Release/locked are invariant and cannot be disabled. One policy
+  applies to every Rust comparator/candidate build. Generator builds also use
+  that toolchain/target/flags/strip policy; generator-specific feature settings
+  are explicit in its source selection. Omitted toolchain resolves once at the
+  caller boundary. Nonempty strings/NUL-free values are validated in Task 1.
+- `GeneratorSpec`: required `revision: String`, `package: String`, `binary: String`;
+  `features: Vec<String> = []`, `no_default_features: bool = false`.
+  The generator must use package and binary `biggie` and a 40-digit hex commit.
+- `DatasetSpec`: required `id: String`, `argv: Vec<String>`, `output: String`,
+  `checks: Vec<CorrectnessRule>`. Output is a nonempty contained relative path;
+  independent checks must be nonempty. Generator argv requires exactly one whole
+  `@output` token and an explicit seed or literal pattern/schedule (see below).
+  `profiles: BTreeMap<MeasurementProfile, DatasetRecipe> = {}` optionally replaces
+  the complete `argv`/`checks` pair for `full` or `smoke`; omitted profiles inherit
+  the base recipe. `DatasetRecipe` has required `argv` and `checks`, validated
+  by the same rules. IDs/output paths do not change across profiles.
+- `IoPolicy`: required `stdin: StdinPolicy` and `stdout: StdoutPolicy`.
+  Both are enums tagged by `kind`. Stdin: `null`, `regular-file {dataset: String}`,
+  `pipe {dataset: String}`. Stdout: `discard`, `drained-pipe`,
+  `scratch-file {path: String}`. Dataset references must exist; scratch paths
+  must be contained relative paths. Pipe cases require expected status zero.
+- `CaseSpec`: required `id: String`, `purpose: String`, `argv: Vec<String>`,
+  `io: IoPolicy`, `expected_status: i32`,
+  `correctness: Vec<CorrectnessRule>`;
+  `role_argv: BTreeMap<Role, Vec<String>> = {}`. Missing role argv inherits
+  the common array. Status must be 0 through 255 and correctness nonempty.
+  `mutation: MutationSetup = none` and `work: Option<Work> = None` declare
+  setup and a meaningful numerator. `profiles: BTreeMap<MeasurementProfile,
+  CaseOverride> = {}` accepts optional replacement `argv`, `role_argv`,
+  `correctness` and `work`; absent fields inherit the base case. Overrides are
+  validated after inheritance so no profile can bypass a constraint. Profile
+  overrides cannot change status, I/O boundaries or mutation setup.
+- `MutationSetup`: internally tagged `kind`, closed `none` or
+  `directories {paths: Vec<String>}`. Paths identify the exact initially present
+  directories under the harness-owned scratch root; empty lists mean absent
+  initial state. The root itself is supplied/marked by the executor. All paths
+  are contained relative paths and unique; resetting a root is not performed
+  by Task 1 validation.
+- `Work`: `amount: u64` (positive), `unit: WorkUnit` (closed `bytes`,
+  `records`, `directory-operations`). Omission means no throughput claim.
+  The runner later divides this declared numerator by elapsed seconds.
+- `Suite`: required `schema_version: u32`, `id: String`, `package: String`,
+  `binary: String`, `generator: GeneratorSpec`, `datasets: Vec<DatasetSpec>`,
+  `cases: Vec<CaseSpec>`; `build: BuildPolicy = defaults`, `limits: Limits = defaults`;
+  `environment: BTreeMap<String, String> = {LC_ALL="C", TZ="UTC", CLIS_LOG_LEVEL="off"}`.
+  Explicit environment tables may contain only these three keys in Task 1;
+  their values must be UTF-8 and NUL-free. Partial environment tables merge over
+  the three defaults: `[environment] TZ="Europe/Paris"` still gives `LC_ALL=C`
+  and `CLIS_LOG_LEVEL=off`. Isolated HOME/config is execution policy.
+
+`CorrectnessRule` is internally tagged by `kind` with these closed variants:
+
+| TOML kind | Rust fields | Task 1 validation |
+| --- | --- | --- |
+| `comparator` | `target: ComparisonTarget`, `stream: Stream` | Dataset checks cannot use a comparator. `ComparisonTarget` is closed `selected-baselines`, `reference`, `previous`, `candidate`; behavior below. Availability is checked later when roles are bound. |
+| `literal` | `stream: Stream`, `text: String` | No NUL in suite strings; binary NUL expectations use hex. |
+| `hex` | `stream: Stream`, `hex: String` | Even-length valid hex; empty represents empty bytes. |
+| `empty-stderr` | no fields | Closed marker. |
+| `byte-pattern` | `bytes: u64`, `pattern_hex: String` | Nonempty even-length valid hex pattern; byte count may be zero. |
+| `text-shape` | `records: u64`, `words_per_record: u32`, `word_length: u32` | Positive word length; records/word count may be zero, matching Biggie. |
+| `records` | `records: Vec<String>`, `repeat: u64`, `cycles: u64` | Nonempty schedule; no LF/NUL in records; positive repeat; cycles may be zero. |
+| `tail-slice` | `dataset: String`, `unit: TailUnit`, `count: u64`, `stream: Stream` | Existing dataset; `TailUnit` is closed `lines`/`bytes`. Independently derive the final count of LF-delimited records or bytes from input; no role comparison is required. Count may be zero. |
+| `directory-tree` | `paths: Vec<String>`, `compare_mode_to: Option<ComparisonTarget> = None` | Exact directory type/path set; unique contained relative paths (empty tree permitted). When set, compare relevant permission bits using the target behavior below. No timestamps. Initial mkdir suites need directories only; files/symlinks/content effects require a future schema extension. |
+
+`Stream` is the closed `stdout`/`stderr` enum. Additional support types above are
+public alongside the requested named model types so Rust callers can construct
+the model without hidden parser types.
+
+`selected-baselines` checks equality between candidate and every selected comparator
+role (`reference`, `previous`, or both). It requires at least one selected baseline
+and never discovers or installs an omitted reference. Thus the same reusable suite
+works for reference/candidate, previous/candidate and three-role runs. With both
+baselines selected, both comparisons must pass. Independent assertions still run
+for every selected role.
+
+A named `reference`, `previous` or `candidate` target explicitly requires that
+role to be bound; absence is a strict configuration failure before execution.
+Equality to a named role applies to every other selected role, rather than silently
+skipping a selected comparison. `compare_mode_to` follows the same rules for the
+relevant permission bits, in addition to each role's exact directory path/type
+assertion. Selection errors, including any explicitly requested but unavailable
+role, remain failures; `selected-baselines` only avoids inventing absent roles.
+
+## Profile and mutation example fragments
+
+The existing dataset base recipe represents full input. This optional table,
+placed directly after that dataset's declaration and before the next case,
+replaces its recipe for smoke. The tiny example does not need an override;
+this syntax illustrates the declared profile contract.
+
+```toml
+[datasets.profiles.smoke]
+argv = ["text", "--lines", "1000", "--words-per-line", "4", "--word-length", "8", "--seed", "42", "@output"]
+checks = [{ kind = "text-shape", records = 1000, words_per_record = 4, word_length = 8 }]
+```
+
+For a mutating mkdir case, these fields are within its `[[cases]]` table.
+`paths = []` explicitly means reset to absent state; an existing-path case lists
+every initially present directory, including parents. The generated path-list
+dataset is still Biggie output, consumed with `@records:paths`.
+
+```toml
+mutation = { kind = "directories", paths = [] }
+work = { amount = 4, unit = "directory-operations" }
+correctness = [{ kind = "directory-tree", paths = ["a", "a/b", "c", "c/d", "e", "e/f", "g", "g/h"], compare_mode_to = "selected-baselines" }, { kind = "literal", stream = "stdout", text = "" }, { kind = "empty-stderr" }]
+```
+
+An output-generation benchmark may replace its case argv/correctness/work for
+smoke using `[cases.profiles.smoke]`, with the same independent rules required for
+the smaller shape. Role overrides replace the whole map, rather than merging
+individual role entries. A profile work table replaces the base numerator; work
+cannot be removed by an override in this initial representation (such a case
+uses no base work claim).
+
+## Validation and tokens
+
+- IDs and Cargo package/binary identifiers are nonempty ASCII letters, digits,
+  hyphens or underscores; IDs are unique separately within datasets and cases.
+  A suite requires at least one case; datasets may be empty. Case count must not
+  exceed the explicit/default `max_cases` limit.
+- NUL is rejected in every suite string before any tool execution.
+- Contained relative paths reject absolute paths, empty paths, `.`/`..`
+  components, repeated/trailing separators, Windows drive/prefix syntax and
+  backslashes, so the same suite has the same path containment on Linux/macOS.
+- Only whole-argument tokens are interpreted: `@input:ID`, `@scratch:REL`,
+  `@records:ID`; `@@anything` escapes a literal leading `@`.
+  Dataset argv permits `@output` exactly once and escaped literals; case argv
+  permits the other three tokens and escaped literals. Unknown leading `@`,
+  empty token suffixes, unknown dataset IDs and escaping scratch paths fail.
+  Strings without a leading `@` remain literal, including an embedded `@`.
+- For Task 1 deterministic generator syntax is recognized explicitly:
+  `text` requires `--seed N`, `--seed=N` or `-s N` with valid u64 N;
+  `bytes` requires such a seed or a nonempty valid `--pattern-hex HEX`,
+  `--pattern-hex=HEX` or `-p HEX`; `records` requires at least one
+  `--record TEXT`, `--record=TEXT` or `-r TEXT`; `fields` requires an explicit
+  seed or at least one literal `--field-value`/`-v`; `pair` is rejected because
+  its two destinations conflict with this v1 single-output dataset contract.
+  Unknown subcommands and external record/value source files are rejected
+  for this first deterministic-recipe contract. Biggie performs its full CLI
+  validation when execution is added; this validator does not reimplement it.
+
+## Library errors and CLI scope
+
+`BenchError` carries context and exposes `kind() -> ErrorKind`.
+`ErrorKind` initially has `UnsupportedSchema` and `InvalidSuite`; malformed TOML,
+unknown fields/variants and semantic constraints return `InvalidSuite`.
+`parse_suite(&str)` deserializes and validates; `validate_suite(&Suite)` protects
+direct Rust callers with the same semantic checks. Neither performs I/O or
+initializes process state.
+
+Task 1 executable exposes `-h/--help`, `-V/--version` and shared `-L/--log-level`.
+No arguments prints help; unknown arguments return 2. Future commands are not
+listed as working. Run/check role-conflict parser tests are assigned to Task 4, which
+owns executable binding, instead of adding unused parser code in Task 1.
+
