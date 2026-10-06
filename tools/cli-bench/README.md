@@ -397,3 +397,48 @@ This case creates only 29 bytes across three tiny recipes and checks reuse. It i
 correctness evidence for the supplied native binary, with unknown prebuilt build
 provenance; it is not a performance sample or a pinned-revision compatibility claim.
 Native macOS execution was checked for this slice; Linux remains unverified.
+
+## Correctness gate and reusable reset
+
+`prepare_experiment(&ExperimentPreparation, &Store, &ProcessRunner)` accepts one
+explicit suite, profile, validated `CaseId` selection, role/build `RunRequest` and
+optional immutable replay datasets. An empty selection includes every declared
+case; duplicate or unknown IDs fail. Preparation binds executables, generates and
+verifies datasets, and allocates unique marked scratch under `RunRequest.cache_root`
+(typically `target/cli-bench`). Retained inputs and evidence stay in the Store.
+
+`validate_experiment(prepared, &mut writer, &runner)` runs every selected case and
+role, retaining `validation/report.json` with every observed status, stopped
+outcome, byte identity, directory mode and check result. The writer must belong to
+the same suite. Failure returns no `ValidatedExperiment`. Exact byte comparisons
+preserve whitespace, NUL and invalid UTF-8. Independent literals, shapes and tail
+slices catch shared comparator bugs. Expected nonzero direct exits remain values.
+Missing named comparators fail. The gate captures output, then repeats each
+invocation with its declared sink to verify status, stderr, observable file output
+and declared directory effects. These extra validation invocations are untimed.
+
+A successful capability exposes prepared roles, cases, profile, datasets, scratch
+and report through read-only accessors. `revalidate()` rechecks retained input and
+executable/tool identities without refreshing expectations. Later sample callers
+must call it at finalization and use `verify_effects(case, role)` after invocations.
+The latter checks declared exact directory types/paths and relevant permission bits
+against that role's successful gate. V1 directory rules intentionally exclude
+creation timestamps; file, symlink and content effects remain unsupported.
+
+`create_scratch(cache_root, case_id)` requires an existing absolute directory with
+no symlink components, creates a fresh marked owner and separate workload root,
+and returns the only public reset capability. `reset_case(case, datasets, scratch)`
+verifies input identities, ownership and the entire existing tree before deleting
+entries, restores the original workload-root permissions, and recreates/verifies
+the exact initial directory set (including required ancestors). It supports both
+absent and existing-directory mkdir scenarios during preflight and future samples.
+Markers stay outside the workload tree. No automatic scratch cleanup or cache
+eviction is performed. This is cooperative containment, not a race-proof sandbox.
+
+Children inherit the same process configuration; the harness never changes umask.
+The report retains the existing host umask observation, including explicit
+unavailability on macOS, and compares actual requested mode bits. It does not infer
+umask from permissions or claim that an unavailable value was verified. Native
+macOS regression tests cover this library workflow; Linux remains unverified.
+Timing, RSS, host measurement locks and CLI run/check wiring remain later work.
+No performance claim is made for preparation, verification or reset.

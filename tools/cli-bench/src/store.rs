@@ -264,6 +264,9 @@ impl Store {
     }
 }
 impl RunWriter {
+    pub(crate) fn matches_suite(&self, suite: &Suite) -> bool {
+        &self.suite == suite
+    }
     /// Caller-owned evidence directory for raw streams and stage records.
     #[must_use]
     pub fn path(&self) -> &Path {

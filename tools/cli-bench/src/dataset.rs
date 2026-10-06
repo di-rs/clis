@@ -728,7 +728,7 @@ impl<'a> Shape<'a> {
         }
     }
 }
-fn validate_shape(mut reader: impl Read, rule: &CorrectnessRule) -> Result<u64, BenchError> {
+pub fn validate_shape(mut reader: impl Read, rule: &CorrectnessRule) -> Result<u64, BenchError> {
     let (shape, expected) = Shape::new(rule)?;
     let mut count = 0_u64;
     let mut buffer = [0_u8; 8192];

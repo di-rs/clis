@@ -37,3 +37,12 @@ pub use build::{
 mod dataset;
 
 pub use dataset::{DatasetPreparation, prepare_datasets, verify_datasets};
+
+mod sandbox;
+pub use sandbox::{CaseId, OwnedScratch, create_scratch, reset_case};
+
+mod check;
+pub use check::{
+    ExperimentPreparation, PreparedExperiment, ValidatedExperiment, ValidationFinding,
+    ValidationObservation, ValidationReport, prepare_experiment, validate_experiment,
+};

@@ -408,3 +408,71 @@ fn file_limit_stops_live_writers_and_rejects_fast_exit_overflow() -> TestResult 
     }
     Ok(())
 }
+
+#[path = "common/validation.rs"]
+mod validation_support;
+#[test]
+fn mkdir_receives_same_initial_state_each_time() -> validation_support::TestResult {
+    use cli_bench::*;
+    for existing in [false, true] {
+        let body = if existing {
+            "[ -d \"$1\" ] || exit 9\n/bin/mkdir -p \"$1\""
+        } else {
+            "[ ! -e \"$1\" ] || exit 9\n/bin/mkdir \"$1\""
+        };
+        let mut fixture = validation_support::Fixture::new(body, body)?;
+        let case = fixture.suite.cases.first_mut().ok_or("case")?;
+        case.argv = vec!["@scratch:target".into()];
+        case.correctness = vec![
+            CorrectnessRule::DirectoryTree {
+                paths: vec!["target".into()],
+                compare_mode_to: Some(ComparisonTarget::SelectedBaselines),
+            },
+            CorrectnessRule::EmptyStderr {},
+        ];
+        case.mutation = MutationSetup::Directories {
+            paths: if existing {
+                vec!["target".into()]
+            } else {
+                vec![]
+            },
+        };
+        let id = CaseId::new(case.id.clone())?;
+        let mut writer = fixture.store.begin_run(&fixture.suite)?;
+        let validated = validate_experiment(fixture.prepare()?, &mut writer, &fixture.runner)?;
+        let prepared = validated.prepared();
+        let spec = prepared.cases().first().ok_or("case")?;
+        let scratch = prepared.scratch(&id).ok_or("scratch")?;
+        for iteration in 0..3 {
+            reset_case(spec, validated.datasets(), scratch)?;
+            let invocation = resolve_invocation(
+                spec,
+                Role::Candidate,
+                prepared.profile(),
+                validated.roles(),
+                validated.datasets(),
+                scratch.path(),
+            )?;
+            let captures = CapturePaths {
+                stdout: fixture
+                    .root
+                    .path()
+                    .join(format!("sample-{iteration}.stdout")),
+                stderr: fixture
+                    .root
+                    .path()
+                    .join(format!("sample-{iteration}.stderr")),
+            };
+            fixture
+                .runner
+                .execute(&invocation.command, &captures)?
+                .check_expected(0)?;
+            validated.verify_effects(&id, Role::Candidate)?;
+        }
+        std::fs::write(scratch.path().join("unexpected-file"), b"extra")?;
+        if validated.verify_effects(&id, Role::Candidate).is_ok() {
+            return Err("post-invocation file effect accepted".into());
+        }
+    }
+    Ok(())
+}

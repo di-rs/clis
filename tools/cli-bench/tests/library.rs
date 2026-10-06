@@ -1424,3 +1424,375 @@ printf 'ABCD\nEFGH\n' > "$output""#,
     }
     Ok(())
 }
+
+#[path = "common/validation.rs"]
+mod validation_support;
+
+// A downstream timing adapter only accepts the opaque validated capability.
+fn fake_timer(
+    _validated: cli_bench::ValidatedExperiment,
+    marker: &std::path::Path,
+) -> std::io::Result<()> {
+    std::fs::write(marker, b"timer invoked")
+}
+fn failed_gate_never_times(
+    fixture: &validation_support::Fixture,
+) -> validation_support::TestResult {
+    let marker = fixture.root.path().join("timed");
+    let mut writer = fixture.store.begin_run(&fixture.suite)?;
+    let result = fixture.prepare().and_then(|prepared| {
+        cli_bench::validate_experiment(prepared, &mut writer, &fixture.runner)
+    });
+    let failed = result.is_err();
+    if let Ok(validated) = result {
+        fake_timer(validated, &marker)?;
+    }
+    require(
+        failed,
+        "failed correctness gate yielded a validation capability",
+    )?;
+    require(!marker.exists(), "timer was invoked after gate failure")?;
+    Ok(())
+}
+#[test]
+fn wrong_bytes_prevent_all_timing() -> validation_support::TestResult {
+    failed_gate_never_times(&validation_support::Fixture::new(
+        "printf 'WRONG\\n'",
+        "printf 'EFGH\\n'",
+    )?)
+}
+#[test]
+fn unexpected_status_prevents_all_timing() -> validation_support::TestResult {
+    failed_gate_never_times(&validation_support::Fixture::new(
+        "printf 'EFGH\\n'; exit 7",
+        "printf 'EFGH\\n'",
+    )?)
+}
+#[test]
+fn stderr_mismatch_is_not_trimmed() -> validation_support::TestResult {
+    let mut fixture = validation_support::Fixture::new(
+        "printf 'EFGH\\n'; printf 'note \\n' >&2",
+        "printf 'EFGH\\n'; printf 'note\\n' >&2",
+    )?;
+    let case = fixture.suite.cases.first_mut().ok_or("case")?;
+    case.correctness
+        .retain(|rule| !matches!(rule, cli_bench::CorrectnessRule::EmptyStderr {}));
+    case.correctness
+        .push(cli_bench::CorrectnessRule::Comparator {
+            target: cli_bench::ComparisonTarget::SelectedBaselines,
+            stream: cli_bench::Stream::Stderr,
+        });
+    failed_gate_never_times(&fixture)
+}
+#[test]
+fn independent_oracle_detects_shared_bug() -> validation_support::TestResult {
+    failed_gate_never_times(&validation_support::Fixture::new(
+        "printf 'WRONG\\n'",
+        "printf 'WRONG\\n'",
+    )?)
+}
+#[test]
+fn missing_reference_is_not_skipped() -> validation_support::TestResult {
+    let mut fixture = validation_support::Fixture::new("printf 'EFGH\\n'", "printf 'EFGH\\n'")?;
+    fixture
+        .suite
+        .cases
+        .first_mut()
+        .ok_or("case")?
+        .correctness
+        .push(cli_bench::CorrectnessRule::Comparator {
+            target: cli_bench::ComparisonTarget::Reference,
+            stream: cli_bench::Stream::Stdout,
+        });
+    failed_gate_never_times(&fixture)
+}
+#[test]
+fn final_input_tamper_prevents_all_timing() -> validation_support::TestResult {
+    use cli_bench::*;
+    let mut fixture = validation_support::Fixture::new(
+        "printf 'EFGH\\n'; if [ ! -p /dev/stdout ]; then printf 'WXYZ\\nIJKL\\n' > \"$1\"; fi",
+        "printf 'EFGH\\n'",
+    )?;
+    let case = fixture.suite.cases.first_mut().ok_or("case")?;
+    case.argv = vec!["@input:tiny".into()];
+    case.io.stdout = StdoutPolicy::Discard {};
+    case.correctness = vec![
+        CorrectnessRule::Literal {
+            stream: Stream::Stdout,
+            text: "EFGH\n".into(),
+        },
+        CorrectnessRule::EmptyStderr {},
+    ];
+    failed_gate_never_times(&fixture)
+}
+#[test]
+fn final_revalidation_is_read_only_and_rejects_input_and_binary_tamper()
+-> validation_support::TestResult {
+    let fixture = validation_support::Fixture::new("printf 'EFGH\\n'", "printf 'EFGH\\n'")?;
+    let mut writer = fixture.store.begin_run(&fixture.suite)?;
+    let validated =
+        cli_bench::validate_experiment(fixture.prepare()?, &mut writer, &fixture.runner)?;
+    validated.revalidate()?;
+    let input = validated.datasets().inputs.get("tiny").ok_or("input")?;
+    let expected = input.file.clone();
+    let original = std::fs::read(&input.path)?;
+    std::fs::write(&input.path, b"WXYZ\nIJKL\n")?;
+    require(
+        validated.revalidate().is_err(),
+        "final check accepted changed input",
+    )?;
+    require(
+        input.file == expected,
+        "revalidation changed expected identity",
+    )?;
+    std::fs::write(&input.path, original)?;
+    let candidate = validated
+        .roles()
+        .roles
+        .get(&cli_bench::Role::Candidate)
+        .ok_or("candidate")?;
+    std::fs::write(&candidate.path, b"changed executable")?;
+    require(
+        validated.revalidate().is_err(),
+        "final check accepted changed binary",
+    )?;
+    Ok(())
+}
+#[test]
+fn nonzero_expected_status_is_a_value_and_all_findings_are_retained()
+-> validation_support::TestResult {
+    use cli_bench::*;
+    let mut fixture =
+        validation_support::Fixture::new("printf 'EFGH\\n'; exit 3", "printf 'EFGH\\n'; exit 3")?;
+    fixture
+        .suite
+        .cases
+        .first_mut()
+        .ok_or("case")?
+        .expected_status = 3;
+    let mut writer = fixture.store.begin_run(&fixture.suite)?;
+    let validated = validate_experiment(fixture.prepare()?, &mut writer, &fixture.runner)?;
+    require(validated.report().passed(), "expected nonzero rejected")?;
+    fake_timer(validated, &fixture.root.path().join("timed"))?;
+    require(
+        fixture.root.path().join("timed").is_file(),
+        "successful capability never reached timer",
+    )?;
+    let fixture = validation_support::Fixture::new(
+        "printf wrong; printf problem >&2; exit 7",
+        "printf shared-bug; exit 9",
+    )?;
+    let mut writer = fixture.store.begin_run(&fixture.suite)?;
+    require(
+        validate_experiment(fixture.prepare()?, &mut writer, &fixture.runner).is_err(),
+        "bad gate passed",
+    )?;
+    let report: ValidationReport = serde_json::from_slice(&std::fs::read(
+        writer.path().join("validation/report.json"),
+    )?)?;
+    require(
+        report.observations.len() == 4,
+        "failed status prevented later role observations",
+    )?;
+    require(
+        report
+            .findings
+            .iter()
+            .filter(|finding| !finding.passed)
+            .count()
+            >= 8,
+        "gate lost independent findings",
+    )?;
+    Ok(())
+}
+#[test]
+fn selected_cases_apply_profile_rules_and_reject_unknown_or_duplicate_ids()
+-> validation_support::TestResult {
+    use cli_bench::*;
+    let mut fixture = validation_support::Fixture::new("printf 'EFGH\\n'", "printf 'EFGH\\n'")?;
+    let mut excluded = fixture.suite.cases.first().ok_or("case")?.clone();
+    excluded.id = "excluded".into();
+    excluded.expected_status = 7;
+    fixture.suite.cases.push(excluded);
+    let selected = [CaseId::new("last-line")?];
+    let request = ExperimentPreparation {
+        run: &fixture.request,
+        suite: &fixture.suite,
+        profile: MeasurementProfile::Full,
+        selected_cases: &selected,
+        expected_datasets: None,
+    };
+    let mut writer = fixture.store.begin_run(&fixture.suite)?;
+    let validated = validate_experiment(
+        prepare_experiment(&request, &fixture.store, &fixture.runner)?,
+        &mut writer,
+        &fixture.runner,
+    )?;
+    require(
+        validated.report().selected_cases == ["last-line"],
+        "selection was not retained",
+    )?;
+    for invalid in [
+        vec![CaseId::new("missing")?],
+        vec![CaseId::new("last-line")?, CaseId::new("last-line")?],
+    ] {
+        require(
+            prepare_experiment(
+                &ExperimentPreparation {
+                    selected_cases: &invalid,
+                    ..request
+                },
+                &fixture.store,
+                &fixture.runner,
+            )
+            .is_err(),
+            "invalid selection accepted",
+        )?;
+    }
+    let case = fixture.suite.cases.first_mut().ok_or("case")?;
+    case.profiles.insert(
+        MeasurementProfile::Smoke,
+        CaseOverride {
+            correctness: Some(vec![CorrectnessRule::Literal {
+                stream: Stream::Stdout,
+                text: "different".into(),
+            }]),
+            ..CaseOverride::default()
+        },
+    );
+    let request = ExperimentPreparation {
+        run: &fixture.request,
+        suite: &fixture.suite,
+        profile: MeasurementProfile::Smoke,
+        selected_cases: &selected,
+        expected_datasets: None,
+    };
+    let mut writer = fixture.store.begin_run(&fixture.suite)?;
+    require(
+        validate_experiment(
+            prepare_experiment(&request, &fixture.store, &fixture.runner)?,
+            &mut writer,
+            &fixture.runner,
+        )
+        .is_err(),
+        "profile-specific oracle ignored",
+    )?;
+    Ok(())
+}
+#[test]
+fn declared_sink_changes_and_directory_mode_mismatches_fail_the_gate()
+-> validation_support::TestResult {
+    use cli_bench::*;
+    let mut fixture = validation_support::Fixture::new(
+        "if [ -p /dev/stdout ]; then printf 'EFGH\\n'; else printf different; fi",
+        "printf 'EFGH\\n'",
+    )?;
+    fixture.suite.cases.first_mut().ok_or("case")?.io.stdout = StdoutPolicy::ScratchFile {
+        path: "output".into(),
+    };
+    failed_gate_never_times(&fixture)?;
+    let mut fixture =
+        validation_support::Fixture::new("/bin/mkdir -m 700 \"$1\"", "/bin/mkdir -m 755 \"$1\"")?;
+    let case = fixture.suite.cases.first_mut().ok_or("case")?;
+    case.argv = vec!["@scratch:dir".into()];
+    case.correctness = vec![CorrectnessRule::DirectoryTree {
+        paths: vec!["dir".into()],
+        compare_mode_to: Some(ComparisonTarget::SelectedBaselines),
+    }];
+    failed_gate_never_times(&fixture)
+}
+#[test]
+fn directory_paths_only_rule_does_not_add_an_undeclared_mode_comparison()
+-> validation_support::TestResult {
+    use cli_bench::*;
+    let body =
+        "if [ -p /dev/stdout ]; then mode=700; else mode=755; fi\n/bin/mkdir -m \"$mode\" \"$1\"";
+    let mut fixture = validation_support::Fixture::new(body, body)?;
+    let case = fixture.suite.cases.first_mut().ok_or("case")?;
+    case.argv = vec!["@scratch:dir".into()];
+    case.correctness = vec![CorrectnessRule::DirectoryTree {
+        paths: vec!["dir".into()],
+        compare_mode_to: None,
+    }];
+    case.io.stdout = StdoutPolicy::Discard {};
+    let mut writer = fixture.store.begin_run(&fixture.suite)?;
+    validate_experiment(fixture.prepare()?, &mut writer, &fixture.runner)?;
+    Ok(())
+}
+#[test]
+fn every_selected_case_and_both_comparators_are_checked_after_failure()
+-> validation_support::TestResult {
+    use cli_bench::*;
+    let mut fixture = validation_support::Fixture::new("printf 'EFGH\\n'", "printf 'EFGH\\n'")?;
+    fixture.request.reference = Some(validation_support::script(
+        &fixture.request.repository,
+        "reference",
+        "printf wrong",
+    )?);
+    let mut second = fixture.suite.cases.first().ok_or("case")?.clone();
+    second.id = "second".into();
+    fixture.suite.cases.push(second);
+    let mut writer = fixture.store.begin_run(&fixture.suite)?;
+    require(
+        validate_experiment(fixture.prepare()?, &mut writer, &fixture.runner).is_err(),
+        "wrong reference skipped",
+    )?;
+    let report: ValidationReport = serde_json::from_slice(&std::fs::read(
+        writer.path().join("validation/report.json"),
+    )?)?;
+    require(
+        report.selected_cases == ["last-line", "second"],
+        "empty selection omitted cases",
+    )?;
+    require(
+        report.observations.len() == 12,
+        "selected role/case observations omitted",
+    )?;
+    for case in ["last-line", "second"] {
+        require(
+            report.findings.iter().any(|finding| {
+                finding.case.as_deref() == Some(case)
+                    && finding.role == Some(Role::Candidate)
+                    && finding.check == "rule-0:Reference"
+                    && !finding.passed
+            }),
+            "candidate/reference comparison omitted",
+        )?;
+        require(
+            report.findings.iter().any(|finding| {
+                finding.case.as_deref() == Some(case)
+                    && finding.role == Some(Role::Candidate)
+                    && finding.check == "rule-0:Previous"
+                    && finding.passed
+            }),
+            "candidate/previous comparison omitted",
+        )?;
+    }
+    Ok(())
+}
+#[test]
+fn failed_selected_comparator_stays_in_every_comparison_finding() -> validation_support::TestResult
+{
+    use cli_bench::*;
+    let mut fixture = validation_support::Fixture::new("printf 'EFGH\\n'", "printf 'EFGH\\n'")?;
+    let reference = validation_support::script(&fixture.request.repository, "reference", "")?;
+    std::fs::write(&reference, b"#!/nonexistent-cli-bench-interpreter\n")?;
+    fixture.request.reference = Some(reference);
+    let mut writer = fixture.store.begin_run(&fixture.suite)?;
+    require(
+        validate_experiment(fixture.prepare()?, &mut writer, &fixture.runner).is_err(),
+        "failed comparator accepted",
+    )?;
+    let report: ValidationReport = serde_json::from_slice(&std::fs::read(
+        writer.path().join("validation/report.json"),
+    )?)?;
+    require(
+        report.findings.iter().any(|finding| {
+            finding.role == Some(Role::Candidate)
+                && finding.check == "rule-0:Reference"
+                && !finding.passed
+        }),
+        "failed selected comparator silently dropped from byte findings",
+    )?;
+    Ok(())
+}
