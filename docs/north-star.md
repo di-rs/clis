@@ -35,8 +35,9 @@ API tests and a compiled consumer example. See [architecture](architecture.md).
 
 ### U2 — Consistent tests
 
-Use the shared [test conventions](../CONTRIBUTING.md#test-conventions): CLI tests,
-direct library tests, and small reusable fixtures. Assert observable results and
+Use the shared [test conventions](../CONTRIBUTING.md#test-conventions): Rust unit
+tests beside their implementation, CLI/public API integration tests under `tests/`,
+and small reusable fixtures. Assert observable results and
 failure paths, including relevant byte boundaries and read/write failures. Ordinary
 tests are hermetic; reference capture and timing are explicit separate workflows.
 

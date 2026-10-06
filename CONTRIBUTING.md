@@ -69,16 +69,32 @@ when tooling or a platform is unavailable; an unrun command is not a passing che
 Use this layout as packages migrate; do not create empty directories:
 
 ```text
+src/
+  <operation>.rs  # implementation and its #[cfg(test)] mod tests
 tests/
-  cli.rs        # process contract
-  library.rs    # direct API integration tests, when useful
-  inputs/       # small reusable read-only inputs
-  expected/     # captured output, statuses, effects, provenance for ports
-mk-outs.nu      # port reference-capture workflow; never called by ordinary tests
+  cli.rs          # CLI process integration tests
+  library.rs      # public API integration tests, when useful; never unit tests
+  process.rs      # subprocess lifecycle integration tests, when needed
+  common/mod.rs   # shared integration-test helpers, when needed; no test cases
+  inputs/         # small reusable read-only inputs
+  expected/       # captured output, statuses, effects, provenance for ports
+mk-outs.nu        # port reference-capture workflow; never called by ordinary tests
 ```
 
-Keep unit tests near their operation and direct public-API integration tests in
-`tests/library.rs` when needed. CLI tests use `assert_cmd::cargo::cargo_bin_cmd!`,
+Rust unit tests must live in a `#[cfg(test)] mod tests` in the same source file as
+the code they test. This applies to parsers, calculations, validators, I/O helpers,
+and other implementation details. `src/lib.rs` may contain unit tests for code
+implemented there; it must not collect unit tests for other modules.
+
+`tests/` is for integration tests and their support files only. Use
+`tests/library.rs` to exercise the public API as an external consumer, including
+workflows across components; do not place isolated function/unit tests there just
+because the function is public. Integration tests import the package's public API;
+do not include source modules with `#[path]` or expose internals solely to test them.
+Keep unit-test helpers beside their unit tests; `tests/common/mod.rs` shares helpers
+between integration tests. Do not duplicate unit coverage in integration tests.
+
+CLI tests use `assert_cmd::cargo::cargo_bin_cmd!`,
 `predicates`, and small local helpers. For `bool`, select `cargo_bin_cmd!("true")`
 or `cargo_bin_cmd!("false")` explicitly. Assert stdout bytes, stderr, status, and
 filesystem effects, not only successful parsing.
