@@ -110,7 +110,7 @@ pub fn validate_strings(value: &serde_json::Value) -> Result<(), BenchError> {
     }
 }
 
-fn validate_identifier(value: &str) -> Result<(), BenchError> {
+pub fn validate_identifier(value: &str) -> Result<(), BenchError> {
     require(
         !value.is_empty()
             && value
@@ -144,6 +144,7 @@ fn validate_limits(limits: &Limits) -> Result<(), BenchError> {
         ("max_cases", limits.max_cases),
         ("max_stream_bytes", limits.max_stream_bytes),
         ("max_generated_bytes", limits.max_generated_bytes),
+        ("max_generated_file_bytes", limits.max_generated_file_bytes),
         ("max_evidence_bytes", limits.max_evidence_bytes),
         ("sample_timeout_seconds", limits.sample_timeout_seconds),
         ("build_timeout_seconds", limits.build_timeout_seconds),
@@ -326,7 +327,7 @@ fn has_literal_records(argv: &[String]) -> Result<bool, BenchError> {
     Ok(has_records)
 }
 
-fn validate_generator_arguments(argv: &[String]) -> Result<(), BenchError> {
+pub fn validate_generator_arguments(argv: &[String]) -> Result<(), BenchError> {
     validate_arguments(argv, &BTreeSet::new(), true)?;
     let command = argv
         .first()
@@ -425,13 +426,23 @@ fn validate_case_profile(
     Ok(())
 }
 
-fn validate_rules(
+pub fn validate_rules(
     rules: &[CorrectnessRule],
     datasets: &BTreeSet<&str>,
     dataset: bool,
 ) -> Result<(), BenchError> {
     require(!rules.is_empty(), "correctness checks must be nonempty")?;
     for rule in rules {
+        require(
+            !dataset
+                || matches!(
+                    rule,
+                    CorrectnessRule::BytePattern { .. }
+                        | CorrectnessRule::TextShape { .. }
+                        | CorrectnessRule::Records { .. }
+                ),
+            "dataset checks require byte-pattern, text-shape or records",
+        )?;
         match rule {
             CorrectnessRule::Comparator { .. } => require(
                 !dataset,
@@ -464,6 +475,10 @@ fn validate_rules(
             CorrectnessRule::TailSlice { dataset, .. } => validate_reference(dataset, datasets)?,
             CorrectnessRule::DirectoryTree { paths, .. } => validate_paths(paths)?,
         }
+    }
+    if dataset {
+        crate::dataset::declared_bytes(rules)
+            .map_err(|error| BenchError::invalid(error.to_string()))?;
     }
     Ok(())
 }
@@ -639,6 +654,7 @@ mod tests {
             "max_cases",
             "max_stream_bytes",
             "max_generated_bytes",
+            "max_generated_file_bytes",
             "max_evidence_bytes",
             "sample_timeout_seconds",
             "build_timeout_seconds",
@@ -852,7 +868,11 @@ mod tests {
                                 "literal".into(),
                                 "@output".into(),
                             ],
-                            checks: vec![CorrectnessRule::EmptyStderr {}],
+                            checks: vec![CorrectnessRule::Records {
+                                records: vec!["literal".into()],
+                                repeat: 1,
+                                cycles: 1,
+                            }],
                         },
                     );
                 check_equal(
@@ -1004,7 +1024,11 @@ mod tests {
                 MeasurementProfile::Smoke,
                 DatasetRecipe {
                     argv: vec!["text".into(), "@output".into()],
-                    checks: vec![CorrectnessRule::EmptyStderr {}],
+                    checks: vec![CorrectnessRule::TextShape {
+                        records: 2,
+                        words_per_record: 1,
+                        word_length: 4,
+                    }],
                 },
             );
         check_equal(validate_suite(&suite).is_err(), true)?;
@@ -1029,6 +1053,125 @@ mod tests {
             unit: WorkUnit::Bytes,
         });
         check_equal(validate_suite(&suite).is_err(), true)?;
+        Ok(())
+    }
+
+    #[test]
+    fn validates_exact_shape_sizes_for_base_and_every_profile() -> TestResult {
+        for checks in [
+            vec![CorrectnessRule::TextShape {
+                records: u64::MAX,
+                words_per_record: 1,
+                word_length: 4,
+            }],
+            vec![CorrectnessRule::Records {
+                records: vec!["a".into()],
+                repeat: u64::MAX,
+                cycles: 1,
+            }],
+            vec![
+                CorrectnessRule::BytePattern {
+                    bytes: 10,
+                    pattern_hex: "00".into(),
+                },
+                CorrectnessRule::BytePattern {
+                    bytes: 11,
+                    pattern_hex: "00".into(),
+                },
+            ],
+        ] {
+            let mut suite = parse_suite(MINIMAL)?;
+            suite
+                .datasets
+                .first_mut()
+                .ok_or("fixture dataset absent")?
+                .checks = checks.clone();
+            check_equal(
+                validate_suite(&suite).err().map(|error| error.kind()),
+                Some(ErrorKind::InvalidSuite),
+            )?;
+            for profile in [MeasurementProfile::Full, MeasurementProfile::Smoke] {
+                let mut suite = parse_suite(MINIMAL)?;
+                let dataset = suite.datasets.first_mut().ok_or("fixture dataset absent")?;
+                dataset.profiles.insert(
+                    profile,
+                    DatasetRecipe {
+                        argv: dataset.argv.clone(),
+                        checks: checks.clone(),
+                    },
+                );
+                check_equal(
+                    validate_suite(&suite).err().map(|error| error.kind()),
+                    Some(ErrorKind::InvalidSuite),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn restricts_dataset_assertions_without_restricting_case_assertions() -> TestResult {
+        for rule in [
+            CorrectnessRule::Literal {
+                stream: Stream::Stdout,
+                text: "literal".into(),
+            },
+            CorrectnessRule::Hex {
+                stream: Stream::Stderr,
+                hex: "00ff".into(),
+            },
+            CorrectnessRule::EmptyStderr {},
+            CorrectnessRule::TailSlice {
+                dataset: "tiny".into(),
+                unit: crate::TailUnit::Bytes,
+                count: 1,
+                stream: Stream::Stdout,
+            },
+            CorrectnessRule::DirectoryTree {
+                paths: vec!["a/b".into()],
+                compare_mode_to: None,
+            },
+            CorrectnessRule::Comparator {
+                target: crate::ComparisonTarget::Reference,
+                stream: Stream::Stdout,
+            },
+        ] {
+            let mut suite = parse_suite(MINIMAL)?;
+            suite
+                .cases
+                .first_mut()
+                .ok_or("fixture case absent")?
+                .correctness = vec![rule.clone()];
+            validate_suite(&suite)?;
+            let mut invalid = suite.clone();
+            invalid
+                .datasets
+                .first_mut()
+                .ok_or("fixture dataset absent")?
+                .checks = vec![rule.clone()];
+            check_equal(
+                validate_suite(&invalid).err().map(|error| error.kind()),
+                Some(ErrorKind::InvalidSuite),
+            )?;
+            for profile in [MeasurementProfile::Full, MeasurementProfile::Smoke] {
+                let mut invalid = suite.clone();
+                let dataset = invalid
+                    .datasets
+                    .first_mut()
+                    .ok_or("fixture dataset absent")?;
+                dataset.profiles.insert(
+                    profile,
+                    DatasetRecipe {
+                        argv: dataset.argv.clone(),
+                        checks: vec![rule.clone()],
+                    },
+                );
+                check_equal(
+                    validate_suite(&invalid).err().map(|error| error.kind()),
+                    Some(ErrorKind::InvalidSuite),
+                )?;
+            }
+        }
         Ok(())
     }
 

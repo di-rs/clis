@@ -63,9 +63,13 @@ These lines are also the implementation plan's global constraints.
 Full and smoke are named measurement profiles, not Cargo profiles. Reject any
 other measurement profile in v1. A sample deadline defaults to 120 seconds; a
 build deadline is 1,800 seconds. Record overrides and reasons when a suite changes
-the deadline. Enforce 128 selected cases, 256 MiB per captured stream, 8 GiB total
-generated inputs and 2 GiB run evidence by default. Reject excess with preserved
-failure evidence; users may increase limits explicitly in the suite's limits table.
+the deadline. Enforce 128 selected cases, 256 MiB per captured stream, 32 MiB per
+generated input file, 128 MiB total generated inputs and 2 GiB run evidence by
+default. Reject an over-budget selected profile before starting Biggie, using
+checked exact sizes from its file assertions. Runtime file-size monitoring rejects
+overflow as a fallback, with possible brief overshoot before termination rather
+than an OS hard quota. Preserve failure evidence; users may increase limits
+explicitly in the suite's limits table.
 
 ## CLI and Cargo relationship
 
@@ -282,6 +286,12 @@ platforms. On replay, a changed generated hash is failure, not an updated expect
 fixture. The harness may materialize/reset directories, but content generation
 always belongs to Biggie. Small hermetic unit-test fixtures are not benchmark data.
 
+Dataset assertions in v1 are limited to byte patterns, fixed text shapes and
+record schedules. Other assertion kinds remain available for workload checks but
+are rejected for datasets during suite validation. These file checks declare exact
+byte counts: preparation rejects contradictory sizes, arithmetic overflow and an
+over-budget selected profile before starting any generator.
+
 Before any selected case is timed, validate every selected role/case. Record all
 failures; if any selected gate fails, start no timing. Record genuine nonzero exit
 expectations rather than accepting any failure. Compare filesystem type/path sets,
@@ -374,7 +384,7 @@ stderr and writers/flush failures propagate.
 | Suite | Full workloads | Independent checks and boundaries |
 | --- | --- | --- |
 | Biggie | Seeded text: 100,000 lines, 4 words of 8 ASCII characters, seed 42; records: `miss`, `Hit`, empty, repeat 2, 10,000 cycles; bytes: 16 MiB, pattern `00ff1b0d0a` | 3,600,000 text bytes/shape, exact 200,000 record bytes/pattern, exact byte budget/repeating pattern. stdout is drained pipe; previous/candidate comparison only. |
-| tailr | Biggie text: 1,000,000 lines with the same fixed word shape; last 10 lines from file, last 1,000 bytes from file, last 10 lines from pipe; tiny two-record startup | GNU equality and explicit expected slices computed from the generated input. File and pipeline cases are separate; no fake scan throughput. |
+| tailr | Biggie text: 400,000 lines with the same fixed word shape (14,400,000 bytes); last 10 lines from file, last 1,000 bytes from file, last 10 lines from pipe; tiny two-record startup | GNU equality and explicit expected slices computed from the generated input. File and pipeline cases are separate; no fake scan throughput. |
 | mkdirr | Biggie records generates `a/b`, `c/d`, `e/f`, `g/h`; create these absent paths with `mkdir -p`/mkdirr; separate existing-path case | Exact tree/type set and mode comparison, empty stdout/stderr, status 0. Reset absent/existing state before every invocation; directory operations reported, not byte throughput. |
 
 Smoke uses 1,000 text lines, 100 record cycles and 64 KiB bytes; the tiny and mkdir

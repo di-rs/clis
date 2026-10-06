@@ -380,3 +380,31 @@ fn producer_failure_invalidates_an_otherwise_successful_pipeline() -> TestResult
     require!(result.check_expected(invocation.expected_status).is_err());
     Ok(())
 }
+
+#[test]
+fn file_limit_stops_live_writers_and_rejects_fast_exit_overflow() -> TestResult {
+    for delay in ["/bin/sleep 2", "exit 0"] {
+        let root = assert_fs::TempDir::new()?;
+        let output = root.join("generated");
+        let program = fixture(
+            root.path(),
+            "file-writer",
+            &format!("printf '0123456789abcdef' > \"$1\"; {delay}"),
+        )?;
+        let mut spec = command(root.path(), program);
+        spec.argv = vec![output.to_str().ok_or("non-UTF-8 fixture path")?.into()];
+        let started = Instant::now();
+        let outcome = ProcessRunner::new(policy()).execute_with_file_limit(
+            &spec,
+            &captures(root.path()),
+            &cli_bench::OutputFileLimit {
+                path: output,
+                max_bytes: 8,
+            },
+        )?;
+        require_eq!(outcome.stopped, Some(StopReason::FileLimit));
+        require!(outcome.check_expected(0).is_err());
+        require!(started.elapsed() < Duration::from_secs(2));
+    }
+    Ok(())
+}

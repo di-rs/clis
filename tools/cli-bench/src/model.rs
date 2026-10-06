@@ -61,6 +61,7 @@ pub struct Limits {
     pub max_cases: u64,
     pub max_stream_bytes: u64,
     pub max_generated_bytes: u64,
+    pub max_generated_file_bytes: u64,
     pub max_evidence_bytes: u64,
     pub sample_timeout_seconds: u64,
     pub build_timeout_seconds: u64,
@@ -72,7 +73,8 @@ impl Default for Limits {
         Self {
             max_cases: 128,
             max_stream_bytes: 268_435_456,
-            max_generated_bytes: 8_589_934_592,
+            max_generated_bytes: 134_217_728,
+            max_generated_file_bytes: 33_554_432,
             max_evidence_bytes: 2_147_483_648,
             sample_timeout_seconds: 120,
             build_timeout_seconds: 1800,
@@ -498,6 +500,36 @@ pub struct InputRecord {
     pub file: FileIdentity,
 }
 
+/// Portable, complete identity of one profile's deterministic dataset recipe.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DatasetIdentity {
+    pub schema_version: u32,
+    pub dataset: String,
+    pub output: String,
+    pub profile: MeasurementProfile,
+    pub generator: ArtifactRecord,
+    pub generator_spec: GeneratorSpec,
+    pub recipe: DatasetRecipe,
+    /// Allowlisted settings only; isolated home/config physical paths are not recipe inputs.
+    pub environment: BTreeMap<String, String>,
+    pub path_records: bool,
+}
+
+/// Independently verified output and retained generation diagnostics.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct GenerationRecord {
+    pub identity: DatasetIdentity,
+    pub recipe_hash: String,
+    pub file: FileIdentity,
+    /// Observed byte count for every independent shape assertion, in recipe order.
+    pub shape_bytes: Vec<u64>,
+    pub argv: Vec<String>,
+    pub stdout: FileIdentity,
+    pub stderr: FileIdentity,
+}
+
 /// Optional optimization metadata, retained even if resolution fails.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -702,6 +734,44 @@ pub struct ToolPaths {
 #[cfg(test)]
 mod tests {
     use super::{MeasurementPolicy, MeasurementProfile};
+
+    #[test]
+    fn generation_limits_default_to_small_inputs_and_allow_explicit_overrides()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let limits = super::Limits::default();
+        if limits.max_generated_file_bytes != 33_554_432
+            || limits.max_generated_bytes != 134_217_728
+        {
+            return Err("unexpected default dataset budgets".into());
+        }
+        let custom: super::Limits =
+            toml::from_str("max_generated_file_bytes = 64\nmax_generated_bytes = 128\n")?;
+        if custom.max_generated_file_bytes != 64 || custom.max_generated_bytes != 128 {
+            return Err("explicit limits not preserved".into());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn dataset_recipe_roundtrip_retains_profile_specific_seed_and_rejects_unknown_fields()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let suite = crate::parse_suite(include_str!("../tests/inputs/minimal-suite.toml"))?;
+        let spec = suite.datasets.first().ok_or("missing fixture dataset")?;
+        let recipe = super::DatasetRecipe {
+            argv: spec.argv.clone(),
+            checks: spec.checks.clone(),
+        };
+        let encoded = serde_json::to_value(&recipe)?;
+        if serde_json::from_value::<super::DatasetRecipe>(encoded.clone())? != recipe {
+            return Err("recipe changed during serialization".into());
+        }
+        let mut unknown = encoded;
+        unknown["assume_deterministic"] = serde_json::json!(true);
+        if serde_json::from_value::<super::DatasetRecipe>(unknown).is_ok() {
+            return Err("unknown recipe field accepted".into());
+        }
+        Ok(())
+    }
 
     #[test]
     fn cargo_evidence_rejects_unresolved_hashes_and_mismatched_binary_features()

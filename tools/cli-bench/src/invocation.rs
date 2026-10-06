@@ -36,10 +36,11 @@ pub struct RoleBindings {
     pub config: PathBuf,
     pub pipeline: Option<PipelineTools>,
 }
-/// Actual generated input bindings. Preparation adds provenance/shape evidence later.
+/// Input bindings with optional generation evidence. Literal fixtures omit evidence.
 #[derive(Clone, Debug, Default)]
 pub struct DatasetSet {
     pub inputs: BTreeMap<String, InputRecord>,
+    pub generations: BTreeMap<String, crate::GenerationRecord>,
 }
 /// Scope of a command, including the shell/producer cost of pipe workloads.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -155,7 +156,7 @@ pub fn resolve_invocation(
         scope,
     })
 }
-fn directory(path: &Path) -> Result<(), BenchError> {
+pub fn directory(path: &Path) -> Result<(), BenchError> {
     crate::process::utf8_path(path)?;
     if !std::fs::symlink_metadata(path)?.is_dir() {
         return Err(BenchError::invalid(
@@ -164,7 +165,7 @@ fn directory(path: &Path) -> Result<(), BenchError> {
     }
     Ok(())
 }
-fn child_environment(bindings: &RoleBindings) -> Result<BTreeMap<String, String>, BenchError> {
+pub fn child_environment(bindings: &RoleBindings) -> Result<BTreeMap<String, String>, BenchError> {
     let mut environment = BTreeMap::from([
         ("LC_ALL".into(), "C".into()),
         ("TZ".into(), "UTC".into()),
@@ -249,26 +250,11 @@ fn resolve_arguments(
     Ok(argv)
 }
 fn resolve_records(path: &Path, scratch: &Path, argv: &mut Vec<String>) -> Result<(), BenchError> {
-    use std::io::BufRead;
-    let mut reader = std::io::BufReader::new(std::fs::File::open(path)?);
-    let mut bytes = Vec::new();
-    loop {
-        bytes.clear();
-        if reader.read_until(b'\n', &mut bytes)? == 0 {
-            return Ok(());
-        }
-        if bytes.pop() != Some(b'\n') {
-            return Err(BenchError::invalid("path records must end in LF"));
-        }
-        let record = std::str::from_utf8(&bytes)
-            .map_err(|_| BenchError::invalid("path records must be UTF-8"))?;
-        if record.contains(['\0', '\r']) {
-            return Err(BenchError::invalid(
-                "path records must not contain NUL or CR",
-            ));
-        }
-        argv.push(crate::process::utf8_path(&contained(scratch, record)?)?.into());
+    let reader = std::io::BufReader::new(std::fs::File::open(path)?);
+    for record in crate::dataset::decode_path_records(reader)? {
+        argv.push(crate::process::utf8_path(&contained(scratch, &record)?)?.into());
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -322,7 +308,14 @@ mod tests {
             config: root.join("config"),
             pipeline: None,
         };
-        Ok((case, bindings, DatasetSet { inputs }))
+        Ok((
+            case,
+            bindings,
+            DatasetSet {
+                inputs,
+                ..DatasetSet::default()
+            },
+        ))
     }
     #[test]
     fn resolves_whole_tokens_and_preserves_literal_arguments() -> TestResult {

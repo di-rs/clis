@@ -108,5 +108,12 @@ pub fn invocation_inputs(
             cat: tool("/bin/cat")?,
         }),
     };
-    Ok((case, bindings, DatasetSet { inputs }))
+    Ok((
+        case,
+        bindings,
+        DatasetSet {
+            inputs,
+            ..DatasetSet::default()
+        },
+    ))
 }

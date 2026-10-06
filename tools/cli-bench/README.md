@@ -5,7 +5,8 @@
 An original benchmark harness under development. The current slice provides
 strict suite parsing/validation, immutable evidence/artifact storage for Rust
 callers, bounded child execution, role/profile invocation resolution, and CLI
-help/version/logging, isolated Cargo revision builds, and executable binding.
+help/version/logging, isolated Cargo revision builds, executable binding, and
+verified Biggie dataset preparation.
 Full run/check execution remains planned in the linked design.
 
 ## Quick start
@@ -74,19 +75,29 @@ unsupported versions and missing deterministic Biggie recipes are rejected.
 Arguments remain strings: only whole tokens are recognized; `@@` escapes a
 literal leading `@`. Partial child environment tables inherit safe defaults.
 
-Resource defaults are 128 cases, 256 MiB per captured stream, 8 GiB generated
-inputs, 2 GiB evidence, 120 seconds per sample, and 1,800 seconds per build.
-Limits must be positive; deadline overrides require an explicit reason. These
-declarations are validated now. `ProcessRunner` enforces explicit per-command
-deadlines and captured/drained stream limits; generated-input and total-evidence
+Resource defaults are 128 cases, 256 MiB per captured stream, 32 MiB per generated
+file, 128 MiB generated inputs per run, 2 GiB evidence, 120 seconds per sample,
+and 1,800 seconds per build.
+Limits must be positive; deadline overrides require an explicit reason. Suite
+limits accept explicit overrides. `ProcessRunner` enforces explicit per-command
+deadlines and captured/drained stream limits. Dataset preparation enforces declared
+input budgets before spawning and monitors actual output sizes; total-evidence
 runtime enforcement belongs to later orchestration. Full/smoke policies encode 3/20 and 1/2 checked warmups/samples per role
 in each of two batches, with separate 5/1 RSS samples. Smoke policy suppresses
 performance conclusions.
 
+Dataset assertions accept only `byte-pattern`, `text-shape`, and `records`.
+Validation computes their exact byte counts with checked arithmetic and rejects
+overflow or conflicting sizes within a recipe, including profile replacements.
+Stream and filesystem assertions remain case-only. Preparation checks every selected
+profile recipe against the file limit and their checked sum against the run limit
+before starting any generator. An unselected larger profile does not consume that
+execution budget.
+
 Generator argv checks explicit deterministic seed/pattern/schedule forms and one
 output token. Biggie's complete argument validation is deferred to execution;
-`bind_roles` now resolves explicit binaries and the generator, but does not
-execute generator recipes or comparator workloads. Named correctness targets are modeled now; their availability and actual
+`bind_roles` resolves explicit binaries and the generator; `prepare_datasets`
+executes the bound generator's recipes. Comparator execution remains separate. Named correctness targets are modeled now; their availability and actual
 assertions are checked when execution bindings are implemented. Directory effects
 currently model directories only; file/symlink/content effects require an extension.
 
@@ -230,9 +241,9 @@ one explicit role and measurement profile per call. `RoleBindings` contains the
 complete role map of `BoundExecutable` paths/artifact identities, allowlisted child
 settings, existing isolated HOME/config directories and optional identified
 `PipelineTools`. Config directories should be outside the workload scratch root
-when correctness checks assert an exact directory tree. `DatasetSet` wraps stable
-IDs and `InputRecord` paths/content identities; generation and shape/provenance
-records belong to the later preparation stage.
+when correctness checks assert an exact directory tree. `DatasetSet` wraps stable IDs and `InputRecord` paths/content identities, plus
+`GenerationRecord` recipe/generator/shape evidence. Tiny literal test fixtures can
+omit generation records without inventing benchmark provenance.
 
 Resolution validates the case, checks bound content identities, applies profile
 replacement and role fallback, and expands only whole tokens. `@input:ID` produces
@@ -326,8 +337,63 @@ or `-a/--candidate`, previous `-b/--previous-ref` or `-p/--previous`, explicit
 They require a candidate plus comparator and reject ref/path conflicts. Valid
 selections return operational failure explaining that execution is not implemented;
 they do not claim to produce benchmark evidence. Other planned selection flags,
-generation, correctness orchestration and measurements remain later work.
+CLI preparation wiring, correctness orchestration and measurements remain later work.
 
 Tests use tiny temporary Git/Cargo repositories and fake Cargo fault cases; they
 generate no benchmark data. Native macOS execution is verified in the task report;
 Linux remains unverified. No performance claim is made for build orchestration.
+
+## Verified dataset preparation
+
+`prepare_datasets(&suite, &DatasetPreparation { profile, bindings, expected },
+&store, &runner)` uses the explicit generator in `RoleBindings`, separately from
+all measured roles. The caller supplies isolated HOME/config directories and
+allowlisted child settings. Suite generator settings and actual bound build/content
+identity are retained separately; an explicit generator override may use a different
+revision. Only that bound executable produces benchmark bytes.
+
+The operation validates the complete suite, selects profile replacements, computes
+exact sizes independently, and checks file and aggregate budgets before any child
+starts. It expands exactly one whole `@output` argument into a fresh staging path.
+`ProcessRunner::execute_with_file_limit` monitors that regular file in its existing
+5 ms process loop and checks again after cleanup, bounded by declared size, file cap
+and remaining run budget. This is a fallback with possible write overshoot, not an
+OS hard quota. Ordinary `execute` keeps its existing timing and cleanup policy.
+Generation timeout/cancellation/capture policy comes from the supplied runner.
+
+Successful output must match every streamed shape check and, when consumed by
+`@records`, safe LF path decoding. SHA-256, byte count, exact expanded argv,
+recipe/profile, generator artifact/build identity and diagnostic hashes are retained.
+Recipe identities include effective allowlisted settings; physical isolated
+HOME/config locations are execution resources, not portable recipe identity.
+Generation diagnostics and failure records remain in pending/failed dataset entries.
+Failure records preserve expected and observed hashes when available. Errors return
+before any caller can receive a complete prepared set.
+
+Only independently verified output is atomically published under
+`datasets/<recipe-hash>/`; existing entries are never overwritten or repaired.
+Reuse rechecks input bytes, shapes, provenance and stdout/stderr diagnostics.
+`verify_datasets(&set)` rechecks input identities and attached generation shapes
+without changing expected values. Literal fixtures may omit generation evidence.
+These operations stream file bytes with 8 KiB buffers; path expansion retains
+memory proportional to the resulting argument list. Preparation is outside timing.
+
+For replay, pass `expected: Some(&original_set)`. Saved metadata must be valid and
+its dataset set, effective recipe/profile/generator identities and output hashes
+must match. Old physical input files need not exist when regenerating in another
+store. Changed seeded output fails and retains mismatch evidence; the original
+set and cache metadata are unchanged. Ordinary preparation uses `expected: None`.
+
+Ordinary integration tests use tiny original literal fault fixtures, never benchmark
+generation. Native Biggie generation is explicitly opt-in:
+
+```sh
+cargo build --locked -p biggie
+CLI_BENCH_BIGGIE="$PWD/target/debug/biggie" cargo test --locked -p cli-bench \
+  --test library native_biggie -- --ignored
+```
+
+This case creates only 29 bytes across three tiny recipes and checks reuse. It is
+correctness evidence for the supplied native binary, with unknown prebuilt build
+provenance; it is not a performance sample or a pinned-revision compatibility claim.
+Native macOS execution was checked for this slice; Linux remains unverified.

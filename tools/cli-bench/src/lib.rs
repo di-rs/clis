@@ -18,8 +18,8 @@ pub use store::{RunBundle, RunWriter, Store};
 
 mod process;
 pub use process::{
-    CapturePaths, CommandInput, CommandOutput, CommandSpec, ExecutionPolicy, ProcessOutcome,
-    ProcessRunner, ProcessStatus, StopReason,
+    CapturePaths, CommandInput, CommandOutput, CommandSpec, ExecutionPolicy, OutputFileLimit,
+    ProcessOutcome, ProcessRunner, ProcessStatus, StopReason,
 };
 
 mod invocation;
@@ -33,3 +33,7 @@ pub use build::{
     BuildRequest, BuildTools, ExecutableSource, GitContext, ResolvedRevision, RunRequest,
     bind_roles, build_revision, resolve_revision,
 };
+
+mod dataset;
+
+pub use dataset::{DatasetPreparation, prepare_datasets, verify_datasets};

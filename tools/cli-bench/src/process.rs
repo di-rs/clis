@@ -36,6 +36,12 @@ pub struct CapturePaths {
     pub stdout: PathBuf,
     pub stderr: PathBuf,
 }
+/// Logical size bound for a child-created regular file. Polling permits overshoot.
+#[derive(Clone, Debug)]
+pub struct OutputFileLimit {
+    pub path: PathBuf,
+    pub max_bytes: u64,
+}
 /// Caller-owned limits and cancellation. No process-global handler is installed.
 #[derive(Clone, Debug)]
 pub struct ExecutionPolicy {
@@ -55,6 +61,7 @@ pub enum StopReason {
     Timeout,
     Cancelled,
     OutputLimit(Stream),
+    FileLimit,
 }
 /// Native status and bounded stream counts retained for successful and stopped runs.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -106,13 +113,32 @@ impl ProcessRunner {
         spec: &CommandSpec,
         paths: &CapturePaths,
     ) -> Result<ProcessOutcome, BenchError> {
-        self.execute_controlled(spec, paths, &NativeControl)
+        self.execute_controlled(spec, paths, &NativeControl, None)
+    }
+    /// Execute with an additional monitored child-created output file limit.
+    ///
+    /// # Errors
+    /// Like `execute`, plus invalid file targets and monitored file failures.
+    pub fn execute_with_file_limit(
+        &self,
+        spec: &CommandSpec,
+        paths: &CapturePaths,
+        limit: &OutputFileLimit,
+    ) -> Result<ProcessOutcome, BenchError> {
+        utf8_path(&limit.path)?;
+        match std::fs::symlink_metadata(&limit.path) {
+            Ok(_) => return Err(BenchError::invalid("monitored output must be a fresh path")),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        self.execute_controlled(spec, paths, &NativeControl, Some(limit))
     }
     fn execute_controlled(
         &self,
         spec: &CommandSpec,
         paths: &CapturePaths,
         control: &impl GroupControl,
+        file_limit: Option<&OutputFileLimit>,
     ) -> Result<ProcessOutcome, BenchError> {
         validate_command(spec, paths, &self.policy)?;
         if self.policy.cancellation.load(Ordering::Relaxed) {
@@ -170,7 +196,14 @@ impl ProcessRunner {
                 sender,
                 Arc::clone(&stop_capture),
             )?);
-            monitor(&mut owned, &receiver, workers.len(), start, &self.policy)
+            monitor(
+                &mut owned,
+                &receiver,
+                workers.len(),
+                start,
+                &self.policy,
+                file_limit,
+            )
         })();
         // Cleanup runs on monitor/reader/thread-creation errors too; the original error wins.
         let cleanup = owned.finish();
@@ -203,7 +236,22 @@ impl ProcessRunner {
                 outcome.stopped = Some(StopReason::OutputLimit(stream));
             }
         }
+        if file_limit.map(file_exceeded).transpose()?.unwrap_or(false) && outcome.stopped.is_none()
+        {
+            outcome.stopped = Some(StopReason::FileLimit);
+        }
         Ok(outcome)
+    }
+}
+
+fn file_exceeded(limit: &OutputFileLimit) -> Result<bool, BenchError> {
+    match std::fs::symlink_metadata(&limit.path) {
+        Ok(metadata) if metadata.is_file() => Ok(metadata.len() > limit.max_bytes),
+        Ok(_) => Err(BenchError::Execution(
+            "monitored output is not a regular file".into(),
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -540,6 +588,7 @@ fn monitor(
     mut pending: usize,
     start: Instant,
     policy: &ExecutionPolicy,
+    file_limit: Option<&OutputFileLimit>,
 ) -> Result<ProcessOutcome, BenchError> {
     let mut outcome = ProcessOutcome {
         status: ProcessStatus::Exit(0),
@@ -555,6 +604,10 @@ fn monitor(
             if capture.exceeded && outcome.stopped.is_none() {
                 outcome.stopped = Some(StopReason::OutputLimit(stream));
             }
+        }
+        if file_limit.map(file_exceeded).transpose()?.unwrap_or(false) && outcome.stopped.is_none()
+        {
+            outcome.stopped = Some(StopReason::FileLimit);
         }
         if outcome.stopped.is_some() {
             break;
@@ -703,6 +756,7 @@ mod tests {
                 &spec,
                 &paths,
                 &DeniedControl { owned: groups },
+                None,
             );
             let _ = completed.send(result);
         });
