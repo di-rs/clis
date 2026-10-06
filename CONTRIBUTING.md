@@ -28,25 +28,33 @@ Implement one reviewable slice at a time; existing gaps are migration work.
 
 Run from the workspace root using the nightly toolchain selected by
 [rust-toolchain.toml](rust-toolchain.toml). `rustfmt`, `clippy`, and `cargo-nextest`
-are required for the complete set. Record the actual toolchain version because
-`nightly` is currently unpinned.
+are required for the complete set. The dated nightly is reproducible; it is not
+an MSRV or stable-support declaration. Update its date in a reviewed change only
+after the complete Linux and macOS checks pass, recording `rustc -Vv`.
 
 Start with the affected package, using `catr` as an example:
 
 ```sh
 cargo nextest run --locked -p catr
 cargo test --locked -p catr --doc
-cargo clippy --locked -p catr --all-targets --all-features
+cargo clippy --locked -p catr --all-targets --all-features -- -D warnings
 ```
 
 The doctest command requires a library target. Then, for Rust changes:
 
 ```sh
 cargo fmt --all -- --check
-cargo clippy --locked --workspace --all-targets --all-features
-cargo nextest run --locked --workspace
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo nextest run --locked --workspace --profile ci
 cargo test --locked --workspace --doc
 ```
+
+The `ci` nextest profile disables retries, terminates a test after two minutes,
+and limits a suite to ten minutes. JUnit output is in
+`target/nextest/ci/junit.xml`. Local hooks select manifest, configuration and
+fixture edits as well as Rust sources. Fmt may fix local formatting; CI checks
+formatting first and rejects any tracked-file changes. First-party workspace
+code forbids unsafe; dependencies are outside that guarantee.
 
 These follow the intent of [prek.toml](prek.toml), adding a separate doctest step:
 [nextest does not run doctests](https://nexte.st/docs/running/). Preserve existing
@@ -63,6 +71,22 @@ reported separately from introduced regressions.
 For documentation-only PRs, review links, paths, shell syntax, examples, and
 `git diff --check`. Compile changed Rust examples when possible. State explicitly
 when tooling or a platform is unavailable; an unrun command is not a passing check.
+
+## CI jobs
+
+PRs and pushes to `master` run `quality`, native `tests (linux)` and
+`tests (macos)`, `packages`, `dependencies`, `workflows` and `secrets`.
+Compiler/test jobs deny warnings. `quality` checks formatting, Clippy and
+workspace rustdoc; nextest and doctests run separately on each platform.
+`packages` uses cargo-hack 0.6.45 to compile each member independently and check
+its feature powerset. `python3 scripts/check_features.py` reports member features
+and runs full-feature nextest/doctests if any exist; currently none do.
+Mutually exclusive features need a documented valid-combination policy before
+introduction. Required workflows have no path filters.
+
+Run policy-script tests with `python3 -m unittest discover -s scripts/tests`
+(Python 3.11 or newer). Workflow syntax/security checks use actionlint 1.7.12 and
+`zizmor --offline --no-progress .github/workflows` (1.30.1).
 
 ## Test conventions
 

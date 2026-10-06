@@ -45,7 +45,7 @@ but the same library-reuse and code-quality goals apply to their useful operatio
 
 ## Development
 
-Use Rust nightly, selected by [rust-toolchain.toml](rust-toolchain.toml), with
+Use the dated Rust nightly pinned by [rust-toolchain.toml](rust-toolchain.toml), with
 `rustfmt` and `clippy`. The toolchain currently floats rather than pinning a date;
 record `rustc -Vv` when reproducing a result. Install
 [cargo-nextest](https://nexte.st/docs/installation/pre-built-binaries/) for the test commands below.

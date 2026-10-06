@@ -3,12 +3,15 @@ name: Pull Request Check
 on:
   pull_request:
     branches: [master]
+  push:
+    branches: [master]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 defaults:
@@ -17,39 +20,101 @@ defaults:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+  RUSTDOCFLAGS: -D warnings
 
 jobs:
-  checks:
-    name: 🦀 Prek and doctests
+  quality:
+    name: quality
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - name: 📥 Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: 🦀 Set up repository Rust toolchain
+      - name: Compiler identity
+        run: rustc -Vv
+      - uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
+        with:
+          tool: prek@0.5.5
+          fallback: none
+      - run: cargo fetch --locked
+      - run: cargo fmt --all -- --check
+      - run: prek run check-added-large-files --all-files --show-diff-on-failure
+      - run: prek run cargo-fmt --all-files --show-diff-on-failure
+      - run: prek run cargo-clippy --all-files --show-diff-on-failure
+      - run: cargo doc --locked --workspace --all-features --no-deps
+      - run: git diff --exit-code
+
+  tests:
+    name: tests (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            os: ubuntu-24.04
+          - platform: macos
+            os: macos-15
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      NEXTEST_PROFILE: ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Record environment
         run: |
-          rustup show active-toolchain
-          rustup component add rustfmt clippy
-      - name: 🛠️ Install check tools
-        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
+          mkdir -p target/ci
+          rustc -Vv > target/ci/environment.txt
+          uname -a >> target/ci/environment.txt
+          git rev-parse HEAD >> target/ci/environment.txt
+      - uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
           tool: prek@0.5.5,cargo-nextest@0.9.146
           fallback: none
-      - name: 📦 Verify lockfile and fetch dependencies
-        run: cargo fetch --locked
-      - name: 🎨 Check formatting without modifying files
-        run: cargo fmt -- --check
-      - name: ✅ Run every configured prek hook
-        run: prek run --all-files --show-diff-on-failure
-      - name: 📚 Run documentation tests
-        run: cargo test --workspace --doc --locked
-      - name: 🧹 Verify checks left tracked files unchanged
-        run: git diff --exit-code
+      - run: cargo fetch --locked
+      - name: Workspace tests
+        run: prek run cargo-nexttest --all-files --show-diff-on-failure | tee target/ci/tests.log
+      - name: Doctests
+        run: cargo test --locked --workspace --doc | tee target/ci/doctests.log
+      - run: git diff --exit-code
+      - name: Test evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tests-${{ matrix.platform }}
+          path: |
+            target/ci/
+            target/nextest/ci/junit.xml
+          retention-days: 14
+          if-no-files-found: error
+
+  packages:
+    name: packages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
+        with:
+          tool: cargo-hack@0.6.45,cargo-nextest@0.9.146
+          fallback: none
+      - run: rustc -Vv
+      - run: cargo hack check --locked --workspace --all-targets
+      - run: cargo hack check --locked --workspace --feature-powerset
+      - run: python3 -m unittest discover -s scripts/tests
+      - run: python3 scripts/check_features.py
+      - run: git diff --exit-code
 
   dependencies:
-    name: 🛡️ Dependency audit
+    name: dependencies
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -66,7 +131,7 @@ jobs:
         run: cargo audit --file Cargo.lock
 
   workflows:
-    name: 🔍 Workflow lint and security
+    name: workflows
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -92,7 +157,7 @@ jobs:
         run: zizmor --offline --no-progress .github/workflows
 
   secrets:
-    name: 🔐 Secret scan
+    name: secrets
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
