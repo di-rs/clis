@@ -300,7 +300,7 @@ fn filtered_generation_does_not_update_the_callers_parent_span()
 }
 
 #[test]
-fn custom_text_units_validation_and_buffer_boundaries() -> io::Result<()> {
+fn custom_text_units_validation_and_buffer_boundaries() -> anyhow::Result<()> {
     use biggie::{Alphabet, LengthUnit, TextOptions, generate_text};
     let options = TextOptions {
         generation: GenerationOptions {
@@ -317,10 +317,10 @@ fn custom_text_units_validation_and_buffer_boundaries() -> io::Result<()> {
     let mut bytes = Vec::new();
     generate_text(&mut bytes, &options)?;
     assert_eq!(bytes, "猫".repeat(8193).as_bytes());
-    assert!(
-        generate_text(FailingWriter, &options)
-            .is_err_and(|e| e.kind() == io::ErrorKind::BrokenPipe)
-    );
+    assert!(generate_text(FailingWriter, &options).is_err_and(|e| {
+        e.downcast_ref::<io::Error>()
+            .is_some_and(|source| source.kind() == io::ErrorKind::BrokenPipe)
+    }));
     for alphabet in [
         Alphabet::Custom(vec![]),
         Alphabet::Custom(vec!['a', 'a']),
@@ -336,10 +336,10 @@ fn custom_text_units_validation_and_buffer_boundaries() -> io::Result<()> {
             },
             ..options.clone()
         };
-        assert!(
-            generate_text(&mut out, &invalid)
-                .is_err_and(|e| e.kind() == io::ErrorKind::InvalidInput)
-        );
+        assert!(generate_text(&mut out, &invalid).is_err_and(|e| {
+            e.downcast_ref::<io::Error>()
+                .is_some_and(|source| source.kind() == io::ErrorKind::InvalidInput)
+        }));
         assert_eq!(out, b"keep");
     }
     let mut ascii = Vec::new();
@@ -362,7 +362,7 @@ fn custom_text_units_validation_and_buffer_boundaries() -> io::Result<()> {
 }
 
 #[test]
-fn records_preserve_schedule_boundaries_and_validate_direct_calls() -> io::Result<()> {
+fn records_preserve_schedule_boundaries_and_validate_direct_calls() -> anyhow::Result<()> {
     use biggie::{RecordOptions, generate_records};
     let options = RecordOptions {
         records: vec!["a".into(), "b".into(), "a".into()],
@@ -375,10 +375,10 @@ fn records_preserve_schedule_boundaries_and_validate_direct_calls() -> io::Resul
     let mut short = FailsAfterPrefix {
         accepted: Vec::new(),
     };
-    assert!(
-        generate_records(&mut short, &options)
-            .is_err_and(|e| e.kind() == io::ErrorKind::BrokenPipe)
-    );
+    assert!(generate_records(&mut short, &options).is_err_and(|e| {
+        e.downcast_ref::<io::Error>()
+            .is_some_and(|source| source.kind() == io::ErrorKind::BrokenPipe)
+    }));
     assert_eq!(short.accepted, b"a\nb");
     generate_records(
         FailingWriter,
@@ -418,10 +418,10 @@ fn records_preserve_schedule_boundaries_and_validate_direct_calls() -> io::Resul
         },
     ] {
         let mut bytes = b"keep".to_vec();
-        assert!(
-            generate_records(&mut bytes, &invalid)
-                .is_err_and(|e| e.kind() == io::ErrorKind::InvalidInput)
-        );
+        assert!(generate_records(&mut bytes, &invalid).is_err_and(|e| {
+            e.downcast_ref::<io::Error>()
+                .is_some_and(|source| source.kind() == io::ErrorKind::InvalidInput)
+        }));
         assert_eq!(bytes, b"keep");
     }
     Ok(())
@@ -429,7 +429,7 @@ fn records_preserve_schedule_boundaries_and_validate_direct_calls() -> io::Resul
 
 #[cfg(feature = "csv")]
 #[test]
-fn field_library_preserves_csv_content() -> io::Result<()> {
+fn field_library_preserves_csv_content() -> anyhow::Result<()> {
     use biggie::{FieldFormat, FieldOptions, generate_fields};
     let options = FieldOptions {
         lines: 2,
@@ -453,15 +453,15 @@ fn field_library_preserves_csv_content() -> io::Result<()> {
     for row in rows {
         assert_eq!(row.iter().collect::<Vec<_>>(), vec!["a,b", "", "a\"b\n"]);
     }
-    assert!(
-        generate_fields(FailingWriter, &options)
-            .is_err_and(|e| e.kind() == io::ErrorKind::BrokenPipe)
-    );
+    assert!(generate_fields(FailingWriter, &options).is_err_and(|e| {
+        e.downcast_ref::<io::Error>()
+            .is_some_and(|source| source.kind() == io::ErrorKind::BrokenPipe)
+    }));
     Ok(())
 }
 
 #[test]
-fn field_library_validates_options_and_repeats_seeded_output() -> io::Result<()> {
+fn field_library_validates_options_and_repeats_seeded_output() -> anyhow::Result<()> {
     use biggie::{FieldOptions, generate_fields};
     let options = FieldOptions {
         lines: 2,
@@ -495,10 +495,10 @@ fn field_library_validates_options_and_repeats_seeded_output() -> io::Result<()>
         },
     ] {
         let mut out = b"keep".to_vec();
-        assert!(
-            generate_fields(&mut out, &invalid)
-                .is_err_and(|e| e.kind() == io::ErrorKind::InvalidInput)
-        );
+        assert!(generate_fields(&mut out, &invalid).is_err_and(|e| {
+            e.downcast_ref::<io::Error>()
+                .is_some_and(|source| source.kind() == io::ErrorKind::InvalidInput)
+        }));
         assert_eq!(out, b"keep");
     }
     let seeded = FieldOptions {
@@ -515,7 +515,7 @@ fn field_library_validates_options_and_repeats_seeded_output() -> io::Result<()>
 }
 
 #[test]
-fn byte_budgets_cross_buffer_boundaries_and_propagate_failures() -> io::Result<()> {
+fn byte_budgets_cross_buffer_boundaries_and_propagate_failures() -> anyhow::Result<()> {
     use biggie::{ByteOptions, ByteSource, generate_bytes};
     for bytes in [0, 1, 8191, 8192, 8193, 32769] {
         let options = ByteOptions {
@@ -567,7 +567,9 @@ fn byte_budgets_cross_buffer_boundaries_and_propagate_failures() -> io::Result<(
                 source: ByteSource::Pattern(b"abcde".to_vec())
             }
         )
-        .is_err_and(|e| e.kind() == io::ErrorKind::BrokenPipe)
+        .is_err_and(|e| e
+            .downcast_ref::<io::Error>()
+            .is_some_and(|source| source.kind() == io::ErrorKind::BrokenPipe))
     );
     assert_eq!(writer.accepted, b"abc");
     for pattern in [Vec::new(), vec![0; 8 * 1024 * 1024 + 1]] {
@@ -580,7 +582,9 @@ fn byte_budgets_cross_buffer_boundaries_and_propagate_failures() -> io::Result<(
                     source: ByteSource::Pattern(pattern)
                 }
             )
-            .is_err_and(|e| e.kind() == io::ErrorKind::InvalidInput)
+            .is_err_and(|e| e
+                .downcast_ref::<io::Error>()
+                .is_some_and(|source| source.kind() == io::ErrorKind::InvalidInput))
         );
         assert_eq!(out, b"keep");
     }
@@ -588,7 +592,7 @@ fn byte_budgets_cross_buffer_boundaries_and_propagate_failures() -> io::Result<(
 }
 
 #[test]
-fn pair_library_checks_multisets_endings_and_failures() -> io::Result<()> {
+fn pair_library_checks_multisets_endings_and_failures() -> anyhow::Result<()> {
     use biggie::{PairOptions, generate_pair};
     let options = PairOptions {
         left_only: 2,
@@ -625,15 +629,17 @@ fn pair_library_checks_multisets_endings_and_failures() -> io::Result<()> {
     let mut left = Vec::new();
     let mut right = Vec::new();
     generate_pair(&mut left, &mut right, &options)?;
-    assert_eq!(left, b"biggie-0000000000000000\r\nbiggie-0000000000000000");
+    assert_eq!(left, b"0000000000000000\r\n0000000000000000");
     assert_eq!(left, right);
     assert!(
-        generate_pair(FailingWriter, Vec::new(), &options)
-            .is_err_and(|e| e.kind() == io::ErrorKind::BrokenPipe)
+        generate_pair(FailingWriter, Vec::new(), &options).is_err_and(|e| e
+            .downcast_ref::<io::Error>()
+            .is_some_and(|source| source.kind() == io::ErrorKind::BrokenPipe))
     );
     assert!(
-        generate_pair(Vec::new(), FailingWriter, &options)
-            .is_err_and(|e| e.kind() == io::ErrorKind::BrokenPipe)
+        generate_pair(Vec::new(), FailingWriter, &options).is_err_and(|e| e
+            .downcast_ref::<io::Error>()
+            .is_some_and(|source| source.kind() == io::ErrorKind::BrokenPipe))
     );
     generate_pair(FailingWriter, FailingWriter, &PairOptions::default())?;
     for invalid in [
@@ -655,8 +661,9 @@ fn pair_library_checks_multisets_endings_and_failures() -> io::Result<()> {
         let mut left = b"left".to_vec();
         let mut right = b"right".to_vec();
         assert!(
-            generate_pair(&mut left, &mut right, &invalid)
-                .is_err_and(|e| e.kind() == io::ErrorKind::InvalidInput)
+            generate_pair(&mut left, &mut right, &invalid).is_err_and(|e| e
+                .downcast_ref::<io::Error>()
+                .is_some_and(|source| source.kind() == io::ErrorKind::InvalidInput))
         );
         assert_eq!(left, b"left");
         assert_eq!(right, b"right");
@@ -678,7 +685,7 @@ impl Write for ShortWriter {
     }
 }
 #[test]
-fn all_operations_handle_short_writes_without_flushing() -> io::Result<()> {
+fn all_operations_handle_short_writes_without_flushing() -> anyhow::Result<()> {
     use biggie::{ByteOptions, ByteSource, FieldOptions, PairOptions, RecordOptions, TextOptions};
     let mut writer = ShortWriter { bytes: Vec::new() };
     biggie::generate_text(
@@ -728,12 +735,12 @@ fn all_operations_handle_short_writes_without_flushing() -> io::Result<()> {
             ..Default::default()
         },
     )?;
-    assert_eq!(other.bytes, b"biggie-0000000000000000\n");
+    assert_eq!(other.bytes, b"0000000000000000\n");
     Ok(())
 }
 
 #[test]
-fn random_plain_fields_keep_the_requested_field_count() -> io::Result<()> {
+fn random_plain_fields_keep_the_requested_field_count() -> anyhow::Result<()> {
     let mut bytes = Vec::new();
     biggie::generate_fields(
         &mut bytes,
@@ -769,9 +776,9 @@ fn csv_random_quote_overhead_is_included_in_row_limit() {
         ..Default::default()
     };
     let mut out = b"keep".to_vec();
-    assert!(
-        biggie::generate_fields(&mut out, &options)
-            .is_err_and(|e| e.kind() == io::ErrorKind::InvalidInput)
-    );
+    assert!(biggie::generate_fields(&mut out, &options).is_err_and(|e| {
+        e.downcast_ref::<io::Error>()
+            .is_some_and(|source| source.kind() == io::ErrorKind::InvalidInput)
+    }));
     assert_eq!(out, b"keep");
 }

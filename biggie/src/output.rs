@@ -31,7 +31,7 @@ pub fn single(
     path: &Path,
     count: u64,
     unit: &str,
-    generate: impl FnOnce(&mut BufWriter<Destination>) -> io::Result<()>,
+    generate: impl FnOnce(&mut BufWriter<Destination>) -> Result<()>,
 ) -> Result<()> {
     if path.as_os_str() == "-" {
         return buffered(
@@ -58,7 +58,7 @@ pub fn single(
 }
 fn buffered(
     writer: Destination,
-    generate: impl FnOnce(&mut BufWriter<Destination>) -> io::Result<()>,
+    generate: impl FnOnce(&mut BufWriter<Destination>) -> Result<()>,
     count: u64,
     unit: &str,
 ) -> Result<()> {

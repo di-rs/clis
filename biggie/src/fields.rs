@@ -1,9 +1,7 @@
 use crate::{CONTENT_LIMIT, LineEnding, invalid};
+use anyhow::{Context, Result};
 use rand::{RngExt, SeedableRng, distr::Alphanumeric, rngs::StdRng};
-use std::{
-    io::{self, Write},
-    ops::RangeInclusive,
-};
+use std::{io::Write, ops::RangeInclusive};
 
 /// Plain separators versus CSV quoting/escaping, without headers.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -57,7 +55,7 @@ impl FieldOptions {
     /// Validate content and a conservative maximum encoded row size of 8 MiB.
     /// # Errors
     /// Returns `InvalidInput` for invalid shapes, overflow, delimiters or cell content.
-    pub fn validate(&self) -> io::Result<()> {
+    pub fn validate(&self) -> Result<()> {
         if self.fields == 0
             || self.empty_every == Some(0)
             || self.word_length.is_empty()
@@ -102,7 +100,7 @@ impl FieldOptions {
                         "plain fields cannot contain the delimiter, CR or LF",
                     ));
                 }
-                let length = u64::try_from(value.len()).map_err(io::Error::other)?;
+                let length = u64::try_from(value.len())?;
                 let encoded = if self.format.is_csv() {
                     length.saturating_mul(2).saturating_add(2)
                 } else {
@@ -117,7 +115,7 @@ impl FieldOptions {
             .and_then(|n| n.checked_mul(u64::from(self.fields)))
             .and_then(|n| n.checked_add(2))
             .ok_or_else(|| invalid("row size overflows u64"))?;
-        if row_size > u64::try_from(CONTENT_LIMIT).map_err(io::Error::other)? {
+        if row_size > u64::try_from(CONTENT_LIMIT)? {
             return Err(invalid("maximum encoded row exceeds 8 MiB"));
         }
         Ok(())
@@ -131,11 +129,11 @@ impl FieldOptions {
 /// let options=biggie::FieldOptions{lines:1,values:vec!["a".into(),"".into(),"c".into()],..Default::default()};
 /// biggie::generate_fields(&mut output,&options)?;
 /// assert_eq!(output,b"a\t\tc\n");
-/// # Ok::<(), std::io::Error>(())
+/// # Ok::<(), anyhow::Error>(())
 /// ```
 /// # Errors
 /// Invalid options fail before writing; write errors preserve partial output.
-pub fn generate_fields(mut writer: impl Write, options: &FieldOptions) -> io::Result<()> {
+pub fn generate_fields(mut writer: impl Write, options: &FieldOptions) -> Result<()> {
     options.validate()?;
     let mut rng = options
         .seed
@@ -162,14 +160,10 @@ pub fn generate_fields(mut writer: impl Write, options: &FieldOptions) -> io::Re
                     })
                     .from_writer(&mut row);
                 for _ in 0..options.fields {
-                    encoder
-                        .write_field(cell_value(options, &mut rng, index, &mut cell)?)
-                        .map_err(io::Error::from)?;
+                    encoder.write_field(cell_value(options, &mut rng, index, &mut cell)?)?;
                     index = index.saturating_add(1);
                 }
-                encoder
-                    .write_record(std::iter::empty::<&[u8]>())
-                    .map_err(io::Error::from)?;
+                encoder.write_record(std::iter::empty::<&[u8]>())?;
                 encoder.flush()?; // Flushes only our row Vec, never the caller's writer.
             }
             FieldFormat::Delimited => {
@@ -185,11 +179,13 @@ pub fn generate_fields(mut writer: impl Write, options: &FieldOptions) -> io::Re
         }
         let bytes = if !options.final_newline && line == options.lines.saturating_sub(1) {
             row.strip_suffix(options.line_ending.bytes())
-                .ok_or_else(|| io::Error::other("missing encoded terminator"))?
+                .context("missing encoded terminator")?
         } else {
             &row
         };
-        writer.write_all(bytes)?;
+        writer
+            .write_all(bytes)
+            .context("Cannot write generated data")?;
     }
     span.record("records_written", options.lines);
     Ok(())
@@ -199,7 +195,7 @@ fn cell_value<'a>(
     rng: &mut StdRng,
     index: u64,
     scratch: &'a mut Vec<u8>,
-) -> io::Result<&'a [u8]> {
+) -> Result<&'a [u8]> {
     if options
         .empty_every
         .is_some_and(|n| index.saturating_add(1).is_multiple_of(n))
@@ -209,7 +205,7 @@ fn cell_value<'a>(
     if options.values.is_empty() {
         let length = rng.random_range(options.word_length.clone());
         scratch.clear();
-        let count = usize::try_from(length).map_err(io::Error::other)?;
+        let count = usize::try_from(length)?;
         scratch.extend(
             std::iter::repeat_with(|| rng.sample(Alphanumeric))
                 .filter(|byte| options.format.is_csv() || *byte != options.delimiter)
@@ -217,17 +213,12 @@ fn cell_value<'a>(
         );
         Ok(scratch)
     } else {
-        let count = u64::try_from(options.values.len()).map_err(io::Error::other)?;
-        let position = usize::try_from(
-            index
-                .checked_rem(count)
-                .ok_or_else(|| io::Error::other("empty field corpus"))?,
-        )
-        .map_err(io::Error::other)?;
+        let count = u64::try_from(options.values.len())?;
+        let position = usize::try_from(index.checked_rem(count).context("empty field corpus")?)?;
         options
             .values
             .get(position)
             .map(String::as_bytes)
-            .ok_or_else(|| io::Error::other("invalid field index"))
+            .context("invalid field index")
     }
 }

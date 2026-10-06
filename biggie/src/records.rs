@@ -1,5 +1,6 @@
 use crate::{LineEnding, invalid};
-use std::io::{self, Write};
+use anyhow::{Context, Result};
+use std::io::Write;
 
 /// Literal record schedule, bounded to 100,000 entries and 8 MiB of content.
 /// Adjacent equal records (including across cycles) form one longer observed run.
@@ -26,7 +27,7 @@ impl RecordOptions {
     /// Validate counts and content before writing.
     /// # Errors
     /// Returns `InvalidInput` for overflow, resource limits, zero repeats or embedded LF.
-    pub fn validate(&self) -> io::Result<()> {
+    pub fn validate(&self) -> Result<()> {
         if self.repeat == 0 {
             return Err(invalid("repeat must be positive"));
         }
@@ -47,7 +48,7 @@ impl RecordOptions {
     /// Count expanded records without expanding the schedule.
     /// # Errors
     /// Returns `InvalidInput` on u64 overflow.
-    pub fn total_records(&self) -> io::Result<u64> {
+    pub fn total_records(&self) -> Result<u64> {
         u64::try_from(self.records.len())
             .ok()
             .and_then(|n| n.checked_mul(self.repeat))
@@ -63,11 +64,11 @@ impl RecordOptions {
 /// let mut output=Vec::new();
 /// biggie::generate_records(&mut output,&options)?;
 /// assert_eq!(output,b"hit\nhit\n");
-/// # Ok::<(), std::io::Error>(())
+/// # Ok::<(), anyhow::Error>(())
 /// ```
 /// # Errors
 /// Invalid options fail before writes; I/O errors preserve partial output.
-pub fn generate_records(mut writer: impl Write, options: &RecordOptions) -> io::Result<()> {
+pub fn generate_records(mut writer: impl Write, options: &RecordOptions) -> Result<()> {
     options.validate()?;
     let total = options.total_records()?;
     let span = tracing::debug_span!(
@@ -81,7 +82,9 @@ pub fn generate_records(mut writer: impl Write, options: &RecordOptions) -> io::
         for _ in 0..options.cycles {
             for record in &options.records {
                 for _ in 0..options.repeat {
-                    writer.write_all(record.as_bytes())?;
+                    writer
+                        .write_all(record.as_bytes())
+                        .context("Cannot write literal record")?;
                     remaining = remaining.saturating_sub(1);
                     if options.final_newline || remaining > 0 {
                         writer.write_all(options.line_ending.bytes())?;

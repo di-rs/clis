@@ -1,7 +1,8 @@
 use super::EndingArgs;
+use anyhow::{Result, ensure};
 use biggie::PairOptions;
 use clap::Args;
-use std::{io, path::PathBuf};
+use std::path::PathBuf;
 #[derive(Args, Debug)]
 pub struct PairArgs {
     /// Left destination (named file required)
@@ -40,13 +41,11 @@ impl PairArgs {
             final_newline: !self.ending.no_final_newline,
         }
     }
-    pub fn validate(&self) -> io::Result<()> {
-        if self.left.as_os_str() == "-" || self.right.as_os_str() == "-" {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "pair requires two named file destinations",
-            ));
-        }
+    pub fn validate(&self) -> Result<()> {
+        ensure!(
+            self.left.as_os_str() != "-" && self.right.as_os_str() != "-",
+            "pair requires two named file destinations"
+        );
         self.options().validate()
     }
 }

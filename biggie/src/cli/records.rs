@@ -1,11 +1,8 @@
 use super::EndingArgs;
+use anyhow::{Context, Result, ensure};
 use biggie::RecordOptions;
 use clap::Args;
-use std::{
-    fs::File,
-    io::{self, Read},
-    path::PathBuf,
-};
+use std::{fs::File, io::Read, path::PathBuf};
 #[derive(Args, Debug)]
 pub struct RecordArgs {
     /// Output filename, or - for stdout
@@ -36,21 +33,17 @@ impl RecordArgs {
             final_newline: !self.ending.no_final_newline,
         }
     }
-    pub fn options(&self) -> io::Result<RecordOptions> {
+    pub fn options(&self) -> Result<RecordOptions> {
         let mut options = self.literal_options();
         if let Some(path) = &self.records_file {
             let mut bytes = Vec::new();
-            File::open(path)?
+            File::open(path)
+                .with_context(|| format!("Cannot open corpus {}", path.display()))?
                 .take(8 * 1024 * 1024 + 1)
-                .read_to_end(&mut bytes)?;
-            if bytes.len() > 8 * 1024 * 1024 {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "corpus exceeds 8 MiB",
-                ));
-            }
-            let text = String::from_utf8(bytes)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                .read_to_end(&mut bytes)
+                .context("Cannot read corpus")?;
+            ensure!(bytes.len() <= 8 * 1024 * 1024, "corpus exceeds 8 MiB");
+            let text = String::from_utf8(bytes).context("corpus must be UTF-8")?;
             options.records = text
                 .split_terminator('\n')
                 .take(100_001)

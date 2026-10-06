@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use rand::distr::Alphanumeric;
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 use std::{
@@ -123,11 +124,11 @@ pub fn generate(writer: impl Write, options: &GenerationOptions) -> io::Result<(
 /// };
 /// let mut data = Vec::new();
 /// generate_text(&mut data, &options)?;
-/// # Ok::<(), std::io::Error>(())
+/// # Ok::<(), anyhow::Error>(())
 /// ```
 /// # Errors
 /// Invalid options fail before writing; I/O errors preserve already emitted bytes.
-pub fn generate_text(writer: impl Write, text: &TextOptions) -> io::Result<()> {
+pub fn generate_text(writer: impl Write, text: &TextOptions) -> Result<()> {
     text.validate()?;
     let alphabet = match &text.alphabet {
         Alphabet::Ascii => None,
@@ -138,7 +139,7 @@ pub fn generate_text(writer: impl Write, text: &TextOptions) -> io::Result<()> {
         ),
         Alphabet::Custom(chars) => Some(chars.clone()),
     };
-    if let Some(chars) = alphabet {
+    let result = if let Some(chars) = alphabet {
         generate_words(
             writer,
             &text.generation,
@@ -154,7 +155,8 @@ pub fn generate_text(writer: impl Write, text: &TextOptions) -> io::Result<()> {
             text.separator.as_bytes(),
             write_random_word,
         )
-    }
+    };
+    result.context("Cannot write generated text")
 }
 
 // Select the word generator once, outside the hot record/word loops. The default
@@ -257,7 +259,7 @@ impl TextOptions {
     /// Validate without drawing randomness or writing output.
     /// # Errors
     /// Returns `InvalidInput` for malformed alphabets, separators or length settings.
-    pub fn validate(&self) -> io::Result<()> {
+    pub fn validate(&self) -> Result<()> {
         self.generation.validate()?;
         if self.separator.contains(['\r', '\n']) {
             return Err(crate::invalid("word separator cannot contain CR or LF"));

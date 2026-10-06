@@ -6,8 +6,8 @@ pub use text::{
     Alphabet, GenerationOptions, LengthUnit, TextOptions, gen_random_lines, generate, generate_text,
 };
 
-pub(crate) fn invalid(message: &str) -> std::io::Error {
-    std::io::Error::new(std::io::ErrorKind::InvalidInput, message)
+pub(crate) fn invalid(message: &str) -> anyhow::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidInput, message.to_owned()).into()
 }
 
 mod records;

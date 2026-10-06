@@ -820,8 +820,8 @@ fn pair_streams_are_sorted_with_exact_overlap() -> Result<()> {
         .assert()
         .success()
         .stderr("");
-    dir.child("left").assert("biggie-0000000000000000\nbiggie-0000000000000000\nbiggie-0000000000000001\nbiggie-0000000000000001\nbiggie-0000000000000002\nbiggie-0000000000000002\nbiggie-0000000000000003\nbiggie-0000000000000003\nbiggie-0000000000000004\nbiggie-0000000000000004\n");
-    dir.child("right").assert("biggie-0000000000000002\nbiggie-0000000000000002\nbiggie-0000000000000003\nbiggie-0000000000000003\nbiggie-0000000000000004\nbiggie-0000000000000004\nbiggie-0000000000000005\nbiggie-0000000000000005\n");
+    dir.child("left").assert("0000000000000000\n0000000000000000\n0000000000000001\n0000000000000001\n0000000000000002\n0000000000000002\n0000000000000003\n0000000000000003\n0000000000000004\n0000000000000004\n");
+    dir.child("right").assert("0000000000000002\n0000000000000002\n0000000000000003\n0000000000000003\n0000000000000004\n0000000000000004\n0000000000000005\n0000000000000005\n");
     Ok(())
 }
 
@@ -1180,4 +1180,20 @@ fn disabled_csv_is_rejected_before_creating_or_truncating_output() -> Result<()>
         .stdout(predicate::str::contains("[possible values: delimited]"))
         .stderr("");
     Ok(())
+}
+
+#[test]
+fn invalid_environment_is_ignored_for_help_and_version() {
+    for args in [
+        vec!["--help"],
+        vec!["bytes", "--help"],
+        vec!["records", "--version"],
+    ] {
+        command()
+            .args(args)
+            .env("CLIS_LOG_LEVEL", "invalid")
+            .assert()
+            .success()
+            .stderr("");
+    }
 }

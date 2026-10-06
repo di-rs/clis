@@ -1,6 +1,7 @@
 use crate::{LineEnding, invalid};
+use anyhow::{Context, Result};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
-use std::io::{self, Write};
+use std::io::Write;
 /// Counts of distinct sorted keys; copies supplies each key's multiplicity.
 #[derive(Clone, Debug)]
 pub struct PairOptions {
@@ -29,7 +30,7 @@ impl PairOptions {
     /// Check union and per-stream record counts before writing.
     /// # Errors
     /// Returns `InvalidInput` on overflow or zero copies.
-    pub fn validate(&self) -> io::Result<()> {
+    pub fn validate(&self) -> Result<()> {
         if self.copies == 0 {
             return Err(invalid("copies must be positive"));
         }
@@ -40,7 +41,7 @@ impl PairOptions {
     /// Expanded (left, right) record counts.
     /// # Errors
     /// Returns `InvalidInput` if either count overflows u64.
-    pub fn record_counts(&self) -> io::Result<(u64, u64)> {
+    pub fn record_counts(&self) -> Result<(u64, u64)> {
         let count = |unique: u64| {
             unique
                 .checked_add(self.shared)
@@ -49,7 +50,7 @@ impl PairOptions {
         };
         Ok((count(self.left_only)?, count(self.right_only)?))
     }
-    fn union_count(&self) -> io::Result<u64> {
+    fn union_count(&self) -> Result<u64> {
         self.left_only
             .checked_add(self.shared)
             .and_then(|n| n.checked_add(self.right_only))
@@ -64,7 +65,7 @@ impl PairOptions {
 /// let mut left=Vec::new(); let mut right=Vec::new();
 /// biggie::generate_pair(&mut left,&mut right,&biggie::PairOptions{shared:2,..Default::default()})?;
 /// assert_eq!(left,right);
-/// # Ok::<(),std::io::Error>(())
+/// # Ok::<(),anyhow::Error>(())
 /// ```
 /// # Errors
 /// Invalid counts fail before writes; I/O errors stop generation immediately.
@@ -72,7 +73,7 @@ pub fn generate_pair(
     mut left: impl Write,
     mut right: impl Write,
     options: &PairOptions,
-) -> io::Result<()> {
+) -> Result<()> {
     options.validate()?;
     let (left_count, right_count) = options.record_counts()?;
     let span = tracing::debug_span!(
@@ -83,13 +84,10 @@ pub fn generate_pair(
         right_written = tracing::field::Empty
     );
     let _entered = span.enter();
-    let prefix = options.seed.map_or_else(
-        || "biggie".to_owned(),
-        |seed| {
-            let mut rng = StdRng::seed_from_u64(seed);
-            format!("{:016x}", rng.random::<u64>())
-        },
-    );
+    let prefix = options.seed.map(|seed| {
+        let mut rng = StdRng::seed_from_u64(seed);
+        format!("{:016x}", rng.random::<u64>())
+    });
     let left_end = options.left_only.saturating_add(options.shared);
     let mut left_remaining = left_count;
     let mut right_remaining = right_count;
@@ -97,11 +95,23 @@ pub fn generate_pair(
         for _ in 0..options.copies {
             if ordinal < left_end {
                 left_remaining = left_remaining.saturating_sub(1);
-                write_key(&mut left, &prefix, ordinal, left_remaining, options)?;
+                write_key(
+                    &mut left,
+                    prefix.as_deref(),
+                    ordinal,
+                    left_remaining,
+                    options,
+                )?;
             }
             if ordinal >= options.left_only {
                 right_remaining = right_remaining.saturating_sub(1);
-                write_key(&mut right, &prefix, ordinal, right_remaining, options)?;
+                write_key(
+                    &mut right,
+                    prefix.as_deref(),
+                    ordinal,
+                    right_remaining,
+                    options,
+                )?;
             }
         }
     }
@@ -111,12 +121,15 @@ pub fn generate_pair(
 }
 fn write_key(
     writer: &mut impl Write,
-    prefix: &str,
+    prefix: Option<&str>,
     ordinal: u64,
     remaining: u64,
     options: &PairOptions,
-) -> io::Result<()> {
-    write!(writer, "{prefix}-{ordinal:016x}")?;
+) -> Result<()> {
+    if let Some(prefix) = prefix {
+        write!(writer, "{prefix}-").context("Cannot write key prefix")?;
+    }
+    write!(writer, "{ordinal:016x}").context("Cannot write key ordinal")?;
     if options.final_newline || remaining > 0 {
         writer.write_all(options.line_ending.bytes())?;
     }

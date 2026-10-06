@@ -38,8 +38,14 @@ pub struct Cli {
     #[command(flatten)]
     pub text: text::TextArgs,
     #[command(flatten)]
+    pub logging: cli_tracing::GlobalLogArgs,
+}
+/// Validated command and resolved diagnostics; parsing details stay at the edge.
+pub struct ParsedCli {
+    pub command: Command,
     pub logging: cli_tracing::LogArgs,
 }
+
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Generate random text (the default command)
@@ -54,48 +60,48 @@ pub enum Command {
     Pair(pair::PairArgs),
 }
 impl Cli {
-    pub fn parse_validated() -> Self {
-        let mut command = Self::command().mut_arg("log_level", |arg| {
-            arg.short('L').global(true).env(None::<&str>)
-        });
-        let matches = command.clone().get_matches();
+    pub fn parse_validated() -> ParsedCli {
+        Self::try_parse_validated_from(std::env::args_os()).unwrap_or_else(|error| error.exit())
+    }
+
+    fn try_parse_validated_from(
+        args: impl IntoIterator<Item = impl Into<std::ffi::OsString> + Clone>,
+    ) -> Result<ParsedCli, clap::Error> {
+        let mut command = Self::command();
+        let matches = command.try_get_matches_from_mut(args)?;
         if matches.subcommand_name().is_some()
-            && command.get_arguments().any(|arg| {
-                arg.get_id() != "log_level"
-                    && matches.value_source(arg.get_id().as_str())
+            && text::TextArgs::augment_args(clap::Command::new("text"))
+                .get_arguments()
+                .any(|arg| {
+                    matches.value_source(arg.get_id().as_str())
                         == Some(clap::parser::ValueSource::CommandLine)
-            })
+                })
         {
-            command
-                .error(
-                    clap::error::ErrorKind::ArgumentConflict,
-                    "text arguments before a subcommand are not allowed",
-                )
-                .exit();
+            return Err(command.error(
+                clap::error::ErrorKind::ArgumentConflict,
+                "text arguments before a subcommand are not allowed",
+            ));
         }
-        let mut cli = Self::from_arg_matches(&matches).unwrap_or_else(|err| err.exit());
-        // Clap validates a parent's environment value before a later subcommand flag.
-        // Resolve the shared environment fallback only after global flag propagation.
-        if matches.value_source("log_level") != Some(clap::parser::ValueSource::CommandLine) {
-            let logging_matches = cli_tracing::LogArgs::augment_args(clap::Command::new("biggie"))
-                .get_matches_from(["biggie"]);
-            cli.logging = cli_tracing::LogArgs::from_arg_matches(&logging_matches)
-                .unwrap_or_else(|err| err.exit());
-        }
-        let validation = match &cli.command {
-            None => cli.text.options().validate(),
-            Some(Command::Text(args)) => args.options().validate(),
-            Some(Command::Records(args)) => args.literal_options().validate(),
-            Some(Command::Fields(args)) => args.options().validate(),
-            Some(Command::Bytes(args)) => args.options().validate(),
-            Some(Command::Pair(args)) => args.validate(),
+        let cli = Self::from_arg_matches(&matches)?;
+        let logging = cli
+            .logging
+            .resolve()
+            .map_err(|error| command.error(clap::error::ErrorKind::ValueValidation, error))?;
+        let selected = cli.command.unwrap_or(Command::Text(cli.text));
+        let validation = match &selected {
+            Command::Text(args) => args.options().validate(),
+            Command::Records(args) => args.literal_options().validate(),
+            Command::Fields(args) => args.options().validate(),
+            Command::Bytes(args) => args.options().validate(),
+            Command::Pair(args) => args.validate(),
         };
         if let Err(error) = validation {
-            command
-                .error(clap::error::ErrorKind::ValueValidation, error)
-                .exit();
+            return Err(command.error(clap::error::ErrorKind::ValueValidation, error));
         }
-        cli
+        Ok(ParsedCli {
+            command: selected,
+            logging,
+        })
     }
 }
 pub fn parse_range(value: &str) -> Result<RangeInclusive<u32>, String> {
