@@ -163,11 +163,21 @@ handlers. Callers supply isolated HOME/config directories where needed.
 
 Each call creates an owned Unix process group, checks cancellation/deadlines while
 concurrent readers drain stdout and stderr with 8 KiB buffers, and reaps the direct
-child. Cleanup sends SIGTERM then SIGKILL after a one-second grace when necessary.
-This controls cooperative descendants that remain in their group; it is not an OS
+child. Cleanup sends SIGTERM then SIGKILL after a one-second grace when necessary,
+with at most one additional second of nonblocking termination confirmation. This
+controls cooperative descendants that remain in their group; it is not an OS
 sandbox. On macOS, transient EPERM during exit is reconciled by reaping and checking
-group absence inside that same grace period. Only verified absence permits
-ignoring EPERM; persistent permission failures and other errors remain failures.
+group absence within these bounds. Only verified absence permits ignoring EPERM;
+persistent permission failures and other errors remain failures.
+
+After cleanup, all capture readers stop through 5 ms readiness polling, flush and
+close their files, and are joined before return. Persistent cleanup failure never
+claims confirmed termination. A still-live direct child is handed to a private
+waiter holding only its child handle, with a requested 128 KiB stack, until eventual
+exit/reaping; that wait can last indefinitely if the OS prevents termination.
+Waiter creation failure is reported alongside the primary error, without blocking
+the caller. No capture writer is detached, and partial capture evidence remains stable.
+An unconfirmed live process may still affect its own scratch files.
 
 `CommandInput` supports null or a regular file. `CommandOutput` selects captured
 bytes, a drained pipe, discard, or a fresh file sink. Stderr is always captured

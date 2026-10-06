@@ -120,20 +120,16 @@ fn quota_stops_output_and_retains_only_bounded_bytes() -> TestResult {
 fn timeout_and_cancellation_remove_sleeping_descendants() -> TestResult {
     for cancel in [false, true] {
         let root = assert_fs::TempDir::new()?;
-        let middle = fixture(
-            root.path(),
-            "middle",
-            "trap 'wait; exit 0' TERM; sleep 30 & echo $! > child.pid; wait",
-        )?;
         let program = fixture(
             root.path(),
             "parent",
-            "trap 'wait; exit 0' TERM; \"$1\" & echo $! > middle.pid; wait",
+            "trap 'wait; exit 0' TERM; (trap 'wait; exit 0' TERM; sleep 30 & echo $! > child.pid; wait) & echo $! > middle.pid; wait",
         )?;
-        let mut spec = command(root.path(), program);
-        spec.argv = vec![middle.to_str().ok_or("non-UTF-8 fixture path")?.into()];
+        let spec = command(root.path(), program);
         let mut limits = policy();
-        limits.timeout = Duration::from_millis(350);
+        // Allow fixture startup under workspace concurrency; descendant liveness
+        // is still checked independently with bounded OS probes after return.
+        limits.timeout = Duration::from_secs(1);
         let token = limits.cancellation.clone();
         let marker = root.join("child.pid");
         let cancelling = std::thread::spawn(move || {
@@ -280,7 +276,9 @@ fn deadline_remains_active_while_a_pipe_producer_is_blocked() -> TestResult {
         consumer.to_str().ok_or("non-UTF-8 fixture path")?.into(),
     ];
     let mut limits = policy();
-    limits.timeout = Duration::from_millis(350);
+    // Allow fixture startup under workspace concurrency; descendant liveness
+    // is still checked independently with bounded OS probes after return.
+    limits.timeout = Duration::from_secs(1);
     let result = ProcessRunner::new(limits).execute(&spec, &captures(root.path()))?;
     require_eq!(result.stopped, Some(StopReason::Timeout));
     for name in ["producer.pid", "consumer.pid", "sleep.pid"] {
