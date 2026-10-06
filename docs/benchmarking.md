@@ -53,9 +53,10 @@ Use `--seed` and record its revision, lockfile, platform, and complete command;
 the same seed/options reproduce bytes within the same build/platform, not across
 arbitrary upgrades. Retain the exact input plus checksum for all compared binaries
 and later reruns. Word-count/length ranges support short and long records, and
-line-ending options cover LF, CRLF and an unterminated final record. Use explicit
-small fixtures or another deterministic generator for binary, Unicode, sorted or
-other shapes it does not yet produce; its README records follow-up requirements.
+line-ending options cover LF, CRLF and an unterminated final record. Biggie also
+supplies Unicode/custom alphabets, literal record schedules, delimited/CSV fields,
+raw byte budgets and sorted overlapping pairs. Its README records these contracts
+and the optional CSV feature. Use small explicit fixtures for permanent regressions.
 For `mkdir`, `touch`, and other mutating tools, reset the sandbox before each run;
 otherwise later runs may measure a cheaper operation. Do not use destructive cache
 clearing or privileged machine-wide changes without explicit authorization.

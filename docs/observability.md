@@ -4,6 +4,9 @@
 [Architecture](architecture.md) · [Setup and API](../utils/cli-tracing/README.md)
 
 Use one shared application setup: Clap `LogArgs` plus `cli_tracing::run::<Cli>`.
+Subcommand CLIs can flatten `GlobalLogArgs`, resolve its effective level after
+parsing, and pass the resulting `LogArgs` to the same runner. This keeps argv
+and configuration validation at the CLI edge, before subscriber initialization.
 The helper gets the command name from Clap and installs logging and tracing before
 running the operation. `biggie` is the first consumer; other utilities require
 individual migrations and evidence. A standard is not proof of adoption.
@@ -36,7 +39,9 @@ shared concise reporter prints causes without a backtrace or panic-style report.
 Expose `--log-level=off|error|warn|info|debug|trace` through the shared Clap group.
 Precedence is explicit flag > `CLIS_LOG_LEVEL` > off. Reject invalid effective
 values before the domain operation. Preserve GNU meanings of `-v`, `-q`,
-`--verbose`, and `--quiet`; there are no shared short verbosity aliases.
+`--verbose`, and `--quiet`; `LogArgs` has no short verbosity aliases. The opt-in
+`GlobalLogArgs` group uses `-L`; use it only when the utility's option grammar
+permits that alias.
 
 Use built-in text formatting on stderr, without ANSI. Keep stdout for the
 utility's data/status contract. There are no file/JSON options or separate timing

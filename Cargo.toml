@@ -11,6 +11,7 @@ readme = "README.md"
 include = ["README.md", "LICENSE", "build.rs", "Cargo.toml", "src/**/*.rs"]
 
 [workspace.dependencies]
+csv = "1.4.0"
 log = { version = "0.4", features = ["std"] }
 anyhow = "1.0"
 tracing = { version = "0.1.44", default-features = false, features = ["std", "attributes"] }

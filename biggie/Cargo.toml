@@ -10,7 +10,12 @@ repository.workspace = true
 readme.workspace = true
 include.workspace = true
 
+[features]
+default = ["csv"]
+csv = ["dep:csv"]
+
 [dependencies]
+csv = { workspace = true, optional = true }
 clap = { workspace = true }
 anyhow.workspace = true
 tracing.workspace = true

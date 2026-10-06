@@ -49,12 +49,35 @@ cargo run --locked -p cli-tracing --example clap -- --log-level=debug
 CLIS_LOG_LEVEL=trace cargo run --locked -p cli-tracing --example clap -- --log-level=off
 ```
 
+For commands with subcommands, flatten `GlobalLogArgs` instead. Its global
+`-L/--log-level` captures the effective flag/environment value without validating
+an overridden value. After parsing, call `resolve()` and map any error to Clap's
+`ValueValidation` before invoking `run`. The result is the same `LogArgs`
+configuration used by the runner; subscriber initialization remains in `run`.
+
+```rust
+# use clap::{CommandFactory, Parser};
+# #[derive(Parser)]
+# struct Cli {
+#     #[command(flatten)]
+#     logging: cli_tracing::GlobalLogArgs,
+# }
+let cli = Cli::try_parse_from(["example", "--log-level", "off"])?;
+let logging = cli.logging.resolve().map_err(|error| {
+    Cli::command().error(clap::error::ErrorKind::ValueValidation, error)
+})?;
+// Pass &logging to cli_tracing::run::<Cli> at the process boundary.
+# Ok::<(), anyhow::Error>(())
+```
+
 ## Configuration and output
 
 There is one shared flag: `--log-level=off|error|warn|info|debug|trace`.
 Clap resolves explicit flag > `CLIS_LOG_LEVEL` > `off`. Invalid effective values
 are parsing errors; an explicit flag overrides even an invalid environment value.
-There are no shared short aliases, file/JSON settings, or separate timing switch.
+`LogArgs` has no short aliases; the opt-in `GlobalLogArgs` group adds `-L` for
+subcommand CLIs whose option grammar permits it. There are no file/JSON settings
+or separate timing switch.
 `RUST_LOG` and other `CLIS_*` variables are not read by this setup.
 
 Logs use tracing-subscriber's built-in text formatter, timestamps, and stderr,
