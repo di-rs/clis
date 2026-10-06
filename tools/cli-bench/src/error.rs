@@ -4,10 +4,11 @@ pub enum ErrorKind {
     UnsupportedSchema,
     InvalidSuite,
     Evidence,
+    Execution,
     Io,
 }
 
-/// A suite configuration failure; process status belongs to the CLI adapter.
+/// Configuration, evidence or execution failure; CLI exit mapping stays at the edge.
 #[derive(Debug, thiserror::Error)]
 pub enum BenchError {
     #[error("unsupported suite schema version {0}; expected 1")]
@@ -18,7 +19,9 @@ pub enum BenchError {
     Parse(#[from] toml::de::Error),
     #[error("evidence error: {0}")]
     Evidence(String),
-    #[error("evidence I/O: {0}")]
+    #[error("execution error: {0}")]
+    Execution(String),
+    #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
     #[error("evidence JSON: {0}")]
     Json(#[from] serde_json::Error),
@@ -31,6 +34,7 @@ impl BenchError {
         match self {
             Self::Evidence(_) | Self::Json(_) => ErrorKind::Evidence,
             Self::Io(_) => ErrorKind::Io,
+            Self::Execution(_) => ErrorKind::Execution,
             Self::UnsupportedSchema(_) => ErrorKind::UnsupportedSchema,
             Self::InvalidSuite(_) | Self::Parse(_) => ErrorKind::InvalidSuite,
         }

@@ -96,7 +96,7 @@ fn require(condition: bool, message: impl Into<String>) -> Result<(), BenchError
     }
 }
 
-fn validate_strings(value: &serde_json::Value) -> Result<(), BenchError> {
+pub fn validate_strings(value: &serde_json::Value) -> Result<(), BenchError> {
     match value {
         serde_json::Value::String(value) => {
             require(!value.contains('\0'), "suite strings must not contain NUL")
@@ -165,7 +165,7 @@ fn validate_limits(limits: &Limits) -> Result<(), BenchError> {
     Ok(())
 }
 
-fn validate_path(path: &str) -> Result<(), BenchError> {
+pub fn validate_path(path: &str) -> Result<(), BenchError> {
     let drive_prefix = path.as_bytes().get(1) == Some(&b':')
         && path.as_bytes().first().is_some_and(u8::is_ascii_alphabetic);
     require(
@@ -195,8 +195,8 @@ fn validate_reference(id: &str, datasets: &BTreeSet<&str>) -> Result<(), BenchEr
     require(datasets.contains(id), format!("unknown dataset ID {id:?}"))
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum ArgumentToken<'a> {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ArgumentToken<'a> {
     Literal,
     Input(&'a str),
     Scratch(&'a str),
@@ -204,7 +204,7 @@ enum ArgumentToken<'a> {
     Output,
 }
 
-fn parse_argument(argument: &str) -> Result<ArgumentToken<'_>, BenchError> {
+pub fn parse_argument(argument: &str) -> Result<ArgumentToken<'_>, BenchError> {
     if argument.starts_with("@@") {
         return Ok(ArgumentToken::Literal);
     }
@@ -364,7 +364,7 @@ fn validate_generator_arguments(argv: &[String]) -> Result<(), BenchError> {
     )
 }
 
-fn validate_case(case: &CaseSpec, datasets: &BTreeSet<&str>) -> Result<(), BenchError> {
+pub fn validate_case(case: &CaseSpec, datasets: &BTreeSet<&str>) -> Result<(), BenchError> {
     require(
         !case.purpose.trim().is_empty(),
         "case purpose must be nonempty",
@@ -1127,5 +1127,12 @@ mod tests {
         ] {
             rejects(&MINIMAL.replace(needle, replacement));
         }
+    }
+    #[test]
+    fn rejects_explicit_early_exit_pipe_policy() {
+        rejects(&MINIMAL.replace(
+            "kind = \"null\"",
+            "kind = \"pipe\"\ndataset = \"tiny\"\nallow_early_exit = true",
+        ));
     }
 }

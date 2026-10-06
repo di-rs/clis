@@ -359,6 +359,7 @@ dependencies = [
  "clap",
  "cli-tracing",
  "predicates",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",

@@ -15,3 +15,15 @@ mod store;
 pub use artifact::{fingerprint, register_binary, verify_file};
 pub use host::collect_host;
 pub use store::{RunBundle, RunWriter, Store};
+
+mod process;
+pub use process::{
+    CapturePaths, CommandInput, CommandOutput, CommandSpec, ExecutionPolicy, ProcessOutcome,
+    ProcessRunner, ProcessStatus, StopReason,
+};
+
+mod invocation;
+pub use invocation::{
+    BoundExecutable, BoundTool, DatasetSet, Invocation, InvocationScope, PipelineTools,
+    RoleBindings, resolve_invocation,
+};
