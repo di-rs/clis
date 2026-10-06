@@ -31,7 +31,7 @@ and limitations.
 | [uniqr](coreutils/uniqr/README.md) | Filter or count adjacent repeated lines | GNU `uniq` |
 | [wcr](coreutils/wcr/README.md) | Count lines, words, bytes, and characters | GNU `wc` |
 | [calr](calr/README.md) | Print month or year calendars | util-linux `cal` |
-| [biggie](biggie/README.md) | Generate files of random text | No direct counterpart |
+| [biggie](biggie/README.md) | Generate text, records, fields, bytes and sorted pairs | No direct counterpart |
 | [parsu](parsu/README.md) | Parse a restricted XML-like language | No direct counterpart |
 | [kara](kara/README.md) | Edit text in a terminal | No direct counterpart |
 

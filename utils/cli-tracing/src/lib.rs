@@ -19,6 +19,38 @@ pub struct LogArgs {
     log_level: LevelFilter,
 }
 
+/// Global diagnostic arguments for CLIs with subcommands.
+///
+/// Capture the effective value first, then call [`Self::resolve`] after Clap has
+/// propagated subcommand flags. This lets an explicit flag override an invalid
+/// environment value without reparsing argv or initializing diagnostics.
+#[derive(Args, Debug)]
+pub struct GlobalLogArgs {
+    /// Diagnostic threshold: off, error, warn, info, debug, trace
+    #[arg(
+        short = 'L',
+        long,
+        global = true,
+        env = "CLIS_LOG_LEVEL",
+        default_value = "off"
+    )]
+    log_level: std::ffi::OsString,
+}
+
+impl GlobalLogArgs {
+    /// Validate the effective level and produce configuration for [`run`].
+    ///
+    /// # Errors
+    /// Returns a diagnostic for unsupported or non-UTF-8 levels. The CLI should
+    /// report this as a Clap value-validation error before invoking [`run`].
+    pub fn resolve(&self) -> Result<LogArgs, &'static str> {
+        let value = self.log_level.to_str().ok_or("--log-level must be UTF-8")?;
+        parse_level(value)
+            .map(|log_level| LogArgs { log_level })
+            .map_err(|_| "invalid --log-level: expected off, error, warn, info, debug or trace")
+    }
+}
+
 fn parse_level(value: &str) -> Result<LevelFilter, &'static str> {
     match value {
         "off" => Ok(LevelFilter::OFF),

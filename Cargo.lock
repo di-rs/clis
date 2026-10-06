@@ -159,6 +159,7 @@ dependencies = [
  "assert_fs",
  "clap",
  "cli-tracing",
+ "csv",
  "log",
  "predicates",
  "rand",

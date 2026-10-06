@@ -186,3 +186,33 @@ fn stderr_write_failure_cannot_report_success() -> Result<()> {
     assert!(output.status.success(), "{output:?}");
     Ok(())
 }
+
+#[derive(Parser)]
+struct GlobalCli {
+    #[command(flatten)]
+    logging: cli_tracing::GlobalLogArgs,
+    #[command(subcommand)]
+    command: GlobalCommand,
+}
+
+#[derive(clap::Subcommand)]
+enum GlobalCommand {
+    Work,
+}
+
+#[test]
+fn global_levels_resolve_after_subcommand_propagation() -> Result<()> {
+    for args in [
+        vec!["test", "--log-level", "invalid", "work", "-L", "off"],
+        vec!["test", "-L", "off", "work"],
+        vec!["test", "work", "--log-level", "off"],
+    ] {
+        GlobalCli::try_parse_from(args)?
+            .logging
+            .resolve()
+            .map_err(anyhow::Error::msg)?;
+    }
+    let cli = GlobalCli::try_parse_from(["test", "work", "--log-level", "invalid"])?;
+    assert!(cli.logging.resolve().is_err());
+    Ok(())
+}

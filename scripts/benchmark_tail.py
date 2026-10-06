@@ -62,7 +62,7 @@ def benchmark(args) -> int:
             path = getattr(args, name+'_lockfile')
             report['lockfiles'][name] = fingerprint(path) if path else {'status': 'not supplied'}
         data = out/'input.txt'
-        generate = [str(args.generator), '--seed', '42', '--lines', '1000' if args.smoke else '1000000',
+        generate = [str(args.generator), 'text', '--seed', '42', '--lines', '1000' if args.smoke else '1000000',
                     '--words-per-line', '4', '--word-length', '8', '--line-ending', 'lf', str(data)]
         generated = subprocess.run(generate, capture_output=True, timeout=120, check=True)
         (out/'generator.stdout').write_bytes(generated.stdout)

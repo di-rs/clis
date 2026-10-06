@@ -19,7 +19,7 @@ class BenchmarkChecks(unittest.TestCase):
             reference=executable(root/'gnu-tail','sys.stdout.buffer.write(b"tail\\n")')
             candidate=executable(root/'tailr',body)
             baseline=executable(root/'baseline','sys.stdout.buffer.write(b"tail\\n")')
-            generator=executable(root/'biggie','from pathlib import Path; Path(sys.argv[-1]).write_bytes(b"first\\ntail\\n")')
+            generator=executable(root/'biggie','from pathlib import Path; assert sys.argv[1] == "text"; Path(sys.argv[-1]).write_bytes(b"first\\ntail\\n")')
             timer=executable(root/'hyperfine','''import os, json
 from pathlib import Path
 Path(os.environ['TIMER_CALLED']).write_text('called')
