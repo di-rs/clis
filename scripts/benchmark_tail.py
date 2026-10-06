@@ -12,7 +12,9 @@ import shutil
 import subprocess
 import sys
 
-from reference_check import check_cases
+from reference_check import check_cases, run_command
+
+TIMING_TIMEOUT_SECONDS = 600
 
 
 def fingerprint(path: Path) -> dict:
@@ -87,7 +89,11 @@ def benchmark(args) -> int:
             command = [timer, '--warmup', '3', '--runs', '20', '--export-json', str(destination)]
             for label, binary in [('reference', args.reference), ('previous', args.baseline), ('candidate', args.candidate)]:
                 command += ['--command-name', label, timed_command(binary, case, data)]
-            subprocess.run(command, env=dict(os.environ, LC_ALL='C', TZ='UTC'), check=True, timeout=600)
+            timed = run_command(command, out, None, TIMING_TIMEOUT_SECONDS, out/(case['id']+'-timing'))
+            if timed['timed_out']:
+                raise ValueError(f"Benchmark {case['id']} timed out; process group terminated")
+            if timed['status'] != 0:
+                raise ValueError(f"Benchmark {case['id']} failed with status {timed['status']}")
             samples = json.loads(destination.read_text())
             results = {result['command']: result for result in samples['results']}
             ratios = {name: results['candidate']['mean']/results[name]['mean'] for name in ['reference', 'previous']}

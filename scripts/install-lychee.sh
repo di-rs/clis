@@ -9,6 +9,6 @@ curl --fail --silent --show-error --location --max-time 120 \
   --output "$RUNNER_TEMP/lychee.tar.gz"
 echo "73657a111819a30c47c08352896796f23d64e4eb2b3ed39b6d32149241566fc5  $RUNNER_TEMP/lychee.tar.gz" | sha256sum --check
 mkdir -p "$RUNNER_TEMP/lychee-bin"
-tar -xzf "$RUNNER_TEMP/lychee.tar.gz" -C "$RUNNER_TEMP/lychee-bin" lychee
+tar -xzf "$RUNNER_TEMP/lychee.tar.gz" -C "$RUNNER_TEMP/lychee-bin" --strip-components=1 lychee-x86_64-unknown-linux-musl/lychee
 echo "$RUNNER_TEMP/lychee-bin" >> "$GITHUB_PATH"
 "$RUNNER_TEMP/lychee-bin/lychee" --version

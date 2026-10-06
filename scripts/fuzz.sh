@@ -15,11 +15,15 @@ chmod +x "$temporary/cargo"
 cp fuzz/Cargo.lock "$temporary/fuzz.lock"
 cp Cargo.lock "$temporary/workspace.lock"
 export PATH="$temporary:$PATH"
+# A portable cargo-fuzz binary may have been compiled for musl. Fuzz the host
+# rustc target explicitly so AddressSanitizer uses the supported native libc.
+host_target=$(rustc -vV | sed -n 's/^host: //p')
+[[ -n "$host_target" ]] || { echo 'rustc did not report a host target' >&2; exit 1; }
 cargo fetch --locked --manifest-path fuzz/Cargo.toml
-cargo fuzz build "$target"
+cargo fuzz build "$target" --target "$host_target"
 mkdir -p "fuzz/runs/$target/corpus" "fuzz/artifacts/$target"
 cp -R "fuzz/corpus/$target/." "fuzz/runs/$target/corpus/"
-cargo fuzz run "$target" "fuzz/corpus/$target" -- -runs=0 -max_len=4096 -timeout=5 -rss_limit_mb=1024
-cargo fuzz run "$target" "fuzz/runs/$target/corpus" -- -max_total_time="$seconds" -max_len=4096 -timeout=5 -rss_limit_mb=1024
+cargo fuzz run "$target" "fuzz/corpus/$target" --target "$host_target" -- -runs=0 -max_len=4096 -timeout=5 -rss_limit_mb=1024
+cargo fuzz run "$target" "fuzz/runs/$target/corpus" --target "$host_target" -- -max_total_time="$seconds" -max_len=4096 -timeout=5 -rss_limit_mb=1024
 cmp "$temporary/fuzz.lock" fuzz/Cargo.lock
 cmp "$temporary/workspace.lock" Cargo.lock
