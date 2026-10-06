@@ -1,24 +1,24 @@
-## Summary
+## Intent
 
-<!-- Describe the problem and resulting behavior. Link a related issue if there is one.
-For compatibility changes, name the GNU baseline, selected BSD additions, and affected behavior.
-For API changes, describe how CLI and Rust callers share the implementation. -->
+<!-- State the problem, desired outcome, and relevant constraints in one or two
+sentences. Link a related issue if applicable. -->
 
-## Validation
+## What Changed
 
-<!-- List commands actually run and their outcomes. Distinguish baseline failures
-from regressions. For docs-only changes, state the relevant checks; explain any
-required checks that were not run. Include direct library tests and doctests where
-applicable, and terminal verification for Kara changes. For performance claims or
-hot-path changes, link correctness checks, raw before/after and reference results,
-workload/platform details, memory impact, and regressions; otherwise explain why
-benchmarks were not run. -->
+<!-- Describe the final behavior and key changes in a few concise bullets.
+Include material limitations, breaking changes, or follow-up work here.
+For compatibility/API work, name the reference and affected CLI/library behavior;
+link updated contracts or audit records when relevant. -->
 
-## Notes
+## Risk Assessment
 
-<!-- State material limitations, breaking changes, or follow-up work. Write "None"
-when there are none. Link updated compatibility records and documentation. Mark
-proposed behavior and future infrastructure as planned. For a utility migration or
-standards audit, link its U1–U9/P1–P4 evidence and explicit acceptance of performance
-regressions; existing gaps remain visible. Keep the description
-proportional to the change. -->
+<!-- State Low, Medium, or High with a concrete reason: what could break and who
+or what is affected. Mention mitigation or accepted regressions when relevant.
+A short sentence is enough. -->
+
+## Testing/Validation
+
+<!-- Summarize checks and outcomes in one or two short bullets. Mention material
+failures or unverified behavior. For performance claims or hot-path changes, link
+benchmark evidence or state why it is unavailable. Omit logs, test counts, and
+repeated runs. This reports completed verification; it does not request new checks. -->

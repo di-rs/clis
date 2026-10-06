@@ -5,8 +5,8 @@ description: Use when naming a branch, committing changes, or opening or updatin
 
 # Git delivery
 
-Read the root `AGENTS.md` and the relevant check commands in `README.md` and
-`prek.toml`. Execute the requested parts of the workflow. A commit request alone
+Read the root `AGENTS.md`, [CONTRIBUTING checks](../../../CONTRIBUTING.md#checks),
+and `prek.toml`. Execute the requested parts of the workflow. A commit request alone
 stays local; opening a PR includes pushing its feature branch. For local review,
 leave changes uncommitted on the requested branch, including the default branch.
 
@@ -40,8 +40,10 @@ Mark actual breaking commits with `!` or a `BREAKING CHANGE:` footer.
 
 ## Commit
 
-Run relevant package and workspace checks; distinguish baseline failures from
-regressions. Review and stage explicit task paths or hunks. Plain `git commit`
+Use `clis-verify` to select relevant checks and reuse passing results for the
+unchanged code and check configuration. Do not rerun checks solely to commit or
+prepare a PR. Distinguish baseline failures from regressions.
+Review and stage explicit task paths or hunks. Plain `git commit`
 includes everything staged: isolate the commit if unrelated changes are already
 in the index, preserving those staged and working changes. When entire selected
 files contain only task changes, `git commit --only -- <paths>` excludes other
@@ -52,10 +54,24 @@ stage, silently bypass failed hooks, or amend someone else's commit.
 ## Pull request
 
 Check `gh` availability/authentication and review the complete base-to-head diff
-and commit list. Fill `.github/pull_request_template.md` for every PR. Keep its
-Summary, Validation, and Notes sections; report actual commands and outcomes,
-including skipped checks and existing failures. Write the body to a temporary
-file with real newlines and pass `--body-file`.
+and commit list. Fill `.github/pull_request_template.md` for every PR, preserving
+this order:
+
+- **Intent:** the user's problem, desired outcome, and relevant constraints.
+- **What Changed:** the final behavior and key changes from the full branch diff,
+  including material limitations, breaking changes, or follow-up work.
+- **Risk Assessment:** Low, Medium, or High with a concrete reason tied to the
+  changed behavior, affected users or data, and mitigation where relevant.
+- **Testing/Validation:** one or two short bullets summarizing checks and outcomes,
+  including material failures or unverified behavior. Keep this section last.
+
+Scale detail to the change. Write for a reviewer without the conversation:
+summarize relevant decisions, omit private conversation and local machine paths,
+and describe the final result rather than the sequence of attempts. Risk is a
+judgment about what could break; passing tests alone do not establish low risk.
+Omit logs, test counts, and repeated runs. Report existing verification; writing
+or updating the description does not trigger new checks. Write the body to a
+temporary file with real newlines and pass `--body-file`.
 
 Query existing PRs by repository, head owner/branch, and base before creating.
 Reuse a matching open PR; update it only when requested and preserve its review state.
