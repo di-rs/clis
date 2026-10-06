@@ -444,6 +444,20 @@ impl RunWriter {
         let (Some(request), Some(contract)) = (&self.experiment, &manifest.contract) else {
             return Ok(());
         };
+        for (role, artifact) in &manifest.roles {
+            if let Some(build) = &artifact.build
+                && build.policy != contract.build
+            {
+                return Err(evidence(format!(
+                    "{role:?} build policy differs from experiment contract"
+                )));
+            }
+        }
+        // validate_manifest verifies tool bytes only when their bindings are present.
+        // Retain partial failed manifests without treating their claimed identities as verified.
+        if manifest.tool_paths.is_none() {
+            return Ok(());
+        }
         let Some(previous) = manifest
             .roles
             .get(&Role::Previous)
@@ -453,11 +467,6 @@ impl RunWriter {
                 "resolved experiment requires a Git-built previous role",
             ));
         };
-        if previous.policy != contract.build {
-            return Err(evidence(
-                "previous build policy differs from experiment contract",
-            ));
-        }
         let record = ExperimentRecord {
             schema_version: 1,
             starting_sha: previous.source_sha.clone(),

@@ -341,3 +341,210 @@ fn experiment_allows_new_declared_selection_but_rejects_policy_or_base_changes()
     )?;
     Ok(())
 }
+
+#[test]
+fn unresolved_failed_tools_do_not_freeze_experiment_contract()
+-> Result<(), Box<dyn std::error::Error>> {
+    use cli_bench::*;
+    let root = assert_fs::TempDir::new()?;
+    let store = Store::open(&root.path().join("evidence"))?;
+    let source = root.path().join("tool");
+    std::fs::write(&source, b"abc")?;
+    let suite = parse_suite(include_str!("inputs/minimal-suite.toml"))?;
+    let request = ExperimentRequest {
+        id: "unresolved-tools".into(),
+        hypothesis: "improve".into(),
+        change_summary: "change".into(),
+        requested_previous: "base".into(),
+        requested_candidate: "HEAD".into(),
+    };
+    let anchor = store
+        .root()
+        .join("experiments/unresolved-tools/experiment.json");
+    for outcome in [RunOutcome::Failed, RunOutcome::Incomplete] {
+        let run = store.begin_tagged_run(&suite, &request)?;
+        let mut manifest = resolved_manifest(&store, &run, &source)?;
+        manifest.experiment = Some(request.clone());
+        manifest.tool_paths = None;
+        manifest
+            .contract
+            .as_mut()
+            .ok_or("missing contract")?
+            .harness
+            .file
+            .sha256 = "0".repeat(64);
+        let result = RunResult {
+            schema_version: 1,
+            outcome,
+            message: Some("tool resolution failed".into()),
+        };
+        let bundle = run.finish(&manifest, &result)?;
+        let retained: RunManifest =
+            serde_json::from_slice(&std::fs::read(bundle.path.join("manifest.json"))?)?;
+        require(
+            retained == manifest,
+            "partial failed manifest was not retained",
+        )?;
+        require(
+            bundle.result == result,
+            "failed/incomplete outcome was not retained",
+        )?;
+        require(
+            !anchor.exists(),
+            "unverified failed tool identity froze experiment",
+        )?;
+    }
+    let run = store.begin_tagged_run(&suite, &request)?;
+    let mut manifest = resolved_manifest(&store, &run, &source)?;
+    manifest.experiment = Some(request);
+    let bundle = run.finish(&manifest, &complete())?;
+    let anchor: ExperimentRecord = serde_json::from_slice(&std::fs::read(anchor)?)?;
+    require(
+        Some(anchor.contract) == bundle.manifest.contract,
+        "valid attempt did not establish its verified contract",
+    )?;
+    require(
+        std::fs::read_dir(store.root().join("experiments/unresolved-tools/attempts"))?.count() == 3,
+        "failed or resolved attempt reference was lost",
+    )?;
+    Ok(())
+}
+
+#[test]
+fn tagged_known_role_policy_drift_is_rejected_and_attempts_are_retained()
+-> Result<(), Box<dyn std::error::Error>> {
+    use cli_bench::*;
+    let root = assert_fs::TempDir::new()?;
+    let store = Store::open(&root.path().join("evidence"))?;
+    let source = root.path().join("tool");
+    std::fs::write(&source, b"abc")?;
+    let suite = parse_suite(include_str!("inputs/minimal-suite.toml"))?;
+    let request = ExperimentRequest {
+        id: "known-policies".into(),
+        hypothesis: "improve".into(),
+        change_summary: "change".into(),
+        requested_previous: "base".into(),
+        requested_candidate: "HEAD".into(),
+    };
+    let run = store.begin_tagged_run(&suite, &request)?;
+    let mut initial = resolved_manifest(&store, &run, &source)?;
+    initial.experiment = Some(request.clone());
+    let mut build = initial
+        .roles
+        .get(&Role::Previous)
+        .and_then(|record| record.build.clone())
+        .ok_or("missing previous build")?;
+    build.source_sha = "2222222222222222222222222222222222222222".into();
+    initial.roles.insert(
+        Role::Candidate,
+        register_binary(&source, Some(build.clone()), &store)?,
+    );
+    run.finish(&initial, &complete())?;
+    let anchor_path = store
+        .root()
+        .join("experiments/known-policies/experiment.json");
+    let anchor = std::fs::read(&anchor_path)?;
+    for (role, changed_field, verified_tools) in [
+        (Role::Candidate, "compiler", true),
+        (Role::Candidate, "target", true),
+        (Role::Candidate, "flags", true),
+        (Role::Reference, "compiler", true),
+        (Role::Candidate, "compiler", false),
+    ] {
+        let run = store.begin_tagged_run(&suite, &request)?;
+        let path = run.path().to_path_buf();
+        let mut manifest = resolved_manifest(&store, &run, &source)?;
+        manifest.experiment = Some(request.clone());
+        let mut changed = build.clone();
+        match changed_field {
+            "compiler" => changed.policy.compiler = "different compiler".into(),
+            "target" => changed.policy.target = "different target".into(),
+            "flags" => changed
+                .policy
+                .settings
+                .rustflags
+                .push("-Copt-level=1".into()),
+            _ => return Err("invalid test field".into()),
+        }
+        manifest
+            .roles
+            .insert(role, register_binary(&source, Some(changed), &store)?);
+        let mut result = complete();
+        if !verified_tools {
+            manifest.tool_paths = None;
+            result.outcome = RunOutcome::Failed;
+            result.message = Some("tool resolution failed".into());
+        }
+        require(
+            run.finish(&manifest, &result).is_err(),
+            "tagged known role policy drift was accepted",
+        )?;
+        let retained: RunManifest =
+            serde_json::from_slice(&std::fs::read(path.join("manifest.json"))?)?;
+        require(retained == manifest, "rejected attempt manifest was lost")?;
+        let status: RunResult = serde_json::from_slice(&std::fs::read(path.join("status.json"))?)?;
+        require(
+            status.outcome == RunOutcome::Incomplete,
+            "rejected attempt was marked complete",
+        )?;
+        require(
+            std::fs::read(&anchor_path)? == anchor,
+            "rejected attempt changed frozen policy",
+        )?;
+    }
+    // A labelled unknown prebuilt remains usable; no compiler policy is inferred for it.
+    let run = store.begin_tagged_run(&suite, &request)?;
+    let mut manifest = resolved_manifest(&store, &run, &source)?;
+    manifest.experiment = Some(request);
+    require(
+        manifest
+            .roles
+            .get(&Role::Candidate)
+            .is_some_and(|record| record.build.is_none()),
+        "fixture lost unknown provenance",
+    )?;
+    run.finish(&manifest, &complete())?;
+    require(
+        std::fs::read_dir(store.root().join("experiments/known-policies/attempts"))?.count() == 7,
+        "policy rejection lost an attempt reference",
+    )?;
+    Ok(())
+}
+
+#[test]
+fn untagged_known_policy_differences_remain_product_comparisons()
+-> Result<(), Box<dyn std::error::Error>> {
+    use cli_bench::*;
+    let root = assert_fs::TempDir::new()?;
+    let store = Store::open(&root.path().join("evidence"))?;
+    let source = root.path().join("tool");
+    std::fs::write(&source, b"abc")?;
+    let suite = parse_suite(include_str!("inputs/minimal-suite.toml"))?;
+    let run = store.begin_run(&suite)?;
+    let mut manifest = resolved_manifest(&store, &run, &source)?;
+    let mut changed = manifest
+        .roles
+        .get(&Role::Previous)
+        .and_then(|record| record.build.clone())
+        .ok_or("missing previous build")?;
+    changed.policy.compiler = "different compiler".into();
+    changed.policy.target = "different target".into();
+    changed
+        .policy
+        .settings
+        .rustflags
+        .push("-Copt-level=1".into());
+    for role in [Role::Candidate, Role::Reference] {
+        manifest.roles.insert(
+            role,
+            register_binary(&source, Some(changed.clone()), &store)?,
+        );
+    }
+    let bundle = run.finish(&manifest, &complete())?;
+    require(
+        bundle.manifest == manifest,
+        "untagged build differences were not retained",
+    )?;
+    store.load_run(&bundle.manifest.run_id)?;
+    Ok(())
+}
