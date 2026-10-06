@@ -3,3 +3,6 @@
 
 # Python policy-check bytecode.
 __pycache__/
+
+/tests/consumers/target/
+/utils/comp_macro/wip/

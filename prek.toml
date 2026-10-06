@@ -57,4 +57,12 @@ hooks = [
     files = '^scripts/.*\.py$',
     pass_filenames = false,
   },
+  {
+    id = "domain-clippy",
+    name = "domain library boundaries",
+    language = "system",
+    entry = "bash scripts/check-domain.sh",
+    files = '(^biggie/|^coreutils/tailr/|^scripts/check-domain\.sh$|^\.config/domain-clippy/|(^|/)Cargo\.(toml|lock)$|^rust-toolchain\.toml$)',
+    pass_filenames = false,
+  },
 ]

@@ -31,10 +31,16 @@ struct Comp {
 
 impl Parse for Comp {
     fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mapping = input.parse()?;
+        let for_if_clause = input.parse()?;
+        let mut additional_for_if_clauses = Vec::new();
+        while input.peek(syn::Token![for]) {
+            additional_for_if_clauses.push(input.parse()?);
+        }
         Ok(Self {
-            mapping: input.parse()?,
-            for_if_clause: input.parse()?,
-            additional_for_if_clauses: parse_zero_or_more(input),
+            mapping,
+            for_if_clause,
+            additional_for_if_clauses,
         })
     }
 }
@@ -109,21 +115,16 @@ impl Parse for ForIfClause {
         let pattern = input.parse()?;
         input.parse::<syn::Token![in]>()?;
         let sequence = input.parse()?;
-        let conditions = parse_zero_or_more(input);
+        let mut conditions = Vec::new();
+        while input.peek(syn::Token![if]) {
+            conditions.push(input.parse()?);
+        }
         Ok(Self {
             pattern,
             sequence,
             conditions,
         })
     }
-}
-
-fn parse_zero_or_more<T: Parse>(input: ParseStream) -> Vec<T> {
-    let mut result = Vec::new();
-    while let Ok(item) = input.parse() {
-        result.push(item);
-    }
-    result
 }
 
 struct Pattern(syn::Pat);

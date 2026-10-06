@@ -1,0 +1,7 @@
+error: unexpected end of input, expected an expression
+ --> tests/ui/malformed_condition.rs:3:13
+  |
+3 |     let _ = comp![x for x in [1, 2] if];
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the macro `comp` (in Nightly builds, run with -Z macro-backtrace for more info)

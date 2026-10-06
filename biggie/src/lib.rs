@@ -1,3 +1,5 @@
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+
 use rand::distr::Alphanumeric;
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 use std::{

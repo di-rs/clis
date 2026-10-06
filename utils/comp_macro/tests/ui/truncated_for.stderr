@@ -1,0 +1,7 @@
+error: unexpected end of input, expected one of: identifier, `::`, `<`, `_`, literal, `const`, `ref`, `mut`, `&`, parentheses, square brackets, `..`, `const`
+ --> tests/ui/truncated_for.rs:3:13
+  |
+3 |     let _ = comp![x for x in [1, 2] for];
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the macro `comp` (in Nightly builds, run with -Z macro-backtrace for more info)
