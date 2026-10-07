@@ -1245,19 +1245,34 @@ mod tests {
     fn dataset_faults_keep_diagnostics_and_never_publish_verified_entries()
     -> Result<(), Box<dyn std::error::Error>> {
         use crate::*;
-        for (script, reason) in [
-            ("printf 'failed fixture' >&2; exit 7", "expected exit"),
-            ("printf 'timeout fixture' >&2; /bin/sleep 3", "Timeout"),
-            ("printf 'missing fixture' >&2; exit 0", "No such file"),
+        for (name, script, reason) in [
             (
+                "nonzero-status",
+                "printf 'failed fixture' >&2; exit 7",
+                "expected exit",
+            ),
+            (
+                "timeout",
+                "printf 'timeout fixture' >&2; /bin/sleep 3",
+                "Timeout",
+            ),
+            (
+                "missing-output",
+                "printf 'missing fixture' >&2; exit 0",
+                "No such file",
+            ),
+            (
+                "file-limit",
                 "for output do :; done; printf '0123456789012345' > \"$output\"; /bin/sleep 3",
                 "FileLimit",
             ),
             (
+                "invalid-shape",
                 "for output do :; done; printf 'bad!' > \"$output\"",
                 "shape",
             ),
             (
+                "symlink-output",
                 "for output do :; done; /bin/ln -s /dev/null \"$output\"",
                 "regular",
             ),
@@ -1272,12 +1287,23 @@ mod tests {
                 bindings: &bindings,
                 expected: None,
             };
-            let error = prepare_datasets(&guard, &suite, &request, &store, &dataset_runner())
+            // Only the intentional timeout fixture needs the short deadline.
+            // Other fault assertions must survive concurrent test process startup.
+            let runner = ProcessRunner::new(ExecutionPolicy {
+                timeout: if name == "timeout" {
+                    std::time::Duration::from_millis(250)
+                } else {
+                    std::time::Duration::from_secs(3)
+                },
+                max_stream_bytes: 1024,
+                cancellation: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            });
+            let error = prepare_datasets(&guard, &suite, &request, &store, &runner)
                 .err()
                 .ok_or("generator fault accepted")?;
             require(
                 error.to_string().contains(reason),
-                &format!("wrong fault: {error}"),
+                &format!("{name}: expected {reason}, observed {error}"),
             )?;
             let entries: Vec<_> =
                 std::fs::read_dir(store.root().join("datasets"))?.collect::<Result<_, _>>()?;

@@ -6,7 +6,8 @@ An original correctness-checked CLI benchmark harness. Local build/check/run,
 independent elapsed/RSS measurements, report/compare, portable export, strict
 replay and compact history are implemented. The package-owned Biggie, tailr and mkdirr
 suites use only Biggie-generated content and have explicit primary and confirmation
-cases. Hosted publication and workflow operation remain planned.
+cases. A read-only native benchmark workflow is implemented; hosted execution and
+trusted publication remain unverified/planned respectively.
 
 ## Quick start
 
@@ -57,7 +58,7 @@ selecting an unknown case fails. Ordering follows declaration order.
 
 | Command | Implemented flags and defaults |
 | --- | --- |
-| `run`, `check` | `-p/--package` workspace package or mutually exclusive `-s/--suite` TOML path; repeatable `-c/--case`; `-r/--candidate-ref` or `-a/--candidate`; `-b/--previous-ref` or `-P/--previous`; optional `-x/--reference`; `-g/--biggie` or `-G/--generator-ref`; `-t/--toolchain`; comma-delimited/repeatable `-F/--features`; `-N/--no-default-features`; `-m/--measurement-profile full|smoke` (full); `-d/--data-dir` (.cli-bench); `-M/--manifest-path` Cargo manifest for package discovery/Git repository context; `-f/--format terminal|json|markdown` (terminal); `-H/--hyperfine` explicit engine path. |
+| `run`, `check` | `-p/--package` workspace package or mutually exclusive `-s/--suite` TOML path; repeatable `-c/--case`; `-r/--candidate-ref` or `-a/--candidate`; `-b/--previous-ref` or `-P/--previous`; optional `-x/--reference`; `-g/--biggie` or `-G/--generator-ref`; `-t/--toolchain`; comma-delimited/repeatable `-F/--features`; `-N/--no-default-features`; `-m/--measurement-profile full, smoke` (full); `-d/--data-dir` (.cli-bench); `-M/--manifest-path` Cargo manifest for package discovery/Git repository context; `-f/--format terminal, json, markdown` (terminal); `-H/--hyperfine` explicit engine path. |
 | `build` | `-p/--package`, `-r/--revision`; optional `-t/--toolchain`, `-F/--features`, `-N/--no-default-features`, `-d/--data-dir` (.cli-bench). Requires the package's sole binary; Rust API/suites allow explicit binary choice. |
 | `report` | `-i/--input` sealed run or bundle directory; `-f/--format` (terminal). |
 | `compare` | `-i/--input`, `-b/--baseline`, `-a/--candidate` distinct present role names; `-f/--format` (terminal). Only compares roles in that run. |
@@ -435,7 +436,8 @@ reference fails. No GNU/BSD substitution is performed.
 are required. `-t/--toolchain`, `-F/--features`, `-N/--no-default-features`,
 `-m/--measurement-profile full|smoke`, `-d/--data-dir`, `-M/--manifest-path`,
 `-f/--format terminal|json|markdown`, and `-H/--hyperfine` complete local selection.
-Saved suite IDs will be supplied with the reviewed suite catalog in a later slice.
+Use `-p/--package` for runtime discovery of the suite declared in the owning
+package metadata, or `-s/--suite` for an explicit file; there is no saved central catalog.
 
 Untagged checks require no timing programs. Tagged checks require `--experiment`,
 `--hypothesis`, `--change-summary`, and `-b` together, identify Hyperfine 1.20.0
@@ -969,3 +971,74 @@ P1–P4 port requirements are inapplicable to this custom harness: it has no GNU
 original or utility hot path whose superiority is claimed. It supplies evidence for
 ports' P4 work using the governing [benchmark policy](../../docs/benchmarking.md).
 This is an assessment, not universal parity or platform certification.
+
+
+## Native benchmark workflow
+
+[CLI benchmark](../../.github/workflows/cli-bench.yml) runs on PRs to `master`,
+`master` pushes, manual dispatch and reusable calls. `master` was confirmed as the
+remote default branch on 2026-10-07. PR runs check out the exact head and compare
+with its merge-base against the event's exact target SHA; push runs compare the
+candidate's first parent. A root commit fails with unavailable comparison. Manual
+runs accept a full candidate SHA (blank selects the triggering commit) and require
+an exact `target_sha`; reusable PR/push calls can use their event defaults. Inputs
+are environment data and validated full SHAs, never shell source. No PR identity
+override is accepted.
+
+Linux (`ubuntu-24.04`) and native macOS (`macos-15`) stay separate. The tests/smoke
+jobs have 90-minute deadlines; full jobs wait for those jobs and have 120-minute
+deadlines. Tests include the explicit `repository_acceptance_` opt-in group.
+All builds use `nightly-2026-10-04`, locked release settings and isolated source/
+target directories. Candidate, previous and pinned generator artifacts for all
+three packages are built serially before measurement. Runs reuse those verified
+build-cache entries and perform no concurrent tests/builds while timing. The
+harness still verifies identities and Cargo metadata when binding cached roles.
+Every declared primary and confirmation case runs; Biggie has no reference.
+Hyperfine is pinned to 1.20.0. CI explicitly installs GNU Coreutils, records GNU
+`tail`/`mkdir` versions, and identifies GNU time on Linux or native `/usr/bin/time
+-l` on macOS. Installed GNU package releases are recorded, not pinned.
+
+Jobs have `contents: read`, no secrets, no persisted checkout credentials, and
+SHA-pinned actions. Setup-uv caching is disabled. They execute candidate source;
+their artifacts and local Markdown are untrusted. There are no comments, history
+writes or performance thresholds in this workflow. A slower valid candidate
+succeeds; selection/build/correctness/execution/projection/export failures fail.
+A build or run failure is retained per suite while other prepared suites continue.
+
+`publication-linux` and `publication-macos` contain only `publication.json`.
+`full-evidence-linux` and `full-evidence-macos` contain portable evidence exports
+and bounded logs. Smoke jobs use the `smoke-` artifact prefix. All request 90-day
+retention; effective expiry remains explicitly unknown until GitHub's artifact API
+confirms it. The [transport contract](ci/TRANSPORT.md) defines the aggregate 16 MiB
+publication limit, three `HistoryRecord` entries and failure representation.
+The full-evidence upload cap is 512 MiB per platform, including publication and
+log prefixes (1 MiB per log). Exports omit dataset and executable bytes and list
+that omission; exact original local resources are needed for strict replay.
+Do not assume that relocated system executables run on another host.
+Oversized/failed exports leave small publication failure evidence available.
+
+Each shell build/measurement command inherits a 2 GiB per-file limit. A 12 GiB
+allocated-space budget covering `target/` and the job evidence root is checked
+between commands, without filesystem polling during timing. It is a checked
+budget, not a hard aggregate filesystem quota; one command can cross it before
+the next check. Suite-specific generated-byte, evidence and process limits still
+apply. A hosted timeout/runner loss or failure before checkout/Python setup can
+prevent final artifact production; missing artifacts must be reported explicitly.
+Shared runners provide advisory evidence, with no claimed CPU affinity, power or
+cold-cache controls. Local lint/tests do not prove a hosted Linux/macOS run.
+
+Run helper tests and workflow checks locally with the configured Python 3.14:
+
+```sh
+uv run --frozen --project tools/cli-bench/ci python -m unittest discover -s tools/cli-bench/ci
+actionlint
+shellcheck tools/cli-bench/ci/*.sh
+zizmor --offline --no-progress .github/workflows
+```
+
+The helper tests use original temporary Git graphs and fixtures without network
+or native timings. A fixture came from a real sealed failed CLI run. Python only
+selects workflow identities and transports Rust-produced history; it never
+recomputes statistics. Hosted trial and the separately trusted publisher remain
+follow-up acceptance work, requiring workflow registration rather than a local
+claim of success.

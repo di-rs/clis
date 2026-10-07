@@ -447,7 +447,13 @@ builds PR code.
 
 Download only the triggering workflow's named publication artifacts. Bound compressed
 and expanded size, reject path traversal/symlinks/duplicate members, and accept one
-versioned JSON publication record per platform, maximum 16 MiB each. Validate
+versioned JSON envelope per platform, maximum 16 MiB aggregate each. The
+[PublicationEnvelope v1 contract](../../../tools/cli-bench/ci/TRANSPORT.md) wraps
+the three package HistoryRecord v1 outcomes; each retains its existing
+PublicationRecord v1, with no duplicated observations. Explicit envelope profile
+and early failures preserve eligibility when a sealed record/contract is absent.
+A cap failure retains a bounded failure envelope with explicit omitted run IDs,
+never a partial-success report. Validate
 repository/run/workflow identity through GitHub API data and bind candidate SHAs to
 the actual PR/default-branch commit. Derive PR association from trusted run/API
 metadata; never trust an artifact's PR number or URL. Missing/ambiguous association

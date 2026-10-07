@@ -1,0 +1,276 @@
+name: CLI benchmark
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact candidate commit SHA (blank uses selected workflow commit)
+        type: string
+        default: ''
+      target_sha:
+        description: Exact target commit SHA; previous is its merge-base with candidate
+        type: string
+        required: true
+  workflow_call:
+    inputs:
+      candidate_sha:
+        description: Optional exact candidate SHA; cannot override PR identity
+        type: string
+        default: ''
+      target_sha:
+        description: Exact comparison target SHA when overriding candidate or calling manually
+        type: string
+        default: ''
+
+concurrency:
+  group: cli-bench-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  RUSTUP_TOOLCHAIN: nightly-2026-10-04
+  CARGO_TERM_COLOR: never
+  # Every role uses the same inherited build environment and isolated Rust cache.
+  RUSTFLAGS: ''
+  CARGO_ENCODED_RUSTFLAGS: ''
+
+jobs:
+  verify:
+    name: Tests and smoke (${{ matrix.platform }})
+    timeout-minutes: 90
+    env:
+      MEASUREMENT_PROFILE: smoke
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux
+          - os: macos-15
+            platform: macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out exact PR head or triggering commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Configure Python runtime manager
+        id: uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: 0.12.17
+          python-version: '3.14'
+          enable-cache: false
+          github-token: ''
+      - name: Install managed Python and initialize evidence paths
+        id: python
+        run: |
+          uv python install 3.14
+          cp -R tools/cli-bench/ci "$RUNNER_TEMP/cli-bench-ci"
+          uv sync --frozen --project "$RUNNER_TEMP/cli-bench-ci"
+          {
+            echo "BENCH_CI=$RUNNER_TEMP/cli-bench-ci"
+            echo "BENCH_ROOT=$GITHUB_WORKSPACE/.cli-bench/ci"
+            echo "BENCH_CLI=$GITHUB_WORKSPACE/target/release/cli-bench"
+          } >> "$GITHUB_ENV"
+          mkdir -p .cli-bench/ci/logs
+      - name: Resolve candidate and previous once
+        id: selection
+        env:
+          INPUT_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          INPUT_TARGET_SHA: ${{ inputs.target_sha }}
+        run: uv run --frozen --offline --project "$BENCH_CI" python "$BENCH_CI/selection.py" --output "$BENCH_ROOT/selection.json"
+      - name: Select candidate source
+        env:
+          CANDIDATE_SHA: ${{ steps.selection.outputs.candidate_sha }}
+        run: git checkout --detach "$CANDIDATE_SHA"
+      - name: Install one dated Rust toolchain
+        run: |
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+          rustc -Vv > "$BENCH_ROOT/logs/rustc-version.txt"
+          cargo -Vv > "$BENCH_ROOT/logs/cargo-version.txt"
+      - name: Install exact measurement and test tools
+        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
+        with:
+          tool: hyperfine@1.20.0,cargo-nextest@0.9.146
+          fallback: none
+      - name: Install and identify GNU references and native RSS tool
+        id: tools
+        run: bash "$BENCH_CI/setup-native.sh"
+      - name: Run source-local CI helper tests
+        run: uv run --frozen --offline --project "$BENCH_CI" python -m unittest discover -s "$BENCH_CI"
+      - name: Run harness tests and explicit repository recipe acceptance
+        run: |
+          cargo nextest run --locked -p cli-bench
+          CLIS_BENCH_WORKSPACE_MANIFEST="$PWD/Cargo.toml" cargo nextest run --locked -p cli-bench --run-ignored only -E 'test(repository_acceptance_)'
+          cargo test --locked -p cli-bench --doc
+      - name: Build harness before benchmark roles
+        id: harness
+        run: cargo build --locked --release -p cli-bench
+      - name: Build all roles serially before any timing
+        id: roles
+        env:
+          CANDIDATE_SHA: ${{ steps.selection.outputs.candidate_sha }}
+          PREVIOUS_SHA: ${{ steps.selection.outputs.previous_sha }}
+        run: bash "$BENCH_CI/native.sh" build
+      - name: Measure all prepared suites serially
+        if: ${{ !cancelled() && steps.harness.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env:
+          CANDIDATE_SHA: ${{ steps.selection.outputs.candidate_sha }}
+          PREVIOUS_SHA: ${{ steps.selection.outputs.previous_sha }}
+        run: bash "$BENCH_CI/native.sh" run
+      - name: Retain bounded publication and full evidence even after failure
+        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          SETUP_STAGE: ${{ steps.selection.outcome != 'success' && 'selection' || 'setup' }}
+        run: |
+          uv run --frozen --offline --project "$BENCH_CI" python "$BENCH_CI/publication.py" \
+            --root "$BENCH_ROOT" --cli "$BENCH_CLI" --profile "$MEASUREMENT_PROFILE" \
+            --platform "$PLATFORM" --setup-stage "$SETUP_STAGE"
+      - name: Add local Markdown summary
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f .cli-bench/ci/summary.md ]]; then
+            cat .cli-bench/ci/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload data-only publication
+        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: smoke-publication-${{ matrix.platform }}
+          path: .cli-bench/ci/publication/publication.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Upload bounded full evidence
+        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: smoke-full-evidence-${{ matrix.platform }}
+          path: .cli-bench/ci/full/
+          if-no-files-found: error
+          retention-days: 90
+
+  measure:
+    name: Full measurement (${{ matrix.platform }})
+    needs: verify
+    timeout-minutes: 120
+    env:
+      MEASUREMENT_PROFILE: full
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux
+          - os: macos-15
+            platform: macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out exact PR head or triggering commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Configure Python runtime manager
+        id: uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: 0.12.17
+          python-version: '3.14'
+          enable-cache: false
+          github-token: ''
+      - name: Install managed Python and initialize evidence paths
+        id: python
+        run: |
+          uv python install 3.14
+          cp -R tools/cli-bench/ci "$RUNNER_TEMP/cli-bench-ci"
+          uv sync --frozen --project "$RUNNER_TEMP/cli-bench-ci"
+          {
+            echo "BENCH_CI=$RUNNER_TEMP/cli-bench-ci"
+            echo "BENCH_ROOT=$GITHUB_WORKSPACE/.cli-bench/ci"
+            echo "BENCH_CLI=$GITHUB_WORKSPACE/target/release/cli-bench"
+          } >> "$GITHUB_ENV"
+          mkdir -p .cli-bench/ci/logs
+      - name: Resolve candidate and previous once
+        id: selection
+        env:
+          INPUT_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          INPUT_TARGET_SHA: ${{ inputs.target_sha }}
+        run: uv run --frozen --offline --project "$BENCH_CI" python "$BENCH_CI/selection.py" --output "$BENCH_ROOT/selection.json"
+      - name: Select candidate source
+        env:
+          CANDIDATE_SHA: ${{ steps.selection.outputs.candidate_sha }}
+        run: git checkout --detach "$CANDIDATE_SHA"
+      - name: Install one dated Rust toolchain
+        run: |
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+          rustc -Vv > "$BENCH_ROOT/logs/rustc-version.txt"
+          cargo -Vv > "$BENCH_ROOT/logs/cargo-version.txt"
+      - name: Install exact measurement and test tools
+        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
+        with:
+          tool: hyperfine@1.20.0,cargo-nextest@0.9.146
+          fallback: none
+      - name: Install and identify GNU references and native RSS tool
+        id: tools
+        run: bash "$BENCH_CI/setup-native.sh"
+      - name: Build harness before benchmark roles
+        id: harness
+        run: cargo build --locked --release -p cli-bench
+      - name: Build all roles serially before any timing
+        id: roles
+        env:
+          CANDIDATE_SHA: ${{ steps.selection.outputs.candidate_sha }}
+          PREVIOUS_SHA: ${{ steps.selection.outputs.previous_sha }}
+        run: bash "$BENCH_CI/native.sh" build
+      - name: Measure all prepared suites serially
+        if: ${{ !cancelled() && steps.harness.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env:
+          CANDIDATE_SHA: ${{ steps.selection.outputs.candidate_sha }}
+          PREVIOUS_SHA: ${{ steps.selection.outputs.previous_sha }}
+        run: bash "$BENCH_CI/native.sh" run
+      - name: Retain bounded publication and full evidence even after failure
+        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          SETUP_STAGE: ${{ steps.selection.outcome != 'success' && 'selection' || 'setup' }}
+        run: |
+          uv run --frozen --offline --project "$BENCH_CI" python "$BENCH_CI/publication.py" \
+            --root "$BENCH_ROOT" --cli "$BENCH_CLI" --profile "$MEASUREMENT_PROFILE" \
+            --platform "$PLATFORM" --setup-stage "$SETUP_STAGE"
+      - name: Add local Markdown summary
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f .cli-bench/ci/summary.md ]]; then
+            cat .cli-bench/ci/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload data-only publication
+        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: publication-${{ matrix.platform }}
+          path: .cli-bench/ci/publication/publication.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Upload bounded full evidence
+        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: full-evidence-${{ matrix.platform }}
+          path: .cli-bench/ci/full/
+          if-no-files-found: error
+          retention-days: 90
