@@ -849,6 +849,46 @@ mod tests {
         Ok(())
     }
     #[test]
+    fn repeated_dataset_operands_suppress_offline_ratios_with_matching_sample_identities()
+    -> TestResult {
+        let (mut manifest, _, _) = fixture(crate::MeasurementProfile::Full)?;
+        let case = manifest
+            .contract
+            .as_mut()
+            .and_then(|contract| contract.suite.cases.first_mut())
+            .ok_or("case")?;
+        let mut doubled = case.argv.clone();
+        doubled.push("@input:tiny".into());
+        case.role_argv.insert(Role::Candidate, doubled);
+        // Recompute identities for this exact saved contract so identity drift cannot
+        // accidentally satisfy the regression before the unequal-work gate is checked.
+        let identity = crate::SampleIdentity::new(
+            &manifest.run_id,
+            case,
+            crate::MeasurementProfile::Full,
+            &manifest.inputs,
+            &"a".repeat(64),
+        )?;
+        let (samples, rss) = fixture_samples(case, crate::MeasurementProfile::Full, &identity);
+        let analysis = analyze(&manifest, &samples, &rss)?;
+        let case = analysis.cases.first().ok_or("analyzed case")?;
+        let comparison = case.comparisons.first().ok_or("comparison")?;
+        crate::test_support::equal(&comparison.ratio, &None)?;
+        crate::test_support::require(
+            comparison.batch_ratios.is_empty(),
+            "unequal work exposed batch ratios",
+        )?;
+        crate::test_support::require(
+            case.roles.values().all(|role| {
+                role.issues
+                    .iter()
+                    .any(|issue| issue == "unequal dataset operands across roles")
+            }),
+            "unequal work was not diagnosed",
+        )?;
+        Ok(())
+    }
+    #[test]
     fn invalid_rss_sets_suppress_comparisons_but_zero_native_rss_is_valid() -> TestResult {
         let (manifest, samples, mut rss) = fixture(crate::MeasurementProfile::Full)?;
         rss.pop();

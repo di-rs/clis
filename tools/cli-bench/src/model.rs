@@ -826,7 +826,7 @@ impl CaseSpec {
         let mut observed = None;
         for role in roles {
             let argv = case.role_argv.get(&role).unwrap_or(&case.argv);
-            let operands: std::collections::BTreeSet<_> = argv
+            let operands: Vec<_> = argv
                 .iter()
                 .filter(|arg| arg.starts_with("@input:") || arg.starts_with("@records:"))
                 .collect();
@@ -861,6 +861,50 @@ impl CaseSpec {
 mod tests {
     use super::{MeasurementPolicy, MeasurementProfile};
 
+    #[test]
+    fn equal_work_preserves_operand_counts_and_order_but_allows_option_spelling()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut suite = crate::parse_suite(include_str!("../tests/inputs/minimal-suite.toml"))?;
+        let case = suite.cases.first_mut().ok_or("case")?;
+        for token in ["@input:tiny", "@records:tiny"] {
+            case.argv = vec!["--old-option".into(), token.into()];
+            case.role_argv.insert(
+                super::Role::Candidate,
+                vec!["--new-option".into(), token.into()],
+            );
+            crate::test_support::require(
+                case.equal_dataset_operands(
+                    super::MeasurementProfile::Full,
+                    [super::Role::Previous, super::Role::Candidate],
+                ),
+                "option override rejected",
+            )?;
+            case.role_argv
+                .get_mut(&super::Role::Candidate)
+                .ok_or("candidate")?
+                .push(token.into());
+            crate::test_support::require(
+                !case.equal_dataset_operands(
+                    super::MeasurementProfile::Full,
+                    [super::Role::Previous, super::Role::Candidate],
+                ),
+                "repeated operand lost multiplicity",
+            )?;
+        }
+        case.argv = vec!["@input:first".into(), "@input:second".into()];
+        case.role_argv.insert(
+            super::Role::Candidate,
+            vec!["@input:second".into(), "@input:first".into()],
+        );
+        crate::test_support::require(
+            !case.equal_dataset_operands(
+                super::MeasurementProfile::Full,
+                [super::Role::Previous, super::Role::Candidate],
+            ),
+            "operand order was erased",
+        )?;
+        Ok(())
+    }
     #[test]
     fn generation_limits_default_to_small_inputs_and_allow_explicit_overrides()
     -> Result<(), Box<dyn std::error::Error>> {

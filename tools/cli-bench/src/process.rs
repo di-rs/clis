@@ -120,6 +120,13 @@ impl ProcessRunner {
             evidence: Some(budget.clone()),
         }
     }
+    pub(crate) fn with_default_evidence(&self, budget: &crate::budget::EvidenceBudget) -> Self {
+        if self.evidence.is_some() {
+            self.clone()
+        } else {
+            self.with_evidence(budget)
+        }
+    }
     pub(crate) fn write_json<T: serde::Serialize>(
         &self,
         path: &Path,

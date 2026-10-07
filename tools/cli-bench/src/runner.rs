@@ -412,6 +412,69 @@ mod tests {
         Ok(())
     }
     #[test]
+    fn repeated_dataset_operands_are_rejected_before_the_correctness_gate() -> TestResult {
+        let body = "for operand do case \"$operand\" in /*) while IFS= read -r line; do :; done < \"$operand\";; esac; done; printf 'EFGH\\n'";
+        for equal in [false, true] {
+            let mut fixture = validation_fixture(body, body)?;
+            let case = fixture.suite.cases.first_mut().ok_or("case")?;
+            case.role_argv.insert(
+                Role::Candidate,
+                vec![
+                    "--different-option".into(),
+                    "@input:tiny".into(),
+                    "@input:tiny".into(),
+                ],
+            );
+            if equal {
+                case.argv.push("@input:tiny".into());
+            }
+            let engine = timing_support::engine(&fixture, "")?;
+            let host = collect_host(&fixture.suite.environment);
+            let bundle = run(
+                &RunRequest {
+                    submitted_toml: None,
+                    preparation: ExperimentPreparation {
+                        run: &fixture.request,
+                        suite: &fixture.suite,
+                        profile: MeasurementProfile::Full,
+                        selected_cases: &[],
+                        expected_datasets: None,
+                    },
+                    measurement_lock: &fixture.measurement_lock,
+                    harness: &engine,
+                    host: &host,
+                    mode: RunMode::CheckOnly { engine: None },
+                    experiment: None,
+                },
+                &fixture.store,
+                &fixture.runner,
+            )?;
+            crate::test_support::equal(
+                &bundle.result.outcome,
+                &if equal {
+                    RunOutcome::Complete
+                } else {
+                    RunOutcome::Failed
+                },
+            )?;
+            if !equal {
+                crate::test_support::require(
+                    bundle
+                        .result
+                        .message
+                        .as_ref()
+                        .is_some_and(|message| message.contains("unequal dataset operands")),
+                    "missing unequal-work failure",
+                )?;
+                crate::test_support::require(
+                    !bundle.path.join("validation").exists(),
+                    "unequal work entered correctness gate",
+                )?;
+            }
+        }
+        Ok(())
+    }
+    #[test]
     fn cumulative_correctness_budget_stops_children_and_seals_failure_metadata() -> TestResult {
         let mut fixture = validation_fixture("printf '%300s' x", "printf '%300s' x")?;
         let mut second = fixture.suite.cases.first().ok_or("case")?.clone();

@@ -609,7 +609,9 @@ reported only with an explicit work numerator; seek-tail fixtures omit it.
 
 Sample identities bind run, role artifact, profile, effective case, work/I/O and immutable input
 hashes, excluding physical paths. Invalid, duplicate, incomplete or unmatched
-sets produce no ratio. This is an unreleased v1 integration: older partial sample
+sets produce no ratio. Equal-work checks compare the ordered sequence of dataset
+and records operands, preserving repetitions while allowing role option spellings.
+This is an unreleased v1 integration: older partial sample
 records without identities fail closed, with no implicit migration. References,
 unknown prebuilt policies and changed build policies are labelled product
 comparisons. Verified previous/candidate builds with matching known policies can
@@ -680,7 +682,9 @@ which case `suite.toml` honestly contains the serialization of their typed suite
 
 The normal logical run-evidence limit defaults to 2 GiB. The private budget is
 owned by `RunWriter` and attached by `run`, `validate_experiment`, `measure_timing`
-and `measure_rss`; bounded runner copies preserve it. Original/resolved TOML,
+and `measure_rss`; bounded runner copies preserve it. The validated capability
+retains that budget for public `final_case_check` calls with a plain runner, while
+measurement stages keep their explicitly bound writer budget. Original/resolved TOML,
 request/status records, captures, observations, diagnostic copies, events and
 reports count from the first write. Shared artifact/dataset/build caches and
 workload scratch outside the run directory have their own existing limits.

@@ -38,6 +38,7 @@ pub struct PreparedExperiment<'lock> {
 pub struct ValidatedExperiment<'lock> {
     prepared: PreparedExperiment<'lock>,
     report: ValidationReport,
+    evidence_budget: crate::budget::EvidenceBudget,
 }
 /// One exact check, including failures; no selected comparison is silently omitted.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -191,6 +192,8 @@ impl<'lock> ValidatedExperiment<'lock> {
     }
     /// Repeat the selected case's exact correctness checks after measurement.
     /// Retains a fresh report and rechecks identities without refreshing expectations.
+    /// A plain caller runner inherits the validation writer's evidence budget;
+    /// enclosing measurement stages keep their explicitly bound writer budget.
     /// # Errors
     /// Rejects changed identities, output/status/effect drift or evidence failures.
     pub fn final_case_check(
@@ -199,6 +202,8 @@ impl<'lock> ValidatedExperiment<'lock> {
         evidence: &Path,
         runner: &ProcessRunner,
     ) -> Result<(), BenchError> {
+        let evidence_runner = runner.with_default_evidence(&self.evidence_budget);
+        let runner = &evidence_runner;
         let spec = self
             .prepared
             .cases
@@ -408,7 +413,11 @@ pub fn validate_experiment<'lock>(
             "correctness gate failed; complete findings retained in validation/report.json",
         ));
     }
-    Ok(ValidatedExperiment { prepared, report })
+    Ok(ValidatedExperiment {
+        prepared,
+        report,
+        evidence_budget: writer.budget.clone(),
+    })
 }
 fn validate_case(
     prepared: &PreparedExperiment<'_>,
@@ -815,6 +824,77 @@ mod tests {
     type TestResult = Result<(), Box<dyn std::error::Error>>;
     fn require(value: bool, message: &str) -> TestResult {
         if value { Ok(()) } else { Err(message.into()) }
+    }
+    #[test]
+    fn public_final_checks_retain_the_writer_budget_with_a_plain_runner() -> TestResult {
+        let mut fixture =
+            crate::test_support::validation_fixture("printf 'EFGH\\n'", "printf 'EFGH\\n'")?;
+        fixture.suite.limits.max_evidence_bytes = 65_536;
+        let mut writer = fixture.store.begin_run(&fixture.suite)?;
+        let validated = validate_experiment(
+            fixture.prepare(MeasurementProfile::Full)?,
+            &mut writer,
+            &fixture.runner,
+        )?;
+        // Leave less than the two successful five-byte correctness captures need.
+        // This is retained evidence, not a changed execution policy or fixture timeout.
+        let remaining = writer.budget.remaining()?;
+        let padding = remaining
+            .checked_sub(8)
+            .ok_or("fixture needs room before final check")?;
+        fs::write(
+            writer.path().join("retained-padding"),
+            vec![0; usize::try_from(padding)?],
+        )?;
+        let final_path = writer.path().join("direct-final");
+        require(
+            validated
+                .final_case_check(&CaseId::new("last-line")?, &final_path, &fixture.runner)
+                .is_err(),
+            "plain runner bypassed final-check quota",
+        )?;
+        let files = crate::store::inventory(&final_path)?;
+        let captured: u64 = files
+            .iter()
+            .filter(|(name, _)| name.ends_with(".stdout") || name.ends_with(".stderr"))
+            .map(|(_, identity)| identity.bytes)
+            .sum();
+        require(
+            captured <= 8,
+            "final check wrote captures beyond shared remaining allowance",
+        )?;
+        require(
+            fs::read_to_string(final_path.join("report.json"))?.contains("EvidenceLimit"),
+            "final cap failure lost observations",
+        )?;
+        let later = writer.path().join("later-final");
+        require(
+            validated
+                .final_case_check(&CaseId::new("last-line")?, &later, &fixture.runner)
+                .is_err(),
+            "final check started more children after exhaustion",
+        )?;
+        require(
+            !crate::store::inventory(&later)?
+                .keys()
+                .any(|name| name.ends_with(".stdout") || name.ends_with(".stderr")),
+            "later final check created child captures",
+        )?;
+        let bundle = writer.record_failure(
+            crate::RunOutcome::Failed,
+            "final check reached evidence cap",
+        )?;
+        fixture.store.load_run(&bundle.manifest.run_id)?;
+        let total = crate::budget::size(&bundle.path)?;
+        let index = fs::metadata(bundle.path.join("checksums.json"))?.len();
+        require(
+            total
+                <= fixture.suite.limits.max_evidence_bytes
+                    + crate::budget::FAILURE_METADATA_BYTES
+                    + index,
+            "final checks escaped failure metadata allowance",
+        )?;
+        Ok(())
     }
     #[test]
     fn exact_assertions_preserve_nul_invalid_utf8_whitespace_and_shape() -> TestResult {
