@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "manifest": {"schema_version": 1, "execution_kind": null, "run_id": "failed-run", "contract": null, "roles": {}, "inputs": [], "selected_cases": [], "host": null, "tool_paths": null, "experiment": null},
+  "result": {"schema_version": 1, "outcome": "failed", "message": "wrong <output>|[x]"},
+  "analysis": {"policy": "descriptive-v1", "contract_id": null, "smoke_only": false, "cases": [], "timing_samples": [], "rss_samples": [], "issues": ["measurement contract unavailable", "run did not complete; ratios and directional conclusions suppressed"]},
+  "validation": null,
+  "evidence": ["suite.toml"],
+  "attempt": null,
+  "replay": "cli-bench replay -i /saved/failed-run",
+  "requested_retention_days": 90,
+  "expires_at_unix_seconds": null
+}

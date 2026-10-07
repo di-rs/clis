@@ -34,8 +34,8 @@ A growing utility normally uses this layout:
     lib.rs           # documented public API and re-exports
     options.rs       # domain configuration, when it merits its own module
     error.rs         # typed errors, when more than io::Error is needed
-    <operation>.rs   # focused implementation modules, when needed
-  tests/             # follow CONTRIBUTING's shared test conventions
+    <operation>.rs   # implementation and its #[cfg(test)] mod tests
+  tests/             # integration tests and their support files only
   benches/           # CLI benchmark recipe and/or registered library benchmarks
 ```
 
@@ -44,6 +44,11 @@ keep domain types and operations in `lib.rs`; a trivial command may not need a
 `cli.rs`. Do not move all packages or add separate core/CLI crates merely to
 standardize directory names. Split packages only for a demonstrated dependency,
 release, or consumer boundary.
+
+Keep each Rust unit test in the source file that owns the implementation it tests.
+`src/lib.rs` is not a central unit-test file for other modules. Public API consumer
+workflows belong in integration tests such as `tests/library.rs`; see the
+[test conventions](../CONTRIBUTING.md#test-conventions) for the exact distinction.
 
 ## Public API contract
 

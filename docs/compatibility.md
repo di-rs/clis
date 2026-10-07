@@ -126,7 +126,8 @@ Keep platform-specific expectations separate where the contract requires them.
 Ordinary tests consume the checked-in small fixtures without references or Nushell.
 Do not copy incompatible upstream source/tests into this MIT workspace.
 
-Direct library tests verify domain semantics; CLI tests verify the whole process
+Unit tests beside the implementation verify domain rules; public API integration
+tests verify consumer workflows, and CLI integration tests verify the whole process
 contract. Where implementations differ, keep separately named expectations and
 test the selected resolution. Normalize only irrelevant differences such as the
 program name or sandbox path, with an explicit rule; do not trim, sort, or discard

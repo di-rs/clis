@@ -1,0 +1,39 @@
+# Original tiny deterministic recipes for opt-in native Biggie checks only.
+schema_version = 1
+id = "tiny-dataset-contract"
+package = "biggie"
+binary = "biggie"
+
+[generator]
+revision = "0d8caa8387d446e91ef263c1ecab88870b735eb5"
+package = "biggie"
+binary = "biggie"
+
+[[datasets]]
+id = "text"
+argv = ["text", "-n", "2", "-w", "1", "-l", "4", "-s", "42", "@output"]
+output = "text.txt"
+checks = [{ kind = "text-shape", records = 2, words_per_record = 1, word_length = 4 }]
+
+[[datasets]]
+id = "pattern"
+argv = ["bytes", "-b", "11", "-p", "00ff0a", "@output"]
+output = "pattern.bin"
+checks = [{ kind = "byte-pattern", bytes = 11, pattern_hex = "00ff0a" }]
+
+[[datasets]]
+id = "paths"
+argv = ["records", "-r", "a/b", "-r", "c/d", "-p", "1", "-c", "1", "@output"]
+output = "paths.txt"
+checks = [{ kind = "records", records = ["a/b", "c/d"], repeat = 1, cycles = 1 }]
+
+[[cases]]
+id = "consume-paths"
+purpose = "Validate generated path decoding before invocation"
+argv = ["@records:paths"]
+expected_status = 0
+correctness = [{ kind = "empty-stderr" }]
+[cases.io.stdin]
+kind = "null"
+[cases.io.stdout]
+kind = "discard"

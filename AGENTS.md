@@ -40,6 +40,9 @@ to copy. Root and app READMEs distinguish current support from plans.
   prove parity. Record reference identity and scope; label unavailable evidence.
 - Keep domain code independent of argv, Clap, global streams, process exit, and
   process-wide initialization. Follow the architecture guide for errors and I/O.
+- Put Rust unit tests in `#[cfg(test)] mod tests` in the same source file as the
+  implementation. Reserve `tests/`, including `tests/library.rs`, for integration
+  tests and their support files; follow [test conventions](CONTRIBUTING.md#test-conventions).
 - Use `anyhow` for application error handling and `thiserror` for typed errors
   when callers need to match variants and take different actions. Apply this to
   new or changed error handling; keep unrelated migrations out of scope.

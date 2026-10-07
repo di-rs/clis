@@ -93,8 +93,11 @@ merely to fill the checklist.]
 
 ## Tests and reference capture
 
-[Link tests/cli.rs, direct API tests, reusable inputs, and expected outputs. Describe
-the case matrix and platform coverage, including injected errors where relevant.]
+[Link source-local unit tests, tests/cli.rs, public API integration tests, reusable
+inputs, and expected outputs. Follow the [test conventions](../../CONTRIBUTING.md#test-conventions):
+unit tests stay in the implementation's source file; tests/ contains integration
+tests and their support files only. Describe the case matrix and platform coverage,
+including injected errors where relevant.]
 
 For ports, document `mk-outs.nu`:
 

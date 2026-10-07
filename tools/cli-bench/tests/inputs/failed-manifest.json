@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "run_id": "run-fixture",
+  "contract": null,
+  "roles": {},
+  "inputs": [],
+  "selected_cases": [],
+  "host": null,
+  "tool_paths": null,
+  "experiment": {
+    "id": "fixture",
+    "hypothesis": "Reduce repeated work",
+    "change_summary": "Cache parsed input",
+    "requested_previous": "base",
+    "requested_candidate": "HEAD"
+  }
+}

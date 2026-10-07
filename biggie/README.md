@@ -131,3 +131,24 @@ The same seed/options/build/platform reproduce the same random data; bytes may
 change across rand versions or platforms. Biggie has no direct GNU/BSD counterpart.
 
 [Workspace README](../README.md) · [Contributor checks](../CONTRIBUTING.md#checks)
+
+## Correctness-checked benchmarks
+
+The [biggie suite](benches/cli-bench.toml) runs through
+[cli-bench](../tools/cli-bench/README.md). Use previous/candidate roles; there is no GNU reference. Primary cases are `text`,
+`records`, `bytes`; select `-c text` with older text-only revisions. Confirmation
+uses seed 43 with a different word shape and an 8 MiB + 1 byte boundary pattern.
+
+From the workspace root, after setting explicit GNU reference/tool paths where
+applicable:
+
+```sh
+cargo build --locked --release -p cli-bench -p biggie
+target/release/cli-bench run -p biggie -a target/release/biggie \
+  -P target/release/biggie -g target/release/biggie -m smoke
+```
+
+These smoke commands validate wiring; they do not demonstrate an optimization.
+Select primary cases explicitly while tuning and use separate `confirm-*` cases
+under full settings with a fixed previous revision after choosing the candidate.
+See the [benchmark policy](../docs/benchmarking.md) for acceptance and evidence.

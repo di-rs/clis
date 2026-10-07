@@ -1,2 +1,4 @@
 /target
-/docs/superpowers/plans/
+/docs/superpowers/plans/*
+!/docs/superpowers/plans/2026-10-06-cli-bench.md
+/.cli-bench/

@@ -1,0 +1,88 @@
+# Approved v1 recipes; full base settings and explicit smoke overrides.
+# See docs/superpowers/specs/2026-10-06-cli-bench-experiments.md.
+schema_version = 1
+id = "mkdirr"
+package = "mkdirr"
+binary = "mkdirr"
+
+[generator]
+revision = "0d8caa8387d446e91ef263c1ecab88870b735eb5"
+package = "biggie"
+binary = "biggie"
+
+[environment]
+LC_ALL = "C"
+TZ = "UTC"
+CLIS_LOG_LEVEL = "off"
+
+[[datasets]]
+id = "paths"
+argv = ["records", "--record", "a/b", "--record", "c/d", "--record", "e/f", "--record", "g/h", "--repeat", "1", "--cycles", "1", "@output"]
+output = "paths.txt"
+checks = [{ kind = "records", records = ["a/b", "c/d", "e/f", "g/h"], repeat = 1, cycles = 1 }]
+
+[[datasets]]
+id = "confirm-paths"
+argv = ["records", "--record", "path01/a/b/c", "--record", "path02/a/b/c", "--record", "path03/a/b/c", "--record", "path04/a/b/c", "--record", "path05/a/b/c", "--record", "path06/a/b/c", "--record", "path07/a/b/c", "--record", "path08/a/b/c", "--repeat", "1", "--cycles", "1", "@output"]
+output = "confirm-paths.txt"
+checks = [{ kind = "records", records = ["path01/a/b/c", "path02/a/b/c", "path03/a/b/c", "path04/a/b/c", "path05/a/b/c", "path06/a/b/c", "path07/a/b/c", "path08/a/b/c"], repeat = 1, cycles = 1 }]
+
+[[cases]]
+id = "absent"
+purpose = "Create 4 generated parent paths from absent state"
+argv = ["-p", "@records:paths"]
+expected_status = 0
+correctness = [{ kind = "directory-tree", paths = ["a", "a/b", "c", "c/d", "e", "e/f", "g", "g/h"], compare_mode_to = "selected-baselines" }, { kind = "literal", stream = "stdout", text = "" }, { kind = "empty-stderr" }]
+work = { amount = 4, unit = "directory-operations" }
+mutation = { kind = "directories", paths = [] }
+
+[cases.io.stdin]
+kind = "null"
+
+[cases.io.stdout]
+kind = "drained-pipe"
+
+[[cases]]
+id = "existing"
+purpose = "Create 4 generated parent paths from existing state"
+argv = ["-p", "@records:paths"]
+expected_status = 0
+correctness = [{ kind = "directory-tree", paths = ["a", "a/b", "c", "c/d", "e", "e/f", "g", "g/h"], compare_mode_to = "selected-baselines" }, { kind = "literal", stream = "stdout", text = "" }, { kind = "empty-stderr" }]
+work = { amount = 4, unit = "directory-operations" }
+mutation = { kind = "directories", paths = ["a", "a/b", "c", "c/d", "e", "e/f", "g", "g/h"] }
+
+[cases.io.stdin]
+kind = "null"
+
+[cases.io.stdout]
+kind = "drained-pipe"
+
+[[cases]]
+id = "confirm-absent"
+purpose = "Create 8 generated parent paths from absent state"
+argv = ["-p", "@records:confirm-paths"]
+expected_status = 0
+correctness = [{ kind = "directory-tree", paths = ["path01", "path01/a", "path01/a/b", "path01/a/b/c", "path02", "path02/a", "path02/a/b", "path02/a/b/c", "path03", "path03/a", "path03/a/b", "path03/a/b/c", "path04", "path04/a", "path04/a/b", "path04/a/b/c", "path05", "path05/a", "path05/a/b", "path05/a/b/c", "path06", "path06/a", "path06/a/b", "path06/a/b/c", "path07", "path07/a", "path07/a/b", "path07/a/b/c", "path08", "path08/a", "path08/a/b", "path08/a/b/c"], compare_mode_to = "selected-baselines" }, { kind = "literal", stream = "stdout", text = "" }, { kind = "empty-stderr" }]
+work = { amount = 8, unit = "directory-operations" }
+mutation = { kind = "directories", paths = [] }
+
+[cases.io.stdin]
+kind = "null"
+
+[cases.io.stdout]
+kind = "drained-pipe"
+
+[[cases]]
+id = "confirm-existing"
+purpose = "Create 8 generated parent paths from existing state"
+argv = ["-p", "@records:confirm-paths"]
+expected_status = 0
+correctness = [{ kind = "directory-tree", paths = ["path01", "path01/a", "path01/a/b", "path01/a/b/c", "path02", "path02/a", "path02/a/b", "path02/a/b/c", "path03", "path03/a", "path03/a/b", "path03/a/b/c", "path04", "path04/a", "path04/a/b", "path04/a/b/c", "path05", "path05/a", "path05/a/b", "path05/a/b/c", "path06", "path06/a", "path06/a/b", "path06/a/b/c", "path07", "path07/a", "path07/a/b", "path07/a/b/c", "path08", "path08/a", "path08/a/b", "path08/a/b/c"], compare_mode_to = "selected-baselines" }, { kind = "literal", stream = "stdout", text = "" }, { kind = "empty-stderr" }]
+work = { amount = 8, unit = "directory-operations" }
+mutation = { kind = "directories", paths = ["path01", "path01/a", "path01/a/b", "path01/a/b/c", "path02", "path02/a", "path02/a/b", "path02/a/b/c", "path03", "path03/a", "path03/a/b", "path03/a/b/c", "path04", "path04/a", "path04/a/b", "path04/a/b/c", "path05", "path05/a", "path05/a/b", "path05/a/b/c", "path06", "path06/a", "path06/a/b", "path06/a/b/c", "path07", "path07/a", "path07/a/b", "path07/a/b/c", "path08", "path08/a", "path08/a/b", "path08/a/b/c"] }
+
+[cases.io.stdin]
+kind = "null"
+
+[cases.io.stdout]
+kind = "drained-pipe"
