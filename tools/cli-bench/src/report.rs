@@ -57,10 +57,14 @@ pub fn publication_record(bundle: &RunBundle) -> Result<PublicationRecord, Bench
             .cloned()
             .collect(),
         attempt: bundle.manifest.experiment.as_ref().map(|experiment| {
-            format!(
-                "../../experiments/{}/attempts/{}.json",
-                experiment.id, bundle.manifest.run_id
-            )
+            if crate::bundle::portable_root(bundle).is_some() {
+                "../experiment/attempt.json".into()
+            } else {
+                format!(
+                    "../../experiments/{}/attempts/{}.json",
+                    experiment.id, bundle.manifest.run_id
+                )
+            }
         }),
         replay: format!(
             "cli-bench replay -i {}",

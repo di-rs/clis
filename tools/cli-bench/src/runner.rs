@@ -245,31 +245,52 @@ fn resolve_manifest(
         .iter()
         .map(|case| case.id.clone())
         .collect();
-    manifest.contract = Some(MeasurementContract {
-        schema_version: 1,
-        suite: request.preparation.suite.clone(),
-        harness: request.harness.identity.clone(),
-        generator: ToolIdentity {
-            file: generator.artifact.file.clone(),
-            version: "version unavailable; retained executable identified by SHA-256".into(),
-        },
-        engine: engine.map(|tool| tool.identity.clone()),
-        validator_policy: "correctness-v1".into(),
-        analysis_policy: "descriptive-v1".into(),
-        build: manifest
-            .roles
-            .get(&Role::Previous)
-            .or_else(|| manifest.roles.get(&Role::Candidate))
-            .and_then(|artifact| artifact.build.as_ref())
-            .map(|build| build.policy.clone()),
-        profile: request.preparation.profile,
-    });
+    manifest.contract = Some(resolved_contract(
+        request.preparation.suite,
+        request.preparation.profile,
+        prepared.roles(),
+        &request.harness.identity,
+        engine.map(|tool| &tool.identity),
+    )?);
     manifest.tool_paths = Some(ToolPaths {
         harness: request.harness.path.clone(),
         generator: generator.path.clone(),
         engine: engine.map(|tool| tool.path.clone()),
     });
     Ok(())
+}
+
+/// Shared resolution for a normal run and strict replay's pre-execution check.
+pub fn resolved_contract(
+    suite: &crate::Suite,
+    profile: crate::MeasurementProfile,
+    roles: &crate::RoleBindings,
+    harness: &ToolIdentity,
+    engine: Option<&ToolIdentity>,
+) -> Result<MeasurementContract, BenchError> {
+    let generator = roles
+        .generator
+        .as_ref()
+        .ok_or_else(|| BenchError::Evidence("missing resolved generator".into()))?;
+    Ok(MeasurementContract {
+        schema_version: 1,
+        suite: suite.clone(),
+        harness: harness.clone(),
+        generator: ToolIdentity {
+            file: generator.artifact.file.clone(),
+            version: "version unavailable; retained executable identified by SHA-256".into(),
+        },
+        engine: engine.cloned(),
+        validator_policy: "correctness-v1".into(),
+        analysis_policy: "descriptive-v1".into(),
+        build: roles
+            .roles
+            .get(&Role::Previous)
+            .or_else(|| roles.roles.get(&Role::Candidate))
+            .and_then(|bound| bound.artifact.build.as_ref())
+            .map(|build| build.policy.clone()),
+        profile,
+    })
 }
 
 #[cfg(test)]

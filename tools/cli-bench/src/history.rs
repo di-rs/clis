@@ -44,6 +44,8 @@ pub fn history_record(bundle: &RunBundle) -> Result<HistoryRecord, BenchError> {
     crate::bundle::verify_evidence(bundle)?;
     let mut publication = crate::publication_record(bundle)?;
     publication.replay = "cli-bench replay -i BUNDLE".into();
+    // The attempt is embedded below; compact history has no live evidence directory.
+    publication.attempt = None;
     let resources = bundle
         .files
         .contains_key("replay-resources.json")
@@ -239,7 +241,10 @@ struct HistoryIndex {
     runs: BTreeMap<String, FileIdentity>,
 }
 /// Append immutable compact evidence, with identical repeats as no-ops.
+///
 /// A separate local transaction lock serializes index updates, never measurement sessions.
+/// Retrying identical records recovers from process interruption, including abandoned stages.
+/// This does not guarantee recovery of directory entries after power loss.
 /// # Errors
 /// Rejects run-ID content collisions, unsafe members and storage failures.
 pub fn append_history(root: &Path, record: &HistoryRecord) -> Result<(), BenchError> {
@@ -274,7 +279,7 @@ pub fn append_history(root: &Path, record: &HistoryRecord) -> Result<(), BenchEr
         if index.runs.contains_key(id) {
             return Err(error("indexed history record is missing"));
         }
-        crate::store::atomic_json(&path, record)?;
+        atomic_history_json(&path, record)?;
     }
     let identity = crate::fingerprint(&path)?;
     if let Some(expected) = index.runs.get(id) {
@@ -284,7 +289,26 @@ pub fn append_history(root: &Path, record: &HistoryRecord) -> Result<(), BenchEr
         return Ok(());
     }
     index.runs.insert(id.clone(), identity);
-    crate::store::atomic_json(&root.join("history-index.json"), &index)
+    atomic_history_json(&root.join("history-index.json"), &index)
+}
+// A process may leave this owned staging directory behind after termination.
+// Unique siblings keep later appends independent of such partial writes; only
+// this call's files are cleaned up. This is not power-loss transaction recovery.
+fn atomic_history_json<T: Serialize>(path: &Path, value: &T) -> Result<(), BenchError> {
+    let bytes = serde_json::to_vec_pretty(value)?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| error("missing history parent"))?;
+    let stage = crate::store::unique_directory(parent, ".history-stage")?;
+    let temporary = stage.join("record.json");
+    let result = (|| {
+        crate::store::atomic_write(&temporary, &bytes)?;
+        fs::rename(&temporary, path)?;
+        Ok(())
+    })();
+    let _ = fs::remove_file(&temporary);
+    let _ = fs::remove_dir(&stage);
+    result
 }
 fn read_index(root: &Path) -> Result<HistoryIndex, BenchError> {
     match root.join("history-index.json").symlink_metadata() {
@@ -397,6 +421,53 @@ mod tests {
         Ok(())
     }
     #[test]
+    fn interrupted_stages_do_not_block_history_record_or_index_retries() -> TestResult {
+        let root = assert_fs::TempDir::new()?;
+        let store = crate::Store::open(&root.join("store"))?;
+        let suite = crate::parse_suite(include_str!("../tests/inputs/minimal-suite.toml"))?;
+        let bundle = store
+            .begin_run(&suite)?
+            .record_failure(crate::RunOutcome::Failed, "retained failure")?;
+        let record = history_record(&bundle)?;
+        let history = root.join("history");
+        fs::create_dir_all(history.join("runs"))?;
+        let stale_record = history
+            .join("runs")
+            .join(format!("{}.pending", bundle.manifest.run_id));
+        let stale_index = history.join("history-index.pending");
+        for path in [&stale_record, &stale_index] {
+            fs::write(path, b"interrupted partial write")?;
+        }
+        for parent in [&history, &history.join("runs")] {
+            let stage = parent.join(".history-stage-interrupted");
+            fs::create_dir(&stage)?;
+            fs::write(stage.join("record.pending"), b"partial")?;
+        }
+        append_history(&history, &record)?;
+        equal(
+            &list_history(&history, &HistoryFilter::default())?.len(),
+            &1,
+        )?;
+        // Model interruption after the record rename, before index publication.
+        fs::remove_file(history.join("history-index.json"))?;
+        append_history(&history, &record)?;
+        append_history(&history, &record)?;
+        equal(
+            &list_history(&history, &HistoryFilter::default())?.len(),
+            &1,
+        )?;
+        for path in [&stale_record, &stale_index] {
+            equal(&fs::read(path)?, &b"interrupted partial write".to_vec())?;
+        }
+        let mut collision = record;
+        collision.publication.result.message = Some("different evidence".into());
+        require(
+            append_history(&history, &collision).is_err(),
+            "accepted collision after recovery",
+        )?;
+        Ok(())
+    }
+    #[test]
     fn early_failed_attempt_keeps_source_and_filters_without_resolved_contract() -> TestResult {
         let root = assert_fs::TempDir::new()?;
         let store = crate::Store::open(&root.join("store"))?;
@@ -430,6 +501,19 @@ mod tests {
             },
         )?;
         let portable = crate::load_bundle(&portable_path)?;
+        let publication = crate::publication_record(&portable)?;
+        let attempt = publication
+            .attempt
+            .as_ref()
+            .ok_or("missing attempt reference")?;
+        equal(
+            &fs::read(portable.path.join(attempt))?,
+            &fs::read(portable_path.join("experiment/attempt.json"))?,
+        )?;
+        require(
+            record.publication.attempt.is_none(),
+            "history retained a live attempt path",
+        )?;
         equal(
             &serde_json::to_vec(&history_record(&portable)?)?,
             &serde_json::to_vec(&record)?,

@@ -797,13 +797,6 @@ pub fn replay_request(
         .ok_or_else(|| replay_error("unresolved measurement contract"))?;
     contract.identity()?;
     verify_experiment_anchor(bundle, &contract)?;
-    if contract.validator_policy != "correctness-v1"
-        || contract.analysis_policy != "descriptive-v1"
-        || contract.generator.version
-            != "version unavailable; retained executable identified by SHA-256"
-    {
-        return Err(replay_error("unsupported measurement contract"));
-    }
     let kind = bundle
         .manifest
         .execution_kind
@@ -868,6 +861,18 @@ pub fn replay_request(
     )?)?)?;
     if resolved != contract.suite {
         return Err(replay_error("resolved suite differs from frozen contract"));
+    }
+    let derived = crate::runner::resolved_contract(
+        &resolved,
+        contract.profile,
+        bindings,
+        &resources.tools.harness.identity,
+        resources.tools.engine.as_ref().map(|tool| &tool.identity),
+    )?;
+    if derived != contract {
+        return Err(replay_error(
+            "resolved execution contract differs from saved contract",
+        ));
     }
     Ok(ReplayRecipe {
         contract,
@@ -1116,6 +1121,103 @@ mod replay_tests {
             replay_request(&original, &changed).is_err(),
             "accepted changed binary",
         )?;
+        Ok(())
+    }
+    #[test]
+    fn untagged_replay_rejects_changed_derived_build_before_children() -> TestResult {
+        for previous in [false, true] {
+            let mut fixture = validation_fixture(
+                "printf x >> \"$HOME/calls\"; printf 'EFGH\\n'",
+                "printf x >> \"$HOME/calls\"; printf 'EFGH\\n'",
+            )?;
+            retain_candidate_build(&mut fixture)?;
+            if previous {
+                let ExecutableSource::Retained(candidate) = &fixture.request.candidate else {
+                    return Err("candidate".into());
+                };
+                let mut bound = candidate.as_ref().clone();
+                bound
+                    .artifact
+                    .build
+                    .as_mut()
+                    .ok_or("build")?
+                    .policy
+                    .compiler = "previous compiler".into();
+                bound.artifact =
+                    register_binary(&bound.path, bound.artifact.build.clone(), &fixture.store)?;
+                fixture.request.previous = Some(ExecutableSource::Retained(Box::new(bound)));
+            } else {
+                let Some(ExecutableSource::Prebuilt(path)) = fixture.request.previous.take() else {
+                    return Err("previous".into());
+                };
+                fixture.request.reference = Some(path);
+            }
+            let prepared = fixture.prepare(MeasurementProfile::Smoke)?;
+            let bindings = prepared.roles().clone();
+            let generator = bindings.generator.as_ref().ok_or("generator")?;
+            let harness = BoundTool {
+                path: generator.path.clone(),
+                identity: ToolIdentity {
+                    file: generator.artifact.file.clone(),
+                    version: "fixture harness".into(),
+                },
+            };
+            let host = collect_host(&fixture.suite.environment);
+            let mut original = run(
+                &RunRequest {
+                    preparation: ExperimentPreparation {
+                        run: &fixture.request,
+                        suite: &fixture.suite,
+                        profile: MeasurementProfile::Smoke,
+                        selected_cases: &[],
+                        expected_datasets: None,
+                    },
+                    submitted_toml: None,
+                    measurement_lock: &fixture.measurement_lock,
+                    harness: &harness,
+                    host: &host,
+                    mode: RunMode::CheckOnly { engine: None },
+                    experiment: None,
+                },
+                &fixture.store,
+                &fixture.runner,
+            )?;
+            equal(&original.result.outcome, &RunOutcome::Complete)?;
+            replay_request(&original, &bindings)?;
+            let calls = fs::read(fixture.request.home.join("calls"))?;
+            let mut changed = original
+                .manifest
+                .contract
+                .as_ref()
+                .ok_or("contract")?
+                .build
+                .clone()
+                .ok_or("derived build")?;
+            changed.compiler = "different saved compiler".into();
+            for build in [None, Some(changed)] {
+                original.manifest.contract.as_mut().ok_or("contract")?.build = build;
+                crate::store::atomic_json(
+                    &original.path.join("manifest.json"),
+                    &original.manifest,
+                )?;
+                original.files.insert(
+                    "manifest.json".into(),
+                    fingerprint(&original.path.join("manifest.json"))?,
+                );
+                crate::store::atomic_json(
+                    &original.path.join("checksums.json"),
+                    &serde_json::json!({"schema_version": 1, "files": original.files}),
+                )?;
+                let error = replay_request(&original, &bindings)
+                    .err()
+                    .ok_or("changed build contract accepted")?;
+                require(
+                    error.to_string().contains("contract"),
+                    "missing contract diagnostic",
+                )?;
+                equal(&fs::read(fixture.request.home.join("calls"))?, &calls)?;
+            }
+        }
         Ok(())
     }
     fn retain_candidate_build(

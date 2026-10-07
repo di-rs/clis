@@ -8,7 +8,7 @@ callers, bounded child execution, role/profile invocation resolution, and CLI
 help/version/logging, isolated Cargo revision builds, executable binding, and
 verified Biggie dataset preparation, correctness gating, controlled Hyperfine timing,
 and per-user measurement coordination.
-Local run/check composition, independent RSS, deterministic analysis and offline report/compare in terminal/JSON/Markdown are implemented. Export/replay/history and hosted publication remain planned.
+Local run/check composition, independent RSS, deterministic analysis and offline report/compare in terminal/JSON/Markdown are implemented. Portable export/strict replay and local history are implemented; hosted publication remains planned.
 
 ## Quick start
 
@@ -791,12 +791,16 @@ The original normalized samples and policies support offline report regeneration
 after full artifacts expire; saved retention/expiry fields survive export/history.
 Render `record.publication` with `render_record`. Replay commands in history use
 the placeholder `BUNDLE`, excluding a live local render path from record identity.
+Attempt evidence is embedded in the history record instead of linked to a live path.
 
 `append_history(directory, record)` writes immutable `runs/RUN_ID.json` records
 and atomically updates `history-index.json` under its own local transaction lock.
 Same ID and identical content is a no-op; different content fails. The index
 publishes only fully written records. An interrupted unindexed record can be
-completed by appending that identical record again. `list_history` and the CLI
+completed by appending that identical record again. Unique staging directories
+allow later appends after process termination leaves a partial temporary write;
+unrelated abandoned stages are not deleted. These guarantees cover process
+interruption, not filesystem recovery after power loss. `list_history` and the CLI
 `history` command accept either this compact directory or a store's `runs/`
 directory, with optional suite filtering including unresolved failed attempts.
 Listing renders runs independently and never derives speedups between runs or
