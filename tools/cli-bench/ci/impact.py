@@ -16,10 +16,14 @@ from selection import git, sha
 PACKAGES = ('biggie', 'tailr', 'mkdirr')
 
 
-def override(value, event):
+def override(value, event, workflow_ref='', repository=''):
     if not value:
         return None
-    if event not in ('workflow_dispatch', 'workflow_call'):
+    # Reusable jobs keep their caller's event and workflow identity. Match the
+    # same direct-workflow boundary used by the comment job; no input controls it.
+    direct = f'{repository}/.github/workflows/cli-bench.yml@'
+    reusable = bool(repository and workflow_ref and not workflow_ref.startswith(direct))
+    if event != 'workflow_dispatch' and not reusable:
         raise ValueError('package override requires a manual/reusable event')
     names = value.split(',')
     if len(names) != len(set(names)) or any(name not in PACKAGES for name in names):
@@ -99,7 +103,8 @@ def main():
     parser.add_argument('--selection', type=Path, required=True)
     args = parser.parse_args()
     selection = json.loads(args.selection.read_text())
-    packages = override(os.environ.get('INPUT_PACKAGES', ''), os.environ['GITHUB_EVENT_NAME'])
+    packages = override(os.environ.get('INPUT_PACKAGES', ''), os.environ['GITHUB_EVENT_NAME'],
+                        os.environ.get('GITHUB_WORKFLOW_REF', ''), os.environ.get('GITHUB_REPOSITORY', ''))
     if packages is None:
         event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
         previous = range_start(os.environ['GITHUB_EVENT_NAME'], event, selection)

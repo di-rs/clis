@@ -716,6 +716,28 @@ fn prepare_selection(
     let SelectionSetup {
         suite, repository, ..
     } = setup;
+    let selected_cases = args
+        .cases
+        .iter()
+        .map(|id| CaseId::new(id.clone()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut selected_roles = vec![cli_bench::Role::Candidate];
+    if args.previous.is_some() || args.previous_ref.is_some() {
+        selected_roles.push(cli_bench::Role::Previous);
+    }
+    if args.reference.is_some() {
+        selected_roles.push(cli_bench::Role::Reference);
+    }
+    cli_bench::validate_experiment_selection(
+        suite,
+        if args.measurement_profile == "smoke" {
+            MeasurementProfile::Smoke
+        } else {
+            MeasurementProfile::Full
+        },
+        &selected_cases,
+        &selected_roles,
+    )?;
     let scratch = AdapterScratch::new()?;
     for directory in ["home", "config"] {
         std::fs::create_dir(scratch.0.join(directory))?;

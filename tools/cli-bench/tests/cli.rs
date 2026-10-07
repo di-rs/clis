@@ -196,6 +196,119 @@ fn check_prebuilt_cli_produces_plain_json_without_timing_tools()
 fn native_slow_candidate_cli_exits_zero() -> Result<(), Box<dyn std::error::Error>> {
     composed_cli(false)
 }
+#[test]
+fn missing_named_comparator_cli_retains_failure_before_any_child()
+-> Result<(), Box<dyn std::error::Error>> {
+    for tagged in [false, true] {
+        reject_missing_comparator_cli(tagged)?;
+    }
+    Ok(())
+}
+fn reject_missing_comparator_cli(tagged: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let root = assert_fs::TempDir::new()?;
+    let marker = root.join("child-ran");
+    let child = validation_support::script(
+        root.path(),
+        "marked-child",
+        &format!("printf x >> '{}'", marker.display()),
+    )?;
+    let mut suite = cli_bench::parse_suite(include_str!("inputs/minimal-suite.toml"))?;
+    suite.datasets.clear();
+    suite.cases.first_mut().ok_or("case")?.argv.clear();
+    suite.cases.first_mut().ok_or("case")?.correctness =
+        vec![cli_bench::CorrectnessRule::Comparator {
+            target: cli_bench::ComparisonTarget::Reference,
+            stream: cli_bench::Stream::Stdout,
+        }];
+    let source = toml::to_string(&suite)?;
+    let suite_path = root.join("suite.toml");
+    std::fs::write(&suite_path, &source)?;
+    let mut command = cargo_bin_cmd!();
+    command
+        .current_dir(root.path())
+        .args(["check", "-f", "json", "-s"])
+        .arg(&suite_path)
+        .arg("-a")
+        .arg(&child)
+        .arg("-g")
+        .arg(&child)
+        .arg("-d")
+        .arg(root.join("evidence"))
+        .env("PATH", "");
+    if tagged {
+        command
+            .args([
+                "-b",
+                "HEAD",
+                "--experiment",
+                "missing-role",
+                "--hypothesis",
+                "missing reference",
+                "--change-summary",
+                "preflight test",
+                "-H",
+            ])
+            .arg(&child);
+    } else {
+        command.arg("-P").arg(&child);
+    }
+    let assertion = command.assert().code(1);
+    let stderr = &assertion.get_output().stderr;
+    if !(stderr.is_empty() || stderr == b"Waiting for the per-user cli-bench measurement lock...\n")
+    {
+        return Err(format!("unexpected stderr: {stderr:?}").into());
+    }
+    if marker.exists() {
+        return Err("invalid selection spawned generator/workload/tool".into());
+    }
+    let record: cli_bench::PublicationRecord =
+        serde_json::from_slice(&assertion.get_output().stdout)?;
+    verify_missing_comparator_failure(root.path(), &record, &source, tagged)
+}
+fn verify_missing_comparator_failure(
+    root: &std::path::Path,
+    record: &cli_bench::PublicationRecord,
+    source: &str,
+    tagged: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if record.result.outcome != cli_bench::RunOutcome::Failed
+        || !record
+            .result
+            .message
+            .as_deref()
+            .is_some_and(|m| m.contains("required comparator Reference"))
+    {
+        return Err("missing comparator failure was not retained".into());
+    }
+    let store = cli_bench::Store::open(&root.join("evidence"))?;
+    let bundle = store.load_run(&record.manifest.run_id)?;
+    if std::fs::read_to_string(bundle.path.join("suite.toml"))? != source
+        || bundle.manifest.execution_kind != Some(cli_bench::ExecutionKind::CheckOnly)
+        || !record.analysis.timing_samples.is_empty()
+    {
+        return Err("early failure lost requested source/stage or ran timing".into());
+    }
+    if tagged
+        && (!store
+            .root()
+            .join(format!(
+                "experiments/missing-role/attempts/{}.json",
+                record.manifest.run_id
+            ))
+            .is_file()
+            || bundle
+                .manifest
+                .experiment
+                .as_ref()
+                .ok_or("experiment missing")?
+                .requested_previous
+                != "HEAD")
+    {
+        return Err("early failure lost tagged attempt metadata".into());
+    }
+    Ok(())
+}
+
 fn composed_cli(check_only: bool) -> Result<(), Box<dyn std::error::Error>> {
     let root = assert_fs::TempDir::new()?;
     let lock =

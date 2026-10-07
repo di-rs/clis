@@ -31,33 +31,45 @@ No native measurements were repeated for this documentation change.
 
 ## Final Rust and CI checks
 
-Final Rust sources/manifests/lockfile/toolchain are unchanged since Task 12's
-accepted fix. Task 13 replacement rechecked this identity and its README-included
-crate documentation. Task 14 reuses those recorded results and adds the exact
-examples check. All commands below exited zero; historical failures remain in the
-logs rather than being replaced by successful results.
+The final review found two configuration defects: reusable callers retained push/PR
+events, and missing named comparators were discovered after preparation/workloads.
+The approved fix batch distinguishes caller workflow identity for package overrides
+and adds shared selected-case/profile comparator preflight before preparation.
+Zero-child regressions preserve submitted source and tagged failure/attempt records.
+Broad review is complete with these two fixes; the controller's scoped re-review is
+pending. This is not an unqualified whole-branch approval.
+
+The final fix batch freshly ran the package-then-workspace sequence below. All
+final commands exited zero; initial regression/test-construction/lint failures and
+the exact corrections remain in `final-fixes-report.md` and its logs. Current fix
+logs are under `.superpowers/sdd/2026-10-06-cli-bench/final-fixes-logs/`; their planned
+durable handoff location is `.cli-bench/acceptance/sdd/final-review/`, copied and
+verified by the controller after scoped review. Earlier logs remain in the preserved
+SDD directory indexed above.
 
 | Command from workspace root | Recorded result / retained log |
 | --- | --- |
-| `cargo nextest run --locked -p cli-bench` | 237 passed, 7 skipped; `task-12-logs/nextest-default-fixed.log`. |
-| `cargo test --locked -p cli-bench --doc` | 5 passed: 2 ordinary + 3 compile-fail; `task-13-replacement-logs/package-doctest-final.log`. |
-| `cargo clippy --locked -p cli-bench --all-targets --all-features` | Passed; `task-13-replacement-logs/package-clippy-final.log`. |
-| `cargo doc --locked -p cli-bench --no-deps` | Passed; `task-13-replacement-logs/package-doc-final.log`. |
-| `cargo check --locked -p cli-bench --examples` | Passed in Task 14; `task-14-logs/examples-check.log`. |
-| `cargo fmt --all -- --check` | Passed; `task-12-logs/workspace-fmt.log`. |
-| `cargo clippy --locked --workspace --all-targets --all-features` | Passed; `task-12-logs/workspace-clippy.log`. |
-| `cargo nextest run --locked --workspace` | 1009 passed, 7 skipped; `task-12-logs/workspace-nextest.log`. |
-| `cargo test --locked --workspace --doc` | 14 passed; `task-12-logs/workspace-doctest.log`. |
-| `CLIS_BENCH_WORKSPACE_MANIFEST="$PWD/Cargo.toml" cargo nextest run --locked -p cli-bench --run-ignored only -E 'test(repository_acceptance_)'` | 3 passed; `task-12-logs/recipe-acceptance.log`. |
-| `UV_CACHE_DIR=/tmp/task13-uv-cache uv run --frozen --project tools/cli-bench/ci python -m unittest discover -s tools/cli-bench/ci` | 29 passed: selection 8, impact 12, projection 6, native adapter 3; `task-13-replacement-logs/python-final.log`. |
-| `node --test tools/cli-bench/ci/test_comment.js` | 21 passed against the actual inline workflow script with an offline API; `task-13-replacement-logs/comment-final.log`. |
-| `actionlint` | Passed; `task-13-replacement-logs/actionlint-final.log`. |
-| `shellcheck tools/cli-bench/ci/native.sh tools/cli-bench/ci/setup-native.sh` | Passed; `task-13-replacement-logs/shellcheck-final.log`. |
-| `bash -n tools/cli-bench/ci/native.sh tools/cli-bench/ci/setup-native.sh` | Passed; `task-13-replacement-logs/shell-syntax-final.log`. |
-| `zizmor --offline --no-progress .github/workflows` | No findings/warnings; `task-13-replacement-logs/zizmor-final.log`. |
-| `zizmor --offline --no-progress --persona auditor --no-ignores .github/workflows` | No findings/warnings or suppressions; `task-13-replacement-logs/zizmor-auditor-final.log`. |
+| `cargo nextest run --locked -p cli-bench` | 242 passed, 7 skipped; `final-fixes-logs/package-nextest-final.log`. |
+| `cargo test --locked -p cli-bench --doc` | 5 passed: 2 ordinary + 3 compile-fail; `final-fixes-logs/package-doctest-final.log`. |
+| `cargo clippy --locked -p cli-bench --all-targets --all-features` | Passed; `final-fixes-logs/package-clippy-final.log`. |
+| `cargo doc --locked -p cli-bench --no-deps` | Passed; `final-fixes-logs/package-doc-final.log`. |
+| `cargo check --locked -p cli-bench --examples` | Passed; `final-fixes-logs/examples-final.log`. |
+| `cargo build --locked -p cli-bench` | Passed; `final-fixes-logs/build-final.log`. |
+| `cargo fmt --all -- --check` | Passed; `final-fixes-logs/workspace-fmt-final.log`. |
+| `cargo clippy --locked --workspace --all-targets --all-features` | Passed; `final-fixes-logs/workspace-clippy-final.log`. |
+| `cargo nextest run --locked --workspace` | 1014 passed, 7 skipped; `final-fixes-logs/workspace-nextest-final.log`. |
+| `cargo test --locked --workspace --doc` | 14 passed; `final-fixes-logs/workspace-doctest-final.log`. |
+| `CLIS_BENCH_WORKSPACE_MANIFEST="$PWD/Cargo.toml" cargo nextest run --locked -p cli-bench --run-ignored only -E 'test(repository_acceptance_)'` | 3 passed; `final-fixes-logs/recipe-acceptance-final.log`. |
+| `UV_CACHE_DIR=/tmp/task13-uv-cache uv run --frozen --offline --project tools/cli-bench/ci python -B -m unittest discover -s tools/cli-bench/ci` | 31 passed: selection 8, impact 14, projection 6, native adapter 3; `final-fixes-logs/python-final.log`. |
+| `node --test tools/cli-bench/ci/test_comment.js` | 21 passed against the actual inline workflow script with an offline API; `final-fixes-logs/comment-final.log`. |
+| `actionlint` | Passed; `final-fixes-logs/actionlint-final.log`. |
+| `shellcheck tools/cli-bench/ci/native.sh tools/cli-bench/ci/setup-native.sh` | Passed; `final-fixes-logs/shellcheck-final.log`. |
+| `bash -n tools/cli-bench/ci/native.sh tools/cli-bench/ci/setup-native.sh` | Passed; `final-fixes-logs/shell-syntax-final.log`. |
+| `zizmor --offline --no-progress .github/workflows` | No findings/warnings; `final-fixes-logs/zizmor-final.log`. |
+| `zizmor --offline --no-progress --persona auditor --no-ignores .github/workflows` | No findings/warnings or suppressions; `final-fixes-logs/zizmor-auditor-final.log`. |
 
-Log paths in the table are relative to the preserved SDD directory above. The seven
+Log paths in the table are relative to the current fix SDD directory above; the
+controller will preserve them at the stated durable handoff location. The seven
 ordinary skips are four native plumbing opt-ins and three repository-resource
 opt-ins; the latter passed separately. Earlier native plumbing fixtures and real
 workloads have their own evidence, not ordinary-suite native coverage. Task 12's
@@ -67,7 +79,7 @@ or weakened lint/test policy was used to obtain these results.
 
 Recorded Rust compiler: `rustc 1.101.0-nightly (db8f076d2 2026-10-03)`, full commit
 `db8f076d2619ce2585b0380dda06e8da25a40da4`, `aarch64-apple-darwin`, LLVM 23.1.1.
-Task 13 tools: uv 0.12.23, managed Python 3.14.7, Node 26.10.0, actionlint 1.7.12,
+Final fix tools: uv 0.12.23, managed Python 3.14.7, Node 26.10.0, actionlint 1.7.12,
 ShellCheck 0.11.0 and zizmor 1.30.1. Tool output is retained in the corresponding
 version logs; CI's configured versions are described in the harness README.
 
@@ -115,8 +127,9 @@ validator `correctness-v1`, analysis `descriptive-v1`, and measurement contract
 `6c6cf3fae7becb1940b7f4f619b7e05f9f299a0af2e2e829654e36ad07cff054`.
 It exercises package metadata discovery, isolated Git builds and one common text
 case. It does not relabel earlier full matrices as observations of the final
-executable. Task 12 later changed one test-only timeout; no final release native
-measurement of that source tree was performed.
+executable. Task 12 later changed one test-only timeout. The final fix batch changes configuration
+preflight in production code; no native release measurement of this final source tree
+was performed. The retained matrices/smoke keep their older harness identities.
 
 The exact final smoke argv was:
 
@@ -153,6 +166,11 @@ replay have retained tests. Storage is outside `target/`, but an actual
 scoped to process interruption; no directory-entry/power-loss durability guarantee
 is claimed.
 
+The retained final-review reproduction is at `.cli-bench/acceptance/final-review-probe/`
+with copy/hash mapping in `.cli-bench/acceptance/final-review-probe-preservation.json`.
+Its original executable/workload mutations describe the pre-fix defect. The new
+CLI regression proves the same invalid named target executes zero children.
+
 Native Linux reference/revision measurements and actual hosted Linux/macOS jobs
 remain unobserved. Real affected-only PR execution, a comment being updated rather
 than duplicated, docs-only retained-result labels, stale-run suppression and failed
@@ -163,7 +181,8 @@ checked after buffering; see the [transport limits](../../tools/cli-bench/ci/TRA
 
 No Docker/image setup, tool installation, workflow activation, push, PR creation,
 merge, settings change, remote comment or remote history write was performed for
-Task 14. The separate whole-branch review is owned by the controller. Remote
+Task 14. Broad whole-branch review found the two approved defects addressed here; the
+controller owns the pending scoped re-review. Remote
 artifact/history publication is outside this release, not a pending acceptance
 operation. This document and its local evidence index record the current limits
 without treating unperformed work as complete.

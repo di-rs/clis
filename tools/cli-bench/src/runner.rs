@@ -300,6 +300,97 @@ mod tests {
     use crate::{ExecutableSource, MeasurementProfile, collect_host};
     type TestResult = Result<(), Box<dyn std::error::Error>>;
     #[test]
+    fn missing_comparator_retains_failed_tagged_attempt_without_children() -> TestResult {
+        use crate::test_support::{equal, require, validation_support::script};
+        let mut fixture = validation_fixture("exit 0", "exit 0")?;
+        let marker = fixture.root.join("child-ran");
+        let child = script(
+            fixture.root.path(),
+            "marked-child",
+            &format!("printf x >> '{}'", marker.display()),
+        )?;
+        fixture.request.generator = Some(ExecutableSource::Prebuilt(child.clone()));
+        fixture.request.candidate = ExecutableSource::Prebuilt(child.clone());
+        fixture.request.previous = Some(ExecutableSource::Revision("HEAD".into()));
+        fixture.suite.cases.first_mut().ok_or("case")?.correctness =
+            vec![crate::CorrectnessRule::Comparator {
+                target: crate::ComparisonTarget::Reference,
+                stream: crate::Stream::Stdout,
+            }];
+        let harness = BoundTool {
+            path: child.clone(),
+            identity: ToolIdentity {
+                file: crate::fingerprint(&child)?,
+                version: "test harness".into(),
+            },
+        };
+        let experiment = ExperimentRequest {
+            id: "missing-role".into(),
+            hypothesis: "test missing role".into(),
+            change_summary: "required reference absent".into(),
+            requested_previous: "HEAD".into(),
+            requested_candidate: "prebuilt".into(),
+        };
+        let source = toml::to_string(&fixture.suite)?;
+        let host = collect_host(&fixture.suite.environment);
+        let bundle = run(
+            &RunRequest {
+                preparation: ExperimentPreparation {
+                    run: &fixture.request,
+                    suite: &fixture.suite,
+                    profile: MeasurementProfile::Full,
+                    selected_cases: &[],
+                    expected_datasets: None,
+                },
+                submitted_toml: Some(&source),
+                measurement_lock: &fixture.measurement_lock,
+                harness: &harness,
+                host: &host,
+                mode: RunMode::CheckOnly { engine: None },
+                experiment: Some(&experiment),
+            },
+            &fixture.store,
+            &fixture.runner,
+        )?;
+        equal(&bundle.result.outcome, &RunOutcome::Failed)?;
+        require(
+            bundle
+                .result
+                .message
+                .as_deref()
+                .is_some_and(|m| m.contains("required comparator Reference")),
+            "missing comparator was not the retained failure",
+        )?;
+        require(!marker.exists(), "invalid tagged attempt spawned children")?;
+        equal(&bundle.manifest.experiment, &Some(experiment))?;
+        equal(
+            &std::fs::read_to_string(bundle.path.join("suite.toml"))?,
+            &source,
+        )?;
+        let retained = fixture.store.load_run(&bundle.manifest.run_id)?;
+        equal(&retained.result, &bundle.result)?;
+        require(
+            fixture
+                .store
+                .root()
+                .join(format!(
+                    "experiments/missing-role/attempts/{}.json",
+                    bundle.manifest.run_id
+                ))
+                .is_file(),
+            "attempt metadata missing",
+        )?;
+        require(
+            publication_record(&bundle)?
+                .analysis
+                .timing_samples
+                .is_empty(),
+            "invalid attempt timed",
+        )?;
+        Ok(())
+    }
+
+    #[test]
     fn composes_all_role_combinations_and_expected_nonzero_status() -> TestResult {
         for selection in ["previous", "reference", "both"] {
             let mut fixture =

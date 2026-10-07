@@ -285,6 +285,77 @@ impl<'lock> ValidatedExperiment<'lock> {
         Ok(())
     }
 }
+/// Validate selected cases and their effective comparator requirements before preparation.
+///
+/// This read-only preflight launches no children and creates no resources. CLI adapters
+/// may call it before tool discovery; [`prepare_experiment`] enforces it for Rust callers.
+/// # Errors
+/// Returns invalid suite/selection or an unavailable named comparator role.
+pub fn validate_experiment_selection(
+    suite: &Suite,
+    profile: MeasurementProfile,
+    selection: &[CaseId],
+    roles: &[Role],
+) -> Result<(), BenchError> {
+    crate::validate_suite(suite)?;
+    for case in selected_cases(suite, selection)? {
+        for rule in rules(case, profile) {
+            let target = match rule {
+                CorrectnessRule::Comparator { target, .. } => Some(*target),
+                CorrectnessRule::DirectoryTree {
+                    compare_mode_to, ..
+                } => *compare_mode_to,
+                _ => None,
+            };
+            let required = match target {
+                Some(ComparisonTarget::Reference) => Some(Role::Reference),
+                Some(ComparisonTarget::Previous) => Some(Role::Previous),
+                Some(ComparisonTarget::Candidate) => Some(Role::Candidate),
+                Some(ComparisonTarget::SelectedBaselines) | None => None,
+            };
+            if let Some(role) = required
+                && !roles.contains(&role)
+            {
+                return Err(BenchError::invalid(format!(
+                    "case {}: required comparator {role:?} is unbound",
+                    case.id,
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+fn selected_cases<'a>(
+    suite: &'a Suite,
+    selection: &[CaseId],
+) -> Result<Vec<&'a CaseSpec>, BenchError> {
+    let selected: BTreeSet<_> = selection.iter().map(CaseId::as_str).collect();
+    if selected.len() != selection.len()
+        || selected
+            .iter()
+            .any(|id| !suite.cases.iter().any(|case| case.id == *id))
+    {
+        return Err(BenchError::invalid(
+            "case selection contains duplicate or unknown IDs",
+        ));
+    }
+    Ok(suite
+        .cases
+        .iter()
+        .filter(|case| selected.is_empty() || selected.contains(case.id.as_str()))
+        .collect())
+}
+fn requested_roles(request: &RoleRequest) -> Vec<Role> {
+    let mut roles = vec![Role::Candidate];
+    if request.previous.is_some() {
+        roles.push(Role::Previous);
+    }
+    if request.reference.is_some() {
+        roles.push(Role::Reference);
+    }
+    roles
+}
+
 /// Prepare all selected resources outside timing. Scratch lives under the explicit
 /// build cache root, while generated data and validation evidence live in Store.
 /// # Errors
@@ -295,24 +366,16 @@ pub fn prepare_experiment<'lock>(
     store: &Store,
     runner: &ProcessRunner,
 ) -> Result<PreparedExperiment<'lock>, BenchError> {
-    crate::validate_suite(request.suite)?;
-    let selected: BTreeSet<_> = request.selected_cases.iter().map(CaseId::as_str).collect();
-    if selected.len() != request.selected_cases.len()
-        || selected
-            .iter()
-            .any(|id| !request.suite.cases.iter().any(|case| case.id == *id))
-    {
-        return Err(BenchError::invalid(
-            "case selection contains duplicate or unknown IDs",
-        ));
-    }
-    let cases: Vec<_> = request
-        .suite
-        .cases
-        .iter()
-        .filter(|case| selected.is_empty() || selected.contains(case.id.as_str()))
+    validate_experiment_selection(
+        request.suite,
+        request.profile,
+        request.selected_cases,
+        &requested_roles(request.run),
+    )?;
+    let cases = selected_cases(request.suite, request.selected_cases)?
+        .into_iter()
         .cloned()
-        .collect();
+        .collect::<Vec<_>>();
     let bindings = crate::bind_roles(measurement_lock, request.run, request.suite, store, runner)?;
     let datasets = crate::prepare_datasets(
         measurement_lock,
@@ -1116,6 +1179,160 @@ mod tests {
                 .count()
                 >= 8,
             "gate lost independent findings",
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn missing_named_stream_roles_fail_before_generator_or_role_preparation()
+    -> validation_support::TestResult {
+        use crate::*;
+        for target in [ComparisonTarget::Reference, ComparisonTarget::Previous] {
+            for stream in [Stream::Stdout, Stream::Stderr] {
+                let mut fixture = crate::test_support::validation_fixture("exit 0", "exit 0")?;
+                let marker = fixture.root.join("child-ran");
+                let child = validation_support::script(
+                    fixture.root.path(),
+                    "marked-child",
+                    &format!("printf x >> '{}'", marker.display()),
+                )?;
+                fixture.request.generator = Some(ExecutableSource::Prebuilt(child.clone()));
+                fixture.request.candidate = ExecutableSource::Revision("HEAD".into());
+                if target == ComparisonTarget::Previous {
+                    fixture.request.previous = None;
+                    fixture.request.reference = Some(child);
+                }
+                fixture.suite.cases.first_mut().ok_or("case")?.correctness =
+                    vec![CorrectnessRule::Comparator { target, stream }];
+                let error = fixture
+                    .prepare(MeasurementProfile::Full)
+                    .err()
+                    .ok_or("accepted missing role")?;
+                require(
+                    error.kind() == ErrorKind::InvalidSuite,
+                    "role requirement was not preflighted",
+                )?;
+                require(
+                    error.to_string().contains("required comparator"),
+                    "lost missing role diagnostic",
+                )?;
+                require(!marker.exists(), "invalid selection spawned a child")?;
+                require(
+                    std::fs::read_dir(&fixture.request.cache_root)?
+                        .next()
+                        .is_none(),
+                    "invalid selection prepared scratch/build",
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn profile_directory_target_fails_before_generation_and_mutation()
+    -> validation_support::TestResult {
+        use crate::*;
+        let mut fixture = crate::test_support::validation_fixture("exit 0", "exit 0")?;
+        let marker = fixture.root.join("generator-ran");
+        fixture.request.generator = Some(ExecutableSource::Prebuilt(validation_support::script(
+            fixture.root.path(),
+            "marked-generator",
+            &format!("printf x >> '{}'", marker.display()),
+        )?));
+        let case = fixture.suite.cases.first_mut().ok_or("case")?;
+        case.mutation = MutationSetup::Directories {
+            paths: vec!["dir".into()],
+        };
+        case.profiles.insert(
+            MeasurementProfile::Smoke,
+            CaseOverride {
+                correctness: Some(vec![CorrectnessRule::DirectoryTree {
+                    paths: vec!["dir".into()],
+                    compare_mode_to: Some(ComparisonTarget::Reference),
+                }]),
+                ..CaseOverride::default()
+            },
+        );
+        let error = fixture
+            .prepare(MeasurementProfile::Smoke)
+            .err()
+            .ok_or("accepted missing directory target")?;
+        require(
+            error.kind() == ErrorKind::InvalidSuite,
+            "directory requirement was not preflighted",
+        )?;
+        require(!marker.exists(), "invalid selection generated inputs")?;
+        require(
+            std::fs::read_dir(&fixture.request.cache_root)?
+                .next()
+                .is_none(),
+            "invalid selection prepared mutation",
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn comparator_preflight_respects_case_selection_profile_replacement_and_baselines()
+    -> validation_support::TestResult {
+        use crate::*;
+        let mut fixture =
+            crate::test_support::validation_fixture("printf 'EFGH\\n'", "printf 'EFGH\\n'")?;
+        let mut excluded = fixture.suite.cases.first().ok_or("case")?.clone();
+        excluded.id = "excluded".into();
+        excluded.correctness = vec![CorrectnessRule::Comparator {
+            target: ComparisonTarget::Reference,
+            stream: Stream::Stdout,
+        }];
+        fixture.suite.cases.push(excluded);
+        let selected = [CaseId::new("last-line")?];
+        let mut writer = fixture.store.begin_run(&fixture.suite)?;
+        validate_experiment(
+            prepare_experiment(
+                &fixture.measurement_lock,
+                &ExperimentPreparation {
+                    run: &fixture.request,
+                    suite: &fixture.suite,
+                    profile: MeasurementProfile::Full,
+                    selected_cases: &selected,
+                    expected_datasets: None,
+                },
+                &fixture.store,
+                &fixture.runner,
+            )?,
+            &mut writer,
+            &fixture.runner,
+        )?;
+        let case = fixture.suite.cases.first_mut().ok_or("case")?;
+        case.correctness = vec![CorrectnessRule::Comparator {
+            target: ComparisonTarget::Reference,
+            stream: Stream::Stdout,
+        }];
+        case.profiles.insert(
+            MeasurementProfile::Smoke,
+            CaseOverride {
+                correctness: Some(vec![CorrectnessRule::Comparator {
+                    target: ComparisonTarget::SelectedBaselines,
+                    stream: Stream::Stdout,
+                }]),
+                ..CaseOverride::default()
+            },
+        );
+        let mut writer = fixture.store.begin_run(&fixture.suite)?;
+        validate_experiment(
+            prepare_experiment(
+                &fixture.measurement_lock,
+                &ExperimentPreparation {
+                    run: &fixture.request,
+                    suite: &fixture.suite,
+                    profile: MeasurementProfile::Smoke,
+                    selected_cases: &selected,
+                    expected_datasets: None,
+                },
+                &fixture.store,
+                &fixture.runner,
+            )?,
+            &mut writer,
+            &fixture.runner,
         )?;
         Ok(())
     }

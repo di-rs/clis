@@ -1,5 +1,7 @@
 """Original commit graphs exercise exact previous/candidate package impact."""
 import json
+import os
+import sys
 from pathlib import Path
 import subprocess
 import tempfile
@@ -87,6 +89,36 @@ class ImpactTests(unittest.TestCase):
         for value, event in [('tailr', 'pull_request'), ('$(touch PWNED)', 'workflow_dispatch'), ('tailr,tailr', 'workflow_dispatch'), ('unknown', 'workflow_dispatch')]:
             with self.subTest(value=value), self.assertRaises(ValueError):
                 impact.override(value, event)
+
+    def test_reusable_overrides_use_actual_caller_events_and_workflow_context(self):
+        selection = self.repo / 'selection.json'
+        selection.write_text(json.dumps({'candidate_sha': self.base, 'previous_sha': self.base}))
+        event_path = self.repo / 'event.json'
+        event_path.write_text('{}')
+        output = self.repo / 'output'
+        for event, ref in [('push', 'refs/heads/master'), ('pull_request', 'refs/pull/7/merge')]:
+            for origin, packages, expected in [('caller', 'tailr', 0), ('caller', '', 0),
+                                               ('cli-bench', 'tailr', 1), ('cli-bench', '', 0), ('caller', 'unknown', 1)]:
+                with self.subTest(event=event, origin=origin, packages=packages):
+                    output.write_text('')
+                    environment = {**os.environ, 'GITHUB_EVENT_NAME': event,
+                                   'GITHUB_REPOSITORY': 'owner/repo',
+                                   'GITHUB_WORKFLOW_REF': f'owner/repo/.github/workflows/{origin}.yml@{ref}',
+                                   'GITHUB_EVENT_PATH': str(event_path), 'GITHUB_OUTPUT': str(output),
+                                   'INPUT_PACKAGES': packages}
+                    result = subprocess.run([sys.executable, '-B', str(Path(impact.__file__)),
+                                             '--selection', str(selection)], cwd=self.repo,
+                                            env=environment, capture_output=True, text=True, check=False)
+                    self.assertEqual(result.returncode, expected, result.stderr)
+                    if not expected:
+                        self.assertEqual(output.read_text(), 'packages=["tailr"]\nhas_packages=true\n'
+                                         if packages else 'packages=[]\nhas_packages=false\n')
+
+    def test_reusable_pr_still_forbids_revision_overrides(self):
+        from selection import select
+        for candidate, target in [('a' * 40, ''), ('', 'b' * 40)]:
+            with self.subTest(candidate=candidate, target=target), self.assertRaisesRegex(ValueError, 'PR identity'):
+                select('pull_request', {}, self.repo, self.base, candidate, target)
 
     def test_synchronize_impact_is_incremental_but_measurement_baseline_stays_fixed(self):
         self.write('biggie/src/lib.rs', '// earlier PR implementation')

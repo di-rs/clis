@@ -45,6 +45,7 @@ mod check;
 pub use check::{
     ExperimentPreparation, PreparedExperiment, ValidatedExperiment, ValidationFinding,
     ValidationObservation, ValidationReport, prepare_experiment, validate_experiment,
+    validate_experiment_selection,
 };
 
 mod timing;

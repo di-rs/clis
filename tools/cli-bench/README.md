@@ -516,7 +516,14 @@ Native macOS execution was checked for this slice; Linux remains unverified.
 `prepare_experiment(&MeasurementLock, &ExperimentPreparation, &Store, &ProcessRunner)` accepts one
 explicit suite, profile, validated `CaseId` selection, role/build `RoleRequest` and
 optional immutable replay datasets. An empty selection includes every declared
-case; duplicate or unknown IDs fail. Preparation binds executables, generates and
+case; duplicate or unknown IDs fail. Before binding/building executables, generating
+inputs or resetting scratch, preparation rejects any missing named comparator in
+the selected cases' effective profile rules, including directory mode targets.
+`validate_experiment_selection(&suite, profile, &cases, &roles)` exposes that same
+read-only preflight for adapters before tool discovery. Unselected cases and rules
+replaced by a profile do not require their original targets; selected-baselines
+compares only the requested baselines. Composed run/check failures retain their
+submitted suite and tagged attempt metadata. Preparation binds executables, generates and
 verifies datasets, and allocates unique marked scratch under `RoleRequest.cache_root`
 (typically `target/cli-bench`). Retained inputs and evidence stay in the Store.
 
@@ -526,7 +533,7 @@ outcome, byte identity, directory mode and check result. The writer must belong 
 the same suite. Failure returns no `ValidatedExperiment`. Exact byte comparisons
 preserve whitespace, NUL and invalid UTF-8. Independent literals, shapes and tail
 slices catch shared comparator bugs. Expected nonzero direct exits remain values.
-Missing named comparators fail. The gate captures output, then repeats each
+Missing named comparators fail during preparation. The gate captures output, then repeats each
 invocation with its declared sink to verify status, stderr, observable file output
 and declared directory effects. These extra validation invocations are untimed.
 
@@ -982,7 +989,13 @@ head against its merge-base with the event target SHA. Push comparisons use the
 candidate's first parent; a root commit records an unavailable comparison.
 Manual runs require exact `target_sha`, may provide exact `candidate_sha`, and may
 select comma-separated `packages` (`biggie,tailr,mkdirr`). Blank packages selects
-affected CLIs automatically. Reusable PR identity cannot be overridden.
+affected CLIs automatically. Reusable callers may also supply the allowlisted
+package list under their actual push/PR event. Selection distinguishes the caller's
+workflow path from this workflow's direct path; GitHub retains the caller context
+in reusable jobs ([GitHub reference](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations#github-context)).
+Direct automatic push/PR events keep impact selection. Reusable PR candidate and
+target SHAs cannot be overridden. Comment publication remains limited to direct
+same-repository PR executions of this workflow.
 
 Impact selection is separate from the benchmark baseline. Initial/opened/reopened
 PR runs inspect the full PR diff; follow-up synchronize events inspect the prior
