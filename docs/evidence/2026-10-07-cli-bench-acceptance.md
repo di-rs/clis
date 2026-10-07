@@ -25,6 +25,7 @@ by Git. They are available in this checkout, not distributed with this document.
 | `.cli-bench/acceptance/sdd/preservation.json` | Source/destination paths, sizes and SHA-256 verification for the handoff copy. |
 | `.cli-bench/acceptance/sdd/final-review/` | Final review, approved fixes, scoped re-review and fresh verification logs. |
 | `.cli-bench/acceptance/sdd/final-review-preservation.json` | Verified final handoff: 56 files / 1,771,946 bytes, every SHA-256 matched. |
+| `.cli-bench/acceptance/cleanup-trial/` | Actual isolated Cargo clean trial: complete copied real native bundle, commands/logs, before/after hashes, identical reports and retained miniature workspace; `result.json` records exact mappings and identities. |
 
 Original evidence remains intact. Recorded temporary paths and provenance were
 not rewritten; use the preservation mappings to find their durable copies. The
@@ -158,14 +159,48 @@ roles as `run-1791378182390486000-30075-0` with 108 elapsed and 27 RSS observati
 Both outcomes and complete bundles remain preserved. Early failed reference-path,
 Git-link and legacy-shape probes also remain visible in the Task 11 report/index.
 
+## Actual isolated Cargo clean trial
+
+The trial used an owned std-only miniature Cargo workspace at
+`/private/tmp/clis-cargo-clean-wtz1tjaj`, with the already installed
+`nightly-2026-10-04` toolchain and offline, explicit manifest/target paths. Cargo
+built and executed its 474,624-byte probe binary, then actual `cargo clean`
+removed the complete owned target (Cargo reported 30 files / 1.0 MiB):
+
+```sh
+cargo +nightly-2026-10-04 build --locked --offline \
+  --manifest-path /private/tmp/clis-cargo-clean-wtz1tjaj/Cargo.toml \
+  --target-dir /private/tmp/clis-cargo-clean-wtz1tjaj/target
+cargo +nightly-2026-10-04 clean \
+  --manifest-path /private/tmp/clis-cargo-clean-wtz1tjaj/Cargo.toml \
+  --target-dir /private/tmp/clis-cargo-clean-wtz1tjaj/target
+```
+
+The copied real successful native bundle was the final package-discovery Biggie
+text smoke `run-1791379789764647000-39381-0`, selected through the preserved Task 11
+index/mapping. All 131 files / 13,231,081 bytes matched SHA-256 across the original
+preserved bundle, miniature `.cli-bench/native-bundle` before and after clean, and
+its durable copy under `cleanup-trial/mini-workspace/`. Scratch and source evidence
+remain intact. No workload was regenerated or measured.
+
+The existing final debug harness rendered saved JSON, Markdown and terminal
+reports before/after, all exit zero and byte-identical (115,487 / 16,965 / 15,959
+bytes respectively). Its SHA-256 was
+`cc85cf5412d0a2c7cc8e8d90e9e75aa81824d0f5a6b481a2cccfe3e97a544d3d`,
+against checkout `2921fb79c2cf05c043e1d746bc365c69bf6a2f68`; both main debug/release
+harness hashes were unchanged after the trial. Exact argv, output, full file
+inventories and report hashes are retained in `.cli-bench/acceptance/cleanup-trial/`.
+This proves isolated actual Cargo clean survival with real evidence; it is not a
+clean of the user's main workspace or a power-loss durability test.
+
 ## Operational limits and remaining acceptance
 
 Cross-process exclusion across distinct data directories and lock release are
 covered by the retained Task 7 integration results and final package suite. Local
 compact history, immutable collision checks, interruption recovery and strict
-replay have retained tests. Storage is outside `target/`, but an actual
-`cargo clean` survival trial was not performed. Atomic publication/recovery is
-scoped to process interruption; no directory-entry/power-loss durability guarantee
+replay have retained tests. The isolated actual `cargo clean` survival trial above
+passed with a copied real native bundle outside the miniature workspace's
+`target/`. Atomic publication/recovery is scoped to process interruption; no directory-entry/power-loss durability guarantee
 is claimed.
 
 The retained final-review reproduction is at `.cli-bench/acceptance/final-review-probe/`
