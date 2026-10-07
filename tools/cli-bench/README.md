@@ -443,7 +443,7 @@ The report retains the existing host umask observation, including explicit
 unavailability on macOS, and compares actual requested mode bits. It does not infer
 umask from permissions or claim that an unavailable value was verified. Native
 macOS regression tests cover this library workflow; Linux remains unverified.
-RSS and CLI run/check wiring remain later work.
+CLI run/check wiring remains later work.
 No performance claim is made for preparation, verification or reset.
 
 
@@ -526,3 +526,46 @@ Native Biggie and Hyperfine opt-ins also keep it. Shared fixture builders under
 production and source-local fixture factories choose their lock explicitly. Preserve
 this separation when adding RSS, orchestration and other component tests. Isolation
 does not relax identity checks, evidence durability, subprocess limits or assertions.
+
+## Independent peak RSS and executable size
+
+`parse_peak_rss(Platform, &[u8])` accepts exactly one native maximum-resident-set
+field. GNU `time -v` reports `kbytes`, normalized as KiB times 1024; Darwin
+`time -l` reports bytes. `NativeRss` retains the native value/unit, selected platform,
+normalized bytes and OS command-accounting limitation. Missing, duplicate,
+malformed, negative or overflowing fields fail rather than becoming zero.
+
+`measure_rss(&validated, &mut writer, &runner, &time_tool, platform)` requires a
+caller-bound `BoundTool` and the successful capability borrowing its session lock.
+It invokes native time around the same resolved direct command or Bash/cat
+pipeline and the declared stdin/stdout boundaries. Full runs collect five fresh
+memory processes per selected role/case; smoke runs collect one and support no
+performance conclusion. These observations are independent of elapsed-time
+samples. OS descendant accounting varies; pipeline RSS is never presented as a
+sum of process peaks, and RSS does not measure allocation counts.
+
+GNU resource output uses a separate bounded `-o` file; target stderr remains
+separate, and both the wrapper outcome and reported target status must match.
+Signal warnings fail. Darwin preserves the combined native stderr stream, checks
+the exact validated target diagnostic prefix by byte count/hash, then validates
+the resource trailer separately. Its abnormal-termination warning fails even
+when the wrapper's numeric exit equals an expected normal exit. Target diagnostics
+containing that warning text are explicitly ambiguous and RSS is unavailable for
+that boundary. No extra wrapper shell changes the command accounting scope.
+
+Every sample resets mutation scratch and checks status, diagnostics and declared
+effects. Each case repeats the full correctness gate afterward. Final identity
+verification rechecks executable byte counts/hashes and the time tool. One
+`executable-sizes.json` copies each role's absolute byte count and hash directly
+from its immutable `ArtifactRecord`; size has no repeated sampling loop.
+Raw resource output, combined/target stderr, exact argv/tool identity, native
+outcomes, individual samples and final reports remain under `raw/rss/`. A sample's
+`raw_stdout` is absent for drained/discarded/file sinks, preserving their boundary.
+Aggregate samples and size evidence require successful correctness and identity
+checks. A second call cannot overwrite the first stage's raw evidence.
+
+Ordinary parser and adapter tests use original tiny fixtures and isolated real
+test locks; the representative public workflow and native opt-in use the fixed
+production lock. See [fixture provenance](tests/inputs/README.md) for native
+execution and parser-only evidence. Native macOS was verified; native Linux
+execution remains unverified. No benchmark performance conclusion is claimed.

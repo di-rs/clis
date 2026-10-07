@@ -56,5 +56,8 @@ pub use timing::{
 mod lock;
 pub use lock::MeasurementLock;
 
+mod rss;
+pub use rss::{NativeRss, Platform, RssSample, RssUnit, measure_rss, parse_peak_rss};
+
 #[cfg(test)]
 mod test_support;

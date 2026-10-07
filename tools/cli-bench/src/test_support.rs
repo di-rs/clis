@@ -5,6 +5,8 @@ pub mod build;
 pub mod dataset_support;
 #[path = "../tests/common/gate.rs"]
 pub mod gate_support;
+#[path = "../tests/common/rss.rs"]
+pub mod rss_support;
 #[path = "../tests/common/timing.rs"]
 pub mod timing_support;
 #[path = "../tests/common/validation.rs"]
