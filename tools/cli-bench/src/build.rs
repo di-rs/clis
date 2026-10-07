@@ -47,7 +47,7 @@ pub enum ExecutableSource {
 }
 /// Role selection and caller-owned execution directories. No ambient tool discovery.
 #[derive(Clone, Debug)]
-pub struct RunRequest {
+pub struct RoleRequest {
     pub repository: PathBuf,
     pub candidate: ExecutableSource,
     pub previous: Option<ExecutableSource>,
@@ -435,7 +435,7 @@ fn retain_build(
 /// Rejects missing comparators/tools, unsupported source or changed identities.
 pub fn bind_roles(
     measurement_lock: &crate::MeasurementLock,
-    request: &RunRequest,
+    request: &RoleRequest,
     suite: &Suite,
     store: &Store,
     runner: &ProcessRunner,
@@ -521,7 +521,7 @@ enum PreparedSource {
 fn prepare_source(
     measurement_lock: &crate::MeasurementLock,
     source: &ExecutableSource,
-    request: &RunRequest,
+    request: &RoleRequest,
     runner: &ProcessRunner,
 ) -> Result<PreparedSource, BenchError> {
     match source {
@@ -551,7 +551,7 @@ fn prepare_source(
 fn bind_source(
     measurement_lock: &crate::MeasurementLock,
     source: PreparedSource,
-    request: &RunRequest,
+    request: &RoleRequest,
     target: (&str, &str),
     policy: &BuildPolicy,
     store: &Store,
@@ -1317,7 +1317,7 @@ mod tests {
         std::fs::create_dir(&config)?;
         let store = Store::open(&root.path().join("evidence"))?;
         let suite = parse_suite(include_str!("../tests/inputs/minimal-suite.toml"))?;
-        let mut request = RunRequest {
+        let mut request = RoleRequest {
             repository: root.path().into(),
             candidate: ExecutableSource::Prebuilt(executable.clone()),
             previous: None,

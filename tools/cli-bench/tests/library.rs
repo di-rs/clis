@@ -69,7 +69,7 @@ fn require(condition: bool, message: &str) -> Result<(), Box<dyn std::error::Err
 }
 fn resolved_manifest(
     store: &Store,
-    run: &cli_bench::RunWriter,
+    writer: &cli_bench::RunWriter,
     source: &std::path::Path,
 ) -> Result<cli_bench::RunManifest, Box<dyn std::error::Error>> {
     use cli_bench::*;
@@ -106,16 +106,17 @@ fn resolved_manifest(
     let candidate = register_binary(source, None, store)?;
     Ok(RunManifest {
         schema_version: 1,
-        run_id: run.id().into(),
+        execution_kind: None,
+        run_id: writer.id().into(),
         contract: Some(MeasurementContract {
             schema_version: 1,
             suite,
             harness: tool.clone(),
             generator: tool.clone(),
-            engine: tool,
+            engine: Some(tool),
             validator_policy: "correctness-v1".into(),
             analysis_policy: "descriptive-v1".into(),
-            build: policy,
+            build: Some(policy),
             profile: MeasurementProfile::Full,
         }),
         roles: [(Role::Previous, previous), (Role::Candidate, candidate)].into(),
@@ -129,7 +130,7 @@ fn resolved_manifest(
         tool_paths: Some(ToolPaths {
             harness: source.into(),
             generator: source.into(),
-            engine: source.into(),
+            engine: Some(source.into()),
         }),
         experiment: None,
     })
@@ -846,3 +847,35 @@ use dataset_support::*;
 #[path = "common/gate.rs"]
 mod gate_support;
 use gate_support::failed_gate_never_times;
+
+#[test]
+fn report_and_analysis_are_repeatable_public_consumers_without_global_setup()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = assert_fs::TempDir::new()?;
+    let store = Store::open(&root.join("evidence"))?;
+    let suite = parse_suite(include_str!("inputs/minimal-suite.toml"))?;
+    let bundle = store.begin_run(&suite)?.record_failure(
+        cli_bench::RunOutcome::Incomplete,
+        "interrupted before preparation",
+    )?;
+    let mut previous = None;
+    for _ in 0..2 {
+        let record = cli_bench::publication_record(&bundle)?;
+        let analysis = cli_bench::analyze(
+            &record.manifest,
+            &record.analysis.timing_samples,
+            &record.analysis.rss_samples,
+        )?;
+        require(
+            analysis.contract_id.is_none(),
+            "invented unresolved contract",
+        )?;
+        let mut output = vec![];
+        cli_bench::render(&bundle, cli_bench::ReportFormat::Json, &mut output)?;
+        if let Some(expected) = &previous {
+            require(expected == &output, "nondeterministic report")?;
+        }
+        previous = Some(output);
+    }
+    Ok(())
+}

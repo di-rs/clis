@@ -122,14 +122,14 @@ fn build_rejects_ambiguous_packages_without_guessing_a_binary()
 }
 
 #[test]
-fn valid_run_selection_does_not_claim_unimplemented_execution() {
+fn missing_suite_returns_operational_failure() {
     cargo_bin_cmd!()
         .env_remove("CLIS_LOG_LEVEL")
         .args(["run", "-s", "tailr", "-a", "/candidate", "-x", "/reference"])
         .assert()
         .code(1)
         .stdout("")
-        .stderr(predicate::str::contains("execution is not implemented"));
+        .stderr(predicate::str::contains("suite"));
 }
 
 #[test]
@@ -168,6 +168,237 @@ fn build_fixtures_ignore_git_hook_repository_redirection() -> Result<(), Box<dyn
     .is_empty()
     {
         return Err("fixture staged files in redirected repository".into());
+    }
+    Ok(())
+}
+
+#[test]
+fn check_prebuilt_cli_produces_plain_json_without_timing_tools()
+-> Result<(), Box<dyn std::error::Error>> {
+    composed_cli(true)
+}
+#[test]
+#[ignore = "requires native time resource permissions"]
+fn native_slow_candidate_cli_exits_zero() -> Result<(), Box<dyn std::error::Error>> {
+    composed_cli(false)
+}
+fn composed_cli(check_only: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let root = assert_fs::TempDir::new()?;
+    let lock =
+        cli_bench::MeasurementLock::acquire(&std::sync::atomic::AtomicBool::new(false), || Ok(()))?;
+    let fixture = validation_support::Fixture::from_root_and_lock(
+        root,
+        lock,
+        "# slower candidate\nprintf 'EFGH\\n'",
+        "printf 'EFGH\\n'",
+    )?;
+    let suite = fixture.root.join("suite.toml");
+    let submitted = format!(
+        "# exact submitted suite\n{}",
+        toml::to_string(&fixture.suite)?
+    );
+    std::fs::write(&suite, &submitted)?;
+    let engine = slow_engine(&fixture)?;
+    drop(fixture.measurement_lock);
+    let cli_bench::ExecutableSource::Prebuilt(candidate) = &fixture.request.candidate else {
+        return Err("candidate".into());
+    };
+    let Some(cli_bench::ExecutableSource::Prebuilt(previous)) = &fixture.request.previous else {
+        return Err("previous".into());
+    };
+    let Some(cli_bench::ExecutableSource::Prebuilt(generator)) = &fixture.request.generator else {
+        return Err("generator".into());
+    };
+    let assertion = cargo_bin_cmd!()
+        .current_dir(fixture.root.path())
+        .args(["check", "-F", "selected-feature", "-f", "json", "-s"])
+        .arg(&suite)
+        .arg("-a")
+        .arg(candidate)
+        .arg("-p")
+        .arg(previous)
+        .arg("-g")
+        .arg(generator)
+        .arg("-d")
+        .arg(fixture.store.root())
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
+    let record: cli_bench::PublicationRecord =
+        serde_json::from_slice(&assertion.get_output().stdout)?;
+    if record.result.outcome != cli_bench::RunOutcome::Complete {
+        return Err("check failed".into());
+    }
+    if !record.analysis.timing_samples.is_empty() {
+        return Err("check measured timing".into());
+    }
+    verify_offline_comparison(&fixture.store, &record, &submitted)?;
+    if check_only {
+        return Ok(());
+    }
+    let assertion = cargo_bin_cmd!()
+        .current_dir(fixture.root.path())
+        .args(["run", "-f", "json", "-s"])
+        .arg(&suite)
+        .arg("-a")
+        .arg(candidate)
+        .arg("-p")
+        .arg(previous)
+        .arg("-g")
+        .arg(generator)
+        .arg("-H")
+        .arg(&engine.path)
+        .arg("-d")
+        .arg(fixture.store.root())
+        .env("NO_COLOR", "1")
+        .assert();
+    let record: cli_bench::PublicationRecord =
+        serde_json::from_slice(&assertion.get_output().stdout)?;
+    if !assertion.get_output().status.success() {
+        let diagnostics = rss_diagnostics(&fixture.store, &record);
+        return Err(format!(
+            "CLI failed: {:?}; diagnostics: {diagnostics:?}",
+            record.result
+        )
+        .into());
+    }
+    if record
+        .analysis
+        .cases
+        .first()
+        .and_then(|case| case.comparisons.first())
+        .map(|comparison| comparison.direction)
+        != Some(cli_bench::Direction::Slower)
+    {
+        return Err("slow candidate did not produce advisory success".into());
+    }
+    Ok(())
+}
+
+fn rss_diagnostics(store: &cli_bench::Store, record: &cli_bench::PublicationRecord) -> Vec<String> {
+    record
+        .evidence
+        .iter()
+        .filter(|path| path.starts_with("raw/rss/") && path.ends_with(".stderr"))
+        .map(|path| {
+            std::fs::read_to_string(
+                store
+                    .root()
+                    .join("runs")
+                    .join(&record.manifest.run_id)
+                    .join(path),
+            )
+            .unwrap_or_default()
+        })
+        .collect()
+}
+
+fn slow_engine(
+    fixture: &validation_support::Fixture,
+) -> Result<cli_bench::BoundTool, Box<dyn std::error::Error>> {
+    let cli_bench::ExecutableSource::Prebuilt(candidate_path) = &fixture.request.candidate else {
+        return Err("candidate".into());
+    };
+    let candidate_record = cli_bench::register_binary(candidate_path, None, &fixture.store)?;
+    let engine = timing_support::engine(
+        fixture,
+        &format!(
+            "case \"$command\" in *{}*) seconds=0.002;; *) seconds=0.001;; esac",
+            candidate_record.id
+        ),
+    )?;
+    let engine_source = std::fs::read_to_string(&engine.path)?
+        .replace("times\":[0.001]", "times\":[%s]")
+        .replace(
+            "\"$command\" \"$status\" >",
+            "\"$command\" \"$seconds\" \"$status\" >",
+        );
+    std::fs::write(&engine.path, engine_source)?;
+    Ok(engine)
+}
+
+#[allow(
+    dead_code,
+    reason = "shared fixture has component-only operations unused by this CLI consumer"
+)]
+#[path = "common/validation.rs"]
+mod validation_support;
+
+fn verify_offline_comparison(
+    store: &cli_bench::Store,
+    record: &cli_bench::PublicationRecord,
+    submitted: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let path = store.root().join("runs").join(&record.manifest.run_id);
+    if std::fs::read_to_string(path.join("suite.toml"))? != submitted {
+        return Err("submitted source changed".into());
+    }
+    let resolved =
+        cli_bench::parse_suite(&std::fs::read_to_string(path.join("resolved-suite.toml"))?)?;
+    if resolved.build.features != ["selected-feature"] {
+        return Err("resolved override missing".into());
+    }
+    let _held =
+        cli_bench::MeasurementLock::acquire(&std::sync::atomic::AtomicBool::new(false), || Ok(()))?;
+    let assertion = cargo_bin_cmd!()
+        .args(["compare", "-i"])
+        .arg(&path)
+        .args(["-b", "candidate", "-a", "previous", "-f", "json"])
+        .env("PATH", "")
+        .env_remove("CLIS_LOG_LEVEL")
+        .timeout(std::time::Duration::from_secs(3))
+        .assert()
+        .success()
+        .stderr("");
+    let projected: cli_bench::PublicationRecord =
+        serde_json::from_slice(&assertion.get_output().stdout)?;
+    if projected.comparison
+        != Some(cli_bench::ComparisonSelection {
+            baseline: cli_bench::Role::Candidate,
+            candidate: cli_bench::Role::Previous,
+        })
+        || projected.manifest.roles != record.manifest.roles
+        || !projected.analysis.cases.iter().all(|case| {
+            case.comparisons.iter().all(|comparison| {
+                comparison.candidate == cli_bench::Role::Previous
+                    && comparison.baseline == cli_bench::Role::Candidate
+            })
+        })
+    {
+        return Err("offline comparison changed role selection or identities".into());
+    }
+    Ok(())
+}
+
+#[allow(dead_code, reason = "CLI uses only the shared engine fixture")]
+#[path = "common/timing.rs"]
+mod timing_support;
+
+#[test]
+fn offline_report_reads_sealed_incomplete_evidence_while_measurement_lock_is_held()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = assert_fs::TempDir::new()?;
+    let store = cli_bench::Store::open(&root.join("evidence"))?;
+    let suite = cli_bench::parse_suite(include_str!("inputs/minimal-suite.toml"))?;
+    let bundle = store
+        .begin_run(&suite)?
+        .record_failure(cli_bench::RunOutcome::Incomplete, "RSS unavailable")?;
+    let _held =
+        cli_bench::MeasurementLock::acquire(&std::sync::atomic::AtomicBool::new(false), || Ok(()))?;
+    let assertion = cargo_bin_cmd!()
+        .args(["report", "-i"])
+        .arg(&bundle.path)
+        .args(["-f", "json"])
+        .env("PATH", "")
+        .env("NO_COLOR", "1")
+        .timeout(std::time::Duration::from_secs(3))
+        .assert()
+        .success()
+        .stderr("");
+    let record: cli_bench::PublicationRecord =
+        serde_json::from_slice(&assertion.get_output().stdout)?;
+    if record.result.outcome != cli_bench::RunOutcome::Incomplete {
+        return Err("report hid incomplete outcome".into());
     }
     Ok(())
 }

@@ -63,3 +63,9 @@ literal fixture data, not actual benchmark content. The selected time binary has
 target prefix, argv, outcome and final checks are retained. Native macOS execution
 passed; no Linux native execution was available. These are adapter correctness
 probes, not benchmark data or performance measurements.
+
+Task 9 adds an original `publication-failed.json` compact projection and the
+corresponding `../expected/failed-report.md` golden. They contain no copied
+reference output, credentials or native performance measurements. The CLI native
+opt-in uses synthetic elapsed values solely to test slow-candidate exit zero;
+macOS native RSS requires permission for `/usr/bin/time` to read `kern.clockrate`.

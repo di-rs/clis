@@ -61,6 +61,10 @@ kind = "drained-pipe"
   `timeout_reason: Option<String> = None`. Every numeric limit is positive;
   changing either deadline requires a nonempty reason. Missing `[limits]` uses
   defaults, and partial tables use defaults for omitted fields.
+  The evidence limit covers normal run output; its approved failure-preservation
+  exception is defined in the [design](2026-10-06-cli-bench-design.md#fixed-execution-policy):
+  stop new work, retain brief externally written-file overshoot, and allow at most
+  16 MiB of final failure metadata plus the retained-file checksum index.
 - `BuildPolicy`: `toolchain: Option<String> = None`,
   `target: Option<String> = None`, `features: Vec<String> = []`,
   `no_default_features: bool = false`, `rustflags: Vec<String> = []`,

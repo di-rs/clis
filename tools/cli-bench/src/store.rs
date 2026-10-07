@@ -26,7 +26,10 @@ pub struct RunWriter {
     id: String,
     suite: Suite,
     experiment: Option<ExperimentRequest>,
+    execution_kind: Option<crate::ExecutionKind>,
+    checked_experiment_manifest: Option<String>,
     events: File,
+    pub(crate) budget: crate::budget::EvidenceBudget,
     _lock: File,
 }
 /// Verified frozen run and its evidence files; paths remain owned by the caller's store.
@@ -81,6 +84,19 @@ impl Store {
         }
         Ok(store)
     }
+    /// Open an existing marked store without creating directories, locks or files.
+    /// # Errors
+    /// Rejects missing/unmarked roots, symlinks and unreadable metadata.
+    pub fn open_existing(root: &Path) -> Result<Self, BenchError> {
+        reject_symlink(root)?;
+        let root = fs::canonicalize(root)?;
+        let marker = root.join(".cli-bench-store");
+        reject_symlink(&marker)?;
+        if fs::read(marker)? != MARKER {
+            return Err(evidence("unrecognized evidence root marker"));
+        }
+        Ok(Self { root })
+    }
     /// The canonical evidence root.
     #[must_use]
     pub fn root(&self) -> &Path {
@@ -107,7 +123,7 @@ impl Store {
     pub fn begin_run(&self, suite: &Suite) -> Result<RunWriter, BenchError> {
         crate::validate_suite(suite)?;
         let source = toml::to_string(suite).map_err(|error| evidence(error.to_string()))?;
-        self.begin_source(suite, &source)
+        self.begin_source(suite, &source, None)
     }
     /// Preserve exact submitted TOML while beginning a validated run.
     ///
@@ -115,9 +131,36 @@ impl Store {
     /// Fails for invalid suite text or filesystem failures.
     pub fn begin_run_source(&self, source: &str) -> Result<RunWriter, BenchError> {
         let suite = crate::parse_suite(source)?;
-        self.begin_source(&suite, source)
+        self.begin_source(&suite, source, None)
     }
-    fn begin_source(&self, suite: &Suite, source: &str) -> Result<RunWriter, BenchError> {
+    /// Preserve submitted TOML separately from resolved build overrides and optional attempt metadata.
+    /// # Errors
+    /// Rejects unrelated suite changes, invalid source/settings, or evidence writes.
+    pub fn begin_resolved_run(
+        &self,
+        source: &str,
+        resolved: &Suite,
+        experiment: Option<&ExperimentRequest>,
+    ) -> Result<RunWriter, BenchError> {
+        let mut submitted = crate::parse_suite(source)?;
+        crate::validate_suite(resolved)?;
+        submitted.build.clone_from(&resolved.build);
+        if submitted != *resolved {
+            return Err(evidence(
+                "resolved suite differs outside declared build overrides",
+            ));
+        }
+        if let Some(experiment) = experiment {
+            validate_experiment_request(experiment)?;
+        }
+        self.begin_source(resolved, source, experiment)
+    }
+    fn begin_source(
+        &self,
+        suite: &Suite,
+        source: &str,
+        experiment: Option<&ExperimentRequest>,
+    ) -> Result<RunWriter, BenchError> {
         let path = unique_directory(&self.root.join("runs"), "run")?;
         let id = path
             .file_name()
@@ -130,15 +173,20 @@ impl Store {
             .create_new(true)
             .open(path.join(".lock"))?;
         lock.lock()?;
-        atomic_json(
-            &path.join("status.json"),
-            &RunResult {
+        let budget =
+            crate::budget::EvidenceBudget::new(path.clone(), suite.limits.max_evidence_bytes);
+        let write = |name: &str, bytes: &[u8]| -> Result<(), BenchError> {
+            budget.reserve_write(bytes.len())?;
+            atomic_write(&path.join(name), bytes)
+        };
+        write(
+            "status.json",
+            &serde_json::to_vec_pretty(&RunResult {
                 schema_version: 1,
                 outcome: RunOutcome::Incomplete,
                 message: Some("run has not finalized".into()),
-            },
+            })?,
         )?;
-        atomic_write(&path.join("suite.toml"), source.as_bytes())?;
         for directory in ["correctness", "raw", "raw/timing", "raw/rss"] {
             fs::create_dir(path.join(directory))?;
         }
@@ -146,15 +194,30 @@ impl Store {
             .append(true)
             .create_new(true)
             .open(path.join("events.jsonl"))?;
-        Ok(RunWriter {
+        let writer = RunWriter {
             store: self.clone(),
             path,
             id,
             suite: suite.clone(),
             experiment: None,
+            execution_kind: None,
+            checked_experiment_manifest: None,
             events,
+            budget,
             _lock: lock,
-        })
+        };
+        let writer = if let Some(request) = experiment {
+            self.tag_writer(writer, request)?
+        } else {
+            writer
+        };
+        writer.write_bytes(&writer.path.join("suite.toml"), source.as_bytes())?;
+        let effective = toml::to_string(suite).map_err(|error| evidence(error.to_string()))?;
+        writer.write_bytes(
+            &writer.path.join("resolved-suite.toml"),
+            effective.as_bytes(),
+        )?;
+        Ok(writer)
     }
     /// Start and immediately retain a tagged invocation, including unresolved/failed attempts.
     ///
@@ -165,22 +228,18 @@ impl Store {
         suite: &Suite,
         request: &ExperimentRequest,
     ) -> Result<RunWriter, BenchError> {
-        identifier(&request.id)?;
-        for value in [
-            &request.hypothesis,
-            &request.change_summary,
-            &request.requested_previous,
-            &request.requested_candidate,
-        ] {
-            if value.trim().is_empty() || value.contains('\0') {
-                return Err(evidence(
-                    "experiment requires descriptions and revision bindings",
-                ));
-            }
-        }
-        let mut writer = self.begin_run(suite)?;
+        validate_experiment_request(request)?;
+        crate::validate_suite(suite)?;
+        let source = toml::to_string(suite).map_err(|error| evidence(error.to_string()))?;
+        self.begin_source(suite, &source, Some(request))
+    }
+    fn tag_writer(
+        &self,
+        mut writer: RunWriter,
+        request: &ExperimentRequest,
+    ) -> Result<RunWriter, BenchError> {
         writer.experiment = Some(request.clone());
-        atomic_json(&writer.path.join("request.json"), request)?;
+        writer.write_json(&writer.path.join("request.json"), request)?;
         let _lock = self.transaction_lock()?;
         let path = self.root.join("experiments").join(&request.id);
         fs::create_dir_all(path.join("attempts"))?;
@@ -229,14 +288,14 @@ impl Store {
     /// Reload a finalized bundle and verify every retained evidence hash.
     ///
     /// # Errors
-    /// Rejects incomplete, altered or malformed bundles; never executes stored data.
+    /// Rejects unsealed, altered or malformed bundles; sealed incomplete outcomes remain readable.
     pub fn load_run(&self, id: &str) -> Result<RunBundle, BenchError> {
         identifier(id)?;
         let path = self.root.join("runs").join(id);
         reject_symlink(&path)?;
         let status: RunResult = read_json(&path.join("status.json"))?;
         let result: RunResult = read_json(&path.join("result.json"))?;
-        if status != result || result.outcome == RunOutcome::Incomplete {
+        if status != result {
             return Err(evidence("run is not finalized"));
         }
         let seal: Seal = read_json(&path.join("checksums.json"))?;
@@ -263,7 +322,28 @@ impl Store {
         })
     }
 }
+fn validate_experiment_request(request: &ExperimentRequest) -> Result<(), BenchError> {
+    identifier(&request.id)?;
+    for value in [
+        &request.hypothesis,
+        &request.change_summary,
+        &request.requested_previous,
+        &request.requested_candidate,
+    ] {
+        if value.trim().is_empty() || value.contains('\0') {
+            return Err(evidence(
+                "experiment requires descriptions and revision bindings",
+            ));
+        }
+    }
+    Ok(())
+}
+
 impl RunWriter {
+    /// Record known requested stages for early failure evidence; source-only callers may leave them unresolved.
+    pub const fn set_execution_kind(&mut self, kind: crate::ExecutionKind) {
+        self.execution_kind = Some(kind);
+    }
     pub(crate) fn matches_suite(&self, suite: &Suite) -> bool {
         &self.suite == suite
     }
@@ -282,11 +362,37 @@ impl RunWriter {
     /// # Errors
     /// Fails when serialization, append or durable flush fails.
     pub fn append_event(&mut self, event: &RunEvent) -> Result<(), BenchError> {
-        serde_json::to_writer(&mut self.events, event)?;
-        self.events.write_all(b"\n")?;
+        let mut bytes = serde_json::to_vec(event)?;
+        bytes.push(b'\n');
+        self.budget.reserve_write(bytes.len())?;
+        self.events.write_all(&bytes)?;
         self.events.flush()?;
         self.events.sync_all()?;
         Ok(())
+    }
+    pub(crate) fn write_json<T: Serialize>(
+        &self,
+        path: &Path,
+        value: &T,
+    ) -> Result<(), BenchError> {
+        self.write_bytes(path, &serde_json::to_vec_pretty(value)?)
+    }
+    pub(crate) fn write_bytes(&self, path: &Path, bytes: &[u8]) -> Result<(), BenchError> {
+        self.budget.reserve_write(bytes.len())?;
+        atomic_write(path, bytes)
+    }
+    pub(crate) fn finalization_bytes(
+        manifest: &RunManifest,
+        result: &RunResult,
+    ) -> Result<usize, BenchError> {
+        let result_bytes = serde_json::to_vec_pretty(result)?.len();
+        crate::budget::sum_sizes(&[
+            serde_json::to_vec_pretty(manifest)?.len(),
+            result_bytes,
+            result_bytes,
+            serde_json::to_vec(&RunEvent::Stage(format!("finalizing {:?}", result.outcome)))?.len(),
+            1,
+        ])
     }
     /// Finalize once, checking resolved identities before publishing terminal status.
     /// Any error retains the initial incomplete status and any available evidence.
@@ -298,10 +404,14 @@ impl RunWriter {
         manifest: &RunManifest,
         result: &RunResult,
     ) -> Result<RunBundle, BenchError> {
+        if result.outcome != RunOutcome::Complete {
+            self.budget.fail();
+        }
         let outcome = self.finish_inner(manifest, result);
         if let Err(error) = &outcome {
+            self.budget.fail();
             let _ = self.append_event(&RunEvent::Failure(error.to_string()));
-            let _ = atomic_json(
+            let _ = self.write_json(
                 &self.path.join("status.json"),
                 &RunResult {
                     schema_version: 1,
@@ -318,10 +428,16 @@ impl RunWriter {
         result: &RunResult,
     ) -> Result<RunBundle, BenchError> {
         self.validate_manifest(manifest, result)?;
-        atomic_json(&self.path.join("manifest.json"), manifest)?;
-        atomic_json(&self.path.join("result.json"), result)?;
+        self.budget
+            .ensure_capacity(Self::finalization_bytes(manifest, result)?)?;
+        self.write_json(&self.path.join("manifest.json"), manifest)?;
+        self.write_json(&self.path.join("result.json"), result)?;
         self.append_event(&RunEvent::Stage(format!("finalizing {:?}", result.outcome)))?;
-        self.bind_experiment(manifest)?;
+        if self.checked_experiment_manifest.as_ref()
+            != Some(&crate::artifact::json_identity(manifest)?)
+        {
+            self.bind_experiment(manifest)?;
+        }
         let files = inventory(&self.path)?;
         atomic_json(
             &self.path.join("checksums.json"),
@@ -332,7 +448,7 @@ impl RunWriter {
         )?;
         File::open(&self.path)?.sync_all()?;
         // All evidence and its checksum index are durable before terminal status is visible.
-        atomic_json(&self.path.join("status.json"), result)?;
+        self.write_json(&self.path.join("status.json"), result)?;
         Ok(RunBundle {
             path: self.path.clone(),
             manifest: manifest.clone(),
@@ -352,9 +468,11 @@ impl RunWriter {
         if outcome == RunOutcome::Complete {
             return Err(evidence("failure recording cannot complete a run"));
         }
+        self.budget.fail();
         self.append_event(&RunEvent::Failure(message.into()))?;
         let manifest = RunManifest {
             schema_version: 1,
+            execution_kind: self.execution_kind,
             run_id: self.id.clone(),
             contract: None,
             roles: BTreeMap::new(),
@@ -400,9 +518,19 @@ impl RunWriter {
                 for (path, identity) in [
                     (&paths.harness, &contract.harness),
                     (&paths.generator, &contract.generator),
-                    (&paths.engine, &contract.engine),
                 ] {
-                    verify_file(path, &identity.file)?;
+                    if result.outcome == RunOutcome::Complete {
+                        verify_file(path, &identity.file)?;
+                    }
+                }
+                match (&paths.engine, &contract.engine) {
+                    (Some(path), Some(identity)) => {
+                        if result.outcome == RunOutcome::Complete {
+                            verify_file(path, &identity.file)?;
+                        }
+                    }
+                    (None, None) => {}
+                    _ => return Err(evidence("engine binding mismatch")),
                 }
             } else if result.outcome == RunOutcome::Complete {
                 return Err(evidence("missing tool paths"));
@@ -419,10 +547,17 @@ impl RunWriter {
             }
         }
         for record in manifest.roles.values() {
-            self.store.verify_artifact(record)?;
+            crate::artifact::validate_identity(&record.file)?;
+            if let Some(build) = &record.build {
+                build.validate()?;
+            }
+            if result.outcome == RunOutcome::Complete {
+                self.store.verify_artifact(record)?;
+            }
         }
         let mut inputs = std::collections::BTreeSet::new();
         for input in &manifest.inputs {
+            crate::artifact::validate_identity(&input.file)?;
             if !inputs.insert(&input.dataset)
                 || !self
                     .suite
@@ -432,7 +567,9 @@ impl RunWriter {
             {
                 return Err(evidence("invalid input dataset"));
             }
-            verify_file(&input.path, &input.file)?;
+            if result.outcome == RunOutcome::Complete {
+                verify_file(&input.path, &input.file)?;
+            }
         }
         if result.outcome == RunOutcome::Complete {
             for dataset in required_inputs(manifest, &self.suite) {
@@ -443,13 +580,38 @@ impl RunWriter {
         }
         Ok(())
     }
+    pub(crate) fn freeze_experiment(&mut self, manifest: &RunManifest) -> Result<(), BenchError> {
+        if self.experiment.is_some() {
+            // The composed runner records rejected preflight attempts as Failed;
+            // direct finish callers still undergo the existing contract checks.
+            self.checked_experiment_manifest = Some(crate::artifact::json_identity(manifest)?);
+            self.validate_manifest(
+                manifest,
+                &RunResult {
+                    schema_version: 1,
+                    outcome: RunOutcome::Complete,
+                    message: None,
+                },
+            )?;
+            self.bind_experiment(manifest)?;
+        }
+        Ok(())
+    }
+    pub(crate) fn check_evidence_limit(&self) -> Result<(), BenchError> {
+        self.budget.remaining().map(|_| ())
+    }
     fn bind_experiment(&self, manifest: &RunManifest) -> Result<(), BenchError> {
         let (Some(request), Some(contract)) = (&self.experiment, &manifest.contract) else {
             return Ok(());
         };
+        if contract.build.is_none() || contract.engine.is_none() {
+            return Err(evidence(
+                "tagged experiment requires resolved build and engine",
+            ));
+        }
         for (role, artifact) in &manifest.roles {
             if let Some(build) = &artifact.build
-                && build.policy != contract.build
+                && Some(&build.policy) != contract.build.as_ref()
             {
                 return Err(evidence(format!(
                     "{role:?} build policy differs from experiment contract"
@@ -575,7 +737,7 @@ fn required_inputs(manifest: &RunManifest, suite: &Suite) -> std::collections::B
 pub fn atomic_json<T: Serialize>(path: &Path, value: &T) -> Result<(), BenchError> {
     atomic_write(path, &serde_json::to_vec_pretty(value)?)
 }
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), BenchError> {
+pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), BenchError> {
     atomic_write_with(path, bytes, File::sync_all, |a, b| fs::rename(a, b))
 }
 fn atomic_write_with<F, R>(path: &Path, bytes: &[u8], flush: F, rename: R) -> Result<(), BenchError>
@@ -648,7 +810,7 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, BenchErro
 fn evidence(message: impl Into<String>) -> BenchError {
     BenchError::Evidence(message.into())
 }
-fn inventory(root: &Path) -> Result<BTreeMap<String, FileIdentity>, BenchError> {
+pub fn inventory(root: &Path) -> Result<BTreeMap<String, FileIdentity>, BenchError> {
     fn walk(
         root: &Path,
         directory: &Path,
@@ -820,6 +982,156 @@ mod tests {
         require(
             required == ["tiny".to_owned()].into(),
             "literal prose/expectations treated as an input binding",
+        )?;
+        Ok(())
+    }
+    #[test]
+    fn initial_exact_source_cannot_bypass_normal_evidence_cap()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = assert_fs::TempDir::new()?;
+        let store = Store::open(&root.join("store"))?;
+        let mut suite = crate::parse_suite(include_str!("../tests/inputs/minimal-suite.toml"))?;
+        suite.limits.max_evidence_bytes = 256;
+        let source = toml::to_string(&suite)?;
+        crate::test_support::require(
+            store.begin_run_source(&source).is_err(),
+            "oversized source escaped initial cap",
+        )?;
+        let paths: Vec<_> = fs::read_dir(store.root().join("runs"))?.collect::<Result<_, _>>()?;
+        let path = paths
+            .first()
+            .ok_or("missing retained run directory")?
+            .path();
+        crate::test_support::require(
+            path.join("status.json").is_file() && !path.join("suite.toml").exists(),
+            "initial failure evidence not honest",
+        )?;
+        crate::test_support::require(
+            crate::budget::size(&path)? <= 256,
+            "initial writes exceeded cap",
+        )?;
+        Ok(())
+    }
+    #[test]
+    fn oversized_tagged_source_retains_discoverable_initial_attempt()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = assert_fs::TempDir::new()?;
+        let store = Store::open(&root.join("store"))?;
+        let mut suite = crate::parse_suite(include_str!("../tests/inputs/minimal-suite.toml"))?;
+        suite.limits.max_evidence_bytes = 1_024;
+        let source = format!("# {}\n{}", "x".repeat(2_048), toml::to_string(&suite)?);
+        let request = ExperimentRequest {
+            id: "oversized".into(),
+            hypothesis: "hypothesis".into(),
+            change_summary: "change".into(),
+            requested_previous: "HEAD".into(),
+            requested_candidate: "candidate".into(),
+        };
+        crate::test_support::require(
+            store
+                .begin_resolved_run(&source, &suite, Some(&request))
+                .is_err(),
+            "oversized tagged source accepted",
+        )?;
+        crate::test_support::equal(
+            &fs::read_dir(store.root().join("experiments/oversized/attempts"))?.count(),
+            &1,
+        )?;
+        Ok(())
+    }
+    #[test]
+    fn early_failure_retains_explicit_execution_kind() -> Result<(), Box<dyn std::error::Error>> {
+        let root = assert_fs::TempDir::new()?;
+        let store = Store::open(&root.join("store"))?;
+        let suite = crate::parse_suite(include_str!("../tests/inputs/minimal-suite.toml"))?;
+        for kind in [
+            crate::ExecutionKind::CheckOnly,
+            crate::ExecutionKind::Measure,
+        ] {
+            let mut writer = store.begin_run(&suite)?;
+            writer.set_execution_kind(kind);
+            let bundle = writer.record_failure(RunOutcome::Failed, "tool discovery failed")?;
+            crate::test_support::equal(
+                &store
+                    .load_run(&bundle.manifest.run_id)?
+                    .manifest
+                    .execution_kind,
+                &Some(kind),
+            )?;
+        }
+        Ok(())
+    }
+    #[test]
+    fn resolved_run_retains_exact_submitted_text_and_separate_effective_build()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = assert_fs::TempDir::new()?;
+        let store = Store::open(&root.join("evidence"))?;
+        let source = format!(
+            "# exact submitted comment\n{}\n",
+            include_str!("../tests/inputs/minimal-suite.toml")
+        );
+        let mut resolved = crate::parse_suite(&source)?;
+        resolved.build.features = vec!["selected-feature".into()];
+        let experiment = ExperimentRequest {
+            id: "source-attempt".into(),
+            hypothesis: "hypothesis".into(),
+            change_summary: "change".into(),
+            requested_previous: "HEAD".into(),
+            requested_candidate: "candidate".into(),
+        };
+        for tag in [None, Some(&experiment)] {
+            let writer = store.begin_resolved_run(&source, &resolved, tag)?;
+            crate::test_support::equal(
+                &fs::read_to_string(writer.path().join("suite.toml"))?,
+                &source,
+            )?;
+            crate::test_support::equal(
+                &crate::parse_suite(&fs::read_to_string(
+                    writer.path().join("resolved-suite.toml"),
+                )?)?,
+                &resolved,
+            )?;
+            let failed = writer.record_failure(RunOutcome::Failed, "before tool discovery")?;
+            crate::test_support::require(
+                store
+                    .load_run(&failed.manifest.run_id)?
+                    .files
+                    .contains_key("resolved-suite.toml"),
+                "resolved source unsealed",
+            )?;
+        }
+        Ok(())
+    }
+    #[test]
+    fn resolved_source_rejects_changes_outside_build_overrides()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = assert_fs::TempDir::new()?;
+        let store = Store::open(&root.join("evidence"))?;
+        let source = include_str!("../tests/inputs/minimal-suite.toml");
+        let mut resolved = crate::parse_suite(source)?;
+        resolved.cases.first_mut().ok_or("case")?.purpose = "changed scenario".into();
+        crate::test_support::require(
+            store.begin_resolved_run(source, &resolved, None).is_err(),
+            "unrelated resolved changes accepted",
+        )?;
+        Ok(())
+    }
+    #[test]
+    fn sealed_incomplete_runs_load_but_unfinished_runs_do_not()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = assert_fs::TempDir::new()?;
+        let store = Store::open(&root.join("evidence"))?;
+        let suite = crate::parse_suite(include_str!("../tests/inputs/minimal-suite.toml"))?;
+        let writer = store.begin_run(&suite)?;
+        let id = writer.id().to_owned();
+        drop(writer);
+        crate::test_support::require(store.load_run(&id).is_err(), "unfinished run accepted")?;
+        let bundle = store
+            .begin_run(&suite)?
+            .record_failure(RunOutcome::Incomplete, "RSS unavailable")?;
+        crate::test_support::equal(
+            &store.load_run(&bundle.manifest.run_id)?.result.outcome,
+            &RunOutcome::Incomplete,
         )?;
         Ok(())
     }

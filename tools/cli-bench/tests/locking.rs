@@ -102,6 +102,13 @@ fn different_processes_and_data_directories_contend_then_kill_releases_lock() ->
 
 #[test]
 fn cli_build_wait_is_reported_and_sigterm_cancels_before_preparation() -> TestResult {
+    cancelled_cli_wait(rustix::process::Signal::TERM, 143)
+}
+#[test]
+fn cli_build_wait_is_reported_and_sigint_cancels_before_preparation() -> TestResult {
+    cancelled_cli_wait(rustix::process::Signal::INT, 130)
+}
+fn cancelled_cli_wait(signal: rustix::process::Signal, code: i32) -> TestResult {
     let first = assert_fs::TempDir::new()?;
     let second = assert_fs::TempDir::new()?;
     let mut owner = spawn(first.path(), true)?;
@@ -136,7 +143,7 @@ fn cli_build_wait_is_reported_and_sigterm_cancels_before_preparation() -> TestRe
     }
     rustix::process::kill_process(
         rustix::process::Pid::from_raw(i32::try_from(waiting.0.id())?).ok_or("child pid")?,
-        rustix::process::Signal::TERM,
+        signal,
     )?;
     let start = Instant::now();
     let status = loop {
@@ -149,7 +156,7 @@ fn cli_build_wait_is_reported_and_sigterm_cancels_before_preparation() -> TestRe
         std::thread::sleep(Duration::from_millis(10));
     };
     require(
-        (status.code()) == (Some(1)),
+        (status.code()) == (Some(code)),
         "CLI did not propagate cancellable wait failure",
     )?;
     require(

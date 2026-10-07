@@ -30,7 +30,7 @@ pub use invocation::{
 
 mod build;
 pub use build::{
-    BuildRequest, BuildTools, ExecutableSource, GitContext, ResolvedRevision, RunRequest,
+    BuildRequest, BuildTools, ExecutableSource, GitContext, ResolvedRevision, RoleRequest,
     bind_roles, build_revision, resolve_revision,
 };
 
@@ -61,3 +61,19 @@ pub use rss::{NativeRss, Platform, RssSample, RssUnit, measure_rss, parse_peak_r
 
 #[cfg(test)]
 mod test_support;
+
+mod analysis;
+pub use analysis::{
+    Analysis, CaseAnalysis, Comparison, ComparisonSelection, Direction, RoleAnalysis, Statistics,
+    analyze,
+};
+
+mod report;
+pub use report::{
+    PublicationRecord, ReportFormat, comparison_record, publication_record, render, render_record,
+};
+
+mod runner;
+pub use runner::{RunMode, RunRequest, run};
+
+mod budget;

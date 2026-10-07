@@ -1,4 +1,10 @@
 use clap::{Args, CommandFactory, Parser, Subcommand};
+use cli_bench::{
+    BoundTool, CaseId, ExecutableSource, ExecutionPolicy, ExperimentPreparation, ExperimentRequest,
+    GitContext, MeasurementProfile, PipelineTools, Platform, ProcessRunner, RoleRequest, RunMode,
+    RunOutcome, RunRequest, StdinPolicy, Store, Suite, ToolIdentity, collect_host, fingerprint,
+    parse_suite, render, run, validate_suite,
+};
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -14,10 +20,71 @@ pub struct Cli {
 pub enum Command {
     /// Build a committed Cargo package and retain its verified executable.
     Build(BuildArgs),
-    /// Validate selection arguments; execution is not yet implemented.
+    /// Run correctness-checked elapsed, memory and size measurements.
     Run(SelectionArgs),
-    /// Validate selection arguments; execution is not yet implemented.
+    /// Check selected workloads without timing or memory measurements.
     Check(SelectionArgs),
+    /// Render a sealed local run without executing workloads.
+    Report(ReportArgs),
+    /// Compare two original roles in one sealed local run.
+    Compare(CompareArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ReportArgs {
+    #[arg(short, long)]
+    pub input: PathBuf,
+    #[arg(short = 'f', long, default_value = "terminal", value_parser = ["terminal", "json", "markdown"])]
+    pub format: String,
+}
+
+#[derive(Debug, Args)]
+pub struct CompareArgs {
+    #[command(flatten)]
+    pub report: ReportArgs,
+    #[arg(short = 'b', long, value_parser = parse_role)]
+    pub baseline: cli_bench::Role,
+    #[arg(short = 'a', long, value_parser = parse_role)]
+    pub candidate: cli_bench::Role,
+}
+fn parse_role(value: &str) -> Result<cli_bench::Role, String> {
+    match value {
+        "candidate" => Ok(cli_bench::Role::Candidate),
+        "previous" => Ok(cli_bench::Role::Previous),
+        "reference" => Ok(cli_bench::Role::Reference),
+        _ => Err("role must be candidate, previous or reference".into()),
+    }
+}
+
+pub fn execute_offline(
+    args: &ReportArgs,
+    selection: Option<cli_bench::ComparisonSelection>,
+) -> anyhow::Result<std::process::ExitCode> {
+    let path = std::fs::canonicalize(&args.input)?;
+    let runs = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("expected a local run directory"))?;
+    anyhow::ensure!(
+        runs.file_name().is_some_and(|name| name == "runs"),
+        "expected a local store runs directory; portable bundles are not supported yet"
+    );
+    let root = runs
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("missing evidence store"))?;
+    let id = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| anyhow::anyhow!("invalid run identifier"))?;
+    let bundle = Store::open_existing(root)?.load_run(id)?;
+    let mut output = std::io::stdout().lock();
+    let format = report_format(&args.format);
+    if let Some(selection) = selection {
+        let record = cli_bench::comparison_record(&bundle, selection)?;
+        cli_bench::render_record(&record, format, &mut output)?;
+    } else {
+        render(&bundle, format, &mut output)?;
+    }
+    Ok(std::process::ExitCode::SUCCESS)
 }
 
 #[derive(Debug, Args)]
@@ -56,6 +123,30 @@ pub struct SelectionArgs {
     pub generator_ref: Option<String>,
     #[arg(short = 'g', long)]
     pub biggie: Option<PathBuf>,
+    #[arg(short = 'c', long = "case")]
+    pub cases: Vec<String>,
+    #[arg(short = 't', long)]
+    pub toolchain: Option<String>,
+    #[arg(short = 'F', long, value_delimiter = ',')]
+    pub features: Vec<String>,
+    #[arg(short = 'N', long)]
+    pub no_default_features: bool,
+    #[arg(short = 'm', long, default_value = "full", value_parser = ["full", "smoke"])]
+    pub measurement_profile: String,
+    #[arg(short = 'd', long, default_value = ".cli-bench")]
+    pub data_dir: PathBuf,
+    #[arg(short = 'M', long)]
+    pub manifest_path: Option<PathBuf>,
+    #[arg(short = 'f', long, default_value = "terminal", value_parser = ["terminal", "json", "markdown"])]
+    pub format: String,
+    #[arg(short = 'H', long)]
+    pub hyperfine: Option<PathBuf>,
+    #[arg(long, requires_all = ["hypothesis", "change_summary", "previous_ref"])]
+    pub experiment: Option<String>,
+    #[arg(long, requires = "experiment")]
+    pub hypothesis: Option<String>,
+    #[arg(long, requires = "experiment")]
+    pub change_summary: Option<String>,
 }
 
 impl Cli {
@@ -71,23 +162,24 @@ impl Cli {
 }
 
 pub fn execute_build(args: &BuildArgs) -> anyhow::Result<std::process::ExitCode> {
+    with_signals(|cancellation| execute_build_inner(args, cancellation))
+}
+fn execute_build_inner(
+    args: &BuildArgs,
+    cancellation: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> anyhow::Result<std::process::ExitCode> {
     use cli_bench::{
         BuildPolicy, BuildRequest, BuildTools, ExecutionPolicy, GitContext, ProcessRunner, Store,
     };
-    use std::{
-        io::Write,
-        sync::{Arc, atomic::AtomicBool},
-        time::Duration,
-    };
-    let cancellation = Arc::new(AtomicBool::new(false));
-    let measurement_lock = acquire_measurement_lock(&cancellation)?;
+    use std::{io::Write, time::Duration};
+    let measurement_lock = acquire_measurement_lock(cancellation)?;
     let cwd = std::env::current_dir()?;
     let scratch = AdapterScratch::new()?;
     let environment = build_environment();
     let runner = ProcessRunner::new(ExecutionPolicy {
         timeout: Duration::from_mins(30),
         max_stream_bytes: 268_435_456,
-        cancellation,
+        cancellation: std::sync::Arc::clone(cancellation),
     });
     let context = AdapterTools {
         cwd: &cwd,
@@ -164,13 +256,394 @@ pub fn execute_build(args: &BuildArgs) -> anyhow::Result<std::process::ExitCode>
     Ok(std::process::ExitCode::SUCCESS)
 }
 
+fn with_signals(
+    action: impl FnOnce(
+        &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> anyhow::Result<std::process::ExitCode>,
+) -> anyhow::Result<std::process::ExitCode> {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    };
+    let cancellation = Arc::new(AtomicBool::new(false));
+    let received = Arc::new(AtomicUsize::new(0));
+    let mut handlers = vec![];
+    for (signal, code) in [
+        (signal_hook::consts::SIGINT, 130),
+        (signal_hook::consts::SIGTERM, 143),
+    ] {
+        handlers.push(signal_hook::flag::register(
+            signal,
+            Arc::clone(&cancellation),
+        )?);
+        handlers.push(signal_hook::flag::register_usize(
+            signal,
+            Arc::clone(&received),
+            code,
+        )?);
+    }
+    let result = action(&cancellation);
+    for handler in handlers {
+        signal_hook::low_level::unregister(handler);
+    }
+    let code = received.load(Ordering::Relaxed);
+    if code != 0 {
+        if let Err(error) = result {
+            use std::io::Write;
+            writeln!(std::io::stderr().lock(), "{error}")?;
+        }
+        return Ok(std::process::ExitCode::from(u8::try_from(code)?));
+    }
+    result
+}
+pub fn execute_selection(
+    args: &SelectionArgs,
+    check_only: bool,
+) -> anyhow::Result<std::process::ExitCode> {
+    with_signals(|cancellation| execute_selection_inner(args, check_only, cancellation))
+}
+struct SelectionSetup {
+    source: String,
+    cwd: PathBuf,
+    repository: PathBuf,
+    suite: Suite,
+    store: Store,
+    experiment: Option<ExperimentRequest>,
+}
+struct SelectionResources {
+    _scratch: AdapterScratch,
+    runner: ProcessRunner,
+    roles: RoleRequest,
+    engine: Option<BoundTool>,
+    time: Option<BoundTool>,
+    platform: Platform,
+    harness: BoundTool,
+}
+fn load_selection(args: &SelectionArgs) -> anyhow::Result<SelectionSetup> {
+    let cwd = std::env::current_dir()?;
+    let repository = if let Some(manifest) = &args.manifest_path {
+        let path = std::fs::canonicalize(cwd.join(manifest))?;
+        path.parent()
+            .ok_or_else(|| anyhow::anyhow!("manifest has no parent"))?
+            .to_path_buf()
+    } else {
+        cwd.clone()
+    };
+    let source = std::fs::read_to_string(cwd.join(&args.suite)).map_err(|error| {
+        anyhow::anyhow!(
+            "cannot load suite {}: {error}; provide a suite TOML path",
+            args.suite
+        )
+    })?;
+    let mut suite = parse_suite(&source)?;
+    if let Some(toolchain) = &args.toolchain {
+        suite.build.toolchain = Some(toolchain.clone());
+    }
+    if !args.features.is_empty() {
+        suite.build.features.clone_from(&args.features);
+    }
+    if args.no_default_features {
+        suite.build.no_default_features = true;
+    }
+    validate_suite(&suite)?;
+    let store = Store::open(&cwd.join(&args.data_dir))?;
+    let experiment = args.experiment.as_ref().map(|id| ExperimentRequest {
+        id: id.clone(),
+        hypothesis: args.hypothesis.clone().unwrap_or_default(),
+        change_summary: args.change_summary.clone().unwrap_or_default(),
+        requested_previous: args.previous_ref.clone().unwrap_or_default(),
+        requested_candidate: args.candidate_ref.clone().unwrap_or_else(|| {
+            args.candidate
+                .as_ref()
+                .map_or_else(String::new, |p| p.display().to_string())
+        }),
+    });
+    Ok(SelectionSetup {
+        source,
+        cwd,
+        repository,
+        suite,
+        store,
+        experiment,
+    })
+}
+fn execute_selection_inner(
+    args: &SelectionArgs,
+    check_only: bool,
+    cancellation: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> anyhow::Result<std::process::ExitCode> {
+    let measurement_lock = acquire_measurement_lock(cancellation)?;
+    let setup = load_selection(args)?;
+    let SelectionSetup {
+        suite,
+        store,
+        experiment,
+        ..
+    } = &setup;
+    let resources = match prepare_selection(args, check_only, cancellation, &setup) {
+        Ok(resources) => resources,
+        Err(error) => {
+            let mut writer = store.begin_resolved_run(&setup.source, suite, experiment.as_ref())?;
+            writer.set_execution_kind(if check_only {
+                cli_bench::ExecutionKind::CheckOnly
+            } else {
+                cli_bench::ExecutionKind::Measure
+            });
+            let bundle = writer.record_failure(RunOutcome::Failed, &error.to_string())?;
+            render(
+                &bundle,
+                report_format(&args.format),
+                &mut std::io::stdout().lock(),
+            )?;
+            return Ok(std::process::ExitCode::FAILURE);
+        }
+    };
+    let SelectionResources {
+        _scratch,
+        runner,
+        roles,
+        engine,
+        time,
+        platform,
+        harness,
+    } = resources;
+    let cases = args
+        .cases
+        .iter()
+        .map(|id| CaseId::new(id.clone()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let host = collect_host(&suite.environment);
+    let mode = if check_only {
+        RunMode::CheckOnly {
+            engine: engine.as_ref(),
+        }
+    } else {
+        RunMode::Measure {
+            engine: engine
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("missing engine"))?,
+            time: time.as_ref(),
+            platform,
+        }
+    };
+    let bundle = run(
+        &RunRequest {
+            submitted_toml: Some(&setup.source),
+            preparation: ExperimentPreparation {
+                run: &roles,
+                suite,
+                profile: if args.measurement_profile == "smoke" {
+                    MeasurementProfile::Smoke
+                } else {
+                    MeasurementProfile::Full
+                },
+                selected_cases: &cases,
+                expected_datasets: None,
+            },
+            measurement_lock: &measurement_lock,
+            harness: &harness,
+            host: &host,
+            mode,
+            experiment: experiment.as_ref(),
+        },
+        store,
+        &runner,
+    )?;
+    render(
+        &bundle,
+        report_format(&args.format),
+        &mut std::io::stdout().lock(),
+    )?;
+    Ok(if bundle.result.outcome == RunOutcome::Complete {
+        std::process::ExitCode::SUCCESS
+    } else {
+        std::process::ExitCode::FAILURE
+    })
+}
+
+fn prepare_selection(
+    args: &SelectionArgs,
+    check_only: bool,
+    cancellation: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    setup: &SelectionSetup,
+) -> anyhow::Result<SelectionResources> {
+    let SelectionSetup {
+        suite, repository, ..
+    } = setup;
+    let scratch = AdapterScratch::new()?;
+    for directory in ["home", "config"] {
+        std::fs::create_dir(scratch.0.join(directory))?;
+    }
+    let environment = build_environment();
+    let runner = ProcessRunner::new(ExecutionPolicy {
+        timeout: std::time::Duration::from_secs(suite.limits.build_timeout_seconds),
+        max_stream_bytes: suite.limits.max_stream_bytes,
+        cancellation: std::sync::Arc::clone(cancellation),
+    });
+    let context = AdapterTools {
+        cwd: repository,
+        environment: &environment,
+        runner: &runner,
+    };
+    let harness_path = std::env::current_exe()?;
+    let harness = BoundTool {
+        identity: ToolIdentity {
+            file: fingerprint(&harness_path)?,
+            version: format!("cli-bench {}", env!("CARGO_PKG_VERSION")),
+        },
+        path: harness_path,
+    };
+    let roles = select_roles(args, setup, &context, &scratch)?;
+    let (engine, time, platform) = measurement_tools(args, check_only, setup, &context)?;
+    Ok(SelectionResources {
+        _scratch: scratch,
+        runner,
+        roles,
+        engine,
+        time,
+        platform,
+        harness,
+    })
+}
+fn measurement_tools(
+    args: &SelectionArgs,
+    check_only: bool,
+    setup: &SelectionSetup,
+    context: &AdapterTools<'_>,
+) -> anyhow::Result<(Option<BoundTool>, Option<BoundTool>, Platform)> {
+    let SelectionSetup {
+        cwd, experiment, ..
+    } = setup;
+    let engine = if !check_only || experiment.is_some() {
+        Some(
+            context.identify(
+                &args
+                    .hyperfine
+                    .as_ref()
+                    .map_or_else(|| context.find("hyperfine"), |p| Ok(cwd.join(p)))?,
+                &["--version".into()],
+            )?,
+        )
+    } else {
+        None
+    };
+    let platform = if cfg!(target_os = "macos") {
+        Platform::Darwin
+    } else {
+        Platform::Linux
+    };
+    let time = if check_only || !std::path::Path::new("/usr/bin/time").exists() {
+        None
+    } else {
+        let path = PathBuf::from("/usr/bin/time");
+        Some(if platform == Platform::Linux {
+            context.identify(&path, &["--version".into()])?
+        } else {
+            BoundTool {
+                identity: ToolIdentity {
+                    file: fingerprint(&path)?,
+                    version: "Darwin native /usr/bin/time -l; version unavailable".into(),
+                },
+                path,
+            }
+        })
+    };
+    Ok((engine, time, platform))
+}
+fn select_roles(
+    args: &SelectionArgs,
+    setup: &SelectionSetup,
+    context: &AdapterTools<'_>,
+    scratch: &AdapterScratch,
+) -> anyhow::Result<RoleRequest> {
+    let SelectionSetup {
+        cwd,
+        repository,
+        suite,
+        ..
+    } = setup;
+    let environment = context.environment;
+    let need_build =
+        args.candidate_ref.is_some() || args.previous_ref.is_some() || args.biggie.is_none();
+    let git = if need_build {
+        Some(GitContext {
+            tool: context.identify(&context.find("git")?, &["--version".into()])?,
+            environment: environment.clone(),
+            scratch_root: scratch.0.clone(),
+        })
+    } else {
+        None
+    };
+    let tools = if need_build {
+        Some(context.build_tools(suite.build.toolchain.as_deref())?)
+    } else {
+        None
+    };
+    let pipeline = if suite
+        .cases
+        .iter()
+        .any(|case| matches!(case.io.stdin, StdinPolicy::Pipe { .. }))
+    {
+        Some(PipelineTools {
+            bash: context.identify(&context.find("bash")?, &["--version".into()])?,
+            cat: BoundTool {
+                path: context.find("cat")?,
+                identity: ToolIdentity {
+                    file: fingerprint(&context.find("cat")?)?,
+                    version: "system cat; version unavailable".into(),
+                },
+            },
+        })
+    } else {
+        None
+    };
+    let source =
+        |revision: &Option<String>, path: &Option<PathBuf>| -> anyhow::Result<ExecutableSource> {
+            if let Some(revision) = revision {
+                Ok(ExecutableSource::Revision(revision.clone()))
+            } else {
+                Ok(ExecutableSource::Prebuilt(
+                    cwd.join(
+                        path.as_ref()
+                            .ok_or_else(|| anyhow::anyhow!("missing executable selection"))?,
+                    ),
+                ))
+            }
+        };
+    let roles = RoleRequest {
+        repository: repository.clone(),
+        candidate: source(&args.candidate_ref, &args.candidate)?,
+        previous: if args.previous_ref.is_some() || args.previous.is_some() {
+            Some(source(&args.previous_ref, &args.previous)?)
+        } else {
+            None
+        },
+        reference: args.reference.as_ref().map(|p| cwd.join(p)),
+        generator: if args.generator_ref.is_some() || args.biggie.is_some() {
+            Some(source(&args.generator_ref, &args.biggie)?)
+        } else {
+            None
+        },
+        git,
+        tools,
+        cache_root: repository.join("target/cli-bench"),
+        home: scratch.0.join("home"),
+        config: scratch.0.join("config"),
+        pipeline,
+    };
+    Ok(roles)
+}
+fn report_format(value: &str) -> cli_bench::ReportFormat {
+    match value {
+        "json" => cli_bench::ReportFormat::Json,
+        "markdown" => cli_bench::ReportFormat::Markdown,
+        _ => cli_bench::ReportFormat::Terminal,
+    }
+}
 fn acquire_measurement_lock(
     cancellation: &std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> anyhow::Result<cli_bench::MeasurementLock> {
     use std::io::Write;
-    for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
-        signal_hook::flag::register(signal, std::sync::Arc::clone(cancellation))?;
-    }
     cli_bench::MeasurementLock::acquire(cancellation, || {
         let mut diagnostic = std::io::stderr().lock();
         writeln!(
@@ -226,6 +699,35 @@ struct AdapterTools<'a> {
     runner: &'a cli_bench::ProcessRunner,
 }
 impl AdapterTools<'_> {
+    fn build_tools(&self, toolchain: Option<&str>) -> anyhow::Result<cli_bench::BuildTools> {
+        let rustup = self.find("rustup")?;
+        let selected = if let Some(value) = toolchain {
+            value.to_string()
+        } else {
+            self.run(&rustup, &["show".into(), "active-toolchain".into()])?
+                .split_whitespace()
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("no active installed toolchain"))?
+                .into()
+        };
+        let locate = |name: &str| -> anyhow::Result<cli_bench::BoundTool> {
+            let path = self.run(
+                &rustup,
+                &[
+                    "which".into(),
+                    "--toolchain".into(),
+                    selected.clone(),
+                    name.into(),
+                ],
+            )?;
+            self.identify(&std::fs::canonicalize(path.trim())?, &["-Vv".into()])
+        };
+        Ok(cli_bench::BuildTools {
+            cargo: locate("cargo")?,
+            rustc: locate("rustc")?,
+            environment: self.environment.clone(),
+        })
+    }
     fn find(&self, name: &str) -> anyhow::Result<PathBuf> {
         let path = self
             .environment

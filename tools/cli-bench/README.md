@@ -8,7 +8,7 @@ callers, bounded child execution, role/profile invocation resolution, and CLI
 help/version/logging, isolated Cargo revision builds, executable binding, and
 verified Biggie dataset preparation, correctness gating, controlled Hyperfine timing,
 and per-user measurement coordination.
-Full run/check execution remains planned in the linked design.
+Local run/check composition, independent RSS, deterministic analysis and offline report/compare in terminal/JSON/Markdown are implemented. Export/replay/history and hosted publication remain planned.
 
 ## Quick start
 
@@ -26,7 +26,7 @@ help. `-L/--log-level` accepts `off`, `error`, `warn`, `info`, `debug`, `trace`;
 explicit flags override `CLIS_LOG_LEVEL`, whose default is `off`. Diagnostics use
 stderr. Invalid arguments or effective logging values return 2. Help and version
 are handled before logging initialization. There is no interactive prompt, pager,
-color policy or benchmark output in this slice.
+color or implicit global initialization in library calls. All report formats use caller-owned writers; terminal and Markdown are ANSI-free.
 
 ## Evidence and limits
 
@@ -34,7 +34,7 @@ Source-local model/suite/store/artifact/host/process/invocation/build/timing/loc
 tests in `tests/process.rs`, `tests/cli.rs`, and the public
 consumer lifecycle in `tests/library.rs` cover the implemented interface. Native macOS 27.0.1 arm64 checks are recorded in the task report; Linux
 has not been run. No performance conclusion or GNU/BSD compatibility claim is
-made for this custom harness. Full benchmark execution remains pending.
+made for this custom harness. Production benchmark workloads and Linux execution remain unverified.
 
 ## Rust library
 
@@ -82,8 +82,8 @@ and 1,800 seconds per build.
 Limits must be positive; deadline overrides require an explicit reason. Suite
 limits accept explicit overrides. `ProcessRunner` enforces explicit per-command
 deadlines and captured/drained stream limits. Dataset preparation enforces declared
-input budgets before spawning and monitors actual output sizes; total-evidence
-runtime enforcement belongs to later orchestration. Full/smoke policies encode 3/20 and 1/2 checked warmups/samples per role
+input budgets before spawning and monitors actual output sizes. Run orchestration
+and public correctness/timing/RSS stages enforce the run-evidence budget described below. Full/smoke policies encode 3/20 and 1/2 checked warmups/samples per role
 in each of two batches, with separate 5/1 RSS samples. Smoke policy suppresses
 performance conclusions.
 
@@ -141,8 +141,7 @@ then flushes evidence and its checksum inventory before publishing terminal stat
 I/O failure retains an incomplete status; no empty successful result is substituted.
 `record_failure` retains failed/incomplete outcomes with unresolved identities absent.
 `Store::load_run` verifies finalized evidence for offline consumers without executing
-it. The outcome record is a storage foundation; RSS/analysis records and
-actual benchmark execution remain pending.
+it. The sealed outcome is also the basis of offline analysis and reporting.
 
 `begin_tagged_run` immediately records an attempt under `experiments/ID/` with
 its hypothesis, change summary and requested revisions. A resolved experiment
@@ -327,20 +326,33 @@ execution paths are absolute UTF-8; callers supply an existing scratch directory
 outside the repository, Git identity, frozen Cargo/rustc identities and child
 settings. These APIs use the supplied runner's deadline/cancellation/stream limits.
 `BuildRequest.binary = None` uses sole-binary selection; `Some(name)` is exact.
-`RunRequest` uses typed revision/prebuilt choices and optional build tools so
+`RoleRequest` uses typed revision/prebuilt choices and optional build tools so
 all-prebuilt bindings need no compiler. `bind_roles` retains candidate, selected
 comparators and `RoleBindings.generator`; invocation-only callers may leave that
 generator field absent. Prebuilt provenance stays unknown, and a requested missing
 reference fails. No GNU/BSD substitution is performed.
 
-`run` and `check` currently validate only `-s/--suite`, candidate `-r/--candidate-ref`
-or `-a/--candidate`, previous `-b/--previous-ref` or `-p/--previous`, explicit
-`-x/--reference`, and generator `-G/--generator-ref` or `-g/--biggie` selections.
-They require a candidate plus comparator and reject ref/path conflicts. Valid
-selections return operational failure explaining that execution is not implemented;
-they do not claim to produce benchmark evidence. Other planned selection flags,
-CLI preparation/correctness/timing orchestration remains later work; the library
-operations are available independently.
+`run` and `check` accept a suite TOML path with `-s/--suite`, repeatable
+`-c/--case`, candidate `-r/--candidate-ref` or `-a/--candidate`, previous
+`-b/--previous-ref` or `-p/--previous`, explicit `-x/--reference`, and generator
+`-G/--generator-ref` or `-g/--biggie`. A candidate and at least one comparator
+are required. `-t/--toolchain`, `-F/--features`, `-N/--no-default-features`,
+`-m/--measurement-profile full|smoke`, `-d/--data-dir`, `-M/--manifest-path`,
+`-f/--format terminal|json|markdown`, and `-H/--hyperfine` complete local selection.
+Saved suite IDs will be supplied with the reviewed suite catalog in a later slice.
+
+Untagged checks require no timing programs. Tagged checks require `--experiment`,
+`--hypothesis`, `--change-summary`, and `-b` together, identify Hyperfine 1.20.0
+for the frozen contract, and perform no timing/RSS measurements. Later attempts
+reject changed scenarios, checks, work, build policies or starting Git revision.
+Every registered attempt remains visible, including failed preparation and checks.
+
+The CLI alone discovers tools, reads process settings, installs logging/signal
+handlers and acquires the measurement lock. SIGINT exits 130 and SIGTERM 143 after
+cleanup; operational failures exit 1. A slower valid candidate exits 0. Reports
+remain data-only on stdout. Library callers inspect `RunBundle.result.outcome`;
+a retained failed/incomplete bundle is a successful storage operation, not a
+successful benchmark. Storage/render/flush errors still return `Err`.
 
 Tests use tiny temporary Git/Cargo repositories and fake Cargo fault cases; they
 generate no benchmark data. Native macOS execution is verified in the task report;
@@ -404,10 +416,10 @@ Native macOS execution was checked for this slice; Linux remains unverified.
 ## Correctness gate and reusable reset
 
 `prepare_experiment(&MeasurementLock, &ExperimentPreparation, &Store, &ProcessRunner)` accepts one
-explicit suite, profile, validated `CaseId` selection, role/build `RunRequest` and
+explicit suite, profile, validated `CaseId` selection, role/build `RoleRequest` and
 optional immutable replay datasets. An empty selection includes every declared
 case; duplicate or unknown IDs fail. Preparation binds executables, generates and
-verifies datasets, and allocates unique marked scratch under `RunRequest.cache_root`
+verifies datasets, and allocates unique marked scratch under `RoleRequest.cache_root`
 (typically `target/cli-bench`). Retained inputs and evidence stay in the Store.
 
 `validate_experiment(prepared, &mut writer, &runner)` runs every selected case and
@@ -443,7 +455,7 @@ The report retains the existing host umask observation, including explicit
 unavailability on macOS, and compares actual requested mode bits. It does not infer
 umask from permissions or claim that an unavailable value was verified. Native
 macOS regression tests cover this library workflow; Linux remains unverified.
-CLI run/check wiring remains later work.
+The CLI run/check commands compose these guarded operations.
 No performance claim is made for preparation, verification or reset.
 
 
@@ -501,7 +513,7 @@ Raw schedules, command identities/argv, each JSON export, engine stdout/stderr
 `raw/timing/`; final reports retain captures and checks per case. Sample raw paths
 are relative to the run root. A second measurement call cannot overwrite this
 run's timing evidence. Single-sample Hyperfine summaries are raw observations;
-overall statistics and performance analysis remain later work.
+overall statistics and descriptive analysis are produced by the report layer.
 
 Ordinary tests use tiny original process fixtures without requiring Hyperfine.
 The separately ignored native adapter test is documented in
@@ -571,3 +583,141 @@ test locks; the representative public workflow and native opt-in use the fixed
 production lock. See [fixture provenance](tests/inputs/README.md) for native
 execution and parser-only evidence. Native macOS was verified; native Linux
 execution remains unverified. No benchmark performance conclusion is claimed.
+
+
+## Deterministic analysis and reports
+
+`run(&RunRequest, &Store, &ProcessRunner)` takes a caller-held `MeasurementLock`,
+`ExperimentPreparation` with a `RoleRequest`, explicit harness/host identities,
+and `RunMode::CheckOnly { engine }` or `RunMode::Measure { engine, time, platform }`.
+It holds the borrowed lock through preparation, the correctness gate, timing, RSS,
+final checks and durable report finalization. `time: None` represents unavailable
+RSS and produces an incomplete full-metric result. Prebuilt provenance remains
+unknown; ordinary check contracts have no engine identity. Tagged checks supply
+an identified engine so their contract matches later measured attempts.
+
+`analyze(&RunManifest, &[TimingSample], &[RssSample])` performs no I/O. The
+`descriptive-v1` policy retains every observation and its original order, while
+case rows and comparison roles sort deterministically. Full analysis requires both
+20-sample batches and exact ordinals/statuses; smoke requires two samples per batch.
+Each batch and the equally sized aggregate report mean, median, sample standard
+deviation (N−1), min/max/count. Candidate/baseline ratios use aggregate means;
+opposite batch directions are inconclusive. Smoke suppresses conclusions.
+RSS uses separate five-sample (smoke one-sample) medians/ranges. Binary sizes and
+signed byte deltas derive only from immutable artifact records. Throughput is
+reported only with an explicit work numerator; seek-tail fixtures omit it.
+
+Sample identities bind run, role artifact, profile, effective case, work/I/O and immutable input
+hashes, excluding physical paths. Invalid, duplicate, incomplete or unmatched
+sets produce no ratio. This is an unreleased v1 integration: older partial sample
+records without identities fail closed, with no implicit migration. References,
+unknown prebuilt policies and changed build policies are labelled product
+comparisons. Verified previous/candidate builds with matching known policies can
+be labelled source-isolated. These observations establish neither significance nor
+equivalence, and never create ratios between historical runs.
+
+`publication_record(&RunBundle)` projects manifest, result, normalized samples,
+analysis, correctness, evidence and attempt links, replay recipe and requested
+90-day retention. Local artifact expiry is explicitly unavailable until a
+publisher assigns it. The strict projection is bounded to 16 MiB and includes no
+remote publication. Failed/incomplete runs suppress comparison conclusions.
+`render(&RunBundle, ReportFormat, &mut dyn Write)` renders terminal, JSON or
+Markdown; user strings are escaped and short writes/flush failures propagate.
+Neither operation acquires a measurement lock, executes a workload, nor installs
+a logger. The shared [failed publication fixture](tests/inputs/publication-failed.json)
+and [Markdown golden](tests/expected/failed-report.md) define an original sample
+for the later trusted publisher.
+
+The [direct consumer example](examples/inspect_report.rs) analyzes and
+renders twice in one process:
+
+```sh
+cargo run --locked -p cli-bench --example inspect_report -- .cli-bench RUN_ID
+```
+
+Normal orchestration tests use private real locks and tiny original executables.
+The native macOS slow-candidate CLI probe requires OS resource permissions:
+
+```sh
+cargo test --locked -p cli-bench --test cli native_slow_candidate_cli_exits_zero -- --ignored
+```
+
+It uses original synthetic elapsed values to verify advisory status handling and
+native RSS plumbing, not to establish performance. Native Linux remains unverified.
+
+Offline CLI reports accept sealed local run directories (including sealed failed or
+incomplete runs) and never discover tools or acquire the measurement lock:
+
+```sh
+cli-bench report -i .cli-bench/runs/RUN_ID -f markdown
+cli-bench compare -i .cli-bench/runs/RUN_ID -b candidate -a previous -f json
+```
+
+`compare` selects two distinct present roles within that run and retains their
+original identities; reversing them reverses the ratio. Reference-involved
+comparisons remain product comparisons. Failed, incomplete and smoke evidence
+retains its existing conclusion restrictions. Offline commands exit zero when
+rendering succeeds, with the saved run outcome visible in the report. Portable
+bundle loading belongs to the export/replay stage and is not implemented yet.
+
+`comparison_record(&RunBundle, ComparisonSelection)` produces the same compact
+record for the selected roles. `render_record(&PublicationRecord, format, writer)`
+validates versions and identities and recomputes the analysis from normalized
+observations before writing, so deserialized summaries are not implicitly trusted.
+`Store::open_existing` is a read-only entry point that creates no directories or
+locks. Loading requires matching status/result and a verified seal; an unfinished
+run is not a sealed incomplete result.
+
+`RunRequest::submitted_toml` preserves the exact submitted text in `suite.toml`.
+`resolved-suite.toml` separately records effective settings, including CLI build
+overrides. `Store::begin_resolved_run` validates both and permits differences only
+in the build policy; it also supports tagged failures before tool discovery. Both
+files are sealed evidence. Source-free Rust callers may omit submitted text, in
+which case `suite.toml` honestly contains the serialization of their typed suite.
+
+
+### Evidence budget and failure preservation
+
+The normal logical run-evidence limit defaults to 2 GiB. The private budget is
+owned by `RunWriter` and attached by `run`, `validate_experiment`, `measure_timing`
+and `measure_rss`; bounded runner copies preserve it. Original/resolved TOML,
+request/status records, captures, observations, diagnostic copies, events and
+reports count from the first write. Shared artifact/dataset/build caches and
+workload scratch outside the run directory have their own existing limits.
+
+A metadata-only inventory runs before each child retaining run evidence and before
+harness writes. Both retained capture streams share one atomic remaining allowance;
+a large stdout stream can use space that stderr does not need. Discarded/drained
+bytes do not consume disk-evidence allowance. During a child, only declared external
+output/resource files are polled and their observed growth shares that allowance.
+No whole-run scan runs inside the measured child or Hyperfine interval.
+
+Captured streams cannot exceed their shared allowance. Harness writes reserve the
+full new byte count before atomic replacement, including temporary-file space.
+External files can overshoot between 5 ms monitor checks and while the existing
+TERM/KILL cleanup finishes (up to one second per cleanup phase before unconfirmed
+termination fails). There is no fixed maximum byte overshoot and no OS disk-quota
+claim. Observed external bytes remain retained; further children are prohibited
+when the budget is exhausted. Normal successful evidence stays within its configured
+logical-byte limit, apart from the separately indexed checksum file.
+
+Failure metadata has a separate cumulative 16 MiB write allowance, including
+correctness/outcome JSON, failure events, projections, manifest/result/status and
+any failure-status fallback. The retained-file checksum index is separately exempt.
+If projections cannot fit, raw evidence can still be sealed with a failure message;
+a storage error or an oversized essential manifest can leave explicit unfinished
+incomplete evidence. Initial source that cannot fit is rejected before workload
+execution; where request/status metadata fit, a tagged initial attempt is retained.
+Original source bytes are never silently truncated to fit.
+
+Inventory work scales with retained file count: a diagnostic on this host measured
+100 scans of 1,000 files in about 205 ms total. This is an overhead observation,
+not a performance gate or benchmark result. Scans and metadata serialization stay
+outside measured command intervals, but do add orchestration time.
+
+`RunManifest::execution_kind` records `check-only` or `measure` independently of
+sample availability. A source-only Store caller may leave it unresolved, or use
+`RunWriter::set_execution_kind` before recording an early failure. The CLI and
+composed run always record the requested kind. This field is outside the frozen
+measurement contract, so tagged checks and subsequent measurements retain the same
+contract while reports/replay inputs distinguish their requested stages honestly.

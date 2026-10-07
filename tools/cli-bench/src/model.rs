@@ -457,10 +457,10 @@ pub struct MeasurementContract {
     pub suite: Suite,
     pub harness: ToolIdentity,
     pub generator: ToolIdentity,
-    pub engine: ToolIdentity,
+    pub engine: Option<ToolIdentity>,
     pub validator_policy: String,
     pub analysis_policy: String,
-    pub build: ResolvedBuildPolicy,
+    pub build: Option<ResolvedBuildPolicy>,
     pub profile: MeasurementProfile,
 }
 
@@ -541,11 +541,21 @@ pub struct ExperimentRequest {
     pub requested_candidate: String,
 }
 
+/// Requested stages, independent of outcome or whether any samples were accepted.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ExecutionKind {
+    CheckOnly,
+    Measure,
+}
+
 /// Resolved run identities may be absent on early failure.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RunManifest {
     pub schema_version: u32,
+    /// None means a source-only Store caller did not declare execution stages.
+    pub execution_kind: Option<ExecutionKind>,
     pub run_id: String,
     pub contract: Option<MeasurementContract>,
     pub roles: BTreeMap<Role, ArtifactRecord>,
@@ -703,11 +713,20 @@ impl MeasurementContract {
             ));
         }
         crate::validate_suite(&self.suite)?;
-        self.build.validate()?;
-        let mut resolved = self.suite.clone();
-        resolved.build.clone_from(&self.build.settings);
-        crate::validate_suite(&resolved)?;
-        for tool in [&self.harness, &self.generator, &self.engine] {
+        if let Some(build) = &self.build {
+            build.validate()?;
+            let mut resolved = self.suite.clone();
+            resolved.build.clone_from(&build.settings);
+            crate::validate_suite(&resolved)?;
+        }
+        for tool in [
+            Some(&self.harness),
+            Some(&self.generator),
+            self.engine.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
             crate::artifact::validate_identity(&tool.file)?;
             if tool.version.trim().is_empty() {
                 return Err(crate::BenchError::Evidence("missing tool version".into()));
@@ -728,9 +747,116 @@ impl MeasurementContract {
 pub struct ToolPaths {
     pub harness: std::path::PathBuf,
     pub generator: std::path::PathBuf,
-    pub engine: std::path::PathBuf,
+    pub engine: Option<std::path::PathBuf>,
 }
 
+/// Portable evidence binding: samples cannot be reused across runs, profiles or work scopes.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SampleIdentity {
+    pub artifact_id: String,
+    pub run_id: String,
+    pub profile: MeasurementProfile,
+    pub case_scope_id: String,
+}
+impl SampleIdentity {
+    pub(crate) fn new(
+        run_id: &str,
+        case: &CaseSpec,
+        profile: MeasurementProfile,
+        inputs: &[InputRecord],
+        artifact_id: &str,
+    ) -> Result<Self, crate::BenchError> {
+        let resolved = case.effective(profile);
+        let mut relevant = std::collections::BTreeSet::new();
+        for arg in resolved
+            .argv
+            .iter()
+            .chain(resolved.role_argv.values().flatten())
+        {
+            if let Some(id) = arg
+                .strip_prefix("@input:")
+                .or_else(|| arg.strip_prefix("@records:"))
+            {
+                relevant.insert(id);
+            }
+        }
+        match &case.io.stdin {
+            StdinPolicy::RegularFile { dataset } | StdinPolicy::Pipe { dataset } => {
+                relevant.insert(dataset);
+            }
+            StdinPolicy::Null {} => {}
+        }
+        for rule in &resolved.correctness {
+            if let CorrectnessRule::TailSlice { dataset, .. } = rule {
+                relevant.insert(dataset);
+            }
+        }
+        let mut identities = BTreeMap::new();
+        for id in relevant {
+            let mut matching = inputs.iter().filter(|input| input.dataset == id);
+            let input = matching
+                .next()
+                .ok_or_else(|| crate::BenchError::Evidence(format!("missing scope input {id}")))?;
+            if matching.next().is_some() {
+                return Err(crate::BenchError::Evidence("duplicate scope input".into()));
+            }
+            crate::artifact::validate_identity(&input.file)?;
+            identities.insert(id, &input.file);
+        }
+        Ok(Self {
+            artifact_id: artifact_id.into(),
+            run_id: run_id.into(),
+            profile,
+            case_scope_id: crate::artifact::json_identity(&(
+                resolved.clone(),
+                profile,
+                identities,
+            ))?,
+        })
+    }
+}
+impl CaseSpec {
+    pub(crate) fn equal_dataset_operands(
+        &self,
+        profile: MeasurementProfile,
+        roles: impl IntoIterator<Item = Role>,
+    ) -> bool {
+        let case = self.effective(profile);
+        let mut observed = None;
+        for role in roles {
+            let argv = case.role_argv.get(&role).unwrap_or(&case.argv);
+            let operands: std::collections::BTreeSet<_> = argv
+                .iter()
+                .filter(|arg| arg.starts_with("@input:") || arg.starts_with("@records:"))
+                .collect();
+            if observed.as_ref().is_some_and(|old| old != &operands) {
+                return false;
+            }
+            observed = Some(operands);
+        }
+        true
+    }
+    pub(crate) fn effective(&self, profile: MeasurementProfile) -> Self {
+        let mut resolved = self.clone();
+        if let Some(overrides) = self.profiles.get(&profile) {
+            if let Some(argv) = &overrides.argv {
+                resolved.argv.clone_from(argv);
+            }
+            if let Some(argv) = &overrides.role_argv {
+                resolved.role_argv.clone_from(argv);
+            }
+            if let Some(checks) = &overrides.correctness {
+                resolved.correctness.clone_from(checks);
+            }
+            if let Some(work) = &overrides.work {
+                resolved.work = Some(work.clone());
+            }
+        }
+        resolved.profiles.clear();
+        resolved
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::{MeasurementPolicy, MeasurementProfile};

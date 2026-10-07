@@ -7,7 +7,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 readme = "README.md"
-include = ["Cargo.toml", "README.md", "src/**/*.rs", "suites/**/*.toml", "tests/**/*.rs", "tests/inputs/**"]
+include = ["Cargo.toml", "README.md", "src/**/*.rs", "suites/**/*.toml", "tests/**/*.rs", "tests/inputs/**", "tests/expected/**", "examples/**/*.rs"]
 
 [dependencies]
 anyhow.workspace = true

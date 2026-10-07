@@ -62,6 +62,7 @@ pub enum StopReason {
     Cancelled,
     OutputLimit(Stream),
     FileLimit,
+    EvidenceLimit,
 }
 /// Native status and bounded stream counts retained for successful and stopped runs.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -94,17 +95,60 @@ impl ProcessOutcome {
 #[derive(Clone, Debug)]
 pub struct ProcessRunner {
     policy: ExecutionPolicy,
+    evidence: Option<crate::budget::EvidenceBudget>,
 }
 impl ProcessRunner {
     #[must_use]
     pub const fn new(policy: ExecutionPolicy) -> Self {
-        Self { policy }
+        Self {
+            policy,
+            evidence: None,
+        }
     }
     pub(crate) fn bounded(&self, timeout: Duration, max_stream_bytes: u64) -> Self {
         let mut policy = self.policy.clone();
         policy.timeout = policy.timeout.min(timeout);
         policy.max_stream_bytes = policy.max_stream_bytes.min(max_stream_bytes);
-        Self::new(policy)
+        Self {
+            policy,
+            evidence: self.evidence.clone(),
+        }
+    }
+    pub(crate) fn with_evidence(&self, budget: &crate::budget::EvidenceBudget) -> Self {
+        Self {
+            policy: self.policy.clone(),
+            evidence: Some(budget.clone()),
+        }
+    }
+    pub(crate) fn write_json<T: serde::Serialize>(
+        &self,
+        path: &Path,
+        value: &T,
+    ) -> Result<(), BenchError> {
+        let bytes = serde_json::to_vec_pretty(value)?;
+        if let Some(budget) = &self.evidence
+            && budget.contains(path)
+            && let Err(error) = budget.reserve_write(bytes.len())
+        {
+            if budget.is_failed() {
+                return Err(error);
+            }
+            // Keep the observation that could not fit as bounded failure metadata,
+            // then propagate quota failure to stop the stage.
+            budget.fail();
+            budget.reserve_write(bytes.len())?;
+            crate::store::atomic_write(path, &bytes)?;
+            return Err(error);
+        }
+        crate::store::atomic_write(path, &bytes)
+    }
+    pub(crate) fn write_evidence(&self, path: &Path, bytes: &[u8]) -> Result<(), BenchError> {
+        if let Some(budget) = &self.evidence
+            && budget.contains(path)
+        {
+            budget.reserve_write(bytes.len())?;
+        }
+        crate::store::atomic_write(path, bytes)
     }
     /// Execute a command, capturing with fixed-size buffers and enforcing its limits.
     ///
@@ -139,6 +183,50 @@ impl ProcessRunner {
         }
         self.execute_controlled(spec, paths, &NativeControl, Some(limit))
     }
+    fn evidence_monitor(
+        &self,
+        spec: &CommandSpec,
+        paths: &CapturePaths,
+        file_limit: Option<&OutputFileLimit>,
+    ) -> Result<EvidenceMonitor, BenchError> {
+        // Inventory is outside the child interval; during execution only explicitly
+        // bound external files are polled, never the whole run directory.
+        let mut external = Vec::new();
+        let allowance = if let Some(budget) = &self.evidence {
+            if let Some(limit) = file_limit
+                && budget.contains(&limit.path)
+            {
+                external.push((limit.path.clone(), 0));
+            }
+            if let CommandOutput::File(path) = &spec.stdout
+                && budget.contains(path)
+                && !external.iter().any(|(existing, _)| existing == path)
+            {
+                external.push((path.clone(), 0));
+            }
+            if budget.contains(&paths.stdout)
+                || budget.contains(&paths.stderr)
+                || !external.is_empty()
+            {
+                let remaining = budget.remaining()?;
+                if remaining == 0 {
+                    budget.fail();
+                    return Err(BenchError::Evidence(
+                        "run evidence budget exhausted before child".into(),
+                    ));
+                }
+                Some(Arc::new(crate::budget::CaptureAllowance::new(remaining)))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        Ok(EvidenceMonitor {
+            allowance,
+            external,
+        })
+    }
     fn execute_controlled(
         &self,
         spec: &CommandSpec,
@@ -150,29 +238,9 @@ impl ProcessRunner {
         if self.policy.cancellation.load(Ordering::Relaxed) {
             return Err(BenchError::Execution("cancelled before spawn".into()));
         }
-        let mut command = Command::new(&spec.program);
-        command
-            .args(&spec.argv)
-            .current_dir(&spec.cwd)
-            .env_clear()
-            .envs(&spec.environment)
-            .process_group(0);
-        command.stdin(match &spec.stdin {
-            CommandInput::Null => Stdio::null(),
-            CommandInput::File(path) => Stdio::from(open_input(path)?),
-        });
-        let output = match &spec.stdout {
-            CommandOutput::Capture => Some(fresh_file(&paths.stdout)?),
-            _ => None,
-        };
-        let stderr = fresh_file(&paths.stderr)?;
-        command
-            .stdout(match &spec.stdout {
-                CommandOutput::Capture | CommandOutput::DrainedPipe => Stdio::piped(),
-                CommandOutput::Discard => Stdio::null(),
-                CommandOutput::File(path) => Stdio::from(fresh_file(path)?),
-            })
-            .stderr(Stdio::piped());
+        let mut evidence = self.evidence_monitor(spec, paths, file_limit)?;
+        let allowance = evidence.allowance.clone();
+        let (mut command, output, stderr) = command_with_captures(spec, paths)?;
         let start = Instant::now();
         let mut owned = OwnedGroup::spawn(&mut command, control)?;
         let (sender, receiver) = mpsc::channel();
@@ -187,6 +255,11 @@ impl ProcessRunner {
                     self.policy.max_stream_bytes,
                     sender.clone(),
                     Arc::clone(&stop_capture),
+                    allowance.clone().filter(|_| {
+                        self.evidence
+                            .as_ref()
+                            .is_some_and(|budget| budget.contains(&paths.stdout))
+                    }),
                 )?);
             }
             let stderr_pipe = owned
@@ -201,6 +274,11 @@ impl ProcessRunner {
                 self.policy.max_stream_bytes,
                 sender,
                 Arc::clone(&stop_capture),
+                allowance.clone().filter(|_| {
+                    self.evidence
+                        .as_ref()
+                        .is_some_and(|budget| budget.contains(&paths.stderr))
+                }),
             )?);
             monitor(
                 &mut owned,
@@ -209,6 +287,7 @@ impl ProcessRunner {
                 start,
                 &self.policy,
                 file_limit,
+                &mut evidence,
             )
         })();
         // Cleanup runs on monitor/reader/thread-creation errors too; the original error wins.
@@ -242,12 +321,51 @@ impl ProcessRunner {
                 outcome.stopped = Some(StopReason::OutputLimit(stream));
             }
         }
+        if evidence.exceeded()? {
+            outcome.stopped = Some(StopReason::EvidenceLimit);
+        }
         if file_limit.map(file_exceeded).transpose()?.unwrap_or(false) && outcome.stopped.is_none()
         {
             outcome.stopped = Some(StopReason::FileLimit);
         }
+        if outcome.stopped == Some(StopReason::EvidenceLimit)
+            && let Some(budget) = &self.evidence
+        {
+            // Further children are forbidden; only bounded failure metadata may follow.
+            budget.fail();
+        }
         Ok(outcome)
     }
+}
+
+fn command_with_captures(
+    spec: &CommandSpec,
+    paths: &CapturePaths,
+) -> Result<(Command, Option<File>, File), BenchError> {
+    let mut command = Command::new(&spec.program);
+    command
+        .args(&spec.argv)
+        .current_dir(&spec.cwd)
+        .env_clear()
+        .envs(&spec.environment)
+        .process_group(0);
+    command.stdin(match &spec.stdin {
+        CommandInput::Null => Stdio::null(),
+        CommandInput::File(path) => Stdio::from(open_input(path)?),
+    });
+    let output = match &spec.stdout {
+        CommandOutput::Capture => Some(fresh_file(&paths.stdout)?),
+        _ => None,
+    };
+    let stderr = fresh_file(&paths.stderr)?;
+    command
+        .stdout(match &spec.stdout {
+            CommandOutput::Capture | CommandOutput::DrainedPipe => Stdio::piped(),
+            CommandOutput::Discard => Stdio::null(),
+            CommandOutput::File(path) => Stdio::from(fresh_file(path)?),
+        })
+        .stderr(Stdio::piped());
+    Ok((command, output, stderr))
 }
 
 fn file_exceeded(limit: &OutputFileLimit) -> Result<bool, BenchError> {
@@ -510,11 +628,12 @@ fn start_drain(
     limit: u64,
     sender: mpsc::Sender<CaptureMessage>,
     stop: Arc<AtomicBool>,
+    allowance: Option<Arc<crate::budget::CaptureAllowance>>,
 ) -> std::io::Result<JoinHandle<()>> {
     thread::Builder::new()
         .name(format!("capture-{stream:?}"))
         .spawn(move || {
-            let result = drain(reader, output, limit, &stop);
+            let result = drain(reader, output, limit, &stop, allowance.as_deref());
             let _ = sender.send((stream, result));
         })
 }
@@ -523,6 +642,7 @@ fn drain(
     mut output: Option<File>,
     limit: u64,
     stop: &AtomicBool,
+    allowance: Option<&crate::budget::CaptureAllowance>,
 ) -> std::io::Result<CaptureResult> {
     let mut bytes = 0_u64;
     let mut buffer = [0_u8; 8192];
@@ -562,7 +682,13 @@ fn drain(
             });
         }
         let remaining = limit.saturating_sub(bytes);
-        let kept = count.min(usize::try_from(remaining).unwrap_or(usize::MAX));
+        let mut kept = count.min(usize::try_from(remaining).unwrap_or(usize::MAX));
+        if output.is_some()
+            && let Some(allowance) = allowance
+        {
+            kept = usize::try_from(allowance.claim(u64::try_from(kept).unwrap_or(u64::MAX)))
+                .unwrap_or(0);
+        }
         if let Some(file) = &mut output {
             file.write_all(
                 buffer
@@ -588,6 +714,32 @@ const fn set_bytes(outcome: &mut ProcessOutcome, stream: Stream, bytes: u64) {
         Stream::Stderr => outcome.stderr_bytes = bytes,
     }
 }
+struct EvidenceMonitor {
+    allowance: Option<Arc<crate::budget::CaptureAllowance>>,
+    external: Vec<(PathBuf, u64)>,
+}
+impl EvidenceMonitor {
+    fn exceeded(&mut self) -> Result<bool, BenchError> {
+        let Some(allowance) = &self.allowance else {
+            return Ok(false);
+        };
+        for (path, previous) in &mut self.external {
+            let bytes = match std::fs::symlink_metadata(path) {
+                Ok(meta) if meta.is_file() => meta.len(),
+                Ok(_) => {
+                    return Err(BenchError::Evidence(
+                        "non-regular monitored evidence".into(),
+                    ));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+                Err(error) => return Err(error.into()),
+            };
+            allowance.claim(bytes.saturating_sub(*previous));
+            *previous = bytes;
+        }
+        Ok(allowance.exceeded.load(Ordering::Relaxed))
+    }
+}
 fn monitor(
     owned: &mut OwnedGroup<'_, impl GroupControl>,
     receiver: &mpsc::Receiver<CaptureMessage>,
@@ -595,6 +747,7 @@ fn monitor(
     start: Instant,
     policy: &ExecutionPolicy,
     file_limit: Option<&OutputFileLimit>,
+    evidence: &mut EvidenceMonitor,
 ) -> Result<ProcessOutcome, BenchError> {
     let mut outcome = ProcessOutcome {
         status: ProcessStatus::Exit(0),
@@ -610,6 +763,9 @@ fn monitor(
             if capture.exceeded && outcome.stopped.is_none() {
                 outcome.stopped = Some(StopReason::OutputLimit(stream));
             }
+        }
+        if evidence.exceeded()? {
+            outcome.stopped = Some(StopReason::EvidenceLimit);
         }
         if file_limit.map(file_exceeded).transpose()?.unwrap_or(false) && outcome.stopped.is_none()
         {
@@ -678,6 +834,71 @@ mod tests {
                 cancellation: Arc::new(AtomicBool::new(false)),
             },
         )
+    }
+    #[test]
+    fn evidence_streams_share_capacity_and_every_child_rechecks_remaining_bytes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = assert_fs::TempDir::new()?;
+        let (mut spec, _, mut policy) = inputs();
+        spec.program = "/bin/sh".into();
+        spec.cwd = root.path().into();
+        spec.argv = vec!["-c".into(), "printf 123456789; printf x >&2".into()];
+        policy.max_stream_bytes = 100;
+        let budget = crate::budget::EvidenceBudget::new(root.path().into(), 15);
+        let runner = ProcessRunner::new(policy)
+            .with_evidence(&budget)
+            .bounded(Duration::from_secs(1), 100);
+        let paths = CapturePaths {
+            stdout: root.join("out"),
+            stderr: root.join("err"),
+        };
+        runner.execute(&spec, &paths)?.check_expected(0)?;
+        crate::test_support::equal(&crate::budget::size(root.path())?, &10)?;
+        let second = CapturePaths {
+            stdout: root.join("out2"),
+            stderr: root.join("err2"),
+        };
+        let outcome = runner.execute(&spec, &second)?;
+        crate::test_support::equal(&outcome.stopped, &Some(StopReason::EvidenceLimit))?;
+        crate::test_support::equal(&crate::budget::size(root.path())?, &15)?;
+        let third = CapturePaths {
+            stdout: root.join("out3"),
+            stderr: root.join("err3"),
+        };
+        crate::test_support::require(
+            runner.execute(&spec, &third).is_err(),
+            "started child at cap",
+        )?;
+        crate::test_support::require(!third.stderr.exists(), "created capture after cap")?;
+        Ok(())
+    }
+    #[test]
+    fn monitored_external_evidence_overshoot_is_retained_and_stops_later_children()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = assert_fs::TempDir::new()?;
+        let (mut spec, _, mut policy) = inputs();
+        spec.program = "/bin/sh".into();
+        spec.cwd = root.path().into();
+        spec.argv = vec!["-c".into(), "printf 12345678901234567890 > external".into()];
+        policy.max_stream_bytes = 100;
+        let budget = crate::budget::EvidenceBudget::new(root.path().into(), 10);
+        let runner = ProcessRunner::new(policy).with_evidence(&budget);
+        let paths = CapturePaths {
+            stdout: root.join("out"),
+            stderr: root.join("err"),
+        };
+        let outcome = runner.execute_with_file_limit(
+            &spec,
+            &paths,
+            &OutputFileLimit {
+                path: root.join("external"),
+                max_bytes: 100,
+            },
+        )?;
+        crate::test_support::equal(&outcome.stopped, &Some(StopReason::EvidenceLimit))?;
+        crate::test_support::equal(&std::fs::metadata(root.join("external"))?.len(), &20)?;
+        crate::test_support::require(budget.remaining().is_err(), "overshoot accepted new work")?;
+        Ok(())
     }
     #[test]
     fn invalid_limits_and_context_fail_before_spawn() {
@@ -819,6 +1040,7 @@ mod tests {
             1024,
             sender,
             Arc::clone(&stop),
+            None,
         )?;
         writer.write_all(b"preserved")?;
         let start = Instant::now();

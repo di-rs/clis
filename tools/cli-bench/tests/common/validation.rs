@@ -12,7 +12,7 @@ pub struct Fixture {
     pub measurement_lock: MeasurementLock,
     pub root: assert_fs::TempDir,
     pub suite: Suite,
-    pub request: RunRequest,
+    pub request: RoleRequest,
     pub store: Store,
     pub runner: ProcessRunner,
 }
@@ -35,7 +35,7 @@ impl Fixture {
         for directory in ["cache", "home", "config"] {
             fs::create_dir(base.join(directory))?;
         }
-        let request = RunRequest {
+        let request = RoleRequest {
             repository: base.clone(),
             candidate: ExecutableSource::Prebuilt(script(&base, "candidate", candidate)?),
             previous: Some(ExecutableSource::Prebuilt(script(

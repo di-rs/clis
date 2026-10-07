@@ -1,7 +1,7 @@
 use crate::{
     BenchError, CapturePaths, CaseId, CaseSpec, CommandOutput, ComparisonTarget, CorrectnessRule,
     DatasetPreparation, DatasetSet, FileIdentity, HostValue, MeasurementProfile, OwnedScratch,
-    ProcessRunner, Role, RoleBindings, RunEvent, RunRequest, RunWriter, Store, Stream, Suite,
+    ProcessRunner, Role, RoleBindings, RoleRequest, RunEvent, RunWriter, Store, Stream, Suite,
     TailUnit,
 };
 use serde::{Deserialize, Serialize};
@@ -15,7 +15,7 @@ use std::{
 /// Explicit suite/profile/case selection and role/build resources.
 #[derive(Debug)]
 pub struct ExperimentPreparation<'a> {
-    pub run: &'a RunRequest,
+    pub run: &'a RoleRequest,
     pub suite: &'a Suite,
     pub profile: MeasurementProfile,
     /// Empty selects every declared case, otherwise unique declared identifiers.
@@ -117,6 +117,26 @@ impl PreparedExperiment<'_> {
     pub fn cases(&self) -> &[CaseSpec] {
         &self.cases
     }
+    pub(crate) fn sample_identity(
+        &self,
+        run_id: &str,
+        case: &CaseSpec,
+        role: Role,
+    ) -> Result<crate::SampleIdentity, BenchError> {
+        let artifact = &self
+            .bindings
+            .roles
+            .get(&role)
+            .ok_or_else(|| failure("unbound sample role"))?
+            .artifact;
+        crate::SampleIdentity::new(
+            run_id,
+            case,
+            self.profile,
+            &self.datasets.inputs.values().cloned().collect::<Vec<_>>(),
+            &artifact.id,
+        )
+    }
     #[must_use]
     pub const fn profile(&self) -> MeasurementProfile {
         self.profile
@@ -210,7 +230,7 @@ impl<'lock> ValidatedExperiment<'lock> {
                 "inherited umask observation changed",
             ),
         );
-        crate::store::atomic_json(&evidence.join("report.json"), &report)?;
+        runner.write_json(&evidence.join("report.json"), &report)?;
         if !report.passed() {
             return Err(failure(
                 "final correctness gate failed; see retained final report",
@@ -343,10 +363,12 @@ pub fn validate_experiment<'lock>(
     writer: &mut RunWriter,
     runner: &ProcessRunner,
 ) -> Result<ValidatedExperiment<'lock>, BenchError> {
+    let evidence_runner = runner.with_evidence(&writer.budget);
+    let runner = &evidence_runner;
     if !writer.matches_suite(&prepared.suite) {
         return Err(failure("run writer suite differs from prepared suite"));
     }
-    crate::store::atomic_json(
+    runner.write_json(
         &writer.path().join("measurement-lock.json"),
         &serde_json::json!({"wait_seconds": prepared.measurement_lock.wait_duration().as_secs_f64()}),
     )?;
@@ -375,7 +397,7 @@ pub fn validate_experiment<'lock>(
             "inherited umask observation changed",
         ),
     );
-    crate::store::atomic_json(&evidence.join("report.json"), &report)?;
+    runner.write_json(&evidence.join("report.json"), &report)?;
     writer.append_event(&if report.passed() {
         RunEvent::Stage("correctness gate passed".into())
     } else {

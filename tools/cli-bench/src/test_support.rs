@@ -50,3 +50,14 @@ pub fn require(condition: bool, message: &str) -> Result<(), Box<dyn std::error:
         Err(message.into())
     }
 }
+
+pub fn equal<T: PartialEq<U> + std::fmt::Debug, U: std::fmt::Debug>(
+    actual: &T,
+    expected: &U,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(format!("expected {expected:?}, observed {actual:?}").into())
+    }
+}

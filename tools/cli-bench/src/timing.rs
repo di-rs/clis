@@ -50,7 +50,9 @@ pub fn parse_hyperfine_sample(json: &str, expected: i32) -> Result<TimingObserva
 }
 
 /// Timing batches preserve forward then reverse role ordering.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum TimingBatch {
     Forward,
@@ -128,7 +130,9 @@ fn schedule<'a>(
 
 /// One accepted elapsed-time sample; raw paths are relative to its run directory.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TimingSample {
+    pub identity: crate::SampleIdentity,
     pub case: String,
     pub role: crate::Role,
     pub batch: TimingBatch,
@@ -149,6 +153,8 @@ pub fn measure_timing(
     runner: &crate::ProcessRunner,
     engine: &crate::BoundTool,
 ) -> Result<Vec<TimingSample>, BenchError> {
+    let evidence_runner = runner.with_evidence(&writer.budget);
+    let runner = &evidence_runner;
     let prepared = validated.prepared();
     if !writer.matches_suite(prepared.suite()) {
         return Err(BenchError::Execution(
@@ -161,6 +167,7 @@ pub fn measure_timing(
         std::time::Duration::from_secs(limits.sample_timeout_seconds),
         limits.max_stream_bytes,
     );
+    writer.check_evidence_limit()?;
     let raw = writer.path().join("raw/timing");
     if std::fs::read_dir(&raw)?.next().is_some() {
         return Err(BenchError::Execution(
@@ -168,7 +175,7 @@ pub fn measure_timing(
         ));
     }
     let schedule = timing_schedule(validated);
-    crate::store::atomic_json(&raw.join("schedule.json"), &schedule)?;
+    runner.write_json(&raw.join("schedule.json"), &schedule)?;
     identify_engine(engine, prepared, &raw, &runner)?;
     let mut samples = vec![];
     for case in prepared.cases() {
@@ -180,6 +187,7 @@ pub fn measure_timing(
         {
             if let Some(sample) = execute_step(validated, writer, &runner, engine, step, index)? {
                 samples.push(sample);
+                writer.check_evidence_limit()?;
             }
         }
         validated.final_case_check(&id, &raw.join(format!("final-{}", case.id)), &runner)?;
@@ -190,7 +198,7 @@ pub fn measure_timing(
     }
     validated.revalidate()?;
     crate::verify_file(&engine.path, &engine.identity.file)?;
-    crate::store::atomic_json(&raw.join("samples.json"), &samples)?;
+    runner.write_json(&raw.join("samples.json"), &samples)?;
     Ok(samples)
 }
 fn execute_step(
@@ -211,6 +219,7 @@ fn execute_step(
     let scratch = prepared
         .scratch(&id)
         .ok_or_else(|| BenchError::Execution("missing validated scratch".into()))?;
+    writer.check_evidence_limit()?;
     let raw = writer.path().join("raw/timing");
     validated.revalidate()?;
     crate::verify_file(&engine.path, &engine.identity.file)?;
@@ -231,11 +240,11 @@ fn execute_step(
         stdout: raw.join(format!("{raw_name}.stdout")),
         stderr: raw.join(format!("{raw_name}.stderr")),
     };
-    crate::store::atomic_json(&raw.join(format!("{raw_name}.step.json")), step)?;
+    runner.write_json(&raw.join(format!("{raw_name}.step.json")), step)?;
     match step.kind {
         TimingKind::Warmup => {
             let outcome = runner.execute(&invocation.command, &paths)?;
-            crate::store::atomic_json(
+            runner.write_json(
                 &raw.join(format!("{raw_name}.outcome.json")),
                 &serde_json::json!({"status": format!("{:?}", outcome.status), "stopped": format!("{:?}", outcome.stopped)}),
             )?;
@@ -247,7 +256,7 @@ fn execute_step(
         TimingKind::Sample => {
             let json = raw.join(format!("{raw_name}.json"));
             let (command, expected_command) = engine_command(engine, &invocation, &json)?;
-            crate::store::atomic_json(
+            runner.write_json(
                 &raw.join(format!("{raw_name}.command.json")),
                 &serde_json::json!({"engine": engine.identity, "argv": command.argv, "workload": expected_command, "scope": format!("{:?}", invocation.scope)}),
             )?;
@@ -259,7 +268,7 @@ fn execute_step(
                     max_bytes: 1_048_576,
                 },
             )?;
-            crate::store::atomic_json(
+            runner.write_json(
                 &raw.join(format!("{raw_name}.outcome.json")),
                 &serde_json::json!({"status": format!("{:?}", outcome.status), "stopped": format!("{:?}", outcome.stopped)}),
             )?;
@@ -278,6 +287,7 @@ fn execute_step(
             }
             let sample = TimingSample {
                 case: step.case.clone(),
+                identity: prepared.sample_identity(writer.id(), case, step.role)?,
                 role: step.role,
                 batch: step.batch,
                 ordinal: step.ordinal,
@@ -287,7 +297,7 @@ fn execute_step(
                 raw_stdout: relative(writer, &paths.stdout)?,
                 raw_stderr: relative(writer, &paths.stderr)?,
             };
-            crate::store::atomic_json(&raw.join(format!("{raw_name}.sample.json")), &sample)?;
+            runner.write_json(&raw.join(format!("{raw_name}.sample.json")), &sample)?;
             return Ok(Some(sample));
         }
     }
@@ -302,7 +312,7 @@ fn relative(
         .map(std::path::Path::to_path_buf)
         .map_err(|_| BenchError::Execution("raw evidence escaped run".into()))
 }
-fn identify_engine(
+pub fn identify_engine(
     engine: &crate::BoundTool,
     prepared: &crate::PreparedExperiment<'_>,
     raw: &std::path::Path,

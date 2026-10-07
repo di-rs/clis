@@ -71,6 +71,15 @@ overflow as a fallback, with possible brief overshoot before termination rather
 than an OS hard quota. Preserve failure evidence; users may increase limits
 explicitly in the suite's limits table.
 
+The run-evidence budget stops new normal work when exhausted. Bound captured
+streams and harness-written metadata against the remaining budget. Externally
+written resource files may briefly overshoot between monitor checks; retain those
+bytes as failure evidence. Final failure metadata has a separate 16 MiB allowance
+plus the checksum index for retained files. This approved exception preserves
+diagnostics and an inspectable failed/incomplete outcome; it does not permit the
+run to continue measuring or claim completion. Account evidence outside measured
+child intervals, and report the observed limit failure explicitly.
+
 ## CLI and Cargo relationship
 
 Add `tools/cli-bench` explicitly to workspace members. Cargo builds the harness,

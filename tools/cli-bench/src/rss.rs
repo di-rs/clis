@@ -16,6 +16,7 @@ pub enum RssUnit {
 }
 /// One OS-accounted command peak, never a sum of pipeline process peaks.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NativeRss {
     pub platform: Platform,
     pub value: u64,
@@ -25,7 +26,9 @@ pub struct NativeRss {
 }
 /// Independent memory observation; all raw paths are relative to the run root.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RssSample {
+    pub identity: crate::SampleIdentity,
     pub case: String,
     pub role: crate::Role,
     pub ordinal: u32,
@@ -100,6 +103,8 @@ pub fn measure_rss(
     tool: &BoundTool,
     platform: Platform,
 ) -> Result<Vec<RssSample>, BenchError> {
+    let evidence_runner = runner.with_evidence(&writer.budget);
+    let runner = &evidence_runner;
     let prepared = validated.prepared();
     if !writer.matches_suite(prepared.suite()) {
         return Err(failure("RSS writer suite differs from validated suite"));
@@ -111,11 +116,12 @@ pub fn measure_rss(
         std::time::Duration::from_secs(limits.sample_timeout_seconds),
         limits.max_stream_bytes,
     );
+    writer.check_evidence_limit()?;
     let raw = writer.path().join("raw/rss");
     if std::fs::read_dir(&raw)?.next().is_some() {
         return Err(failure("RSS evidence already exists; begin a fresh run"));
     }
-    crate::store::atomic_json(
+    runner.write_json(
         &raw.join("tool.json"),
         &serde_json::json!({"tool": tool.identity, "path": tool.path, "platform": platform}),
     )?;
@@ -133,6 +139,7 @@ pub fn measure_rss(
                     case,
                     (role, ordinal),
                 )?);
+                writer.check_evidence_limit()?;
             }
         }
         validated.final_case_check(&id, &raw.join(format!("final-{}", case.id)), &runner)?;
@@ -149,8 +156,8 @@ pub fn measure_rss(
         .iter()
         .map(|(role, executable)| (*role, &executable.artifact.file))
         .collect();
-    crate::store::atomic_json(&raw.join("executable-sizes.json"), &sizes)?;
-    crate::store::atomic_json(&raw.join("samples.json"), &samples)?;
+    runner.write_json(&raw.join("executable-sizes.json"), &sizes)?;
+    runner.write_json(&raw.join("samples.json"), &samples)?;
     Ok(samples)
 }
 fn execute_sample(
@@ -178,6 +185,7 @@ fn execute_sample(
         validated.datasets(),
         scratch.path(),
     )?;
+    writer.check_evidence_limit()?;
     let raw = writer.path().join("raw/rss");
     let name = format!("{}-{role:?}-{ordinal}", case.id);
     let paths = crate::CapturePaths {
@@ -200,7 +208,7 @@ fn execute_sample(
     argv.extend(command.argv);
     command.program.clone_from(&tool.path);
     command.argv = argv;
-    crate::store::atomic_json(
+    runner.write_json(
         &raw.join(format!("{name}.command.json")),
         &serde_json::json!({"tool": tool.identity, "argv": command.argv, "scope": format!("{:?}", invocation.scope), "stdin": format!("{:?}", command.stdin), "stdout": format!("{:?}", command.stdout), "expected_status": invocation.expected_status}),
     )?;
@@ -215,7 +223,7 @@ fn execute_sample(
         )?,
         Platform::Darwin => runner.execute(&command, &paths)?,
     };
-    crate::store::atomic_json(
+    runner.write_json(
         &raw.join(format!("{name}.outcome.json")),
         &serde_json::json!({"status": format!("{:?}", outcome.status), "stopped": format!("{:?}", outcome.stopped)}),
     )?;
@@ -228,14 +236,14 @@ fn execute_sample(
         case,
         role,
         platform,
-        &paths.stderr,
-        &resource,
-        &target_stderr,
+        (&paths.stderr, &resource, &target_stderr),
+        runner,
     )?;
     let output = std::fs::read(&resource)?;
     check_resource_trailer(platform, &output, invocation.expected_status)?;
     let sample = RssSample {
         case: case.id.clone(),
+        identity: prepared.sample_identity(writer.id(), case, role)?,
         role,
         ordinal,
         rss: parse_peak_rss(platform, &output)?,
@@ -250,7 +258,7 @@ fn execute_sample(
         raw_stderr: relative(writer, &paths.stderr)?,
         target_stderr: relative(writer, &target_stderr)?,
     };
-    crate::store::atomic_json(&raw.join(format!("{name}.sample.json")), &sample)?;
+    runner.write_json(&raw.join(format!("{name}.sample.json")), &sample)?;
     Ok(sample)
 }
 fn retain_diagnostics(
@@ -258,10 +266,10 @@ fn retain_diagnostics(
     case: &crate::CaseSpec,
     role: crate::Role,
     platform: Platform,
-    raw_stderr: &std::path::Path,
-    resource: &std::path::Path,
-    target_stderr: &std::path::Path,
+    paths: (&std::path::Path, &std::path::Path, &std::path::Path),
+    runner: &ProcessRunner,
 ) -> Result<(), BenchError> {
+    let (raw_stderr, resource, target_stderr) = paths;
     let diagnostic = validated
         .report()
         .observations
@@ -285,10 +293,10 @@ fn retain_diagnostics(
             (target, Some(trailer))
         }
     };
-    std::fs::write(target_stderr, target)?;
+    runner.write_evidence(target_stderr, target)?;
     crate::verify_file(target_stderr, &diagnostic.stderr)?;
     if let Some(trailer) = trailer {
-        std::fs::write(resource, trailer)?;
+        runner.write_evidence(resource, trailer)?;
     }
     Ok(())
 }
