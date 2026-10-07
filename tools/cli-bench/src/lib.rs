@@ -77,3 +77,13 @@ mod runner;
 pub use runner::{RunMode, RunRequest, run};
 
 mod budget;
+
+mod bundle;
+pub use bundle::{
+    BundleIndex, BundleResource, ExportRequest, ReplayContext, ReplayRecipe, ReplayTools,
+    export_bundle, load_bundle, replay_bindings, replay_request, replay_tools,
+};
+mod history;
+pub use history::{
+    HistoryDiagnostic, HistoryFilter, HistoryRecord, append_history, history_record, list_history,
+};

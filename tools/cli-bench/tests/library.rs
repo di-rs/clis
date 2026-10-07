@@ -877,5 +877,105 @@ fn report_and_analysis_are_repeatable_public_consumers_without_global_setup()
         }
         previous = Some(output);
     }
+    let portable_path = root.join("portable");
+    cli_bench::export_bundle(
+        &bundle,
+        &cli_bench::ExportRequest {
+            destination: portable_path.clone(),
+            with_inputs: false,
+            with_binaries: false,
+        },
+    )?;
+    let portable = cli_bench::load_bundle(&portable_path)?;
+    let history = cli_bench::history_record(&portable)?;
+    let history_path = root.join("history");
+    cli_bench::append_history(&history_path, &history)?;
+    let records = cli_bench::list_history(&history_path, &cli_bench::HistoryFilter::default())?;
+    require(records.len() == 1, "history workflow lost incomplete run")?;
+    let saved = records.first().ok_or("missing history")?;
+    require(
+        saved.publication.result == bundle.result,
+        "offline export changed outcome",
+    )?;
+    Ok(())
+}
+
+#[test]
+fn portable_replay_uses_explicit_public_context_and_new_store()
+-> Result<(), Box<dyn std::error::Error>> {
+    use cli_bench::*;
+    let fixture = validation_support::Fixture::new("printf 'EFGH\\n'", "printf 'EFGH\\n'")?;
+    let prepared = fixture.prepare(MeasurementProfile::Smoke)?;
+    let generator = prepared.roles().generator.as_ref().ok_or("generator")?;
+    let harness = BoundTool {
+        path: generator.path.clone(),
+        identity: ToolIdentity {
+            file: generator.artifact.file.clone(),
+            version: "external fixture harness".into(),
+        },
+    };
+    let host = collect_host(&fixture.suite.environment);
+    let original = run(
+        &RunRequest {
+            preparation: ExperimentPreparation {
+                run: &fixture.request,
+                suite: &fixture.suite,
+                profile: MeasurementProfile::Smoke,
+                selected_cases: &[],
+                expected_datasets: None,
+            },
+            submitted_toml: None,
+            measurement_lock: &fixture.measurement_lock,
+            harness: &harness,
+            host: &host,
+            mode: RunMode::CheckOnly { engine: None },
+            experiment: None,
+        },
+        &fixture.store,
+        &fixture.runner,
+    )?;
+    let path = fixture.root.join("portable");
+    export_bundle(
+        &original,
+        &ExportRequest {
+            destination: path.clone(),
+            with_inputs: false,
+            with_binaries: true,
+        },
+    )?;
+    let portable = load_bundle(&path)?;
+    let bindings = replay_bindings(&portable, &fixture.request.home, &fixture.request.config)?;
+    let tools = replay_tools(&portable)?;
+    let recipe = replay_request(&portable, &bindings)?;
+    let store = Store::open(&fixture.root.join("replay"))?;
+    let replayed = recipe.execute(
+        &ReplayContext {
+            measurement_lock: &fixture.measurement_lock,
+            harness: &tools.harness,
+            host: &host,
+            mode: RunMode::CheckOnly { engine: None },
+            cache_root: &fixture.request.cache_root,
+        },
+        &store,
+        &fixture.runner,
+    )?;
+    require(
+        replayed.result.outcome == RunOutcome::Complete,
+        "public replay failed",
+    )?;
+    require(
+        replayed.manifest.contract == original.manifest.contract,
+        "contract changed",
+    )?;
+    require(
+        replayed.manifest.run_id != original.manifest.run_id,
+        "reused run identity",
+    )?;
+    let history = history_record(&replayed)?;
+    append_history(&fixture.root.join("history"), &history)?;
+    require(
+        list_history(&fixture.root.join("history"), &HistoryFilter::default())?.len() == 1,
+        "history missing",
+    )?;
     Ok(())
 }

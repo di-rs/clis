@@ -660,7 +660,7 @@ original identities; reversing them reverses the ratio. Reference-involved
 comparisons remain product comparisons. Failed, incomplete and smoke evidence
 retains its existing conclusion restrictions. Offline commands exit zero when
 rendering succeeds, with the saved run outcome visible in the report. Portable
-bundle loading belongs to the export/replay stage and is not implemented yet.
+directory bundles support the same report and compare commands.
 
 `comparison_record(&RunBundle, ComparisonSelection)` produces the same compact
 record for the selected roles. `render_record(&PublicationRecord, format, writer)`
@@ -725,3 +725,83 @@ sample availability. A source-only Store caller may leave it unresolved, or use
 composed run always record the requested kind. This field is outside the frozen
 measurement contract, so tagged checks and subsequent measurements retain the same
 contract while reports/replay inputs distinguish their requested stages honestly.
+
+
+## Portable bundles, strict replay and local history
+
+Export and offline inspection need neither tools nor the measurement lock:
+
+```sh
+cli-bench export -i .cli-bench/runs/RUN_ID -o exported-run
+cli-bench export -i .cli-bench/runs/RUN_ID -o complete-run -I -B
+cli-bench report -i exported-run -f markdown
+cli-bench compare -i exported-run -b previous -a candidate -f json
+cli-bench history -d .cli-bench/runs -s tailr -f json
+```
+
+The destination must not exist. A directory bundle retains exact submitted and
+resolved TOML, original manifest/result, raw observations and validation evidence,
+compact publication, experiment/attempt records when available, and available
+Biggie generation records. `bundle-index.json` hashes every member and records
+relative resource bindings, logical sizes and omissions. `-I/--with-inputs` copies
+generated input bytes; `-B/--with-binaries` copies roles, Biggie, harness and saved
+measurement/pipeline tools. Requested missing resources fail export. Default
+exports preserve identity metadata while explicitly omitting these resource bytes.
+Loading rejects missing/extra/altered files, escaping paths and symlink members.
+The CLI accepts directories, without extracting archives. Hashes detect changed
+bytes; they do not establish that an arbitrary producer is trustworthy.
+
+Strict replay keeps the original suite, selected cases, full/smoke profile,
+requested check/measurement stages, build provenance, dataset hashes and tool
+identities, and creates a new run ID through the normal guarded run pipeline:
+
+```sh
+cli-bench replay -i complete-run -d .cli-bench -f json
+cli-bench replay -i exported-run -a /exact/candidate -p /exact/previous -g /exact/biggie
+```
+
+Use `-x/--reference` for an originally selected reference and `-H/--hyperfine`
+for the original engine. Replacements must have the exact saved executable bytes;
+matching source or a newly built executable with a different hash is insufficient.
+The running harness must also match the original hash/version. Saved check runs
+remain checks even when they have an engine identity. Replay allocates new owned
+HOME/config/scratch resources; original host paths remain provenance data. Biggie
+regenerates datasets through the saved recipe/shape/hash gate, even when an export
+contains the original input bytes. Changed output fails and retains the failed
+new attempt rather than refreshing its expected hash. To change resources,
+settings, cases or recipes, use `run` as a separately identified experiment.
+Older runs lacking the execution resource record remain reportable/exportable;
+strict replay rejects unresolved resource provenance rather than guessing.
+
+The public APIs are `export_bundle`, `load_bundle`, `replay_bindings`,
+`replay_tools`, `replay_request`, `history_record`, `append_history` and
+`list_history`. `replay_request(&RunBundle, &RoleBindings)` returns an owned
+`ReplayRecipe`; `ReplayRecipe::execute` accepts `ReplayContext`, a store and a
+runner. The context supplies the caller-held lock, actual harness and host,
+selected tools/mode and scratch cache root. `ExecutableSource::Retained` verifies
+and imports exact bytes with their saved `ArtifactRecord`/`BuildRecord`; it never
+runs a compiler or relabels an existing build as unknown prebuilt provenance.
+Library replay performs no environment, host, tool or lock discovery.
+
+Compact `HistoryRecord` wraps the existing `PublicationRecord`; it adds original
+and resolved suite text, evidence checksums, available generation recipes,
+execution tools, experiment/attempt records and bounded diagnostic prefixes.
+Diagnostic truncation and omitted binaries/datasets/full captures remain explicit.
+The original normalized samples and policies support offline report regeneration
+after full artifacts expire; saved retention/expiry fields survive export/history.
+Render `record.publication` with `render_record`. Replay commands in history use
+the placeholder `BUNDLE`, excluding a live local render path from record identity.
+
+`append_history(directory, record)` writes immutable `runs/RUN_ID.json` records
+and atomically updates `history-index.json` under its own local transaction lock.
+Same ID and identical content is a no-op; different content fails. The index
+publishes only fully written records. An interrupted unindexed record can be
+completed by appending that identical record again. `list_history` and the CLI
+`history` command accept either this compact directory or a store's `runs/`
+directory, with optional suite filtering including unresolved failed attempts.
+Listing renders runs independently and never derives speedups between runs or
+hosts. These operations neither fetch/push Git nor alter a history branch.
+
+Ordinary coverage uses original tiny plumbing fixtures and private real locks
+for detailed faults, with representative public API/CLI workflows on the production
+lock. No Task 10 performance result or additional native Linux evidence is claimed.

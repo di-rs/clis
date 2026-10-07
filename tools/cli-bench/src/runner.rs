@@ -180,6 +180,7 @@ fn execute(
         }
     }
     resolve_manifest(request, &prepared, engine, manifest)?;
+    crate::bundle::capture_resources(&prepared, request, writer)?;
     if let RunMode::CheckOnly {
         engine: Some(engine),
     } = request.mode
@@ -482,9 +483,33 @@ mod tests {
         fixture.suite.cases.push(second);
         fixture.suite.limits.max_stream_bytes = 10_000;
         let serialized = toml::to_string(&fixture.suite)?;
-        fixture.suite.limits.max_evidence_bytes = u64::try_from(serialized.len() * 2 + 600)?;
+        let original_limit = u64::try_from(serialized.len() * 2 + 600)?;
         let engine = timing_support::engine(&fixture, "")?;
         let host = collect_host(&fixture.suite.environment);
+        let prepared = fixture.prepare(MeasurementProfile::Full)?;
+        let metadata_request = RunRequest {
+            submitted_toml: None,
+            preparation: ExperimentPreparation {
+                run: &fixture.request,
+                suite: &fixture.suite,
+                profile: MeasurementProfile::Full,
+                selected_cases: &[],
+                expected_datasets: None,
+            },
+            measurement_lock: &fixture.measurement_lock,
+            harness: &engine,
+            host: &host,
+            mode: RunMode::CheckOnly { engine: None },
+            experiment: None,
+        };
+        let replay_metadata_bytes = serde_json::to_vec_pretty(&crate::bundle::resource_record(
+            &prepared,
+            &metadata_request,
+        )?)?
+        .len();
+        // Preserve the existing correctness-capture allowance after the newly required metadata.
+        fixture.suite.limits.max_evidence_bytes =
+            original_limit + u64::try_from(replay_metadata_bytes)?;
         let bundle = run(
             &RunRequest {
                 submitted_toml: None,
@@ -538,6 +563,7 @@ mod tests {
                 .contains("EvidenceLimit"),
             "missing budget diagnostic",
         )?;
+        fixture.suite.limits.max_evidence_bytes = original_limit;
         assert_direct_stage_cap(&fixture)?;
         Ok(())
     }
@@ -710,7 +736,16 @@ mod tests {
             )?;
             if !changed {
                 reject_manifest_changed_after_preflight(&fixture, &experiment, &bundle)?;
+                reject_changed_replay_anchor(&fixture, &experiment, &bundle)?;
             }
+            let history = crate::history_record(&bundle)?;
+            crate::test_support::equal(&history.publication.result, &bundle.result)?;
+            let bindings =
+                crate::replay_bindings(&bundle, &fixture.request.home, &fixture.request.config)?;
+            crate::test_support::equal(
+                &crate::replay_request(&bundle, &bindings).is_err(),
+                &changed,
+            )?;
             crate::test_support::equal(
                 &bundle.result.outcome,
                 &if changed {
@@ -738,6 +773,28 @@ mod tests {
             &std::fs::read_dir(fixture.store.root().join("experiments/attempts/attempts"))?.count(),
             &3,
         )?;
+        Ok(())
+    }
+    fn reject_changed_replay_anchor(
+        fixture: &crate::test_support::validation_support::Fixture,
+        experiment: &ExperimentRequest,
+        bundle: &RunBundle,
+    ) -> TestResult {
+        let path = fixture
+            .store
+            .root()
+            .join("experiments")
+            .join(&experiment.id)
+            .join("experiment.json");
+        let bytes = std::fs::read(&path)?;
+        let mut anchor: crate::ExperimentRecord = serde_json::from_slice(&bytes)?;
+        anchor.starting_sha = "0".repeat(40);
+        crate::store::atomic_json(&path, &anchor)?;
+        let bindings =
+            crate::replay_bindings(bundle, &fixture.request.home, &fixture.request.config)?;
+        let rejected = crate::replay_request(bundle, &bindings).is_err();
+        std::fs::write(&path, bytes)?;
+        crate::test_support::require(rejected, "strict replay replaced frozen starting SHA")?;
         Ok(())
     }
     fn reject_manifest_changed_after_preflight(

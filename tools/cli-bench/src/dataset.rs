@@ -500,7 +500,7 @@ pub fn declared_bytes(rules: &[CorrectnessRule]) -> Result<u64, BenchError> {
     Ok(expected)
 }
 
-fn validate_record(record: &GenerationRecord) -> Result<(), BenchError> {
+pub fn validate_record(record: &GenerationRecord) -> Result<(), BenchError> {
     let identity = &record.identity;
     crate::suite::validate_strings(&serde_json::to_value(record)?)?;
     crate::suite::validate_identifier(&identity.dataset)?;

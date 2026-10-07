@@ -8,19 +8,22 @@ use std::{
 };
 
 /// A retained executable and its provenance, resolved independently of active role.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BoundExecutable {
     pub path: PathBuf,
     pub artifact: ArtifactRecord,
 }
 /// A resolved tool path and observed identity; discovery belongs to the caller.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BoundTool {
     pub path: PathBuf,
     pub identity: ToolIdentity,
 }
 /// The explicitly identified programs used by the fixed finite pipeline.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PipelineTools {
     pub bash: BoundTool,
     pub cat: BoundTool,
@@ -37,7 +40,8 @@ pub struct RoleBindings {
     pub pipeline: Option<PipelineTools>,
 }
 /// Input bindings with optional generation evidence. Literal fixtures omit evidence.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DatasetSet {
     pub inputs: BTreeMap<String, InputRecord>,
     pub generations: BTreeMap<String, crate::GenerationRecord>,

@@ -10,6 +10,9 @@ use std::{io::Write, process::ExitCode};
 fn main() -> ExitCode {
     match Cli::try_parse_validated_from(std::env::args_os()) {
         Ok((cli, logging)) => cli_tracing::run::<Cli>(&logging, || match cli.command {
+            Some(cli::Command::Export(args)) => cli::execute_export(&args),
+            Some(cli::Command::History(args)) => cli::execute_history(&args),
+            Some(cli::Command::Replay(args)) => cli::execute_replay(&args),
             Some(cli::Command::Build(args)) => cli::execute_build(&args),
             Some(cli::Command::Run(args)) => cli::execute_selection(&args, false),
             Some(cli::Command::Check(args)) => cli::execute_selection(&args, true),

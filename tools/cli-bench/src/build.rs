@@ -44,6 +44,8 @@ pub struct BuildRequest {
 pub enum ExecutableSource {
     Revision(String),
     Prebuilt(PathBuf),
+    /// Exact saved artifact, preserving verified build provenance without rebuilding.
+    Retained(Box<crate::BoundExecutable>),
 }
 /// Role selection and caller-owned execution directories. No ambient tool discovery.
 #[derive(Clone, Debug)]
@@ -517,6 +519,7 @@ pub fn bind_roles(
 enum PreparedSource {
     Revision(ResolvedRevision),
     Prebuilt(PathBuf),
+    Retained(Box<crate::BoundExecutable>),
 }
 fn prepare_source(
     measurement_lock: &crate::MeasurementLock,
@@ -525,6 +528,11 @@ fn prepare_source(
     runner: &ProcessRunner,
 ) -> Result<PreparedSource, BenchError> {
     match source {
+        ExecutableSource::Retained(bound) => {
+            check_program(&bound.path)?;
+            crate::verify_file(&bound.path, &bound.artifact.file)?;
+            Ok(PreparedSource::Retained(bound.clone()))
+        }
         ExecutableSource::Prebuilt(path) => {
             check_program(path)?;
             Ok(PreparedSource::Prebuilt(path.clone()))
@@ -558,6 +566,15 @@ fn bind_source(
     runner: &ProcessRunner,
 ) -> Result<crate::BoundExecutable, BenchError> {
     let artifact = match source {
+        PreparedSource::Retained(bound) => {
+            crate::verify_file(&bound.path, &bound.artifact.file)?;
+            let registered =
+                crate::register_binary(&bound.path, bound.artifact.build.clone(), store)?;
+            if registered != bound.artifact {
+                return Err(build_error("retained artifact provenance mismatch"));
+            }
+            registered
+        }
         PreparedSource::Prebuilt(path) => return retain_prebuilt(&path, store),
         PreparedSource::Revision(revision) => build_revision(
             measurement_lock,

@@ -39,7 +39,7 @@ pub fn publication_record(bundle: &RunBundle) -> Result<PublicationRecord, Bench
     };
     let mut analysis = crate::analyze(&bundle.manifest, &timing, &rss)?;
     suppress_failed(&mut analysis, bundle.result.outcome);
-    let record = PublicationRecord {
+    let mut record = PublicationRecord {
         schema_version: 1,
         comparison: None,
         manifest: bundle.manifest.clone(),
@@ -64,11 +64,20 @@ pub fn publication_record(bundle: &RunBundle) -> Result<PublicationRecord, Bench
         }),
         replay: format!(
             "cli-bench replay -i {}",
-            shell_words::quote(crate::process::utf8_path(&bundle.path)?)
+            shell_words::quote(crate::process::utf8_path(
+                crate::bundle::portable_root(bundle).unwrap_or(&bundle.path)
+            )?)
         ),
         requested_retention_days: 90,
         expires_at_unix_seconds: None,
     };
+    if bundle.files.contains_key("publication.json") && bundle.files.contains_key("result.json") {
+        let saved: PublicationRecord = read_evidence(bundle, "publication.json")?;
+        if saved.manifest == bundle.manifest && saved.result == bundle.result {
+            record.requested_retention_days = saved.requested_retention_days;
+            record.expires_at_unix_seconds = saved.expires_at_unix_seconds;
+        }
+    }
     if serde_json::to_vec(&record)?.len() > 16_777_216 {
         return Err(BenchError::Evidence("publication exceeds 16 MiB".into()));
     }

@@ -28,6 +28,12 @@ pub enum Command {
     Report(ReportArgs),
     /// Compare two original roles in one sealed local run.
     Compare(CompareArgs),
+    /// Export verified evidence with optional resource bytes.
+    Export(ExportArgs),
+    /// Strictly replay exact saved resources into a new run.
+    Replay(ReplayArgs),
+    /// List compact history or sealed local runs without executing tools.
+    History(HistoryArgs),
 }
 
 #[derive(Debug, Args)]
@@ -60,22 +66,7 @@ pub fn execute_offline(
     args: &ReportArgs,
     selection: Option<cli_bench::ComparisonSelection>,
 ) -> anyhow::Result<std::process::ExitCode> {
-    let path = std::fs::canonicalize(&args.input)?;
-    let runs = path
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("expected a local run directory"))?;
-    anyhow::ensure!(
-        runs.file_name().is_some_and(|name| name == "runs"),
-        "expected a local store runs directory; portable bundles are not supported yet"
-    );
-    let root = runs
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("missing evidence store"))?;
-    let id = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| anyhow::anyhow!("invalid run identifier"))?;
-    let bundle = Store::open_existing(root)?.load_run(id)?;
+    let bundle = cli_bench::load_bundle(&args.input)?;
     let mut output = std::io::stdout().lock();
     let format = report_format(&args.format);
     if let Some(selection) = selection {
@@ -85,6 +76,228 @@ pub fn execute_offline(
         render(&bundle, format, &mut output)?;
     }
     Ok(std::process::ExitCode::SUCCESS)
+}
+
+#[derive(Debug, Args)]
+pub struct ExportArgs {
+    #[arg(short, long)]
+    pub input: PathBuf,
+    #[arg(short, long)]
+    pub output: PathBuf,
+    #[arg(short = 'I', long)]
+    pub with_inputs: bool,
+    #[arg(short = 'B', long)]
+    pub with_binaries: bool,
+}
+#[derive(Debug, Args)]
+pub struct HistoryArgs {
+    #[arg(short, long, default_value = ".cli-bench/runs")]
+    pub directory: PathBuf,
+    #[arg(short, long)]
+    pub suite: Option<String>,
+    #[arg(short = 'f', long, default_value = "terminal", value_parser = ["terminal", "json", "markdown"])]
+    pub format: String,
+}
+#[derive(Debug, Args)]
+pub struct ReplayArgs {
+    #[arg(short, long)]
+    pub input: PathBuf,
+    #[arg(short = 'a', long)]
+    pub candidate: Option<PathBuf>,
+    #[arg(short = 'p', long)]
+    pub previous: Option<PathBuf>,
+    #[arg(short = 'x', long)]
+    pub reference: Option<PathBuf>,
+    #[arg(short = 'g', long)]
+    pub biggie: Option<PathBuf>,
+    #[arg(short = 'H', long)]
+    pub hyperfine: Option<PathBuf>,
+    #[arg(short = 'd', long, default_value = ".cli-bench")]
+    pub data_dir: PathBuf,
+    #[arg(short = 'f', long, default_value = "terminal", value_parser = ["terminal", "json", "markdown"])]
+    pub format: String,
+}
+pub fn execute_export(args: &ExportArgs) -> anyhow::Result<std::process::ExitCode> {
+    use std::io::Write;
+    let bundle = cli_bench::load_bundle(&args.input)?;
+    let index = cli_bench::export_bundle(
+        &bundle,
+        &cli_bench::ExportRequest {
+            destination: args.output.clone(),
+            with_inputs: args.with_inputs,
+            with_binaries: args.with_binaries,
+        },
+    )?;
+    let mut output = std::io::stdout().lock();
+    serde_json::to_writer_pretty(&mut output, &index)?;
+    writeln!(output)?;
+    output.flush()?;
+    Ok(std::process::ExitCode::SUCCESS)
+}
+pub fn execute_history(args: &HistoryArgs) -> anyhow::Result<std::process::ExitCode> {
+    use std::io::Write;
+    let records = cli_bench::list_history(
+        &args.directory,
+        &cli_bench::HistoryFilter {
+            suite: args.suite.clone(),
+        },
+    )?;
+    let mut output = std::io::stdout().lock();
+    if args.format == "json" {
+        serde_json::to_writer_pretty(&mut output, &records)?;
+        writeln!(output)?;
+    } else {
+        for record in records {
+            cli_bench::render_record(
+                &record.publication,
+                report_format(&args.format),
+                &mut output,
+            )?;
+            for omission in &record.omissions {
+                writeln!(output, "{omission}")?;
+            }
+        }
+    }
+    output.flush()?;
+    Ok(std::process::ExitCode::SUCCESS)
+}
+pub fn execute_replay(args: &ReplayArgs) -> anyhow::Result<std::process::ExitCode> {
+    with_signals(|cancellation| replay_inner(args, cancellation))
+}
+fn replay_inner(
+    args: &ReplayArgs,
+    cancellation: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> anyhow::Result<std::process::ExitCode> {
+    let bundle = cli_bench::load_bundle(&args.input)?;
+    let contract = bundle.manifest.contract.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("strict replay requires a resolved contract; use run for a new experiment")
+    })?;
+    let lock = acquire_measurement_lock(cancellation)?;
+    let scratch = AdapterScratch::new()?;
+    let home = scratch.0.join("home");
+    let config = scratch.0.join("config");
+    std::fs::create_dir(&home)?;
+    std::fs::create_dir(&config)?;
+    let mut bindings = cli_bench::replay_bindings(&bundle, &home, &config)?;
+    for (role, path) in [
+        (cli_bench::Role::Candidate, &args.candidate),
+        (cli_bench::Role::Previous, &args.previous),
+        (cli_bench::Role::Reference, &args.reference),
+    ] {
+        if let Some(path) = path {
+            bindings
+                .roles
+                .get_mut(&role)
+                .ok_or_else(|| anyhow::anyhow!("strict replay cannot add an unselected role"))?
+                .path = std::fs::canonicalize(path)?;
+        }
+    }
+    if let Some(path) = &args.biggie {
+        bindings
+            .generator
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("missing Biggie identity"))?
+            .path = std::fs::canonicalize(path)?;
+    }
+    let runner = ProcessRunner::new(ExecutionPolicy {
+        timeout: std::time::Duration::from_secs(contract.suite.limits.build_timeout_seconds),
+        max_stream_bytes: contract.suite.limits.max_stream_bytes,
+        cancellation: std::sync::Arc::clone(cancellation),
+    });
+    let cwd = std::env::current_dir()?;
+    let environment = build_environment();
+    let context = AdapterTools {
+        cwd: &cwd,
+        environment: &environment,
+        runner: &runner,
+    };
+    if let Some(pipeline) = &mut bindings.pipeline {
+        if pipeline.bash.path.as_os_str().is_empty() {
+            pipeline.bash.path = context.find("bash")?;
+        }
+        if pipeline.cat.path.as_os_str().is_empty() {
+            pipeline.cat.path = context.find("cat")?;
+        }
+    }
+    let mut tools = cli_bench::replay_tools(&bundle)?;
+    let harness = replay_harness()?;
+    if let Some(engine) = &mut tools.engine {
+        if let Some(path) = &args.hyperfine {
+            engine.path = std::fs::canonicalize(path)?;
+        } else if engine.path.as_os_str().is_empty() {
+            engine.path = context.find("hyperfine")?;
+        }
+    } else {
+        anyhow::ensure!(
+            args.hyperfine.is_none(),
+            "strict replay cannot add an engine"
+        );
+    }
+    if let Some(time) = &mut tools.time
+        && time.path.as_os_str().is_empty()
+    {
+        time.path = PathBuf::from("/usr/bin/time");
+    }
+    let recipe = cli_bench::replay_request(&bundle, &bindings)?;
+    let mode = replay_mode(bundle.manifest.execution_kind, &tools)?;
+    let host = collect_host(&contract.suite.environment);
+    let store = Store::open(&args.data_dir)?;
+    let replayed = recipe.execute(
+        &cli_bench::ReplayContext {
+            measurement_lock: &lock,
+            harness: &harness,
+            host: &host,
+            mode,
+            cache_root: &cwd.join("target/cli-bench"),
+        },
+        &store,
+        &runner,
+    )?;
+    render(
+        &replayed,
+        report_format(&args.format),
+        &mut std::io::stdout().lock(),
+    )?;
+    Ok(if replayed.result.outcome == RunOutcome::Complete {
+        std::process::ExitCode::SUCCESS
+    } else {
+        std::process::ExitCode::FAILURE
+    })
+}
+
+fn replay_harness() -> anyhow::Result<BoundTool> {
+    let harness_path = std::env::current_exe()?;
+    Ok(BoundTool {
+        identity: ToolIdentity {
+            file: fingerprint(&harness_path)?,
+            version: format!("cli-bench {}", env!("CARGO_PKG_VERSION")),
+        },
+        path: harness_path,
+    })
+}
+
+fn replay_mode(
+    kind: Option<cli_bench::ExecutionKind>,
+    tools: &cli_bench::ReplayTools,
+) -> anyhow::Result<RunMode<'_>> {
+    Ok(match kind {
+        Some(cli_bench::ExecutionKind::CheckOnly) => RunMode::CheckOnly {
+            engine: tools.engine.as_ref(),
+        },
+        Some(cli_bench::ExecutionKind::Measure) => RunMode::Measure {
+            engine: tools
+                .engine
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("missing saved engine"))?,
+            time: tools.time.as_ref(),
+            platform: tools
+                .platform
+                .ok_or_else(|| anyhow::anyhow!("missing saved RSS platform"))?,
+        },
+        None => anyhow::bail!(
+            "strict replay requires known execution kind; use run for a new experiment"
+        ),
+    })
 }
 
 #[derive(Debug, Args)]

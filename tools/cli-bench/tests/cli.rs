@@ -234,6 +234,9 @@ fn composed_cli(check_only: bool) -> Result<(), Box<dyn std::error::Error>> {
     }
     verify_offline_comparison(&fixture.store, &record, &submitted)?;
     if check_only {
+        verify_portable_workflow(fixture.root.path(), &fixture.store, &record)?;
+    }
+    if check_only {
         return Ok(());
     }
     let assertion = cargo_bin_cmd!()
@@ -323,6 +326,66 @@ fn slow_engine(
 )]
 #[path = "common/validation.rs"]
 mod validation_support;
+
+fn verify_portable_workflow(
+    root: &std::path::Path,
+    store: &cli_bench::Store,
+    record: &cli_bench::PublicationRecord,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let held =
+        cli_bench::MeasurementLock::acquire(&std::sync::atomic::AtomicBool::new(false), || Ok(()))?;
+    let original = store.root().join("runs").join(&record.manifest.run_id);
+    let portable = root.join("portable");
+    cargo_bin_cmd!()
+        .args(["export", "-i"])
+        .arg(&original)
+        .arg("-o")
+        .arg(&portable)
+        .args(["-I", "-B"])
+        .env("PATH", "")
+        .assert()
+        .success();
+    cargo_bin_cmd!()
+        .args(["report", "-i"])
+        .arg(&portable)
+        .args(["-f", "json"])
+        .env("PATH", "")
+        .assert()
+        .success();
+    cargo_bin_cmd!()
+        .args(["compare", "-i"])
+        .arg(&portable)
+        .args(["-b", "previous", "-a", "candidate", "-f", "json"])
+        .env("PATH", "")
+        .assert()
+        .success();
+    drop(held);
+    let replay_store = root.join("replay-store");
+    let replay = cargo_bin_cmd!()
+        .current_dir(root)
+        .args(["replay", "-i"])
+        .arg(&portable)
+        .arg("-d")
+        .arg(&replay_store)
+        .args(["-f", "json"])
+        .env("PATH", "")
+        .assert()
+        .success();
+    let replay: cli_bench::PublicationRecord = serde_json::from_slice(&replay.get_output().stdout)?;
+    if replay.manifest.run_id == record.manifest.run_id
+        || replay.manifest.contract != record.manifest.contract
+    {
+        return Err("strict CLI replay changed contract or ID".into());
+    }
+    cargo_bin_cmd!()
+        .args(["history", "-d"])
+        .arg(replay_store.join("runs"))
+        .args(["-f", "json"])
+        .env("PATH", "")
+        .assert()
+        .success();
+    Ok(())
+}
 
 fn verify_offline_comparison(
     store: &cli_bench::Store,
