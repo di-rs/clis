@@ -1,3 +1,4 @@
+use super::bench_api as cli_bench;
 use cli_bench::*;
 use std::{
     fs,
@@ -22,9 +23,12 @@ pub fn script(root: &Path, name: &str, body: &str) -> Result<PathBuf, BenchError
     Ok(path)
 }
 impl Fixture {
-    pub fn new(candidate: &str, previous: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let measurement_lock = MeasurementLock::acquire(&AtomicBool::new(false), || Ok(()))?;
-        let root = assert_fs::TempDir::new()?;
+    pub fn from_root_and_lock(
+        root: assert_fs::TempDir,
+        measurement_lock: MeasurementLock,
+        candidate: &str,
+        previous: &str,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let base = fs::canonicalize(root.path())?;
         let suite = parse_suite(include_str!("../inputs/minimal-suite.toml"))?;
         let store = Store::open(&base.join("evidence"))?;
@@ -64,13 +68,16 @@ impl Fixture {
             runner,
         })
     }
-    pub fn prepare(&self) -> Result<PreparedExperiment<'_>, BenchError> {
+    pub fn prepare(
+        &self,
+        profile: MeasurementProfile,
+    ) -> Result<PreparedExperiment<'_>, BenchError> {
         prepare_experiment(
             &self.measurement_lock,
             &ExperimentPreparation {
                 run: &self.request,
                 suite: &self.suite,
-                profile: MeasurementProfile::Full,
+                profile,
                 selected_cases: &[],
                 expected_datasets: None,
             },

@@ -75,7 +75,7 @@ tests/
   cli.rs          # CLI process integration tests
   library.rs      # public API integration tests, when useful; never unit tests
   process.rs      # subprocess lifecycle integration tests, when needed
-  common/mod.rs   # shared integration-test helpers, when needed; no test cases
+  common/mod.rs   # shared fixture helpers, when needed; no test cases
   inputs/         # small reusable read-only inputs
   expected/       # captured output, statuses, effects, provenance for ports
 mk-outs.nu        # port reference-capture workflow; never called by ordinary tests
@@ -91,8 +91,17 @@ implemented there; it must not collect unit tests for other modules.
 workflows across components; do not place isolated function/unit tests there just
 because the function is public. Integration tests import the package's public API;
 do not include source modules with `#[path]` or expose internals solely to test them.
-Keep unit-test helpers beside their unit tests; `tests/common/mod.rs` shares helpers
-between integration tests. Do not duplicate unit coverage in integration tests.
+Keep unit-test helpers beside their unit tests. Fixture builders shared with
+integration tests may live under `tests/common/` and be reused by source-local tests
+through a `#[cfg(test)]` support module; these helpers contain no test cases and
+must not become part of the shipped library API. Do not duplicate unit coverage
+in integration tests.
+
+Keep independent fixtures isolated. For `cli-bench`, detailed component tests use
+private, test-only locks in their own temporary directories. Representative public
+workflows and cross-process coordination tests exercise the fixed per-user lock.
+The isolated constructor is absent from ordinary library builds; production
+benchmark sessions always use the shared lock.
 
 CLI tests use `assert_cmd::cargo::cargo_bin_cmd!`,
 `predicates`, and small local helpers. For `bool`, select `cargo_bin_cmd!("true")`

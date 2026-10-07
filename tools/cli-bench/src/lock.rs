@@ -31,7 +31,7 @@ impl MeasurementLock {
     /// Rejects unsafe lock paths, cancellation and waiting-diagnostic failures.
     pub fn acquire(
         cancellation: &AtomicBool,
-        mut on_wait: impl FnMut() -> Result<(), BenchError>,
+        on_wait: impl FnMut() -> Result<(), BenchError>,
     ) -> Result<Self, BenchError> {
         check_cancelled(cancellation)?;
         // macOS aliases the system /tmp directory to /private/tmp. Only this
@@ -39,6 +39,23 @@ impl MeasurementLock {
         let root = fs::canonicalize("/tmp")?;
         let uid = rustix::process::geteuid().as_raw();
         let file = open_lock(&root.join(format!("cli-bench-{uid}")), uid)?;
+        Self::acquire_opened(file, cancellation, on_wait)
+    }
+    #[cfg(test)]
+    pub(crate) fn acquire_in_test_directory(
+        directory: &Path,
+        cancellation: &AtomicBool,
+        on_wait: impl FnMut() -> Result<(), BenchError>,
+    ) -> Result<Self, BenchError> {
+        check_cancelled(cancellation)?;
+        let file = open_lock(directory, rustix::process::geteuid().as_raw())?;
+        Self::acquire_opened(file, cancellation, on_wait)
+    }
+    fn acquire_opened(
+        file: File,
+        cancellation: &AtomicBool,
+        mut on_wait: impl FnMut() -> Result<(), BenchError>,
+    ) -> Result<Self, BenchError> {
         let start = Instant::now();
         let mut reported = false;
         loop {
@@ -131,12 +148,51 @@ mod tests {
     use std::sync::atomic::Ordering;
 
     #[test]
+    fn isolated_roots_coexist_while_the_same_root_contends()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = assert_fs::TempDir::new()?;
+        let first = root.join("first");
+        let second = root.join("second");
+        let cancelled = AtomicBool::new(false);
+        let held = MeasurementLock::acquire_in_test_directory(&first, &cancelled, || Ok(()))?;
+        let independent = MeasurementLock::acquire_in_test_directory(&second, &cancelled, || {
+            Err(BenchError::Execution("independent root contended".into()))
+        })?;
+        let mut notices = 0;
+        let contender = MeasurementLock::acquire_in_test_directory(&first, &cancelled, || {
+            notices += 1;
+            Err(BenchError::Execution("same root contended".into()))
+        });
+        require(
+            matches!(contender, Err(BenchError::Execution(message)) if message == "same root contended"),
+            "same root did not report contention",
+        )?;
+        require(
+            notices == 1,
+            "contention callback was not invoked exactly once",
+        )?;
+        drop(held);
+        let _reacquired = MeasurementLock::acquire_in_test_directory(&first, &cancelled, || {
+            Err(BenchError::Execution(
+                "released root still contended".into(),
+            ))
+        })?;
+        require(
+            first.join("measurement.lock").is_file(),
+            "released lock file was removed",
+        )?;
+        drop(independent);
+        Ok(())
+    }
+    #[test]
     fn cancellation_and_diagnostic_failure_never_bypass_contention()
     -> Result<(), Box<dyn std::error::Error>> {
+        let root = assert_fs::TempDir::new()?;
+        let directory = root.join("lock");
         let cancelled = AtomicBool::new(false);
-        let held = MeasurementLock::acquire(&cancelled, || Ok(()))?;
+        let held = MeasurementLock::acquire_in_test_directory(&directory, &cancelled, || Ok(()))?;
         let mut notices = 0;
-        let result = MeasurementLock::acquire(&cancelled, || {
+        let result = MeasurementLock::acquire_in_test_directory(&directory, &cancelled, || {
             notices += 1;
             cancelled.store(true, Ordering::Relaxed);
             Ok(())
@@ -151,26 +207,29 @@ mod tests {
         )?;
         cancelled.store(false, Ordering::Relaxed);
         require(
-            MeasurementLock::acquire(&cancelled, || {
+            MeasurementLock::acquire_in_test_directory(&directory, &cancelled, || {
                 Err(BenchError::Execution("diagnostic failed".into()))
             })
             .is_err(),
             &format!(
                 "assertion failed: {}",
                 stringify!(
-                    MeasurementLock::acquire(&cancelled, || Err(BenchError::Execution(
-                        "diagnostic failed".into()
-                    )))
+                    MeasurementLock::acquire_in_test_directory(&directory, &cancelled, || Err(
+                        BenchError::Execution("diagnostic failed".into())
+                    ))
                     .is_err()
                 )
             ),
         )?;
         drop(held);
         require(
-            MeasurementLock::acquire(&cancelled, || Ok(())).is_ok(),
+            MeasurementLock::acquire_in_test_directory(&directory, &cancelled, || Ok(())).is_ok(),
             &format!(
                 "assertion failed: {}",
-                stringify!(MeasurementLock::acquire(&cancelled, || Ok(())).is_ok())
+                stringify!(
+                    MeasurementLock::acquire_in_test_directory(&directory, &cancelled, || Ok(()))
+                        .is_ok()
+                )
             ),
         )?;
         Ok(())

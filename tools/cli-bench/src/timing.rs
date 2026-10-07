@@ -392,6 +392,12 @@ fn engine_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{
+        require,
+        timing_support::{engine, prepare_smoke},
+        validation_support::TestResult,
+    };
+    use crate::*;
 
     #[test]
     fn parses_exact_nonzero_status_and_rejects_zero_for_expected_one() {
@@ -498,5 +504,179 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn engine_version_identity_timeout_and_command_mismatch_fail() -> TestResult {
+        let fixture =
+            crate::test_support::validation_fixture("printf 'EFGH\\n'", "printf 'EFGH\\n'")?;
+        for mode in [
+            "wrong-version",
+            "observed-version",
+            "wrong-command",
+            "timeout",
+            "changed-engine",
+        ] {
+            let mut tool = engine(
+                &fixture,
+                match mode {
+                    "observed-version" => "observed-version",
+                    "wrong-command" => "wrong-command",
+                    "timeout" => "/bin/sleep 10",
+                    _ => "",
+                },
+            )?;
+            if mode == "wrong-version" {
+                tool.identity.version = "hyperfine 1.19.0".into();
+            }
+            let mut writer = fixture.store.begin_run(&fixture.suite)?;
+            let validated = validate_experiment(
+                fixture.prepare(crate::MeasurementProfile::Full)?,
+                &mut writer,
+                &fixture.runner,
+            )?;
+            if mode == "changed-engine" {
+                std::fs::write(&tool.path, b"changed")?;
+            }
+            let runner = ProcessRunner::new(ExecutionPolicy {
+                timeout: std::time::Duration::from_millis(150),
+                max_stream_bytes: 4096,
+                cancellation: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            });
+            let error = measure_timing(&validated, &mut writer, &runner, &tool)
+                .err()
+                .ok_or_else(|| format!("accepted {mode}"))?;
+            if mode == "wrong-command" {
+                require(
+                    error
+                        .to_string()
+                        .contains("engine exported an unexpected command identity"),
+                    &format!("wrong command-identity rejection: {error}"),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn final_gate_rechecks_output_after_measurement() -> TestResult {
+        let fixture = crate::test_support::validation_fixture(
+            r#"n=0
+if [ -f "$HOME/count" ]; then read -r n < "$HOME/count"; fi
+n=$((n+1)); printf '%s\n' "$n" > "$HOME/count"
+if [ "$n" -gt 8 ]; then printf 'WRONG\n'; else printf 'EFGH\n'; fi"#,
+            "printf 'EFGH\\n'",
+        )?;
+        let tool = engine(&fixture, "")?;
+        let mut writer = fixture.store.begin_run(&fixture.suite)?;
+        let validated = prepare_smoke(&fixture, &mut writer)?;
+        require(
+            measure_timing(&validated, &mut writer, &fixture.runner, &tool).is_err(),
+            &format!(
+                "assertion failed: {}",
+                stringify!(
+                    measure_timing(&validated, &mut writer, &fixture.runner, &tool).is_err()
+                )
+            ),
+        )?;
+        let report: ValidationReport = serde_json::from_slice(&std::fs::read(
+            writer.path().join("raw/timing/final-last-line/report.json"),
+        )?)?;
+        require(
+            !report.passed(),
+            &format!("assertion failed: {}", stringify!(!report.passed())),
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn exact_expected_one_and_mutation_reset_are_checked_after_each_invocation() -> TestResult {
+        {
+            let mut fixture = crate::test_support::validation_fixture(
+                "printf 'EFGH\\n'; exit 1",
+                "printf 'EFGH\\n'; exit 1",
+            )?;
+            fixture
+                .suite
+                .cases
+                .first_mut()
+                .ok_or("case")?
+                .expected_status = 1;
+            let tool = engine(&fixture, "force-zero")?;
+            let mut writer = fixture.store.begin_run(&fixture.suite)?;
+            let validated = prepare_smoke(&fixture, &mut writer)?;
+            require(
+                measure_timing(&validated, &mut writer, &fixture.runner, &tool).is_err(),
+                &format!(
+                    "assertion failed: {}",
+                    stringify!(
+                        measure_timing(&validated, &mut writer, &fixture.runner, &tool).is_err()
+                    )
+                ),
+            )?;
+            require(
+                !writer.path().join("raw/timing/samples.json").exists(),
+                &format!(
+                    "assertion failed: {}",
+                    stringify!(!writer.path().join("raw/timing/samples.json").exists())
+                ),
+            )?;
+        }
+        let mut fixture = crate::test_support::validation_fixture(
+            "/bin/mkdir -m 700 \"$1\"",
+            "/bin/mkdir -m 700 \"$1\"",
+        )?;
+        let case = fixture.suite.cases.first_mut().ok_or("case")?;
+        case.argv = vec!["@scratch:dir".into()];
+        case.correctness = vec![CorrectnessRule::DirectoryTree {
+            paths: vec!["dir".into()],
+            compare_mode_to: Some(ComparisonTarget::SelectedBaselines),
+        }];
+        let tool = engine(&fixture, "")?;
+        let mut writer = fixture.store.begin_run(&fixture.suite)?;
+        let validated = prepare_smoke(&fixture, &mut writer)?;
+        require(
+            (measure_timing(&validated, &mut writer, &fixture.runner, &tool)?.len()) == (8),
+            &format!(
+                "assertion failed: {}",
+                stringify!(
+                    (measure_timing(&validated, &mut writer, &fixture.runner, &tool)?.len()) == (8)
+                )
+            ),
+        )?;
+        require(
+            measure_timing(&validated, &mut writer, &fixture.runner, &tool).is_err(),
+            "reused raw evidence directory",
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn missing_mutation_effect_stops_before_the_next_sample() -> TestResult {
+        let mut fixture = crate::test_support::validation_fixture(
+            r#"n=0
+if [ -f "$HOME/candidate-count" ]; then read -r n < "$HOME/candidate-count"; fi
+n=$((n+1)); printf '%s\n' "$n" > "$HOME/candidate-count"
+if [ "$n" -lt 4 ]; then /bin/mkdir -m 700 "$1"; fi"#,
+            "/bin/mkdir -m 700 \"$1\"",
+        )?;
+        let case = fixture.suite.cases.first_mut().ok_or("case")?;
+        case.argv = vec!["@scratch:dir".into()];
+        case.correctness = vec![CorrectnessRule::DirectoryTree {
+            paths: vec!["dir".into()],
+            compare_mode_to: Some(ComparisonTarget::SelectedBaselines),
+        }];
+        let tool = engine(&fixture, "")?;
+        let mut writer = fixture.store.begin_run(&fixture.suite)?;
+        let validated = prepare_smoke(&fixture, &mut writer)?;
+        require(
+            measure_timing(&validated, &mut writer, &fixture.runner, &tool).is_err(),
+            "missing directory effect accepted",
+        )?;
+        require(
+            std::fs::read_to_string(fixture.request.home.join("candidate-count"))?.trim() == "4",
+            "driver continued after bad mutation",
+        )?;
+        Ok(())
     }
 }

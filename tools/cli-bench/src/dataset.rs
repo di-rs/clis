@@ -779,6 +779,9 @@ pub fn decode_path_records(mut reader: impl BufRead) -> Result<Vec<String>, Benc
 
 #[cfg(test)]
 mod tests {
+    use crate::test_support::{
+        dataset_support::*, measurement_lock as test_measurement_lock, require,
+    };
     macro_rules! require {
         ($condition:expr $(,)?) => {
             if !$condition {
@@ -1185,6 +1188,408 @@ mod tests {
             require!(decode_path_records(bytes).is_err());
         }
         require!(decode_path_records(&b""[..])?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn dataset_preflight_rejects_all_over_budget_inputs_before_spawning()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::*;
+        let guard = test_measurement_lock()?;
+        let root = assert_fs::TempDir::new()?;
+        let store = Store::open(&root.join("store"))?;
+        let bindings = dataset_bindings(
+            root.path(),
+            &store,
+            "/usr/bin/touch \"$HOME/spawned\"; exit 23",
+        )?;
+        let request = DatasetPreparation {
+            profile: MeasurementProfile::Full,
+            bindings: &bindings,
+            expected: None,
+        };
+        let mut suite = parse_suite(include_str!("../tests/inputs/minimal-suite.toml"))?;
+        let mut second = suite.datasets.first().ok_or("missing dataset")?.clone();
+        second.id = "other".into();
+        second.output = "other.txt".into();
+        suite.datasets.push(second);
+        suite.limits.max_generated_bytes = 19;
+        let error = prepare_datasets(&guard, &suite, &request, &store, &dataset_runner())
+            .err()
+            .ok_or("aggregate overflow accepted")?;
+        require(
+            error.to_string().contains("budget"),
+            "wrong aggregate failure",
+        )?;
+        require(
+            !bindings.home.join("spawned").exists(),
+            "generator ran before aggregate preflight",
+        )?;
+        suite.limits.max_generated_bytes = 20;
+        suite.limits.max_generated_file_bytes = 9;
+        let error = prepare_datasets(&guard, &suite, &request, &store, &dataset_runner())
+            .err()
+            .ok_or("file overflow accepted")?;
+        require(
+            error.to_string().contains("budget"),
+            "wrong file budget failure",
+        )?;
+        require(
+            !bindings.home.join("spawned").exists(),
+            "generator ran before file preflight",
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn dataset_faults_keep_diagnostics_and_never_publish_verified_entries()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::*;
+        for (script, reason) in [
+            ("printf 'failed fixture' >&2; exit 7", "expected exit"),
+            ("printf 'timeout fixture' >&2; /bin/sleep 3", "Timeout"),
+            ("printf 'missing fixture' >&2; exit 0", "No such file"),
+            (
+                "for output do :; done; printf '0123456789012345' > \"$output\"; /bin/sleep 3",
+                "FileLimit",
+            ),
+            (
+                "for output do :; done; printf 'bad!' > \"$output\"",
+                "shape",
+            ),
+            (
+                "for output do :; done; /bin/ln -s /dev/null \"$output\"",
+                "regular",
+            ),
+        ] {
+            let guard = test_measurement_lock()?;
+            let root = assert_fs::TempDir::new()?;
+            let store = Store::open(&root.join("store"))?;
+            let suite = parse_suite(include_str!("../tests/inputs/minimal-suite.toml"))?;
+            let bindings = dataset_bindings(root.path(), &store, script)?;
+            let request = DatasetPreparation {
+                profile: MeasurementProfile::Full,
+                bindings: &bindings,
+                expected: None,
+            };
+            let error = prepare_datasets(&guard, &suite, &request, &store, &dataset_runner())
+                .err()
+                .ok_or("generator fault accepted")?;
+            require(
+                error.to_string().contains(reason),
+                &format!("wrong fault: {error}"),
+            )?;
+            let entries: Vec<_> =
+                std::fs::read_dir(store.root().join("datasets"))?.collect::<Result<_, _>>()?;
+            require(
+                entries.len() == 1
+                    && entries
+                        .iter()
+                        .all(|e| e.path().join("failure.json").is_file()),
+                "failure evidence not retained",
+            )?;
+            if reason == "FileLimit" {
+                let failure = entries
+                    .first()
+                    .ok_or("missing quota failure")?
+                    .path()
+                    .join("failure.json");
+                let evidence: serde_json::Value = serde_json::from_slice(&std::fs::read(failure)?)?;
+                require(
+                    evidence
+                        .get("observed")
+                        .is_some_and(serde_json::Value::is_null),
+                    "oversized output was fully hashed after quota failure",
+                )?;
+                require(
+                    evidence
+                        .get("observed_bytes")
+                        .and_then(serde_json::Value::as_u64)
+                        == Some(16),
+                    "quota observation size absent",
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn dataset_cached_hash_mismatch_records_expected_and_observed_without_overwrite()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::*;
+        let guard = test_measurement_lock()?;
+        let root = assert_fs::TempDir::new()?;
+        let store = Store::open(&root.join("store"))?;
+        let suite = parse_suite(include_str!("../tests/inputs/minimal-suite.toml"))?;
+        let bindings = dataset_bindings(root.path(), &store, LITERAL_GENERATOR)?;
+        let request = DatasetPreparation {
+            profile: MeasurementProfile::Full,
+            bindings: &bindings,
+            expected: None,
+        };
+        let original = prepare_datasets(&guard, &suite, &request, &store, &dataset_runner())?;
+        let input = original.inputs.get("tiny").ok_or("missing input")?;
+        let generation = original
+            .generations
+            .get("tiny")
+            .ok_or("missing generation")?;
+        let metadata = store
+            .root()
+            .join("datasets")
+            .join(&generation.recipe_hash)
+            .join("generation.json");
+        let original_metadata = std::fs::read(&metadata)?;
+        std::fs::write(&input.path, b"WXYZ\nIJKL\n")?;
+        require(
+            prepare_datasets(&guard, &suite, &request, &store, &dataset_runner()).is_err(),
+            "cache corruption accepted",
+        )?;
+        require(
+            std::fs::read(metadata)? == original_metadata,
+            "cache metadata overwritten",
+        )?;
+        let failure = std::fs::read_dir(store.root().join("datasets"))?
+            .filter_map(Result::ok)
+            .find(|e| e.path().join("failure.json").is_file())
+            .ok_or("missing failure evidence")?;
+        let evidence: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(failure.path().join("failure.json"))?)?;
+        require(
+            evidence.get("expected") == Some(&serde_json::to_value(&input.file)?),
+            "expected hash absent from failure",
+        )?;
+        require(
+            evidence.get("observed") == Some(&serde_json::to_value(fingerprint(&input.path)?)?),
+            "observed hash absent from failure",
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn dataset_cache_size_drift_is_rejected_before_hash_verification()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::*;
+        let guard = test_measurement_lock()?;
+        let root = assert_fs::TempDir::new()?;
+        let store = Store::open(&root.join("store"))?;
+        let suite = parse_suite(include_str!("../tests/inputs/minimal-suite.toml"))?;
+        let bindings = dataset_bindings(root.path(), &store, LITERAL_GENERATOR)?;
+        let request = DatasetPreparation {
+            profile: MeasurementProfile::Full,
+            bindings: &bindings,
+            expected: None,
+        };
+        let datasets = prepare_datasets(&guard, &suite, &request, &store, &dataset_runner())?;
+        let input = datasets.inputs.get("tiny").ok_or("missing fixture")?;
+        std::fs::write(&input.path, b"oversized literal fixture")?;
+        let error = prepare_datasets(&guard, &suite, &request, &store, &dataset_runner())
+            .err()
+            .ok_or("cache size drift accepted")?;
+        require(
+            error.to_string().contains("dataset size mismatch"),
+            "size drift reached hash verification",
+        )?;
+        let error = verify_datasets(&datasets)
+            .err()
+            .ok_or("set size drift accepted")?;
+        require(
+            error.to_string().contains("dataset size mismatch"),
+            "set size drift reached hash verification",
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn dataset_selected_profile_and_bound_generator_are_independent_of_candidate()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::*;
+        let guard = test_measurement_lock()?;
+        let root = assert_fs::TempDir::new()?;
+        let store = Store::open(&root.join("store"))?;
+        let mut suite = parse_suite(include_str!("../tests/inputs/minimal-suite.toml"))?;
+        let mut bindings = dataset_bindings(root.path(), &store, LITERAL_GENERATOR)?;
+        let other = root.join("measured-candidate");
+        std::fs::write(&other, b"deliberately not the generator")?;
+        let artifact = register_binary(&other, None, &store)?;
+        bindings.roles.insert(
+            Role::Candidate,
+            BoundExecutable {
+                path: store.artifact_path(&artifact),
+                artifact,
+            },
+        );
+        let dataset = suite.datasets.first_mut().ok_or("missing recipe")?;
+        dataset.profiles.insert(
+            MeasurementProfile::Smoke,
+            DatasetRecipe {
+                argv: dataset.argv.clone(),
+                checks: dataset.checks.clone(),
+            },
+        );
+        dataset.checks = vec![CorrectnessRule::TextShape {
+            records: 1_000_000,
+            words_per_record: 1,
+            word_length: 4,
+        }];
+        suite.limits.max_generated_bytes = 10;
+        suite.limits.max_generated_file_bytes = 10;
+        let request = DatasetPreparation {
+            profile: MeasurementProfile::Smoke,
+            bindings: &bindings,
+            expected: None,
+        };
+        let datasets = prepare_datasets(&guard, &suite, &request, &store, &dataset_runner())?;
+        require(
+            datasets.inputs.get("tiny").map(|i| i.file.bytes) == Some(10),
+            "wrong selected profile",
+        )?;
+        verify_datasets(&datasets)?;
+        Ok(())
+    }
+
+    #[test]
+    fn dataset_recipe_and_bound_identity_failures_precede_generator_execution()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::*;
+        let guard = test_measurement_lock()?;
+        let root = assert_fs::TempDir::new()?;
+        let store = Store::open(&root.join("store"))?;
+        let suite = parse_suite(include_str!("../tests/inputs/minimal-suite.toml"))?;
+        let bindings = dataset_bindings(root.path(), &store, LITERAL_GENERATOR)?;
+        let request = DatasetPreparation {
+            profile: MeasurementProfile::Full,
+            bindings: &bindings,
+            expected: None,
+        };
+        let datasets = prepare_datasets(&guard, &suite, &request, &store, &dataset_runner())?;
+        let replay = DatasetPreparation {
+            expected: Some(&datasets),
+            ..request
+        };
+        for edit in ["seed", "random", "escape"] {
+            let mut changed = suite.clone();
+            let dataset = changed.datasets.first_mut().ok_or("missing recipe")?;
+            match edit {
+                "seed" => {
+                    *dataset.argv.get_mut(8).ok_or("missing seed")? = "43".into();
+                }
+                "random" => {
+                    dataset.argv.drain(7..9);
+                }
+                _ => {
+                    dataset.output = "../escape".into();
+                }
+            }
+            require(
+                prepare_datasets(&guard, &changed, &replay, &store, &dataset_runner()).is_err(),
+                "invalid replay recipe accepted",
+            )?;
+        }
+        let mut malformed = datasets.clone();
+        malformed
+            .generations
+            .get_mut("tiny")
+            .ok_or("missing record")?
+            .argv = vec!["forged command".into()];
+        let bad_expected = DatasetPreparation {
+            expected: Some(&malformed),
+            ..replay
+        };
+        require(
+            prepare_datasets(&guard, &suite, &bad_expected, &store, &dataset_runner()).is_err(),
+            "malformed replay argv accepted",
+        )?;
+        let generator = bindings.generator.as_ref().ok_or("missing generator")?;
+        std::fs::write(&generator.path, b"changed generator")?;
+        require(
+            prepare_datasets(&guard, &suite, &replay, &store, &dataset_runner()).is_err(),
+            "changed generator accepted",
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn dataset_path_records_are_checked_before_cache_publication()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::*;
+        let guard = test_measurement_lock()?;
+        let root = assert_fs::TempDir::new()?;
+        let store = Store::open(&root.join("store"))?;
+        let bindings = dataset_bindings(
+            root.path(),
+            &store,
+            "for output do :; done; printf '../x\\n' > \"$output\"",
+        )?;
+        let mut suite = parse_suite(include_str!("../tests/inputs/minimal-suite.toml"))?;
+        let dataset = suite.datasets.first_mut().ok_or("missing recipe")?;
+        dataset.argv = vec![
+            "records".into(),
+            "-r".into(),
+            "../x".into(),
+            "@output".into(),
+        ];
+        dataset.checks = vec![CorrectnessRule::Records {
+            records: vec!["../x".into()],
+            repeat: 1,
+            cycles: 1,
+        }];
+        suite.cases.first_mut().ok_or("missing case")?.argv = vec!["@records:tiny".into()];
+        let request = DatasetPreparation {
+            profile: MeasurementProfile::Full,
+            bindings: &bindings,
+            expected: None,
+        };
+        require(
+            prepare_datasets(&guard, &suite, &request, &store, &dataset_runner()).is_err(),
+            "escaping generated record accepted",
+        )?;
+        let entries: Vec<_> =
+            std::fs::read_dir(store.root().join("datasets"))?.collect::<Result<_, _>>()?;
+        require(
+            entries
+                .iter()
+                .all(|e| e.path().join("failure.json").exists()),
+            "unsafe paths published",
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn dataset_rejects_output_parent_symlink_replacement() -> Result<(), Box<dyn std::error::Error>>
+    {
+        use crate::*;
+        let guard = test_measurement_lock()?;
+        let root = assert_fs::TempDir::new()?;
+        let store = Store::open(&root.join("store"))?;
+        let bindings = dataset_bindings(
+            root.path(),
+            &store,
+            r#"for output do :; done
+parent=${output%/*}
+/bin/rmdir "$parent"
+/bin/ln -s "$HOME" "$parent"
+printf 'ABCD\nEFGH\n' > "$output""#,
+        )?;
+        let mut suite = parse_suite(include_str!("../tests/inputs/minimal-suite.toml"))?;
+        suite.datasets.first_mut().ok_or("missing recipe")?.output = "nested/tiny.txt".into();
+        let request = DatasetPreparation {
+            profile: MeasurementProfile::Full,
+            bindings: &bindings,
+            expected: None,
+        };
+        require(
+            prepare_datasets(&guard, &suite, &request, &store, &dataset_runner()).is_err(),
+            "symlink parent output published",
+        )?;
+        for entry in std::fs::read_dir(store.root().join("datasets"))? {
+            let entry = entry?;
+            require(
+                entry.file_name().to_str().is_some_and(|name| {
+                    name.starts_with("pending-") || name.starts_with("failed-")
+                }),
+                "unsafe output reached immutable cache path",
+            )?;
+        }
         Ok(())
     }
 }

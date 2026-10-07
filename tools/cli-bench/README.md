@@ -320,7 +320,7 @@ stable markers. Supplied environment values remain hashed, including explicit
 user-home/cache/PATH settings. Legacy or caller-supplied records may have no hash;
 verified builds always supply one matching their Cargo evidence.
 
-`resolve_revision(repository, reference, &git_context, &runner)`,
+`resolve_revision(&lock, repository, reference, &git_context, &runner)`,
 `build_revision(&lock, &request, &store, &runner)` and
 `bind_roles(&lock, &request, &suite, &store, &runner)` are public Rust operations. All
 execution paths are absolute UTF-8; callers supply an existing scratch directory
@@ -508,3 +508,21 @@ The separately ignored native adapter test is documented in
 [fixture provenance](tests/inputs/README.md); it tests expected-zero/one, pipe
 boundaries and literal argv. Native macOS passed; Linux remains unverified.
 These adapter probes are plumbing evidence only and make no performance claim.
+
+
+### Test coordination boundaries
+
+Component behavior tests live beside their implementation in source-local test
+modules. Their synthetic fixtures hold real OS locks in independent owned temporary
+directories through a private `cfg(test)`-only constructor that shares production
+path validation and acquisition. This constructor is absent from normal library
+builds; the public API always uses the fixed per-user lock. Independent component
+fixtures therefore do not serialize behind unrelated tests.
+
+Representative external build, dataset, correctness, timing and reset workflows,
+and real cross-process contention/cancellation tests, keep the production lock.
+Native Biggie and Hyperfine opt-ins also keep it. Shared fixture builders under
+`tests/common/` contain no test cases and are reused by a test-only source aggregator;
+production and source-local fixture factories choose their lock explicitly. Preserve
+this separation when adding RSS, orchestration and other component tests. Isolation
+does not relax identity checks, evidence durability, subprocess limits or assertions.

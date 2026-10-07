@@ -2,6 +2,7 @@
     dead_code,
     reason = "shared build fixtures are used differently by CLI and library integration tests"
 )]
+use super::bench_api as cli_bench;
 use cli_bench::*;
 use std::{
     collections::BTreeMap,

@@ -1,3 +1,4 @@
+use cli_bench as bench_api;
 macro_rules! require {
     ($condition:expr) => {
         if !$condition {
@@ -409,7 +410,7 @@ fn file_limit_stops_live_writers_and_rejects_fast_exit_overflow() -> TestResult 
     Ok(())
 }
 
-#[path = "common/validation.rs"]
+#[path = "common/production_validation.rs"]
 mod validation_support;
 #[test]
 fn mkdir_receives_same_initial_state_each_time() -> validation_support::TestResult {
@@ -439,7 +440,11 @@ fn mkdir_receives_same_initial_state_each_time() -> validation_support::TestResu
         };
         let id = CaseId::new(case.id.clone())?;
         let mut writer = fixture.store.begin_run(&fixture.suite)?;
-        let validated = validate_experiment(fixture.prepare()?, &mut writer, &fixture.runner)?;
+        let validated = validate_experiment(
+            fixture.prepare(cli_bench::MeasurementProfile::Full)?,
+            &mut writer,
+            &fixture.runner,
+        )?;
         let prepared = validated.prepared();
         let spec = prepared.cases().first().ok_or("case")?;
         let scratch = prepared.scratch(&id).ok_or("scratch")?;

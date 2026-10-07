@@ -1,4 +1,5 @@
 use assert_cmd::cargo::cargo_bin_cmd;
+use cli_bench as bench_api;
 use predicates::prelude::*;
 
 #[test]

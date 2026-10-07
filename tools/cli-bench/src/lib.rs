@@ -55,3 +55,6 @@ pub use timing::{
 
 mod lock;
 pub use lock::MeasurementLock;
+
+#[cfg(test)]
+mod test_support;

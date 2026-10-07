@@ -99,7 +99,8 @@ pub fn execute_build(args: &BuildArgs) -> anyhow::Result<std::process::ExitCode>
         environment: environment.clone(),
         scratch_root: scratch.0.clone(),
     };
-    let revision = cli_bench::resolve_revision(&cwd, &args.revision, &git, &runner)?;
+    let revision =
+        cli_bench::resolve_revision(&measurement_lock, &cwd, &args.revision, &git, &runner)?;
     if args.revision == "HEAD" && revision.dirty {
         let mut diagnostic = std::io::stderr().lock();
         writeln!(

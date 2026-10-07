@@ -55,12 +55,16 @@ pub fn collect_host(settings: &BTreeMap<String, String>) -> HostMetadata {
         cpu,
         memory,
         filesystem: unavailable("no filesystem probe requested"),
-        inherited_umask: if cfg!(target_os = "linux") {
-            read_field("/proc/self/status", "Umask")
-        } else {
-            unavailable("no non-mutating native umask probe")
-        },
+        inherited_umask: inherited_umask(),
         settings,
+    }
+}
+/// Observe only the inherited umask, without unrelated host probes or mutation.
+pub fn inherited_umask() -> HostValue {
+    if cfg!(target_os = "linux") {
+        read_field("/proc/self/status", "Umask")
+    } else {
+        unavailable("no non-mutating native umask probe")
     }
 }
 fn unavailable(reason: &str) -> HostValue {
@@ -144,6 +148,7 @@ mod tests {
         ]
         .into();
         let host = collect_host(&settings);
+        assert_eq!(host.inherited_umask, inherited_umask());
         assert_eq!(host.settings.get("LC_ALL").map(String::as_str), Some("C"));
         assert!(!host.settings.contains_key("SECRET"));
         assert_ne!(

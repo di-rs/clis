@@ -62,9 +62,18 @@ pub struct RunRequest {
 }
 
 /// Resolve a Git ref once, without changing the active checkout.
+/// Requires the session guard before scratch allocation or repository scanning.
+///
+/// ```compile_fail
+/// use cli_bench::{GitContext, ProcessRunner, resolve_revision};
+/// fn resolve_without_session(repository: &std::path::Path, git: &GitContext, runner: &ProcessRunner) {
+///     let _ = resolve_revision(repository, "HEAD", git, runner);
+/// }
+/// ```
 /// # Errors
 /// Rejects invalid references, changed Git identity and failed bounded Git commands.
 pub fn resolve_revision(
+    _measurement_lock: &crate::MeasurementLock,
     repository: &Path,
     revision: &str,
     git: &GitContext,
@@ -448,17 +457,17 @@ pub fn bind_roles(
     if let Some(reference) = &request.reference {
         check_program(reference)?;
     }
-    let candidate = prepare_source(&request.candidate, request, runner)?;
+    let candidate = prepare_source(measurement_lock, &request.candidate, request, runner)?;
     let previous = request
         .previous
         .as_ref()
-        .map(|source| prepare_source(source, request, runner))
+        .map(|source| prepare_source(measurement_lock, source, request, runner))
         .transpose()?;
     let generator_source = request
         .generator
         .clone()
         .unwrap_or_else(|| ExecutableSource::Revision(suite.generator.revision.clone()));
-    let generator = prepare_source(&generator_source, request, runner)?;
+    let generator = prepare_source(measurement_lock, &generator_source, request, runner)?;
     let mut roles = BTreeMap::new();
     for (role, selection) in [
         (crate::Role::Candidate, Some(candidate)),
@@ -510,6 +519,7 @@ enum PreparedSource {
     Prebuilt(PathBuf),
 }
 fn prepare_source(
+    measurement_lock: &crate::MeasurementLock,
     source: &ExecutableSource,
     request: &RunRequest,
     runner: &ProcessRunner,
@@ -529,6 +539,7 @@ fn prepare_source(
                 ));
             }
             Ok(PreparedSource::Revision(resolve_revision(
+                measurement_lock,
                 &request.repository,
                 revision,
                 git,
@@ -1090,6 +1101,7 @@ fn verify_unchanged(files: &[(PathBuf, crate::FileIdentity)]) -> Result<(), Benc
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{build as build_support, measurement_lock as test_measurement_lock};
     fn require(condition: bool, message: &str) -> Result<(), Box<dyn std::error::Error>> {
         if condition {
             Ok(())
@@ -1287,5 +1299,231 @@ mod tests {
         ] {
             assert!(validate_build_token(value).is_ok());
         }
+    }
+
+    #[test]
+    fn binds_prebuilt_roles_without_inventing_compiler_provenance_or_missing_reference()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::*;
+        use std::os::unix::fs::PermissionsExt;
+        let guard = test_measurement_lock()?;
+        let root = assert_fs::TempDir::new()?;
+        let executable = root.path().join("tool");
+        std::fs::write(&executable, "#!/bin/sh\nexit 0\n")?;
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755))?;
+        let home = root.path().join("home");
+        let config = root.path().join("config");
+        std::fs::create_dir(&home)?;
+        std::fs::create_dir(&config)?;
+        let store = Store::open(&root.path().join("evidence"))?;
+        let suite = parse_suite(include_str!("../tests/inputs/minimal-suite.toml"))?;
+        let mut request = RunRequest {
+            repository: root.path().into(),
+            candidate: ExecutableSource::Prebuilt(executable.clone()),
+            previous: None,
+            reference: Some(executable.clone()),
+            generator: Some(ExecutableSource::Prebuilt(executable)),
+            git: None,
+            tools: None,
+            cache_root: root.path().join("target/cli-bench"),
+            home,
+            config,
+            pipeline: None,
+        };
+        let bindings = bind_roles(&guard, &request, &suite, &store, &build_support::runner())?;
+        require(
+            bindings.roles.len() == 2
+                && bindings
+                    .roles
+                    .values()
+                    .all(|role| role.artifact.build.is_none()),
+            "prebuilt role was omitted or given invented compiler provenance",
+        )?;
+        request.reference = Some(root.path().join("missing-reference"));
+        require(
+            bind_roles(&guard, &request, &suite, &store, &build_support::runner()).is_err(),
+            "missing explicit reference was silently ignored",
+        )?;
+        request.reference = None;
+        require(
+            bind_roles(&guard, &request, &suite, &store, &build_support::runner()).is_err(),
+            "comparison without baseline was accepted",
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_unsupported_committed_sources_and_literal_malicious_refs()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::*;
+        use build_support::{Fixture, command, runner};
+        let guard = test_measurement_lock()?;
+        let fixture = Fixture::new()?;
+        let runner = runner();
+        for revision in [
+            "--help",
+            "-cfoo=bar",
+            "HEAD;touch marker",
+            "$(touch marker)",
+        ] {
+            require(
+                resolve_revision(&guard, &fixture.repo, revision, &fixture.git, &runner).is_err(),
+                "unsafe ref was accepted",
+            )?;
+        }
+        require(
+            !fixture.repo.join("marker").exists(),
+            "ref text executed as shell source",
+        )?;
+        let original = resolve_revision(&guard, &fixture.repo, "HEAD", &fixture.git, &runner)?;
+        command(
+            &fixture.repo,
+            &fixture.git.tool.path,
+            &[
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                &format!("160000,{},module", original.sha),
+            ],
+        )?;
+        command(
+            &fixture.repo,
+            &fixture.git.tool.path,
+            &["commit", "--quiet", "-m", "submodule"],
+        )?;
+        let store = Store::open(&fixture.root.path().join("evidence"))?;
+        let submodule = resolve_revision(&guard, &fixture.repo, "HEAD", &fixture.git, &runner)?;
+        let error = build_revision(&guard, &fixture.request(submodule), &store, &runner)
+            .err()
+            .ok_or("accepted submodule")?;
+        require(
+            error.to_string().contains("submodule"),
+            "submodule failure was not actionable",
+        )?;
+        command(
+            &fixture.repo,
+            &fixture.git.tool.path,
+            &["update-index", "--force-remove", "module"],
+        )?;
+        std::fs::write(
+            fixture.repo.join("large.dat"),
+            "version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 4\n",
+        )?;
+        command(&fixture.repo, &fixture.git.tool.path, &["add", "large.dat"])?;
+        command(
+            &fixture.repo,
+            &fixture.git.tool.path,
+            &["commit", "--quiet", "-m", "LFS"],
+        )?;
+        let lfs = resolve_revision(&guard, &fixture.repo, "HEAD", &fixture.git, &runner)?;
+        let error = build_revision(&guard, &fixture.request(lfs), &store, &runner)
+            .err()
+            .ok_or("accepted LFS")?;
+        require(
+            error.to_string().contains("LFS"),
+            "LFS failure was not actionable",
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn fake_cargo_cannot_hide_missing_artifacts_lockfile_or_compiler_changes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::*;
+        use build_support::{Fixture, runner};
+        use std::os::unix::fs::PermissionsExt;
+        let guard = test_measurement_lock()?;
+        let fixture = Fixture::new()?;
+        let runner = runner();
+        let revision = resolve_revision(&guard, &fixture.repo, "HEAD", &fixture.git, &runner)?;
+        let store = Store::open(&fixture.root.path().join("evidence"))?;
+        for (mode, expected) in [
+            ("missing", "omitted requested"),
+            ("lock", "identity mismatch"),
+            ("compiler", "identity mismatch"),
+        ] {
+            let mut request = fixture.request(revision.clone());
+            let cargo = fixture.root.path().join(format!("cargo-{mode}"));
+            let rustc = fixture.root.path().join(format!("rustc-{mode}"));
+            let compiler_script = format!(
+                "#!/bin/sh\nexec '{}' \"$@\"\n",
+                fixture.tools.rustc.path.display()
+            );
+            std::fs::write(&rustc, compiler_script)?;
+            std::fs::set_permissions(&rustc, std::fs::Permissions::from_mode(0o755))?;
+            let action = match mode {
+                "missing" => {
+                    "printf '%s\\n' '{\"reason\":\"build-finished\",\"success\":true}'".into()
+                }
+                "lock" => format!(
+                    "'{}' \"$@\" || exit $?\nprintf '# changed\\n' >> Cargo.lock",
+                    fixture.tools.cargo.path.display()
+                ),
+                "compiler" => format!(
+                    "'{}' \"$@\" || exit $?\nprintf '# changed\\n' >> '{}'",
+                    fixture.tools.cargo.path.display(),
+                    rustc.display()
+                ),
+                _ => return Err("invalid mode".into()),
+            };
+            std::fs::write(
+                &cargo,
+                format!(
+                    "#!/bin/sh\nif [ \"$1\" = build ]; then\n{action}\nelse\nexec '{}' \"$@\"\nfi\n",
+                    fixture.tools.cargo.path.display()
+                ),
+            )?;
+            std::fs::set_permissions(&cargo, std::fs::Permissions::from_mode(0o755))?;
+            request.tools.cargo.path = cargo.clone();
+            request.tools.cargo.identity.file = fingerprint(&cargo)?;
+            request.tools.rustc.path = rustc.clone();
+            request.tools.rustc.identity.file = fingerprint(&rustc)?;
+            let error = build_revision(&guard, &request, &store, &runner)
+                .err()
+                .ok_or("fake Cargo hid invalid build evidence")?;
+            require(
+                error.to_string().contains(expected),
+                &format!("wrong {mode} rejection: {error}"),
+            )?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn committed_cargo_target_config_cannot_override_the_selected_build_target()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::*;
+        use build_support::{Fixture, command, runner};
+        let guard = test_measurement_lock()?;
+        let fixture = Fixture::new()?;
+        std::fs::create_dir(fixture.repo.join(".cargo"))?;
+        std::fs::write(
+            fixture.repo.join(".cargo/config.toml"),
+            "[build]\ntarget = 'cli-bench-nonexistent-target'\n[env]\nPRIVATE_VALUE = 'configuration-secret'\n",
+        )?;
+        command(&fixture.repo, &fixture.git.tool.path, &["add", ".cargo"])?;
+        command(
+            &fixture.repo,
+            &fixture.git.tool.path,
+            &["commit", "--quiet", "-m", "config"],
+        )?;
+        let runner = runner();
+        let revision = resolve_revision(&guard, &fixture.repo, "HEAD", &fixture.git, &runner)?;
+        let store = Store::open(&fixture.root.path().join("evidence"))?;
+        let artifact = build_revision(&guard, &fixture.request(revision), &store, &runner)?;
+        let build = artifact.build.as_ref().ok_or("missing provenance")?;
+        require(
+            build.policy.cargo_config_hashes.len() == 1,
+            "Cargo config identity omitted",
+        )?;
+        require(
+            !serde_json::to_string(&artifact)?.contains("configuration-secret"),
+            "configuration secret published",
+        )?;
+        require(
+            command(&fixture.repo, &store.artifact_path(&artifact), &[])? == "first",
+            "recorded native target did not build",
+        )?;
+        Ok(())
     }
 }
