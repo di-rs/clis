@@ -11,6 +11,10 @@ on:
         description: Exact candidate commit SHA (blank uses selected workflow commit)
         type: string
         default: ''
+      packages:
+        description: Optional comma-separated packages (biggie,tailr,mkdirr); blank selects affected CLIs
+        type: string
+        default: ''
       target_sha:
         description: Exact target commit SHA; previous is its merge-base with candidate
         type: string
@@ -19,6 +23,10 @@ on:
     inputs:
       candidate_sha:
         description: Optional exact candidate SHA; cannot override PR identity
+        type: string
+        default: ''
+      packages:
+        description: Optional comma-separated packages (biggie,tailr,mkdirr); blank selects affected CLIs
         type: string
         default: ''
       target_sha:
@@ -45,36 +53,158 @@ env:
   CARGO_ENCODED_RUSTFLAGS: ''
 
 jobs:
-  verify:
-    name: Tests and smoke (${{ matrix.platform }})
+  select:
+    name: Select exact revisions and affected CLIs
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      candidate_sha: ${{ steps.selection.outputs.candidate_sha }}
+      previous_sha: ${{ steps.selection.outputs.previous_sha }}
+      packages: ${{ steps.impact.outputs.packages }}
+      has_packages: ${{ steps.impact.outputs.has_packages }}
+    steps:
+      - name: Check out exact PR head or triggering commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Configure Python runtime manager
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: 0.12.17
+          python-version: '3.14'
+          enable-cache: false
+          github-token: ''
+      - name: Install managed Python and copy CI adapters
+        id: python
+        run: |
+          uv python install 3.14
+          cp -R tools/cli-bench/ci "$RUNNER_TEMP/cli-bench-ci"
+          uv sync --frozen --project "$RUNNER_TEMP/cli-bench-ci"
+          {
+            echo "BENCH_CI=$RUNNER_TEMP/cli-bench-ci"
+            echo "BENCH_ROOT=$GITHUB_WORKSPACE/.cli-bench/ci"
+            echo "BENCH_CLI=$GITHUB_WORKSPACE/target/release/cli-bench"
+          } >> "$GITHUB_ENV"
+          mkdir -p .cli-bench/ci/logs
+      - name: Resolve comparison once
+        id: selection
+        env:
+          INPUT_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          INPUT_TARGET_SHA: ${{ inputs.target_sha }}
+        run: uv run --frozen --offline --project "$BENCH_CI" python "$BENCH_CI/selection.py" --output "$BENCH_ROOT/selection.json"
+      - name: Select affected benchmark packages
+        id: impact
+        env:
+          INPUT_PACKAGES: ${{ inputs.packages }}
+        run: uv run --frozen --offline --project "$BENCH_CI" python "$BENCH_CI/impact.py" --selection "$BENCH_ROOT/selection.json"
+
+  tests:
+    name: Unconditional tests (${{ matrix.platform }})
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux
+          - os: macos-15
+            platform: macos
+    steps:
+      - name: Check out exact PR head or triggering commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.candidate_sha || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Configure Python runtime manager
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: 0.12.17
+          python-version: '3.14'
+          enable-cache: false
+          github-token: ''
+      - name: Install managed Python and copy CI adapters
+        id: python
+        run: |
+          uv python install 3.14
+          cp -R tools/cli-bench/ci "$RUNNER_TEMP/cli-bench-ci"
+          uv sync --frozen --project "$RUNNER_TEMP/cli-bench-ci"
+          {
+            echo "BENCH_CI=$RUNNER_TEMP/cli-bench-ci"
+            echo "BENCH_ROOT=$GITHUB_WORKSPACE/.cli-bench/ci"
+            echo "BENCH_CLI=$GITHUB_WORKSPACE/target/release/cli-bench"
+          } >> "$GITHUB_ENV"
+          mkdir -p .cli-bench/ci/logs
+      - name: Validate exact test candidate independently of impact
+        env:
+          INPUT_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          uv run --frozen --offline --project "$BENCH_CI" python - <<'PYTHON'
+          import os, subprocess, sys
+          sys.path.insert(0, os.environ['BENCH_CI'])
+          from selection import sha
+          requested = os.environ.get('INPUT_CANDIDATE_SHA', '')
+          if requested:
+              if os.environ['GITHUB_EVENT_NAME'] == 'pull_request':
+                  raise ValueError('PR identity cannot be overridden')
+              if subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() != sha(requested):
+                  raise ValueError('test checkout differs from exact candidate')
+          PYTHON
+      - name: Install one dated Rust toolchain
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      - name: Install exact test runner
+        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
+        with:
+          tool: cargo-nextest@0.9.146
+          fallback: none
+      - name: Run CI adapter tests
+        run: |
+          uv run --frozen --offline --project "$BENCH_CI" python -m unittest discover -s tools/cli-bench/ci
+          node --test tools/cli-bench/ci/test_comment.js
+      - name: Run all workspace tests and doctests
+        # Linux PR workspace tests already run in pull-request-check.yml without
+        # changed-package filtering. Mac and every non-PR event need them here.
+        if: ${{ matrix.platform == 'macos' || github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'master' }}
+        run: |
+          cargo nextest run --locked --workspace
+          cargo test --locked --workspace --doc
+      - name: Run all three explicit repository recipe acceptance tests
+        run: CLIS_BENCH_WORKSPACE_MANIFEST="$PWD/Cargo.toml" cargo nextest run --locked -p cli-bench --run-ignored only -E 'test(repository_acceptance_)'
+
+  smoke_linux:
+    name: Smoke measurement (linux)
+    needs: [select, tests]
+    if: ${{ needs.select.outputs.has_packages == 'true' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
+      PLATFORM: linux
       MEASUREMENT_PROFILE: smoke
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            platform: linux
-          - os: macos-15
-            platform: macos
-    runs-on: ${{ matrix.os }}
+      BENCH_PACKAGES: ${{ needs.select.outputs.packages }}
+      CANDIDATE_SHA: ${{ needs.select.outputs.candidate_sha }}
+      PREVIOUS_SHA: ${{ needs.select.outputs.previous_sha }}
+    outputs:
+      summary: ${{ steps.summary.outputs.summary }}
     steps:
-      - name: Check out exact PR head or triggering commit
+      - name: Check out exact selected candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ needs.select.outputs.candidate_sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Configure Python runtime manager
-        id: uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: 0.12.17
           python-version: '3.14'
           enable-cache: false
           github-token: ''
-      - name: Install managed Python and initialize evidence paths
+      - name: Install managed Python and copy CI adapters
         id: python
         run: |
           uv python install 3.14
@@ -86,114 +216,133 @@ jobs:
             echo "BENCH_CLI=$GITHUB_WORKSPACE/target/release/cli-bench"
           } >> "$GITHUB_ENV"
           mkdir -p .cli-bench/ci/logs
-      - name: Resolve candidate and previous once
-        id: selection
-        env:
-          INPUT_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
-          INPUT_TARGET_SHA: ${{ inputs.target_sha }}
-        run: uv run --frozen --offline --project "$BENCH_CI" python "$BENCH_CI/selection.py" --output "$BENCH_ROOT/selection.json"
-      - name: Select candidate source
-        env:
-          CANDIDATE_SHA: ${{ steps.selection.outputs.candidate_sha }}
-        run: git checkout --detach "$CANDIDATE_SHA"
       - name: Install one dated Rust toolchain
         run: |
           rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
           rustc -Vv > "$BENCH_ROOT/logs/rustc-version.txt"
           cargo -Vv > "$BENCH_ROOT/logs/cargo-version.txt"
-      - name: Install exact measurement and test tools
+      - name: Install exact measurement engine
         uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
-          tool: hyperfine@1.20.0,cargo-nextest@0.9.146
+          tool: hyperfine@1.20.0
           fallback: none
       - name: Install and identify GNU references and native RSS tool
         id: tools
         run: bash "$BENCH_CI/setup-native.sh"
-      - name: Run source-local CI helper tests
-        run: uv run --frozen --offline --project "$BENCH_CI" python -m unittest discover -s "$BENCH_CI"
-      - name: Run harness tests and explicit repository recipe acceptance
-        run: |
-          cargo nextest run --locked -p cli-bench
-          CLIS_BENCH_WORKSPACE_MANIFEST="$PWD/Cargo.toml" cargo nextest run --locked -p cli-bench --run-ignored only -E 'test(repository_acceptance_)'
-          cargo test --locked -p cli-bench --doc
       - name: Build harness before benchmark roles
         id: harness
         run: cargo build --locked --release -p cli-bench
-      - name: Build all roles serially before any timing
+      - name: Build selected roles serially before any timing
         id: roles
-        env:
-          CANDIDATE_SHA: ${{ steps.selection.outputs.candidate_sha }}
-          PREVIOUS_SHA: ${{ steps.selection.outputs.previous_sha }}
         run: bash "$BENCH_CI/native.sh" build
-      - name: Measure all prepared suites serially
+      - name: Measure prepared selected suites serially
         if: ${{ !cancelled() && steps.harness.outcome == 'success' && steps.tools.outcome == 'success' }}
-        env:
-          CANDIDATE_SHA: ${{ steps.selection.outputs.candidate_sha }}
-          PREVIOUS_SHA: ${{ steps.selection.outputs.previous_sha }}
         run: bash "$BENCH_CI/native.sh" run
-      - name: Retain bounded publication and full evidence even after failure
+      - name: Project small typed output even after failure
+        id: summary
         if: ${{ !cancelled() && steps.python.outcome == 'success' }}
-        env:
-          PLATFORM: ${{ matrix.platform }}
-          SETUP_STAGE: ${{ steps.selection.outcome != 'success' && 'selection' || 'setup' }}
         run: |
-          uv run --frozen --offline --project "$BENCH_CI" python "$BENCH_CI/publication.py" \
-            --root "$BENCH_ROOT" --cli "$BENCH_CLI" --profile "$MEASUREMENT_PROFILE" \
-            --platform "$PLATFORM" --setup-stage "$SETUP_STAGE"
-      - name: Add local Markdown summary
-        if: ${{ !cancelled() }}
-        run: |
-          if [[ -f .cli-bench/ci/summary.md ]]; then
-            cat .cli-bench/ci/summary.md >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - name: Upload data-only publication
-        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: smoke-publication-${{ matrix.platform }}
-          path: .cli-bench/ci/publication/publication.json
-          if-no-files-found: error
-          retention-days: 90
-      - name: Upload bounded full evidence
-        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: smoke-full-evidence-${{ matrix.platform }}
-          path: .cli-bench/ci/full/
-          if-no-files-found: error
-          retention-days: 90
+          uv run --frozen --offline --project "$BENCH_CI" python "$BENCH_CI/summary.py" \
+            --root "$BENCH_ROOT" --cli "$BENCH_CLI" --profile "$MEASUREMENT_PROFILE" --platform "$PLATFORM"
 
-  measure:
-    name: Full measurement (${{ matrix.platform }})
-    needs: verify
+  smoke_macos:
+    name: Smoke measurement (macos)
+    needs: [select, tests]
+    if: ${{ needs.select.outputs.has_packages == 'true' }}
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      PLATFORM: macos
+      MEASUREMENT_PROFILE: smoke
+      BENCH_PACKAGES: ${{ needs.select.outputs.packages }}
+      CANDIDATE_SHA: ${{ needs.select.outputs.candidate_sha }}
+      PREVIOUS_SHA: ${{ needs.select.outputs.previous_sha }}
+    outputs:
+      summary: ${{ steps.summary.outputs.summary }}
+    steps:
+      - name: Check out exact selected candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.select.outputs.candidate_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Configure Python runtime manager
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: 0.12.17
+          python-version: '3.14'
+          enable-cache: false
+          github-token: ''
+      - name: Install managed Python and copy CI adapters
+        id: python
+        run: |
+          uv python install 3.14
+          cp -R tools/cli-bench/ci "$RUNNER_TEMP/cli-bench-ci"
+          uv sync --frozen --project "$RUNNER_TEMP/cli-bench-ci"
+          {
+            echo "BENCH_CI=$RUNNER_TEMP/cli-bench-ci"
+            echo "BENCH_ROOT=$GITHUB_WORKSPACE/.cli-bench/ci"
+            echo "BENCH_CLI=$GITHUB_WORKSPACE/target/release/cli-bench"
+          } >> "$GITHUB_ENV"
+          mkdir -p .cli-bench/ci/logs
+      - name: Install one dated Rust toolchain
+        run: |
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+          rustc -Vv > "$BENCH_ROOT/logs/rustc-version.txt"
+          cargo -Vv > "$BENCH_ROOT/logs/cargo-version.txt"
+      - name: Install exact measurement engine
+        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
+        with:
+          tool: hyperfine@1.20.0
+          fallback: none
+      - name: Install and identify GNU references and native RSS tool
+        id: tools
+        run: bash "$BENCH_CI/setup-native.sh"
+      - name: Build harness before benchmark roles
+        id: harness
+        run: cargo build --locked --release -p cli-bench
+      - name: Build selected roles serially before any timing
+        id: roles
+        run: bash "$BENCH_CI/native.sh" build
+      - name: Measure prepared selected suites serially
+        if: ${{ !cancelled() && steps.harness.outcome == 'success' && steps.tools.outcome == 'success' }}
+        run: bash "$BENCH_CI/native.sh" run
+      - name: Project small typed output even after failure
+        id: summary
+        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
+        run: |
+          uv run --frozen --offline --project "$BENCH_CI" python "$BENCH_CI/summary.py" \
+            --root "$BENCH_ROOT" --cli "$BENCH_CLI" --profile "$MEASUREMENT_PROFILE" --platform "$PLATFORM"
+
+  full_linux:
+    name: Full measurement (linux)
+    needs: [select, tests, smoke_linux, smoke_macos]
+    if: ${{ needs.select.outputs.has_packages == 'true' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
+      PLATFORM: linux
       MEASUREMENT_PROFILE: full
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            platform: linux
-          - os: macos-15
-            platform: macos
-    runs-on: ${{ matrix.os }}
+      BENCH_PACKAGES: ${{ needs.select.outputs.packages }}
+      CANDIDATE_SHA: ${{ needs.select.outputs.candidate_sha }}
+      PREVIOUS_SHA: ${{ needs.select.outputs.previous_sha }}
+    outputs:
+      summary: ${{ steps.summary.outputs.summary }}
     steps:
-      - name: Check out exact PR head or triggering commit
+      - name: Check out exact selected candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ needs.select.outputs.candidate_sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Configure Python runtime manager
-        id: uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: 0.12.17
           python-version: '3.14'
           enable-cache: false
           github-token: ''
-      - name: Install managed Python and initialize evidence paths
+      - name: Install managed Python and copy CI adapters
         id: python
         run: |
           uv python install 3.14
@@ -205,25 +354,15 @@ jobs:
             echo "BENCH_CLI=$GITHUB_WORKSPACE/target/release/cli-bench"
           } >> "$GITHUB_ENV"
           mkdir -p .cli-bench/ci/logs
-      - name: Resolve candidate and previous once
-        id: selection
-        env:
-          INPUT_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
-          INPUT_TARGET_SHA: ${{ inputs.target_sha }}
-        run: uv run --frozen --offline --project "$BENCH_CI" python "$BENCH_CI/selection.py" --output "$BENCH_ROOT/selection.json"
-      - name: Select candidate source
-        env:
-          CANDIDATE_SHA: ${{ steps.selection.outputs.candidate_sha }}
-        run: git checkout --detach "$CANDIDATE_SHA"
       - name: Install one dated Rust toolchain
         run: |
           rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
           rustc -Vv > "$BENCH_ROOT/logs/rustc-version.txt"
           cargo -Vv > "$BENCH_ROOT/logs/cargo-version.txt"
-      - name: Install exact measurement and test tools
+      - name: Install exact measurement engine
         uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
-          tool: hyperfine@1.20.0,cargo-nextest@0.9.146
+          tool: hyperfine@1.20.0
           fallback: none
       - name: Install and identify GNU references and native RSS tool
         id: tools
@@ -231,46 +370,318 @@ jobs:
       - name: Build harness before benchmark roles
         id: harness
         run: cargo build --locked --release -p cli-bench
-      - name: Build all roles serially before any timing
+      - name: Build selected roles serially before any timing
         id: roles
-        env:
-          CANDIDATE_SHA: ${{ steps.selection.outputs.candidate_sha }}
-          PREVIOUS_SHA: ${{ steps.selection.outputs.previous_sha }}
         run: bash "$BENCH_CI/native.sh" build
-      - name: Measure all prepared suites serially
+      - name: Measure prepared selected suites serially
         if: ${{ !cancelled() && steps.harness.outcome == 'success' && steps.tools.outcome == 'success' }}
-        env:
-          CANDIDATE_SHA: ${{ steps.selection.outputs.candidate_sha }}
-          PREVIOUS_SHA: ${{ steps.selection.outputs.previous_sha }}
         run: bash "$BENCH_CI/native.sh" run
-      - name: Retain bounded publication and full evidence even after failure
+      - name: Project small typed output even after failure
+        id: summary
         if: ${{ !cancelled() && steps.python.outcome == 'success' }}
+        run: |
+          uv run --frozen --offline --project "$BENCH_CI" python "$BENCH_CI/summary.py" \
+            --root "$BENCH_ROOT" --cli "$BENCH_CLI" --profile "$MEASUREMENT_PROFILE" --platform "$PLATFORM"
+
+  full_macos:
+    name: Full measurement (macos)
+    needs: [select, tests, smoke_linux, smoke_macos]
+    if: ${{ needs.select.outputs.has_packages == 'true' }}
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      PLATFORM: macos
+      MEASUREMENT_PROFILE: full
+      BENCH_PACKAGES: ${{ needs.select.outputs.packages }}
+      CANDIDATE_SHA: ${{ needs.select.outputs.candidate_sha }}
+      PREVIOUS_SHA: ${{ needs.select.outputs.previous_sha }}
+    outputs:
+      summary: ${{ steps.summary.outputs.summary }}
+    steps:
+      - name: Check out exact selected candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.select.outputs.candidate_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Configure Python runtime manager
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: 0.12.17
+          python-version: '3.14'
+          enable-cache: false
+          github-token: ''
+      - name: Install managed Python and copy CI adapters
+        id: python
+        run: |
+          uv python install 3.14
+          cp -R tools/cli-bench/ci "$RUNNER_TEMP/cli-bench-ci"
+          uv sync --frozen --project "$RUNNER_TEMP/cli-bench-ci"
+          {
+            echo "BENCH_CI=$RUNNER_TEMP/cli-bench-ci"
+            echo "BENCH_ROOT=$GITHUB_WORKSPACE/.cli-bench/ci"
+            echo "BENCH_CLI=$GITHUB_WORKSPACE/target/release/cli-bench"
+          } >> "$GITHUB_ENV"
+          mkdir -p .cli-bench/ci/logs
+      - name: Install one dated Rust toolchain
+        run: |
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+          rustc -Vv > "$BENCH_ROOT/logs/rustc-version.txt"
+          cargo -Vv > "$BENCH_ROOT/logs/cargo-version.txt"
+      - name: Install exact measurement engine
+        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
+        with:
+          tool: hyperfine@1.20.0
+          fallback: none
+      - name: Install and identify GNU references and native RSS tool
+        id: tools
+        run: bash "$BENCH_CI/setup-native.sh"
+      - name: Build harness before benchmark roles
+        id: harness
+        run: cargo build --locked --release -p cli-bench
+      - name: Build selected roles serially before any timing
+        id: roles
+        run: bash "$BENCH_CI/native.sh" build
+      - name: Measure prepared selected suites serially
+        if: ${{ !cancelled() && steps.harness.outcome == 'success' && steps.tools.outcome == 'success' }}
+        run: bash "$BENCH_CI/native.sh" run
+      - name: Project small typed output even after failure
+        id: summary
+        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
+        run: |
+          uv run --frozen --offline --project "$BENCH_CI" python "$BENCH_CI/summary.py" \
+            --root "$BENCH_ROOT" --cli "$BENCH_CLI" --profile "$MEASUREMENT_PROFILE" --platform "$PLATFORM"
+
+  comment:
+    name: Update same-repository PR benchmark comment
+    needs: [select, tests, smoke_linux, smoke_macos, full_linux, full_macos]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && startsWith(github.workflow_ref, format('{0}/.github/workflows/cli-bench.yml@', github.repository)) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read # Read authoritative run identity and stale-run ordering.
+      pull-requests: write # Update only this workflow's bot-owned PR comment.
+    steps:
+      - name: Validate bounded outputs and update one marked comment
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          PLATFORM: ${{ matrix.platform }}
-          SETUP_STAGE: ${{ steps.selection.outcome != 'success' && 'selection' || 'setup' }}
-        run: |
-          uv run --frozen --offline --project "$BENCH_CI" python "$BENCH_CI/publication.py" \
-            --root "$BENCH_ROOT" --cli "$BENCH_CLI" --profile "$MEASUREMENT_PROFILE" \
-            --platform "$PLATFORM" --setup-stage "$SETUP_STAGE"
-      - name: Add local Markdown summary
-        if: ${{ !cancelled() }}
-        run: |
-          if [[ -f .cli-bench/ci/summary.md ]]; then
-            cat .cli-bench/ci/summary.md >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - name: Upload data-only publication
-        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          BENCH_PACKAGES: ${{ needs.select.outputs.packages }}
+          SELECTION_RESULT: ${{ needs.select.result }}
+          CANDIDATE_SHA: ${{ needs.select.outputs.candidate_sha }}
+          PREVIOUS_SHA: ${{ needs.select.outputs.previous_sha }}
+          LINUX_SMOKE: ${{ needs.smoke_linux.outputs.summary }}
+          LINUX_SMOKE_RESULT: ${{ needs.smoke_linux.result }}
+          MACOS_SMOKE: ${{ needs.smoke_macos.outputs.summary }}
+          MACOS_SMOKE_RESULT: ${{ needs.smoke_macos.result }}
+          LINUX_FULL: ${{ needs.full_linux.outputs.summary }}
+          LINUX_FULL_RESULT: ${{ needs.full_linux.result }}
+          MACOS_FULL: ${{ needs.full_macos.outputs.summary }}
+          MACOS_FULL_RESULT: ${{ needs.full_macos.result }}
         with:
-          name: publication-${{ matrix.platform }}
-          path: .cli-bench/ci/publication/publication.json
-          if-no-files-found: error
-          retention-days: 90
-      - name: Upload bounded full evidence
-        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: full-evidence-${{ matrix.platform }}
-          path: .cli-bench/ci/full/
-          if-no-files-found: error
-          retention-days: 90
+          retries: 0
+          debug: false
+          script: |
+            // BEGIN COMMENT SCRIPT
+            const marker = '<!-- cli-bench:v1 -->';
+            const packagesAllowed = ['biggie', 'tailr', 'mkdirr'];
+            const rolesAllowed = ['candidate', 'previous', 'reference'];
+            const fail = () => { throw new Error('Invalid benchmark comment input'); };
+            const exact = (value, keys) => {
+              if (!value || Array.isArray(value) || typeof value !== 'object' || Object.keys(value).sort().join() !== keys.slice().sort().join()) fail();
+            };
+            const list = (value, max) => { if (!Array.isArray(value) || value.length > max) fail(); };
+            const text = value => { if (typeof value !== 'string' || [...value].length > 128 || Buffer.byteLength(value) > 512) fail(); };
+            const metric = (value, negative=false) => { if (value !== null && (typeof value !== 'number' || !Number.isFinite(value) || Math.abs(value) > 1e15 || (!negative && value < 0))) fail(); };
+            const integer = value => { if (!Number.isSafeInteger(value) || value < 1) fail(); return value; };
+            const unique = values => { if (new Set(values).size !== values.length) fail(); };
+            // Encode punctuation as entities too: labels cannot create links, tables,
+            // HTML, mentions, hidden comments or additional Markdown structure.
+            const escape = value => [...String(value)].map(ch => /[a-zA-Z0-9 /:.,%-]/.test(ch) ? ch : `&#${ch.codePointAt(0)};`).join('');
+            function decode(raw, platform, profile, selected) {
+              if (typeof raw !== 'string' || Buffer.byteLength(raw) > 24000) fail();
+              const value = JSON.parse(raw);
+              exact(value, ['version','platform','profile','suites']);
+              if (value.version !== 1 || value.platform !== platform || value.profile !== profile) fail();
+              list(value.suites, 3);
+              if (value.suites.map(suite => suite.package).sort().join() !== selected.slice().sort().join()) fail();
+              for (const suite of value.suites) {
+                exact(suite, ['package','outcome','failure','cases','omitted_cases','issues']);
+                if (!packagesAllowed.includes(suite.package) || !['complete','failed','incomplete','unavailable'].includes(suite.outcome)) fail();
+                if (suite.failure !== null) text(suite.failure);
+                if (!Number.isInteger(suite.omitted_cases) || suite.omitted_cases < 0 || suite.omitted_cases > 128) fail();
+                list(suite.issues,4); suite.issues.forEach(text);
+                list(suite.cases,12); unique(suite.cases.map(item => item.id));
+                if (suite.cases.length + suite.omitted_cases > 128) fail();
+                for (const item of suite.cases) {
+                  exact(item,['id','roles','comparisons']); text(item.id);
+                  list(item.roles,3); unique(item.roles.map(role => role.role));
+                  for (const role of item.roles) {
+                    exact(role,['role','elapsed_mean','rss_mean','executable_bytes']);
+                    if (!rolesAllowed.includes(role.role)) fail();
+                    metric(role.elapsed_mean); metric(role.rss_mean); metric(role.executable_bytes);
+                    if (!Number.isSafeInteger(role.executable_bytes)) fail();
+                  }
+                  list(item.comparisons,2); unique(item.comparisons.map(comparison => comparison.baseline));
+                  for (const comparison of item.comparisons) {
+                    exact(comparison,['baseline','candidate','ratio','elapsed_change_percent','direction']);
+                    if (!['previous','reference'].includes(comparison.baseline) || comparison.candidate !== 'candidate') fail();
+                    metric(comparison.ratio); metric(comparison.elapsed_change_percent,true);
+                    if (!['faster','slower','equal','inconclusive','smoke-only','unavailable'].includes(comparison.direction)) fail();
+                    if (profile === 'smoke' && !['smoke-only','unavailable'].includes(comparison.direction)) fail();
+                    if (suite.outcome !== 'complete' && (comparison.ratio !== null || comparison.elapsed_change_percent !== null || comparison.direction !== 'unavailable')) fail();
+                  }
+                }
+              }
+              return value;
+            }
+            try {
+              const env = process.env;
+              if (context.eventName !== 'pull_request' || context.actor === 'dependabot[bot]') return;
+              const repo = `${context.repo.owner}/${context.repo.repo}`;
+              if (!env.WORKFLOW_REF?.startsWith(`${repo}/.github/workflows/cli-bench.yml@`)) return;
+              const eventPR = context.payload.pull_request;
+              if (eventPR?.head?.repo?.full_name !== repo) return;
+              const pull = integer(eventPR.number), runId = integer(context.runId);
+              const attempt = integer(Number(env.GITHUB_RUN_ATTEMPT));
+              const candidate = eventPR.head.sha;
+              if (!/^[0-9a-f]{40}$/.test(candidate) || (env.CANDIDATE_SHA && env.CANDIDATE_SHA !== candidate)) fail();
+              if (env.PREVIOUS_SHA && !/^[0-9a-f]{40}$/.test(env.PREVIOUS_SHA)) fail();
+              let selected = [];
+              if (env.SELECTION_RESULT === 'success') {
+                if (!env.BENCH_PACKAGES || Buffer.byteLength(env.BENCH_PACKAGES) > 100) fail();
+                selected = JSON.parse(env.BENCH_PACKAGES); list(selected,3); unique(selected);
+                if (selected.some(packageName => !packagesAllowed.includes(packageName))) fail();
+              }
+              const results = [];
+              for (const platform of ['linux','macos']) for (const profile of ['smoke','full']) {
+                const key = `${platform}_${profile}`.toUpperCase();
+                const status = env[`${key}_RESULT`] || 'unavailable';
+                if (!['success','failure','cancelled','skipped','unavailable'].includes(status)) fail();
+                const value = env.SELECTION_RESULT === 'success' && selected.length && env[key] ? decode(env[key],platform,profile,selected) : null;
+                results.push({platform,profile,status,value});
+              }
+              // Only fixed API endpoints are used; no input URLs or downloaded code.
+              let calls = 0;
+              const api = async (route, args) => {
+                if (++calls > 32) fail();
+                const response = await github.request(route, {...context.repo,...args,request:{timeout:10000}});
+                if (Buffer.byteLength(JSON.stringify(response.data) || '') > 4*1024*1024) fail();
+                return response.data;
+              };
+              const runCache = new Map();
+              const getRun = async id => {
+                if (!runCache.has(id)) runCache.set(id, await api('GET /repos/{owner}/{repo}/actions/runs/{run_id}',{run_id:id}));
+                return runCache.get(id);
+              };
+              function validateRun(run, id, sourceSHA=candidate) {
+                if (run?.id !== id || run.repository?.full_name !== repo || run.head_repository?.full_name !== repo || run.event !== 'pull_request' || run.path !== '.github/workflows/cli-bench.yml') fail();
+                integer(run.run_number);integer(run.run_attempt);
+                if (!Array.isArray(run.pull_requests) || !run.pull_requests.some(pr => pr.number === pull && pr.head?.sha === sourceSHA)) fail();
+              }
+              const run = await getRun(runId); validateRun(run,runId);
+              if (run.run_attempt !== attempt) return;
+              if (run.html_url !== `https://github.com/${repo}/actions/runs/${runId}`) fail();
+              const current = async () => {
+                const pr = await api('GET /repos/{owner}/{repo}/pulls/{pull_number}',{pull_number:pull});
+                return pr.number === pull && pr.state === 'open' && pr.head?.sha === candidate && pr.head?.repo?.full_name === repo && pr.base?.repo?.full_name === repo;
+              };
+              if (!await current()) return;
+              const owned = [];
+              for (let page=1;page<=10;page++) {
+                const comments = await api('GET /repos/{owner}/{repo}/issues/{issue_number}/comments',{issue_number:pull,per_page:50,page});
+                list(comments,50);
+                owned.push(...comments.filter(comment => comment.user?.type === 'Bot' && comment.user?.login === 'github-actions[bot]' && typeof comment.body === 'string' && comment.body.startsWith(marker+'\n')));
+                if (owned.length>1) fail();
+                if (comments.length<50) break;
+                if (page===10) fail();
+              }
+              const existing = owned[0];
+              if (existing) {
+                integer(existing.id);
+                const match = existing.body.match(/^<!-- cli-bench:v1 -->\n<!-- cli-bench-run:([1-9][0-9]*):([1-9][0-9]*):([0-9a-f]{40}) -->\n/);
+                if (!match) fail();
+                const oldId=integer(Number(match[1])), oldAttempt=integer(Number(match[2]));
+                const old = await getRun(oldId);validateRun(old,oldId,match[3]);
+                if (oldAttempt > old.run_attempt) fail();
+                if (old.run_number > run.run_number || (old.run_number === run.run_number && oldAttempt > attempt)) return;
+              }
+              // The comment itself is the only retained remote state. Never ingest its
+              // rendered Markdown: validate bounded data and API-prove every source run.
+              const state = {version:1,slots:[]};
+              if (existing) {
+                if (Buffer.byteLength(existing.body)>60000) fail();
+                const matches=[...existing.body.matchAll(/<!-- cli-bench-state:([A-Za-z0-9+/=]+) -->/g)];
+                if (matches.length!==1 || matches[0][1].length>30040) fail();
+                const bytes=Buffer.from(matches[0][1],'base64');
+                if (bytes.length>22528 || bytes.toString('base64')!==matches[0][1]) fail();
+                const saved=JSON.parse(bytes.toString('utf8'));
+                exact(saved,['version','slots']);if(saved.version!==1)fail();list(saved.slots,12);
+                unique(saved.slots.map(slot=>`${slot.platform}/${slot.profile}/${slot.suite?.package}`));
+                for (const slot of saved.slots) {
+                  exact(slot,['platform','profile','run_id','attempt','sha','previous_sha','status','suite']);
+                  if (!['linux','macos'].includes(slot.platform)||!['smoke','full'].includes(slot.profile)||!['success','failure','cancelled','skipped','unavailable'].includes(slot.status))fail();
+                  integer(slot.run_id);integer(slot.attempt);
+                  if(!/^[0-9a-f]{40}$/.test(slot.sha)||!(/^[0-9a-f]{40}$/).test(slot.previous_sha))fail();
+                  decode(JSON.stringify({version:1,platform:slot.platform,profile:slot.profile,suites:[slot.suite]}),slot.platform,slot.profile,[slot.suite.package]);
+                  const source=await getRun(slot.run_id);validateRun(source,slot.run_id,slot.sha);
+                  if(slot.attempt>source.run_attempt || source.run_number>run.run_number || (source.run_number===run.run_number && slot.attempt>attempt))fail();
+                  if(source.html_url!==`https://github.com/${repo}/actions/runs/${slot.run_id}`)fail();
+                  state.slots.push(slot);
+                }
+              }
+              if (selected.length && !env.PREVIOUS_SHA) fail();
+              if (env.SELECTION_RESULT === 'success') for (const result of results) for (const packageName of selected) {
+                state.slots=state.slots.filter(slot=>!(slot.platform===result.platform&&slot.profile===result.profile&&slot.suite.package===packageName));
+                const suite=result.value?.suites.find(value=>value.package===packageName) || {package:packageName,outcome:'unavailable',failure:'Report unavailable; inspect workflow logs.',cases:[],omitted_cases:0,issues:[]};
+                state.slots.push({platform:result.platform,profile:result.profile,run_id:runId,attempt,sha:candidate,previous_sha:env.PREVIOUS_SHA,status:result.status,suite});
+              }
+              state.slots.sort((left,right)=>`${left.suite.package}/${left.platform}/${left.profile}`.localeCompare(`${right.suite.package}/${right.platform}/${right.profile}`));
+              function renderState() {
+                const lines=[marker,`<!-- cli-bench-run:${runId}:${attempt}:${candidate} -->`,
+                  `<!-- cli-bench-state:${Buffer.from(JSON.stringify(state)).toString('base64')} -->`,'## CLI benchmarks',
+                  `Current PR head: ${candidate}.`,
+                  `[Workflow run ${run.run_number}, attempt ${attempt}](${run.html_url})`,
+                  'Timing is advisory on shared runners. Full results are primary; smoke is wiring-only. Linux and macOS are separate.',
+                  'Raw evidence is ephemeral on the runner; no benchmark artifacts or separate remote history store are retained.'];
+                if(env.SELECTION_RESULT!=='success')lines.push('Selection unavailable: benchmarks could not be selected; prior results are retained with original sources. Inspect workflow logs.');
+                else if(!selected.length)lines.push('No relevant CLI changes. No benchmark builds or measurements were run. Retained results below keep their original measured commits.');
+                else lines.push('Rerun packages: '+selected.join(', ')+'. Skipped CLIs retain their original measured results.');
+                let omitted=0;
+                for(const slot of state.slots) {
+                  const suite=slot.suite,source=runCache.get(slot.run_id);
+                  lines.push(`### ${suite.package} — ${slot.platform} — ${slot.profile} (${slot.status})`,
+                    `${slot.run_id===runId && slot.attempt===attempt ? 'Measured' : 'Retained results; measured'} commit: ${slot.sha}. Previous: ${slot.previous_sha}.`,
+                    `[Source run ${source.run_number}, attempt ${slot.attempt}](${source.html_url})`,
+                    `**${suite.outcome}**${suite.failure?' — '+escape(suite.failure):''}`);
+                  lines.push(...suite.issues.map(issue=>escape(issue)));
+                  omitted+=suite.omitted_cases;
+                  if(suite.omitted_cases)lines.push(`${suite.omitted_cases} cases omitted from this compact output.`);
+                  for(const item of suite.cases) {
+                    lines.push(`Case: ${escape(item.id)}`,
+                      ...item.roles.map(role=>`${role.role}: elapsed mean ${role.elapsed_mean??'unavailable'} s; RSS mean ${role.rss_mean??'unavailable'} bytes; executable ${role.executable_bytes} bytes.`),
+                      ...item.comparisons.map(comparison=>`candidate / ${comparison.baseline}: ${comparison.ratio??'unavailable'}; elapsed change ${comparison.elapsed_change_percent??'unavailable'}%; ${comparison.direction}.`));
+                  }
+                }
+                lines.push(`Omitted cases across OS/profile reports: ${omitted}. Labels may be shortened. Source links show workflow status/logs; full raw evidence is not remotely retained.`);
+                return lines.join('\n')+'\n';
+              }
+              let body=renderState();
+              // Bound both decoded metadata and the complete UTF-8 comment, including
+              // base64 overhead. Trim only case rows, keeping every status/source identity.
+              while(Buffer.byteLength(JSON.stringify(state))>22528 || Buffer.byteLength(body)>60000) {
+                const largest=state.slots.reduce((best,slot)=>slot.suite.cases.length>(best?.suite.cases.length||0)?slot:best,null);
+                if(!largest?.suite.cases.length)fail();
+                largest.suite.cases.pop();largest.suite.omitted_cases++;
+                body=renderState();
+              }
+              // Workflow concurrency serializes writers. Re-read the head immediately before
+              // mutation; GitHub comments have no atomic compare-and-set for a PR head.
+              if (!await current()) return;
+              if (existing) await api('PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}',{comment_id:existing.id,body});
+              else await api('POST /repos/{owner}/{repo}/issues/{issue_number}/comments',{issue_number:pull,body});
+            } catch {
+              // Never dump input, API response, exception details, or token-bearing headers.
+              core.setFailed('Benchmark comment was not published: invalid or unavailable bounded data/API metadata. Inspect measurement job status.');
+            }
+            // END COMMENT SCRIPT

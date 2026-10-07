@@ -1,9 +1,22 @@
 #!/usr/bin/env bash
 # Serial CLI orchestration only; Rust owns builds, validation and measurement.
 set -euo pipefail
-: "${BENCH_ROOT:?}" "${BENCH_CLI:?}" "${CANDIDATE_SHA:?}" "${PREVIOUS_SHA:?}" "${RUSTUP_TOOLCHAIN:?}"
+: "${BENCH_PACKAGES:?}" "${BENCH_ROOT:?}" "${BENCH_CLI:?}" "${CANDIDATE_SHA:?}" "${PREVIOUS_SHA:?}" "${RUSTUP_TOOLCHAIN:?}"
 mkdir -p "$BENCH_ROOT/status" "$BENCH_ROOT/logs"
 failed=0
+selected=$(uv run --frozen --offline --project "$BENCH_CI" python - <<'SELECT'
+import json, os, sys
+sys.path.insert(0, os.environ['BENCH_CI'])
+from impact import PACKAGES
+packages = json.loads(os.environ['BENCH_PACKAGES'])
+if not isinstance(packages, list) or len(packages) != len(set(packages)) or any(package not in PACKAGES for package in packages):
+    raise ValueError('invalid selected packages')
+print(' '.join(packages))
+SELECT
+)
+# Empty selection performs no role or generator builds, even when called locally.
+if [[ -z "$selected" ]]; then exit 0; fi
+IFS=' ' read -r -a packages <<< "$selected"
 # A checked 12 GiB logical workspace budget, plus a 2 GiB per-file hard limit.
 # Check between commands; do not poll or run du concurrently with measurements.
 ulimit -f 2097152
@@ -23,7 +36,7 @@ PY
 }
 case "$1" in
   build)
-    for package in biggie tailr mkdirr; do
+    for package in "${packages[@]}"; do
       code=0
       if ! check_quota; then record_status "$package" build 1; failed=1; continue; fi
       for revision in "$CANDIDATE_SHA" "$PREVIOUS_SHA"; do
@@ -51,7 +64,7 @@ PY
     ;;
   run)
     : "${MEASUREMENT_PROFILE:?}" "${HYPERFINE:?}" "${GNU_TAIL:?}" "${GNU_MKDIR:?}"
-    for package in biggie tailr mkdirr; do
+    for package in "${packages[@]}"; do
       if [[ ! -f "$BENCH_ROOT/status/$package.json" ]] || [[ "$(cat "$BENCH_ROOT/status/$package.json")" != null ]]; then failed=1; continue; fi
       if ! check_quota; then record_status "$package" measurement 1; failed=1; continue; fi
       reference=()

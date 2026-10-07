@@ -29,7 +29,7 @@ scope. Do not claim optimization gains from implementing the harness itself.
 | R3 | Biggie CLI generates every benchmark dataset; preserve generator identity, seed/pattern, argv, byte count and hash. |
 | R4 | Check exact expected status, stdout, stderr and relevant filesystem effects before timing. |
 | R5 | Measure elapsed time, declared throughput, executable bytes and separate process peak-RSS samples. |
-| R6 | Preserve local evidence outside `target/`, 90-day PR artifacts, and permanent compact history for default-branch and explicitly promoted runs. |
+| R6 | Preserve local evidence outside `target/` and local compact history/export/replay. CI retains only bounded PR comment results; raw CI evidence is ephemeral. Remote storage is deferred to #12. |
 | R7 | Produce terminal, JSON and Markdown reports; provide offline analysis, history listing and bundle export/replay. |
 | R8 | Run advisory Linux/macOS Actions jobs and update one benchmark comment per PR; timing differences never fail a merge check. |
 | R9 | Deliver Biggie, tailr and mkdirr suites, including real pipe input and mutation reset. |
@@ -52,7 +52,7 @@ These lines are also the implementation plan's global constraints.
 - Smoke measurements use 1 warmup, 2 samples per role in each of two batches, and 1 RSS sample; label them smoke-only and suppress performance conclusions.
 - Performance is advisory; schema, build, identity, correctness, timeout and execution failures return failure.
 - Local evidence defaults to `.cli-bench/`; Cargo build caches remain under `target/cli-bench/`.
-- PR artifacts request 90-day retention; durable compact history uses `chore/benchmark-history`.
+- No remote benchmark artifacts or history publishing; local evidence APIs stay intact. Storage work is deferred to [#12](https://github.com/di-rs/clis/issues/12).
 - Default PR comparison is exact PR head versus its merge-base with the current target-branch SHA, resolved once per run.
 - Default release builds use `--locked`, one selected toolchain, the same target/features/flags/strip policy, and isolated source/target directories.
 - No first-party unsafe code, global cwd/environment mutation, implicit tool installation, destructive cache eviction or unrelated utility fixes.
@@ -245,19 +245,14 @@ Record platform/reference package identity and disclose that limitation. A
 prebuilt executable without a build record remains usable for a labelled product
 comparison; the current `rustc -Vv` is never attributed to its unknown build.
 
-Permanent history is compact data on `chore/benchmark-history`: per-run immutable
-`runs/<run-id>.json` plus an index. Preserve scenario/resolved recipe, identities,
-all normalized time/RSS samples, native compact resource values, checksums,
-validation outcomes, tool warnings and policy version. Exclude binaries, generated
-datasets and large stdout captures. Preserve links to expiring full artifacts and
-their expiry. The history record alone supports offline analysis; it may require
-rebuilding/regenerating resources for execution replay.
-
-Automatically append default-branch full runs; maintainer-triggered promotion may
-append a selected PR/manual run. PR runs otherwise retain 90-day artifacts and
-their comment. History is append-only by run ID; identical repeated publication
-is idempotent, conflicting content for an existing ID fails. No force-push,
-rewriting old records or committing generated datasets to the default branch.
+Local compact history preserves scenario/resolved recipe, identities, normalized
+time/RSS samples, checksums, validation, warnings and policy versions. Local
+`append_history` uses immutable run records and an atomic index; export/replay and
+user-retained evidence remain supported. There is no remote history branch,
+promotion operation, benchmark artifact upload or 90-day CI retention contract.
+The local v1 record's existing retention/expiry fields remain for compatibility;
+they do not promise hosted storage. Remote storage is a separate follow-up
+[#12](https://github.com/di-rs/clis/issues/12).
 
 ## Building and binding executable roles
 
@@ -422,62 +417,53 @@ use `confirm-*` case IDs and the existing repeatable `--case` selector.
 
 ## Actions and permanent history
 
-Create independent `cli-bench.yml` and `cli-bench-publish.yml` workflows. The first
-supports PR, default-branch push, manual and reusable `workflow_call` execution.
-It runs package tests plus smoke on Linux/macOS, builds roles before full measurement,
-and uploads evidence/summary even when validation fails. Full runs use a quiet
-single measurement job per OS and report shared-runner limitations. No CPU affinity
-or power controls are claimed unless actually recorded. An explicit job timeout
-and disk quota bound each job.
+The scope approved on 2026-10-07 supersedes the original artifact publisher and
+remote-history design. Use one `cli-bench.yml` for same-repository PRs,
+default-branch pushes, manual and reusable calls. Fork PR benchmark jobs are
+skipped, without changing repository settings or unrelated CI. There is no
+fork/Dependabot comment fallback, privileged alternate trigger or lint suppression.
 
-The PR checkout/manifest uses the exact head SHA; resolve its merge-base against
-the target SHA, not `HEAD^` or a synthetic merge commit. Default-branch push uses
-the candidate's first parent as previous; no parent is a recorded unavailable
-comparison. Generator selection stays independent. Standard fork approval policy
-applies; measurement has read-only contents permission, no secrets and no persisted
-Git credentials. Use SHA-pinned actions and identified GNU/Hyperfine installs.
+All workspace tests remain independent of benchmark selection. Existing Linux PR
+checks already run workspace tests/doctests; this workflow supplies macOS and
+non-PR coverage and all three explicit repository recipe checks on both platforms.
+Tests never filter packages based on changes. Zero affected CLIs skips smoke/full
+jobs entirely, including benchmark role and generator builds.
 
-`cli-bench-publish.yml` runs trusted default-branch publisher code on `workflow_run`
-and explicit maintainer promotion. Python 3.14 standard-library code, with uv-managed
-Python and project configuration, is required for the small GitHub publisher; the measurement/library implementation remains Rust.
-Separate jobs give the comment publisher only comment permissions and the history
-publisher only contents-write permission. Neither executes PR checkout content,
-artifacts, replay recipes or downloaded binaries. No `pull_request_target` job
-builds PR code.
+A CLI is affected by its source, build script, manifest, suite or transitive
+normal/build dependency changes. Read both committed dependency graphs to cover
+renames/deletes. Shared Cargo settings/root manifest/lockfile/toolchain changes
+select all benchmark-enabled CLIs. Docs/tests/harness-only changes select none.
+Initial/opened/reopened PR runs inspect the whole PR diff; synchronize runs use
+`before` to new head solely for impact. A missing/unavailable required prior head
+fails selection explicitly. The measurement baseline independently stays the exact
+target/head merge-base. Default-branch pushes compare the first parent. Manual
+and reusable events may select an explicit allowlisted package subset.
 
-Download only the triggering workflow's named publication artifacts. Bound compressed
-and expanded size, reject path traversal/symlinks/duplicate members, and accept one
-versioned JSON envelope per platform, maximum 16 MiB aggregate each. The
-[PublicationEnvelope v1 contract](../../../tools/cli-bench/ci/TRANSPORT.md) wraps
-the three package HistoryRecord v1 outcomes; each retains its existing
-PublicationRecord v1, with no duplicated observations. Explicit envelope profile
-and early failures preserve eligibility when a sealed record/contract is absent.
-A cap failure retains a bounded failure envelope with explicit omitted run IDs,
-never a partial-success report. Validate
-repository/run/workflow identity through GitHub API data and bind candidate SHAs to
-the actual PR/default-branch commit. Derive PR association from trusted run/API
-metadata; never trust an artifact's PR number or URL. Missing/ambiguous association
-leaves a job summary/artifact and an explicit publishing error. Recheck current PR
-head before updating the marked comment; stale runs cannot replace newer evidence.
-Serialize updates per PR and retain API-verified workflow run number/attempt in
-comment metadata. Compare that ordering before writing so an older run or attempt
-of the same head cannot replace a newer report.
+Measurement has contents-read only, no persisted credentials, pinned action/tool
+versions, deadlines and checked disk budgets. Build selected roles serially before
+measurement and report Linux/macOS separately. Execution failures fail the job;
+timing remains advisory. Python projects existing Rust observations and does not
+recompute statistics. No full-history envelope crosses the job boundary: use the
+[compact output contract](../../../tools/cli-bench/ci/TRANSPORT.md), bounded to
+24,000 bytes per OS/profile, with explicit failures and omitted-case counts.
 
-Generate Markdown from bounded typed data with escaped text and API-derived links.
-The marker is `<!-- cli-bench:v1 -->`; update only this bot-owned comment. Aggregate
-Linux/macOS under it without combining measurements. No comment spam, arbitrary
-HTML/links or token/environment logging. Validate failures too: a wrong-output
-benchmark should produce a clear failure report when its artifact is available.
-Cap the rendered comment at 60,000 UTF-8 bytes; when rows exceed that budget,
-include an explicit omission count and API-derived full-evidence link.
+A separate comment-only job in the same workflow uses pinned GitHub script glue
+without checking out code. It receives outputs through environment values, never
+script interpolation. Permissions are Actions metadata read and PR-comment write,
+with no contents-write. API-derived repository/run/PR association, current-head
+checks and stale run/attempt ordering precede mutations. Serialize workflow runs
+per PR, update only the GitHub bot's fixed `<!-- cli-bench:v1 -->` comment, and
+preserve human comments. Head is reread immediately before mutation; GitHub lacks
+an atomic PR-head/comment compare-and-set, so the unavoidable final API race is
+an operational limitation rather than a claimed guarantee.
 
-History appends use Git data operations without checking out the data branch,
-with non-force updates and optimistic conflict retry. Serialize publisher updates
-per repository and reject an existing run ID with different content. Automatic
-history accepts default-branch full runs (including recorded failed runs with no
-valid ratio); smoke and PR runs require explicit promotion. Record promotion's
-source run and actor. Workflows on the default branch do not trigger recursively
-from the history branch. Expired/missing artifacts are explicit promotion errors.
+Keep last compact results for skipped CLIs in the comment, clearly labelled with
+the measured commit and source run. Docs-only pushes add a skip note; selected CLI
+slots are replaced on reruns, including failures/missing OS output. Validate
+retained source metadata through the API, and never compute cross-run ratios.
+Escape all labels and derive links from API metadata. Bound the complete comment
+to 60,000 UTF-8 bytes with explicit omitted cases; full evidence remains local or
+ephemeral on the CI runner. No artifact or history publishing is activated.
 
 ## Verification and rollout
 
@@ -487,13 +473,13 @@ their respective `src/*.rs` modules. `tests/library.rs` covers public API consum
 workflows, `tests/cli.rs` covers CLI behavior, and `tests/process.rs` covers real
 subprocess lifecycle integration. `tests/common/mod.rs` contains shared integration
 helpers only. Neither `tests/library.rs` nor `src/lib.rs` collects other modules'
-unit tests. Python publisher tests remain beside `publish.py` under `ci/`.
+unit tests. Python CI tests live beside their helpers; `ci/test_comment.js` executes the exact inline workflow script with an injected offline API client.
 
 Ordinary tests are hermetic: fake child tools, tiny explicit test fixtures, saved
 Hyperfine/native-time output, no reference installs/network/real speed thresholds.
 Test direct library calls twice in one process, invalid options, failing writers,
 path boundaries, process descendants, checked nonzero exits, resets, tampering,
-atomic storage, offline statistics, export/replay and publisher abuse cases.
+atomic storage, offline statistics, export/replay and comment/selection abuse cases.
 
 Native integration separately builds Biggie and the three utilities, installs
 identified references/Hyperfine in CI, runs smoke and full evidence, and verifies
@@ -503,7 +489,7 @@ the measured executable and platform. No synthetic timing fixture is performance
 evidence.
 
 Follow package then workspace checks in CONTRIBUTING, public API docs/examples,
-Python publisher tests, actionlint and zizmor. Validate actual Actions runs after
+Python helpers and inline comment tests, actionlint and zizmor including auditor persona. Validate actual Actions runs after
 default-branch registration; before that label remote execution unverified. A
 workflow definition passing lint is not a successful publication/history trial.
 Test comment update/stale suppression, a default-branch history append and repeat
@@ -513,3 +499,8 @@ Acceptance requires all R1–R10 implemented, the three suites executable locall
 and through the workflow, two comparison modes demonstrated with declared identity,
 and evidence/history/reporting checks passing. Native platform or remote permission
 limits remain explicit outstanding acceptance items, not silently completed work.
+
+Direct `cli-bench.yml` PR runs own the benchmark comment. Reusable calls under
+another workflow run tests/measurements with read-only permissions and skip the
+comment job; the workflow-reference guard and API workflow-path check do not
+grant caller workflows publication authority.

@@ -70,6 +70,9 @@ See [CONTRIBUTING](CONTRIBUTING.md) for workspace checks and fixture conventions
 The [cli-bench harness](tools/cli-bench/README.md) provides Biggie, tailr and mkdirr
 suites, elapsed/RSS evidence, export and replay. Benchmarks require additional tools
 described in the [benchmarking guide](docs/benchmarking.md); they are not prerequisites for ordinary tests.
+CI benchmarks only affected CLIs, keeps tests unconditional, and updates one PR
+comment with labelled current/retained results. It uploads no benchmark artifacts;
+remote storage is deferred to [#12](https://github.com/di-rs/clis/issues/12).
 
 ## Workspace and contributor guides
 

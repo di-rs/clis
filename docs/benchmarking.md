@@ -154,11 +154,12 @@ use a separate input-only `export -I` with exact local role/generator/engine ove
 and hash-checked original pipeline/time tools. The [harness replay instructions](../tools/cli-bench/README.md#portable-bundles-strict-replay-and-local-history)
 show this verified route and its explicit executable omissions.
 The Rust `append_history` API retains compact immutable records and an atomic local
-index for offline inspection; it performs no Git/network publication. Requested
-90-day PR artifact retention and the planned `chore/benchmark-history` workflow are
-policy, not proof that hosted publication ran. Local expiry remains unavailable
-until a publisher assigns it. See the harness README for storage, logical resource
-limits, failure preservation and known replay/history boundaries.
+index for offline inspection; it performs no Git/network publication. CI uploads
+no benchmark artifacts and publishes no remote history. Its one PR comment keeps bounded results for skipped CLIs with their measured commit/run,
+while raw CI evidence is ephemeral. Remote storage is deferred to
+[#12](https://github.com/di-rs/clis/issues/12). Existing local v1 retention/expiry
+fields do not promise hosted retention. See the harness README for storage,
+logical resource limits, failure preservation and known replay/history boundaries.
 
 ## Reproducibility record
 

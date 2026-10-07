@@ -718,15 +718,14 @@ equivalence, and never create ratios between historical runs.
 
 `publication_record(&RunBundle)` projects manifest, result, normalized samples,
 analysis, correctness, evidence and attempt links, replay recipe and requested
-90-day retention. Local artifact expiry is explicitly unavailable until a
-publisher assigns it. The strict projection is bounded to 16 MiB and includes no
+90-day retention. Local artifact expiry remains explicitly unavailable; these retained v1 fields
+do not promise hosted storage. The strict projection is bounded to 16 MiB and includes no
 remote publication. Failed/incomplete runs suppress comparison conclusions.
 `render(&RunBundle, ReportFormat, &mut dyn Write)` renders terminal, JSON or
 Markdown; user strings are escaped and short writes/flush failures propagate.
 Neither operation acquires a measurement lock, executes a workload, nor installs
 a logger. The shared [failed publication fixture](tests/inputs/publication-failed.json)
-and [Markdown golden](tests/expected/failed-report.md) define an original sample
-for the later trusted publisher.
+and [Markdown golden](tests/expected/failed-report.md) define an original local report sample.
 
 The [direct consumer example](examples/inspect_report.rs) analyzes and
 renders twice in one process:
@@ -975,70 +974,88 @@ This is an assessment, not universal parity or platform certification.
 
 ## Native benchmark workflow
 
-[CLI benchmark](../../.github/workflows/cli-bench.yml) runs on PRs to `master`,
-`master` pushes, manual dispatch and reusable calls. `master` was confirmed as the
-remote default branch on 2026-10-07. PR runs check out the exact head and compare
-with its merge-base against the event's exact target SHA; push runs compare the
-candidate's first parent. A root commit fails with unavailable comparison. Manual
-runs accept a full candidate SHA (blank selects the triggering commit) and require
-an exact `target_sha`; reusable PR/push calls can use their event defaults. Inputs
-are environment data and validated full SHAs, never shell source. No PR identity
-override is accepted.
+[CLI benchmark](../../.github/workflows/cli-bench.yml) accepts same-repository PRs
+to `master`, `master` pushes, manual dispatch and reusable calls. Fork PR benchmark
+jobs are skipped; the comment job also skips Dependabot without a fallback.
+Unrelated contribution CI/settings are unchanged. PR comparisons use the exact
+head against its merge-base with the event target SHA. Push comparisons use the
+candidate's first parent; a root commit records an unavailable comparison.
+Manual runs require exact `target_sha`, may provide exact `candidate_sha`, and may
+select comma-separated `packages` (`biggie,tailr,mkdirr`). Blank packages selects
+affected CLIs automatically. Reusable PR identity cannot be overridden.
 
-Linux (`ubuntu-24.04`) and native macOS (`macos-15`) stay separate. The tests/smoke
-jobs have 90-minute deadlines; full jobs wait for those jobs and have 120-minute
-deadlines. Tests include the explicit `repository_acceptance_` opt-in group.
+Impact selection is separate from the benchmark baseline. Initial/opened/reopened
+PR runs inspect the full PR diff; follow-up synchronize events inspect the prior
+PR head (`before`) to new head. Missing/invalid/unavailable prior heads fail
+selection explicitly. Actual measurements still compare to the merge-base.
+Source, build script, manifest, suite and transitive normal/build path dependency
+changes select their consuming benchmark CLIs, using both exact revision graphs.
+Root Cargo manifest/lockfile/settings and toolchain changes select all three CLIs.
+Docs, dedicated tests, unrelated CLIs and harness-only changes select none. Changes
+inside `src/`, including source-local test modules, conservatively count as source.
+No Cargo build or generator runs during selection.
+
+All tests remain independent of benchmark selection. Existing Linux PR CI runs
+unfiltered workspace tests and doctests; this workflow runs them on macOS and on
+both OSes for non-PR events. It always runs all three explicit
+`repository_acceptance_` recipe tests on Linux/macOS, plus the CI helper tests.
+When no CLI is affected, no smoke/full job starts and no benchmark role/generator
+is built. Tests have 90-minute deadlines. Separate smoke/full OS jobs prevent
+matrix output collisions; smoke has a 90-minute and full a 120-minute deadline.
+Full measurement waits for tests and both smoke jobs.
+
 All builds use `nightly-2026-10-04`, locked release settings and isolated source/
-target directories. Candidate, previous and pinned generator artifacts for all
-three packages are built serially before measurement. Runs reuse those verified
-build-cache entries and perform no concurrent tests/builds while timing. The
-harness still verifies identities and Cargo metadata when binding cached roles.
-Every declared primary and confirmation case runs; Biggie has no reference.
-Hyperfine is pinned to 1.20.0. CI explicitly installs GNU Coreutils, records GNU
-`tail`/`mkdir` versions, and identifies GNU time on Linux or native `/usr/bin/time
--l` on macOS. Installed GNU package releases are recorded, not pinned.
+target directories. Only selected candidate/previous roles and their pinned
+Biggie generators are built serially before timing. GNU reference/time tools are
+identified and Hyperfine is pinned to 1.20.0. Linux (`ubuntu-24.04`) and native
+macOS (`macos-15`) evidence remains separate. Timing is advisory; selection,
+build, correctness, execution and projection failures remain visible. No
+optimization claim follows from shared-runner timings.
 
-Jobs have `contents: read`, no secrets, no persisted checkout credentials, and
-SHA-pinned actions. Setup-uv caching is disabled. They execute candidate source;
-their artifacts and local Markdown are untrusted. There are no comments, history
-writes or performance thresholds in this workflow. A slower valid candidate
-succeeds; selection/build/correctness/execution/projection/export failures fail.
-A build or run failure is retained per suite while other prepared suites continue.
+Measurement jobs have contents-read only, no secrets or persisted checkout
+credentials, and SHA-pinned actions. A separate checkout-free job in the same
+workflow validates at most 24,000 bytes of typed output per OS/profile and updates
+one fixed-marker GitHub bot comment. Its only permissions are Actions metadata
+read and PR-comment write. All labels are escaped; API metadata supplies source
+links, PR identity, current head and run/attempt ordering. Offline tests execute
+the exact inline script with an injected API client; no Node project is required.
 
-`publication-linux` and `publication-macos` contain only `publication.json`.
-`full-evidence-linux` and `full-evidence-macos` contain portable evidence exports
-and bounded logs. Smoke jobs use the `smoke-` artifact prefix. All request 90-day
-retention; effective expiry remains explicitly unknown until GitHub's artifact API
-confirms it. The [transport contract](ci/TRANSPORT.md) defines the aggregate 16 MiB
-publication limit, three `HistoryRecord` entries and failure representation.
-The full-evidence upload cap is 512 MiB per platform, including publication and
-log prefixes (1 MiB per log). Exports omit dataset and executable bytes and list
-that omission; exact original local resources are needed for strict replay.
-Do not assume that relocated system executables run on another host.
-Oversized/failed exports leave small publication failure evidence available.
+Skipped CLIs retain their last results in that comment with their original
+measured commit, baseline and run. Docs-only pushes add a skip note. Selected
+CLI slots are replaced even when a rerun fails or an OS output is missing, so an
+old success cannot appear to measure the new source. The complete comment stays
+under 60,000 UTF-8 bytes, including at most 22 KiB of decoded compact metadata
+for 12 package/OS/profile slots. Case omissions are counted; full observations
+appear before wiring-only smoke. Corrupt prior state or unavailable API proof
+fails without mutation. The [transport contract](ci/TRANSPORT.md) documents the
+schema, API/resource bounds and final non-atomic head-check limitation.
 
-Each shell build/measurement command inherits a 2 GiB per-file limit. A 12 GiB
-allocated-space budget covering `target/` and the job evidence root is checked
-between commands, without filesystem polling during timing. It is a checked
-budget, not a hard aggregate filesystem quota; one command can cross it before
-the next check. Suite-specific generated-byte, evidence and process limits still
-apply. A hosted timeout/runner loss or failure before checkout/Python setup can
-prevent final artifact production; missing artifacts must be reported explicitly.
-Shared runners provide advisory evidence, with no claimed CPU affinity, power or
-cold-cache controls. Local lint/tests do not prove a hosted Linux/macOS run.
+CI uploads no benchmark artifacts, stages no exports, and writes no remote
+history. Full raw evidence exists only on the ephemeral runner; retained local
+stores and CLI/library history/export/replay are unchanged. Remote storage is
+tracked separately in [#12](https://github.com/di-rs/clis/issues/12). No alternate
+privileged trigger, contents-write permission, or lint suppression is configured.
 
-Run helper tests and workflow checks locally with the configured Python 3.14:
+Each shell build/measurement inherits a 2 GiB per-file limit. A 12 GiB allocated-
+space budget covering `target/` and the evidence root is checked between commands,
+without polling during timing. This is a checked budget, not a hard aggregate
+quota; one command can cross it before the next check. Suite-specific resource
+limits still apply. Runner loss or early setup failure may prevent compact output;
+the comment marks missing selected results unavailable. Hosted runs and actual
+comment mutations remain operational acceptance work, not a local-test claim.
+
+Run helper and workflow checks locally with configured Python 3.14 and Node:
 
 ```sh
 uv run --frozen --project tools/cli-bench/ci python -m unittest discover -s tools/cli-bench/ci
+node --test tools/cli-bench/ci/test_comment.js
 actionlint
 shellcheck tools/cli-bench/ci/*.sh
 zizmor --offline --no-progress .github/workflows
+zizmor --offline --no-progress --persona auditor .github/workflows
 ```
 
-The helper tests use original temporary Git graphs and fixtures without network
-or native timings. A fixture came from a real sealed failed CLI run. Python only
-selects workflow identities and transports Rust-produced history; it never
-recomputes statistics. Hosted trial and the separately trusted publisher remain
-follow-up acceptance work, requiring workflow registration rather than a local
-claim of success.
+Direct `cli-bench.yml` PR runs own the benchmark comment. Reusable calls under
+another workflow run tests/measurements with read-only permissions and skip the
+comment job; the workflow-reference guard and API workflow-path check do not
+grant caller workflows publication authority.
