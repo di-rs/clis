@@ -24,7 +24,8 @@ pub struct ExperimentPreparation<'a> {
 }
 /// Prepared resources; only validation can produce a measurement capability.
 #[derive(Debug)]
-pub struct PreparedExperiment {
+pub struct PreparedExperiment<'lock> {
+    measurement_lock: &'lock crate::MeasurementLock,
     suite: Suite,
     profile: MeasurementProfile,
     cases: Vec<CaseSpec>,
@@ -34,8 +35,8 @@ pub struct PreparedExperiment {
 }
 /// Opaque successful correctness gate. No public constructor or deserialization.
 #[derive(Debug)]
-pub struct ValidatedExperiment {
-    prepared: PreparedExperiment,
+pub struct ValidatedExperiment<'lock> {
+    prepared: PreparedExperiment<'lock>,
     report: ValidationReport,
 }
 /// One exact check, including failures; no selected comparison is silently omitted.
@@ -94,7 +95,16 @@ impl ValidationReport {
         });
     }
 }
-impl PreparedExperiment {
+impl PreparedExperiment<'_> {
+    #[must_use]
+    pub const fn suite(&self) -> &Suite {
+        &self.suite
+    }
+    #[must_use]
+    pub const fn measurement_lock(&self) -> &crate::MeasurementLock {
+        self.measurement_lock
+    }
+
     #[must_use]
     pub const fn roles(&self) -> &RoleBindings {
         &self.bindings
@@ -136,9 +146,9 @@ impl PreparedExperiment {
         Ok(())
     }
 }
-impl ValidatedExperiment {
+impl<'lock> ValidatedExperiment<'lock> {
     #[must_use]
-    pub const fn prepared(&self) -> &PreparedExperiment {
+    pub const fn prepared(&self) -> &PreparedExperiment<'lock> {
         &self.prepared
     }
     #[must_use]
@@ -158,6 +168,55 @@ impl ValidatedExperiment {
     /// Rejects changed datasets, executable/tool bytes or scratch ownership.
     pub fn revalidate(&self) -> Result<(), BenchError> {
         self.prepared.revalidate()
+    }
+    /// Repeat the selected case's exact correctness checks after measurement.
+    /// Retains a fresh report and rechecks identities without refreshing expectations.
+    /// # Errors
+    /// Rejects changed identities, output/status/effect drift or evidence failures.
+    pub fn final_case_check(
+        &self,
+        case: &CaseId,
+        evidence: &Path,
+        runner: &ProcessRunner,
+    ) -> Result<(), BenchError> {
+        let spec = self
+            .prepared
+            .cases
+            .iter()
+            .find(|spec| spec.id == case.as_str())
+            .ok_or_else(|| failure("unknown selected case"))?;
+        fs::create_dir(evidence)?;
+        let mut report = ValidationReport {
+            schema_version: 1,
+            profile: self.prepared.profile,
+            selected_cases: vec![case.as_str().into()],
+            inherited_umask: self.report.inherited_umask.clone(),
+            findings: vec![],
+            observations: vec![],
+        };
+        report.record(None, None, "pre-final-identities", self.revalidate());
+        if report.passed() {
+            let result = validate_case(&self.prepared, spec, evidence, runner, &mut report);
+            report.record(Some(case.as_str()), None, "final-execution", result);
+        }
+        report.record(None, None, "final-identities", self.revalidate());
+        report.record(
+            None,
+            None,
+            "inherited-umask",
+            same(
+                &report.inherited_umask,
+                &crate::collect_host(&self.prepared.bindings.environment).inherited_umask,
+                "inherited umask observation changed",
+            ),
+        );
+        crate::store::atomic_json(&evidence.join("report.json"), &report)?;
+        if !report.passed() {
+            return Err(failure(
+                "final correctness gate failed; see retained final report",
+            ));
+        }
+        Ok(())
     }
     /// Verify declared directory effects against this role's successful gate.
     /// Call after later warmup/sample invocations, outside their timing boundary.
@@ -205,11 +264,12 @@ impl ValidatedExperiment {
 /// build cache root, while generated data and validation evidence live in Store.
 /// # Errors
 /// Returns invalid selection, build, input or scratch failures.
-pub fn prepare_experiment(
+pub fn prepare_experiment<'lock>(
+    measurement_lock: &'lock crate::MeasurementLock,
     request: &ExperimentPreparation<'_>,
     store: &Store,
     runner: &ProcessRunner,
-) -> Result<PreparedExperiment, BenchError> {
+) -> Result<PreparedExperiment<'lock>, BenchError> {
     crate::validate_suite(request.suite)?;
     let selected: BTreeSet<_> = request.selected_cases.iter().map(CaseId::as_str).collect();
     if selected.len() != request.selected_cases.len()
@@ -228,8 +288,9 @@ pub fn prepare_experiment(
         .filter(|case| selected.is_empty() || selected.contains(case.id.as_str()))
         .cloned()
         .collect();
-    let bindings = crate::bind_roles(request.run, request.suite, store, runner)?;
+    let bindings = crate::bind_roles(measurement_lock, request.run, request.suite, store, runner)?;
     let datasets = crate::prepare_datasets(
+        measurement_lock,
         request.suite,
         &DatasetPreparation {
             profile: request.profile,
@@ -256,6 +317,7 @@ pub fn prepare_experiment(
         scratch.insert(id, owned);
     }
     Ok(PreparedExperiment {
+        measurement_lock,
         suite: request.suite.clone(),
         profile: request.profile,
         cases,
@@ -276,14 +338,18 @@ struct Captured {
 /// All child executions inherit the same process umask; unavailable readings stay explicit.
 /// # Errors
 /// Returns failure instead of a validation capability when any check fails.
-pub fn validate_experiment(
-    prepared: PreparedExperiment,
+pub fn validate_experiment<'lock>(
+    prepared: PreparedExperiment<'lock>,
     writer: &mut RunWriter,
     runner: &ProcessRunner,
-) -> Result<ValidatedExperiment, BenchError> {
+) -> Result<ValidatedExperiment<'lock>, BenchError> {
     if !writer.matches_suite(&prepared.suite) {
         return Err(failure("run writer suite differs from prepared suite"));
     }
+    crate::store::atomic_json(
+        &writer.path().join("measurement-lock.json"),
+        &serde_json::json!({"wait_seconds": prepared.measurement_lock.wait_duration().as_secs_f64()}),
+    )?;
     let evidence = writer.path().join("validation");
     fs::create_dir(&evidence)?;
     let mut report = ValidationReport {
@@ -323,7 +389,7 @@ pub fn validate_experiment(
     Ok(ValidatedExperiment { prepared, report })
 }
 fn validate_case(
-    prepared: &PreparedExperiment,
+    prepared: &PreparedExperiment<'_>,
     case: &CaseSpec,
     evidence: &Path,
     runner: &ProcessRunner,
@@ -361,7 +427,7 @@ fn validate_case(
     Ok(())
 }
 fn execute(
-    prepared: &PreparedExperiment,
+    prepared: &PreparedExperiment<'_>,
     case: &CaseSpec,
     role: Role,
     scratch: &OwnedScratch,

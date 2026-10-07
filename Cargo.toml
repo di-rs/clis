@@ -43,3 +43,8 @@ panic_in_result_fn = "deny"
 panic = "deny"
 exit = "deny"
 as_conversions = "deny"
+
+# Native cli-bench fixtures repeatedly hash compiler binaries; keep the SHA-256
+# implementation optimized in tests without changing release build policy.
+[profile.test.package.sha2]
+opt-level = 3

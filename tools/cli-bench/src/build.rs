@@ -105,6 +105,7 @@ pub fn resolve_revision(
 /// # Errors
 /// Rejects unsupported source, unavailable tools, policy drift and invalid Cargo evidence.
 pub fn build_revision(
+    measurement_lock: &crate::MeasurementLock,
     request: &BuildRequest,
     store: &Store,
     runner: &ProcessRunner,
@@ -121,6 +122,10 @@ pub fn build_revision(
     let cache_root = std::fs::canonicalize(&request.cache_root)?;
     let work = OwnedDirectory::new(&scratch, "source")?;
     let logs = crate::store::unique_directory(&cache_root, "build")?;
+    crate::store::atomic_json(
+        &logs.join("measurement-lock.json"),
+        &serde_json::json!({"wait_seconds": measurement_lock.wait_duration().as_secs_f64()}),
+    )?;
     verify_tools(&request.tools, runner, &work.path, &logs)?;
     let source = create_snapshot(request, runner, &repository, &work.path, &logs)?;
     let lock_path = source.join("Cargo.lock");
@@ -420,6 +425,7 @@ fn retain_build(
 /// # Errors
 /// Rejects missing comparators/tools, unsupported source or changed identities.
 pub fn bind_roles(
+    measurement_lock: &crate::MeasurementLock,
     request: &RunRequest,
     suite: &Suite,
     store: &Store,
@@ -462,10 +468,10 @@ pub fn bind_roles(
             roles.insert(
                 role,
                 bind_source(
+                    measurement_lock,
                     selection,
                     request,
-                    &suite.package,
-                    &suite.binary,
+                    (&suite.package, &suite.binary),
                     &suite.build,
                     store,
                     runner,
@@ -482,10 +488,10 @@ pub fn bind_roles(
         .clone_from(&suite.generator.features);
     generator_policy.no_default_features = suite.generator.no_default_features;
     let generator = bind_source(
+        measurement_lock,
         generator,
         request,
-        &suite.generator.package,
-        &suite.generator.binary,
+        (&suite.generator.package, &suite.generator.binary),
         &generator_policy,
         store,
         runner,
@@ -532,10 +538,10 @@ fn prepare_source(
     }
 }
 fn bind_source(
+    measurement_lock: &crate::MeasurementLock,
     source: PreparedSource,
     request: &RunRequest,
-    package: &str,
-    binary: &str,
+    target: (&str, &str),
     policy: &BuildPolicy,
     store: &Store,
     runner: &ProcessRunner,
@@ -543,11 +549,12 @@ fn bind_source(
     let artifact = match source {
         PreparedSource::Prebuilt(path) => return retain_prebuilt(&path, store),
         PreparedSource::Revision(revision) => build_revision(
+            measurement_lock,
             &BuildRequest {
                 repository: request.repository.clone(),
                 revision,
-                package: package.into(),
-                binary: Some(binary.into()),
+                package: target.0.into(),
+                binary: Some(target.1.into()),
                 policy: policy.clone(),
                 git: request
                     .git

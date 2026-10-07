@@ -257,6 +257,17 @@ fn resolve_records(path: &Path, scratch: &Path, argv: &mut Vec<String>) -> Resul
     Ok(())
 }
 
+/// Encode direct argv for Hyperfine's shell-words parser, without shell expansion.
+pub fn hyperfine_command(command: &CommandSpec) -> Result<String, BenchError> {
+    let program = crate::process::utf8_path(&command.program)?;
+    if command.argv.iter().any(|arg| arg.contains('\0')) {
+        return Err(BenchError::invalid("NUL is unsupported in engine argv"));
+    }
+    Ok(shell_words::join(
+        std::iter::once(program).chain(command.argv.iter().map(String::as_str)),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -533,5 +544,66 @@ mod tests {
             return Err("changed input identity accepted".into());
         }
         Ok(())
+    }
+    #[test]
+    fn hyperfine_quote_split_round_trip_preserves_literal_argv() -> TestResult {
+        use std::os::unix::ffi::OsStringExt;
+        let root = assert_fs::TempDir::new()?;
+        let (mut case, bindings, datasets) = setup(root.path())?;
+        case.argv = [
+            "",
+            "a b",
+            "'single'",
+            "\"double\"",
+            "$dollar",
+            "`backticks`",
+            "line\nnext",
+            "back\\slash",
+        ]
+        .map(str::to_owned)
+        .to_vec();
+        let invocation = resolve_invocation(
+            &case,
+            Role::Candidate,
+            MeasurementProfile::Full,
+            &bindings,
+            &datasets,
+            root.path(),
+        )?;
+        let mut expected = vec![
+            invocation
+                .command
+                .program
+                .to_str()
+                .ok_or("UTF-8 fixture")?
+                .to_owned(),
+        ];
+        expected.extend(case.argv);
+        require(
+            (shell_words::split(&hyperfine_command(&invocation.command)?)?) == (expected),
+            &format!(
+                "assertion failed: {}",
+                stringify!(
+                    (shell_words::split(&hyperfine_command(&invocation.command)?)?) == (expected)
+                )
+            ),
+        )?;
+        let mut invalid = invocation.command;
+        invalid.program = std::ffi::OsString::from_vec(b"/bad-\xff".to_vec()).into();
+        require(
+            hyperfine_command(&invalid).is_err(),
+            &format!(
+                "assertion failed: {}",
+                stringify!(hyperfine_command(&invalid).is_err())
+            ),
+        )?;
+        Ok(())
+    }
+    fn require(condition: bool, message: &str) -> Result<(), Box<dyn std::error::Error>> {
+        if condition {
+            Ok(())
+        } else {
+            Err(message.into())
+        }
     }
 }

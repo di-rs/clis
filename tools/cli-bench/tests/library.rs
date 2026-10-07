@@ -563,6 +563,7 @@ fn builds_resolved_revisions_with_isolated_outputs_and_ignores_dirty_edits()
 -> Result<(), Box<dyn std::error::Error>> {
     use build_support::{Fixture, command, runner};
     use cli_bench::*;
+    let guard = test_measurement_lock()?;
     let mut fixture = Fixture::new()?;
     fixture.tools.environment.insert(
         "BUILD_PRIVATE_TOKEN".into(),
@@ -595,12 +596,17 @@ fn builds_resolved_revisions_with_isolated_outputs_and_ignores_dirty_edits()
         "dirty HEAD was not resolved to committed tree",
     )?;
     let store = Store::open(&fixture.root.path().join("evidence"))?;
-    let first = build_revision(&fixture.request(first_revision.clone()), &store, &runner)?;
+    let first = build_revision(
+        &guard,
+        &fixture.request(first_revision.clone()),
+        &store,
+        &runner,
+    )?;
     require(
         !serde_json::to_string(&first)?.contains("secret-value-never-publish"),
         "build environment secret leaked into artifact",
     )?;
-    let second = build_revision(&fixture.request(second_revision), &store, &runner)?;
+    let second = build_revision(&guard, &fixture.request(second_revision), &store, &runner)?;
     require(
         first.build.as_ref().map(|build| &build.policy)
             == second.build.as_ref().map(|build| &build.policy),
@@ -630,7 +636,7 @@ fn builds_resolved_revisions_with_isolated_outputs_and_ignores_dirty_edits()
     )?;
     let mut featured_request = fixture.request(first_revision.clone());
     featured_request.policy.features = vec!["fast".into()];
-    let featured = build_revision(&featured_request, &store, &runner)?;
+    let featured = build_revision(&guard, &featured_request, &store, &runner)?;
     require(
         featured.id != first.id
             && featured
@@ -639,11 +645,16 @@ fn builds_resolved_revisions_with_isolated_outputs_and_ignores_dirty_edits()
                 .is_some_and(|build| build.resolved_features == ["fast"]),
         "changed features reused old build provenance",
     )?;
-    let cached = build_revision(&fixture.request(first_revision.clone()), &store, &runner)?;
+    let cached = build_revision(
+        &guard,
+        &fixture.request(first_revision.clone()),
+        &store,
+        &runner,
+    )?;
     require(cached == first, "verified cache changed provenance")?;
     std::fs::write(store.artifact_path(&first), b"overwritten baseline")?;
     require(
-        build_revision(&fixture.request(first_revision), &store, &runner).is_err(),
+        build_revision(&guard, &fixture.request(first_revision), &store, &runner).is_err(),
         "corrupt baseline cache reused",
     )?;
     Ok(())
@@ -654,6 +665,7 @@ fn binds_prebuilt_roles_without_inventing_compiler_provenance_or_missing_referen
 -> Result<(), Box<dyn std::error::Error>> {
     use cli_bench::*;
     use std::os::unix::fs::PermissionsExt;
+    let guard = test_measurement_lock()?;
     let root = assert_fs::TempDir::new()?;
     let executable = root.path().join("tool");
     std::fs::write(&executable, "#!/bin/sh\nexit 0\n")?;
@@ -677,7 +689,7 @@ fn binds_prebuilt_roles_without_inventing_compiler_provenance_or_missing_referen
         config,
         pipeline: None,
     };
-    let bindings = bind_roles(&request, &suite, &store, &build_support::runner())?;
+    let bindings = bind_roles(&guard, &request, &suite, &store, &build_support::runner())?;
     require(
         bindings.roles.len() == 2
             && bindings
@@ -688,12 +700,12 @@ fn binds_prebuilt_roles_without_inventing_compiler_provenance_or_missing_referen
     )?;
     request.reference = Some(root.path().join("missing-reference"));
     require(
-        bind_roles(&request, &suite, &store, &build_support::runner()).is_err(),
+        bind_roles(&guard, &request, &suite, &store, &build_support::runner()).is_err(),
         "missing explicit reference was silently ignored",
     )?;
     request.reference = None;
     require(
-        bind_roles(&request, &suite, &store, &build_support::runner()).is_err(),
+        bind_roles(&guard, &request, &suite, &store, &build_support::runner()).is_err(),
         "comparison without baseline was accepted",
     )?;
     Ok(())
@@ -704,6 +716,7 @@ fn rejects_unsupported_committed_sources_and_literal_malicious_refs()
 -> Result<(), Box<dyn std::error::Error>> {
     use build_support::{Fixture, command, runner};
     use cli_bench::*;
+    let guard = test_measurement_lock()?;
     let fixture = Fixture::new()?;
     let runner = runner();
     for revision in [
@@ -739,7 +752,7 @@ fn rejects_unsupported_committed_sources_and_literal_malicious_refs()
     )?;
     let store = Store::open(&fixture.root.path().join("evidence"))?;
     let submodule = resolve_revision(&fixture.repo, "HEAD", &fixture.git, &runner)?;
-    let error = build_revision(&fixture.request(submodule), &store, &runner)
+    let error = build_revision(&guard, &fixture.request(submodule), &store, &runner)
         .err()
         .ok_or("accepted submodule")?;
     require(
@@ -762,7 +775,7 @@ fn rejects_unsupported_committed_sources_and_literal_malicious_refs()
         &["commit", "--quiet", "-m", "LFS"],
     )?;
     let lfs = resolve_revision(&fixture.repo, "HEAD", &fixture.git, &runner)?;
-    let error = build_revision(&fixture.request(lfs), &store, &runner)
+    let error = build_revision(&guard, &fixture.request(lfs), &store, &runner)
         .err()
         .ok_or("accepted LFS")?;
     require(
@@ -778,6 +791,7 @@ fn fake_cargo_cannot_hide_missing_artifacts_lockfile_or_compiler_changes()
     use build_support::{Fixture, runner};
     use cli_bench::*;
     use std::os::unix::fs::PermissionsExt;
+    let guard = test_measurement_lock()?;
     let fixture = Fixture::new()?;
     let runner = runner();
     let revision = resolve_revision(&fixture.repo, "HEAD", &fixture.git, &runner)?;
@@ -821,7 +835,7 @@ fn fake_cargo_cannot_hide_missing_artifacts_lockfile_or_compiler_changes()
         request.tools.cargo.identity.file = fingerprint(&cargo)?;
         request.tools.rustc.path = rustc.clone();
         request.tools.rustc.identity.file = fingerprint(&rustc)?;
-        let error = build_revision(&request, &store, &runner)
+        let error = build_revision(&guard, &request, &store, &runner)
             .err()
             .ok_or("fake Cargo hid invalid build evidence")?;
         require(
@@ -837,6 +851,7 @@ fn committed_cargo_target_config_cannot_override_the_selected_build_target()
 -> Result<(), Box<dyn std::error::Error>> {
     use build_support::{Fixture, command, runner};
     use cli_bench::*;
+    let guard = test_measurement_lock()?;
     let fixture = Fixture::new()?;
     std::fs::create_dir(fixture.repo.join(".cargo"))?;
     std::fs::write(
@@ -852,7 +867,7 @@ fn committed_cargo_target_config_cannot_override_the_selected_build_target()
     let runner = runner();
     let revision = resolve_revision(&fixture.repo, "HEAD", &fixture.git, &runner)?;
     let store = Store::open(&fixture.root.path().join("evidence"))?;
-    let artifact = build_revision(&fixture.request(revision), &store, &runner)?;
+    let artifact = build_revision(&guard, &fixture.request(revision), &store, &runner)?;
     let build = artifact.build.as_ref().ok_or("missing provenance")?;
     require(
         build.policy.cargo_config_hashes.len() == 1,
@@ -913,6 +928,7 @@ if [ -f "$HOME/drift" ]; then printf 'WXYZ\nIJKL\n' > "$output"; else printf 'AB
 fn dataset_fixture_materializes_reuses_and_replays_across_stores()
 -> Result<(), Box<dyn std::error::Error>> {
     use cli_bench::*;
+    let guard = test_measurement_lock()?;
     let root = assert_fs::TempDir::new()?;
     let store = Store::open(&root.join("store"))?;
     let suite = parse_suite(include_str!("inputs/minimal-suite.toml"))?;
@@ -922,7 +938,7 @@ fn dataset_fixture_materializes_reuses_and_replays_across_stores()
         bindings: &bindings,
         expected: None,
     };
-    let datasets = prepare_datasets(&suite, &request, &store, &dataset_runner())?;
+    let datasets = prepare_datasets(&guard, &suite, &request, &store, &dataset_runner())?;
     verify_datasets(&datasets)?;
     let input = datasets.inputs.get("tiny").ok_or("missing input")?;
     require(
@@ -940,7 +956,7 @@ fn dataset_fixture_materializes_reuses_and_replays_across_stores()
     )?;
     require(record.stderr.bytes == 19, "diagnostics not retained")?;
     std::fs::write(bindings.home.join("drift"), b"literal fault switch")?;
-    let cached = prepare_datasets(&suite, &request, &store, &dataset_runner())?;
+    let cached = prepare_datasets(&guard, &suite, &request, &store, &dataset_runner())?;
     require(cached.inputs == datasets.inputs, "cache was regenerated")?;
     let other = Store::open(&root.join("replay"))?;
     let mut replay_bindings = bindings.clone();
@@ -957,7 +973,7 @@ fn dataset_fixture_materializes_reuses_and_replays_across_stores()
         expected: Some(&expected),
     };
     require(
-        prepare_datasets(&suite, &replay, &other, &dataset_runner()).is_err(),
+        prepare_datasets(&guard, &suite, &replay, &other, &dataset_runner()).is_err(),
         "seeded drift accepted",
     )?;
     require(
@@ -974,7 +990,7 @@ fn dataset_fixture_materializes_reuses_and_replays_across_stores()
     )?;
     std::fs::remove_file(bindings.home.join("drift"))?;
     std::fs::remove_file(&input.path)?;
-    let regenerated = prepare_datasets(&suite, &replay, &other, &dataset_runner())?;
+    let regenerated = prepare_datasets(&guard, &suite, &replay, &other, &dataset_runner())?;
     require(
         regenerated.inputs.get("tiny").map(|value| &value.file) == Some(&input.file),
         "cross-store replay changed identity",
@@ -986,6 +1002,7 @@ fn dataset_fixture_materializes_reuses_and_replays_across_stores()
 fn dataset_preflight_rejects_all_over_budget_inputs_before_spawning()
 -> Result<(), Box<dyn std::error::Error>> {
     use cli_bench::*;
+    let guard = test_measurement_lock()?;
     let root = assert_fs::TempDir::new()?;
     let store = Store::open(&root.join("store"))?;
     let bindings = dataset_bindings(
@@ -1004,7 +1021,7 @@ fn dataset_preflight_rejects_all_over_budget_inputs_before_spawning()
     second.output = "other.txt".into();
     suite.datasets.push(second);
     suite.limits.max_generated_bytes = 19;
-    let error = prepare_datasets(&suite, &request, &store, &dataset_runner())
+    let error = prepare_datasets(&guard, &suite, &request, &store, &dataset_runner())
         .err()
         .ok_or("aggregate overflow accepted")?;
     require(
@@ -1017,7 +1034,7 @@ fn dataset_preflight_rejects_all_over_budget_inputs_before_spawning()
     )?;
     suite.limits.max_generated_bytes = 20;
     suite.limits.max_generated_file_bytes = 9;
-    let error = prepare_datasets(&suite, &request, &store, &dataset_runner())
+    let error = prepare_datasets(&guard, &suite, &request, &store, &dataset_runner())
         .err()
         .ok_or("file overflow accepted")?;
     require(
@@ -1052,6 +1069,7 @@ fn dataset_faults_keep_diagnostics_and_never_publish_verified_entries()
             "regular",
         ),
     ] {
+        let guard = test_measurement_lock()?;
         let root = assert_fs::TempDir::new()?;
         let store = Store::open(&root.join("store"))?;
         let suite = parse_suite(include_str!("inputs/minimal-suite.toml"))?;
@@ -1061,7 +1079,7 @@ fn dataset_faults_keep_diagnostics_and_never_publish_verified_entries()
             bindings: &bindings,
             expected: None,
         };
-        let error = prepare_datasets(&suite, &request, &store, &dataset_runner())
+        let error = prepare_datasets(&guard, &suite, &request, &store, &dataset_runner())
             .err()
             .ok_or("generator fault accepted")?;
         require(
@@ -1106,6 +1124,7 @@ fn dataset_faults_keep_diagnostics_and_never_publish_verified_entries()
 fn dataset_cached_hash_mismatch_records_expected_and_observed_without_overwrite()
 -> Result<(), Box<dyn std::error::Error>> {
     use cli_bench::*;
+    let guard = test_measurement_lock()?;
     let root = assert_fs::TempDir::new()?;
     let store = Store::open(&root.join("store"))?;
     let suite = parse_suite(include_str!("inputs/minimal-suite.toml"))?;
@@ -1115,7 +1134,7 @@ fn dataset_cached_hash_mismatch_records_expected_and_observed_without_overwrite(
         bindings: &bindings,
         expected: None,
     };
-    let original = prepare_datasets(&suite, &request, &store, &dataset_runner())?;
+    let original = prepare_datasets(&guard, &suite, &request, &store, &dataset_runner())?;
     let input = original.inputs.get("tiny").ok_or("missing input")?;
     let generation = original
         .generations
@@ -1129,7 +1148,7 @@ fn dataset_cached_hash_mismatch_records_expected_and_observed_without_overwrite(
     let original_metadata = std::fs::read(&metadata)?;
     std::fs::write(&input.path, b"WXYZ\nIJKL\n")?;
     require(
-        prepare_datasets(&suite, &request, &store, &dataset_runner()).is_err(),
+        prepare_datasets(&guard, &suite, &request, &store, &dataset_runner()).is_err(),
         "cache corruption accepted",
     )?;
     require(
@@ -1157,6 +1176,7 @@ fn dataset_cached_hash_mismatch_records_expected_and_observed_without_overwrite(
 fn dataset_cache_size_drift_is_rejected_before_hash_verification()
 -> Result<(), Box<dyn std::error::Error>> {
     use cli_bench::*;
+    let guard = test_measurement_lock()?;
     let root = assert_fs::TempDir::new()?;
     let store = Store::open(&root.join("store"))?;
     let suite = parse_suite(include_str!("inputs/minimal-suite.toml"))?;
@@ -1166,10 +1186,10 @@ fn dataset_cache_size_drift_is_rejected_before_hash_verification()
         bindings: &bindings,
         expected: None,
     };
-    let datasets = prepare_datasets(&suite, &request, &store, &dataset_runner())?;
+    let datasets = prepare_datasets(&guard, &suite, &request, &store, &dataset_runner())?;
     let input = datasets.inputs.get("tiny").ok_or("missing fixture")?;
     std::fs::write(&input.path, b"oversized literal fixture")?;
-    let error = prepare_datasets(&suite, &request, &store, &dataset_runner())
+    let error = prepare_datasets(&guard, &suite, &request, &store, &dataset_runner())
         .err()
         .ok_or("cache size drift accepted")?;
     require(
@@ -1190,6 +1210,7 @@ fn dataset_cache_size_drift_is_rejected_before_hash_verification()
 fn dataset_selected_profile_and_bound_generator_are_independent_of_candidate()
 -> Result<(), Box<dyn std::error::Error>> {
     use cli_bench::*;
+    let guard = test_measurement_lock()?;
     let root = assert_fs::TempDir::new()?;
     let store = Store::open(&root.join("store"))?;
     let mut suite = parse_suite(include_str!("inputs/minimal-suite.toml"))?;
@@ -1224,7 +1245,7 @@ fn dataset_selected_profile_and_bound_generator_are_independent_of_candidate()
         bindings: &bindings,
         expected: None,
     };
-    let datasets = prepare_datasets(&suite, &request, &store, &dataset_runner())?;
+    let datasets = prepare_datasets(&guard, &suite, &request, &store, &dataset_runner())?;
     require(
         datasets.inputs.get("tiny").map(|i| i.file.bytes) == Some(10),
         "wrong selected profile",
@@ -1237,6 +1258,7 @@ fn dataset_selected_profile_and_bound_generator_are_independent_of_candidate()
 fn dataset_recipe_and_bound_identity_failures_precede_generator_execution()
 -> Result<(), Box<dyn std::error::Error>> {
     use cli_bench::*;
+    let guard = test_measurement_lock()?;
     let root = assert_fs::TempDir::new()?;
     let store = Store::open(&root.join("store"))?;
     let suite = parse_suite(include_str!("inputs/minimal-suite.toml"))?;
@@ -1246,7 +1268,7 @@ fn dataset_recipe_and_bound_identity_failures_precede_generator_execution()
         bindings: &bindings,
         expected: None,
     };
-    let datasets = prepare_datasets(&suite, &request, &store, &dataset_runner())?;
+    let datasets = prepare_datasets(&guard, &suite, &request, &store, &dataset_runner())?;
     let replay = DatasetPreparation {
         expected: Some(&datasets),
         ..request
@@ -1266,7 +1288,7 @@ fn dataset_recipe_and_bound_identity_failures_precede_generator_execution()
             }
         }
         require(
-            prepare_datasets(&changed, &replay, &store, &dataset_runner()).is_err(),
+            prepare_datasets(&guard, &changed, &replay, &store, &dataset_runner()).is_err(),
             "invalid replay recipe accepted",
         )?;
     }
@@ -1281,13 +1303,13 @@ fn dataset_recipe_and_bound_identity_failures_precede_generator_execution()
         ..replay
     };
     require(
-        prepare_datasets(&suite, &bad_expected, &store, &dataset_runner()).is_err(),
+        prepare_datasets(&guard, &suite, &bad_expected, &store, &dataset_runner()).is_err(),
         "malformed replay argv accepted",
     )?;
     let generator = bindings.generator.as_ref().ok_or("missing generator")?;
     std::fs::write(&generator.path, b"changed generator")?;
     require(
-        prepare_datasets(&suite, &replay, &store, &dataset_runner()).is_err(),
+        prepare_datasets(&guard, &suite, &replay, &store, &dataset_runner()).is_err(),
         "changed generator accepted",
     )?;
     Ok(())
@@ -1297,6 +1319,7 @@ fn dataset_recipe_and_bound_identity_failures_precede_generator_execution()
 fn dataset_path_records_are_checked_before_cache_publication()
 -> Result<(), Box<dyn std::error::Error>> {
     use cli_bench::*;
+    let guard = test_measurement_lock()?;
     let root = assert_fs::TempDir::new()?;
     let store = Store::open(&root.join("store"))?;
     let bindings = dataset_bindings(
@@ -1324,7 +1347,7 @@ fn dataset_path_records_are_checked_before_cache_publication()
         expected: None,
     };
     require(
-        prepare_datasets(&suite, &request, &store, &dataset_runner()).is_err(),
+        prepare_datasets(&guard, &suite, &request, &store, &dataset_runner()).is_err(),
         "escaping generated record accepted",
     )?;
     let entries: Vec<_> =
@@ -1343,6 +1366,7 @@ fn dataset_path_records_are_checked_before_cache_publication()
 fn native_biggie_materializes_tiny_recipes_and_reuses_verified_inputs()
 -> Result<(), Box<dyn std::error::Error>> {
     use cli_bench::*;
+    let guard = test_measurement_lock()?;
     let binary = std::path::PathBuf::from(
         std::env::var_os("CLI_BENCH_BIGGIE").ok_or("set CLI_BENCH_BIGGIE explicitly")?,
     );
@@ -1368,7 +1392,7 @@ fn native_biggie_materializes_tiny_recipes_and_reuses_verified_inputs()
         bindings: &bindings,
         expected: None,
     };
-    let first = prepare_datasets(&suite, &request, &store, &dataset_runner())?;
+    let first = prepare_datasets(&guard, &suite, &request, &store, &dataset_runner())?;
     verify_datasets(&first)?;
     require(
         first
@@ -1379,7 +1403,7 @@ fn native_biggie_materializes_tiny_recipes_and_reuses_verified_inputs()
             == 29,
         "wrong native recipe sizes",
     )?;
-    let second = prepare_datasets(&suite, &request, &store, &dataset_runner())?;
+    let second = prepare_datasets(&guard, &suite, &request, &store, &dataset_runner())?;
     require(
         first.inputs == second.inputs,
         "native cache did not preserve inputs",
@@ -1390,6 +1414,7 @@ fn native_biggie_materializes_tiny_recipes_and_reuses_verified_inputs()
 #[test]
 fn dataset_rejects_output_parent_symlink_replacement() -> Result<(), Box<dyn std::error::Error>> {
     use cli_bench::*;
+    let guard = test_measurement_lock()?;
     let root = assert_fs::TempDir::new()?;
     let store = Store::open(&root.join("store"))?;
     let bindings = dataset_bindings(
@@ -1409,7 +1434,7 @@ printf 'ABCD\nEFGH\n' > "$output""#,
         expected: None,
     };
     require(
-        prepare_datasets(&suite, &request, &store, &dataset_runner()).is_err(),
+        prepare_datasets(&guard, &suite, &request, &store, &dataset_runner()).is_err(),
         "symlink parent output published",
     )?;
     for entry in std::fs::read_dir(store.root().join("datasets"))? {
@@ -1430,7 +1455,7 @@ mod validation_support;
 
 // A downstream timing adapter only accepts the opaque validated capability.
 fn fake_timer(
-    _validated: cli_bench::ValidatedExperiment,
+    _validated: cli_bench::ValidatedExperiment<'_>,
     marker: &std::path::Path,
 ) -> std::io::Result<()> {
     std::fs::write(marker, b"timer invoked")
@@ -1578,6 +1603,8 @@ fn nonzero_expected_status_is_a_value_and_all_findings_are_retained()
         fixture.root.path().join("timed").is_file(),
         "successful capability never reached timer",
     )?;
+    drop(writer);
+    drop(fixture);
     let fixture = validation_support::Fixture::new(
         "printf wrong; printf problem >&2; exit 7",
         "printf shared-bug; exit 9",
@@ -1624,7 +1651,12 @@ fn selected_cases_apply_profile_rules_and_reject_unknown_or_duplicate_ids()
     };
     let mut writer = fixture.store.begin_run(&fixture.suite)?;
     let validated = validate_experiment(
-        prepare_experiment(&request, &fixture.store, &fixture.runner)?,
+        prepare_experiment(
+            &fixture.measurement_lock,
+            &request,
+            &fixture.store,
+            &fixture.runner,
+        )?,
         &mut writer,
         &fixture.runner,
     )?;
@@ -1638,6 +1670,7 @@ fn selected_cases_apply_profile_rules_and_reject_unknown_or_duplicate_ids()
     ] {
         require(
             prepare_experiment(
+                &fixture.measurement_lock,
                 &ExperimentPreparation {
                     selected_cases: &invalid,
                     ..request
@@ -1670,7 +1703,12 @@ fn selected_cases_apply_profile_rules_and_reject_unknown_or_duplicate_ids()
     let mut writer = fixture.store.begin_run(&fixture.suite)?;
     require(
         validate_experiment(
-            prepare_experiment(&request, &fixture.store, &fixture.runner)?,
+            prepare_experiment(
+                &fixture.measurement_lock,
+                &request,
+                &fixture.store,
+                &fixture.runner,
+            )?,
             &mut writer,
             &fixture.runner,
         )
@@ -1691,6 +1729,7 @@ fn declared_sink_changes_and_directory_mode_mismatches_fail_the_gate()
         path: "output".into(),
     };
     failed_gate_never_times(&fixture)?;
+    drop(fixture);
     let mut fixture =
         validation_support::Fixture::new("/bin/mkdir -m 700 \"$1\"", "/bin/mkdir -m 755 \"$1\"")?;
     let case = fixture.suite.cases.first_mut().ok_or("case")?;
@@ -1795,4 +1834,8 @@ fn failed_selected_comparator_stays_in_every_comparison_finding() -> validation_
         "failed selected comparator silently dropped from byte findings",
     )?;
     Ok(())
+}
+
+fn test_measurement_lock() -> Result<cli_bench::MeasurementLock, cli_bench::BenchError> {
+    cli_bench::MeasurementLock::acquire(&std::sync::atomic::AtomicBool::new(false), || Ok(()))
 }

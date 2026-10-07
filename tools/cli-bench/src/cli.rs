@@ -79,13 +79,15 @@ pub fn execute_build(args: &BuildArgs) -> anyhow::Result<std::process::ExitCode>
         sync::{Arc, atomic::AtomicBool},
         time::Duration,
     };
+    let cancellation = Arc::new(AtomicBool::new(false));
+    let measurement_lock = acquire_measurement_lock(&cancellation)?;
     let cwd = std::env::current_dir()?;
     let scratch = AdapterScratch::new()?;
     let environment = build_environment();
     let runner = ProcessRunner::new(ExecutionPolicy {
         timeout: Duration::from_mins(30),
         max_stream_bytes: 268_435_456,
-        cancellation: Arc::new(AtomicBool::new(false)),
+        cancellation,
     });
     let context = AdapterTools {
         cwd: &cwd,
@@ -135,6 +137,7 @@ pub fn execute_build(args: &BuildArgs) -> anyhow::Result<std::process::ExitCode>
     };
     let store = Store::open(&args.data_dir)?;
     let artifact = cli_bench::build_revision(
+        &measurement_lock,
         &BuildRequest {
             repository: cwd.clone(),
             revision,
@@ -158,6 +161,25 @@ pub fn execute_build(args: &BuildArgs) -> anyhow::Result<std::process::ExitCode>
     writeln!(output)?;
     output.flush()?;
     Ok(std::process::ExitCode::SUCCESS)
+}
+
+fn acquire_measurement_lock(
+    cancellation: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> anyhow::Result<cli_bench::MeasurementLock> {
+    use std::io::Write;
+    for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
+        signal_hook::flag::register(signal, std::sync::Arc::clone(cancellation))?;
+    }
+    cli_bench::MeasurementLock::acquire(cancellation, || {
+        let mut diagnostic = std::io::stderr().lock();
+        writeln!(
+            diagnostic,
+            "Waiting for the per-user cli-bench measurement lock..."
+        )?;
+        diagnostic.flush()?;
+        Ok(())
+    })
+    .map_err(Into::into)
 }
 
 fn build_environment() -> std::collections::BTreeMap<String, String> {

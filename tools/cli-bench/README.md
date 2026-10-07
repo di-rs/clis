@@ -6,7 +6,8 @@ An original benchmark harness under development. The current slice provides
 strict suite parsing/validation, immutable evidence/artifact storage for Rust
 callers, bounded child execution, role/profile invocation resolution, and CLI
 help/version/logging, isolated Cargo revision builds, executable binding, and
-verified Biggie dataset preparation.
+verified Biggie dataset preparation, correctness gating, controlled Hyperfine timing,
+and per-user measurement coordination.
 Full run/check execution remains planned in the linked design.
 
 ## Quick start
@@ -29,10 +30,10 @@ color policy or benchmark output in this slice.
 
 ## Evidence and limits
 
-Source-local model/suite/store/artifact/host/process/invocation/build tests, real child lifecycle
+Source-local model/suite/store/artifact/host/process/invocation/build/timing/lock tests, real child lifecycle
 tests in `tests/process.rs`, `tests/cli.rs`, and the public
 consumer lifecycle in `tests/library.rs` cover the implemented interface. Native macOS 27.0.1 arm64 checks are recorded in the task report; Linux
-has not been run. No performance measurement or GNU/BSD compatibility claim is
+has not been run. No performance conclusion or GNU/BSD compatibility claim is
 made for this custom harness. Full benchmark execution remains pending.
 
 ## Rust library
@@ -97,8 +98,8 @@ execution budget.
 Generator argv checks explicit deterministic seed/pattern/schedule forms and one
 output token. Biggie's complete argument validation is deferred to execution;
 `bind_roles` resolves explicit binaries and the generator; `prepare_datasets`
-executes the bound generator's recipes. Comparator execution remains separate. Named correctness targets are modeled now; their availability and actual
-assertions are checked when execution bindings are implemented. Directory effects
+executes the bound generator's recipes. Comparator execution remains separate. Named correctness targets and their availability/actual assertions are checked by
+`validate_experiment`. Directory effects
 currently model directories only; file/symlink/content effects require an extension.
 
 ## Text and presentation
@@ -140,7 +141,7 @@ then flushes evidence and its checksum inventory before publishing terminal stat
 I/O failure retains an incomplete status; no empty successful result is substituted.
 `record_failure` retains failed/incomplete outcomes with unresolved identities absent.
 `Store::load_run` verifies finalized evidence for offline consumers without executing
-it. The outcome record is a storage foundation; timing/RSS/analysis records and
+it. The outcome record is a storage foundation; RSS/analysis records and
 actual benchmark execution remain pending.
 
 `begin_tagged_run` immediately records an attempt under `experiments/ID/` with
@@ -157,8 +158,9 @@ starting SHA or known input drift fails and keeps the attempt reference.
 `collect_host` performs bounded native OS/CPU/RAM probes, exposes unavailable fields
 explicitly, and copies only allowlisted/redacted child settings supplied by the
 caller. It never enumerates the environment or mutates umask. Store transaction and
-per-run locks protect evidence operations; the host-wide measurement-session lock
-belongs to the future execution layer. Do not infer host idleness from these locks.
+per-run locks protect evidence operations; the per-user measurement-session lock
+separately coordinates resource-consuming operations. Do not infer host idleness
+from these locks.
 
 Storage operations take time proportional to copied/verified evidence. No performance
 claim is made for this foundation. Native Linux execution is still unverified.
@@ -319,8 +321,8 @@ user-home/cache/PATH settings. Legacy or caller-supplied records may have no has
 verified builds always supply one matching their Cargo evidence.
 
 `resolve_revision(repository, reference, &git_context, &runner)`,
-`build_revision(&request, &store, &runner)` and
-`bind_roles(&request, &suite, &store, &runner)` are public Rust operations. All
+`build_revision(&lock, &request, &store, &runner)` and
+`bind_roles(&lock, &request, &suite, &store, &runner)` are public Rust operations. All
 execution paths are absolute UTF-8; callers supply an existing scratch directory
 outside the repository, Git identity, frozen Cargo/rustc identities and child
 settings. These APIs use the supplied runner's deadline/cancellation/stream limits.
@@ -337,7 +339,8 @@ or `-a/--candidate`, previous `-b/--previous-ref` or `-p/--previous`, explicit
 They require a candidate plus comparator and reject ref/path conflicts. Valid
 selections return operational failure explaining that execution is not implemented;
 they do not claim to produce benchmark evidence. Other planned selection flags,
-CLI preparation wiring, correctness orchestration and measurements remain later work.
+CLI preparation/correctness/timing orchestration remains later work; the library
+operations are available independently.
 
 Tests use tiny temporary Git/Cargo repositories and fake Cargo fault cases; they
 generate no benchmark data. Native macOS execution is verified in the task report;
@@ -345,7 +348,7 @@ Linux remains unverified. No performance claim is made for build orchestration.
 
 ## Verified dataset preparation
 
-`prepare_datasets(&suite, &DatasetPreparation { profile, bindings, expected },
+`prepare_datasets(&lock, &suite, &DatasetPreparation { profile, bindings, expected },
 &store, &runner)` uses the explicit generator in `RoleBindings`, separately from
 all measured roles. The caller supplies isolated HOME/config directories and
 allowlisted child settings. Suite generator settings and actual bound build/content
@@ -400,7 +403,7 @@ Native macOS execution was checked for this slice; Linux remains unverified.
 
 ## Correctness gate and reusable reset
 
-`prepare_experiment(&ExperimentPreparation, &Store, &ProcessRunner)` accepts one
+`prepare_experiment(&MeasurementLock, &ExperimentPreparation, &Store, &ProcessRunner)` accepts one
 explicit suite, profile, validated `CaseId` selection, role/build `RunRequest` and
 optional immutable replay datasets. An empty selection includes every declared
 case; duplicate or unknown IDs fail. Preparation binds executables, generates and
@@ -431,7 +434,7 @@ and returns the only public reset capability. `reset_case(case, datasets, scratc
 verifies input identities, ownership and the entire existing tree before deleting
 entries, restores the original workload-root permissions, and recreates/verifies
 the exact initial directory set (including required ancestors). It supports both
-absent and existing-directory mkdir scenarios during preflight and future samples.
+absent and existing-directory mkdir scenarios during preflight and samples.
 Markers stay outside the workload tree. No automatic scratch cleanup or cache
 eviction is performed. This is cooperative containment, not a race-proof sandbox.
 
@@ -440,5 +443,68 @@ The report retains the existing host umask observation, including explicit
 unavailability on macOS, and compares actual requested mode bits. It does not infer
 umask from permissions or claim that an unavailable value was verified. Native
 macOS regression tests cover this library workflow; Linux remains unverified.
-Timing, RSS, host measurement locks and CLI run/check wiring remain later work.
+RSS and CLI run/check wiring remain later work.
 No performance claim is made for preparation, verification or reset.
+
+
+## Controlled timing and measurement coordination
+
+`MeasurementLock::acquire(&cancellation, on_wait)` obtains one OS-backed lock per
+user account, shared across repositories and data directories. Its fixed
+`/tmp/cli-bench-<effective-uid>/measurement.lock` lives in a private owner-only
+directory. macOS's system `/tmp` alias is resolved before creating that directory;
+symlinks, wrong ownership and unsafe permissions on harness-owned entries are
+rejected. The file remains in place after release, including abnormal process
+exit. This excludes only cooperating cli-bench sessions for the same account;
+ordinary Cargo commands and unrelated system workloads remain outside it.
+
+The callback runs once at first contention and may return a diagnostic I/O error.
+Waiting polls caller cancellation every 10 ms, without consuming a build/sample
+deadline. `wait_duration()` exposes the separate waiting duration. Build captures
+and validation runs retain it in `measurement-lock.json`. The CLI `build` command
+acquires before tool discovery/preparation, reports waiting on stderr, and maps
+SIGINT/SIGTERM to its caller-owned cancellation token. Libraries never install
+signal handlers. Offline Store/report operations do not acquire this lock.
+
+Resource-consuming `build_revision`, `bind_roles`, `prepare_datasets`, and
+`prepare_experiment` require `&MeasurementLock` as their first argument.
+`PreparedExperiment<'lock>` and `ValidatedExperiment<'lock>` borrow the held guard,
+so it cannot be dropped before correctness, warmups, timing and final checks.
+The low-level `ProcessRunner` remains a general explicit execution backend.
+
+`timing_schedule(&ValidatedExperiment)` returns exact case/batch/role order. Full
+uses three checked warmups and twenty samples for each present role in each of
+forward (reference, previous, candidate) and reverse batches: forty samples per
+role/case. Smoke uses one warmup and two samples in each batch and supports no
+performance conclusion. Each ordinal is one-based within role/batch/kind.
+
+`measure_timing(&validated, &mut writer, &runner, &engine)` requires an explicit
+`BoundTool` for Hyperfine. Discovery belongs to the caller. It verifies the bound
+hash and actual version output, accepting only Hyperfine 1.20.0. Every observation
+uses a fresh engine process with `--runs 1 --warmup 0 --shell=none`, explicit input
+and output boundaries, a unique JSON export, and shell-words encoded argv. Direct
+expected nonzero cases alone get `--ignore-failure=E`; the single exported exit
+status must equal E exactly, even though Hyperfine itself also accepts zero.
+Missing/null/signal status, extra observations, wrong command identity and
+nonfinite/nonpositive time fail. Unsupported non-UTF-8 paths fail before spawn.
+
+Preparation, reset and captures occur outside the command's reported time.
+Warmups use the checked runner directly. Each entire engine process group is
+bounded by the smaller of the caller deadline and suite sample deadline. Declared
+mutation effects are checked after each invocation; the exact correctness gate is
+repeated at each case's end and immutable identities are checked again. The public
+`final_case_check` method supports later measurement phases while retaining the
+same held-lock capability. Failure produces no accepted aggregate sample set.
+
+Raw schedules, command identities/argv, each JSON export, engine stdout/stderr
+(including warnings), native outcomes and individual samples remain in
+`raw/timing/`; final reports retain captures and checks per case. Sample raw paths
+are relative to the run root. A second measurement call cannot overwrite this
+run's timing evidence. Single-sample Hyperfine summaries are raw observations;
+overall statistics and performance analysis remain later work.
+
+Ordinary tests use tiny original process fixtures without requiring Hyperfine.
+The separately ignored native adapter test is documented in
+[fixture provenance](tests/inputs/README.md); it tests expected-zero/one, pipe
+boundaries and literal argv. Native macOS passed; Linux remains unverified.
+These adapter probes are plumbing evidence only and make no performance claim.

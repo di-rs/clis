@@ -14,6 +14,7 @@ pub struct DatasetPreparation<'a> {
 /// Rejects invalid recipes, quota overflow, changed identities, generation failures,
 /// unsafe outputs and shape/hash mismatches; failed diagnostics remain in the store.
 pub fn prepare_datasets(
+    _measurement_lock: &crate::MeasurementLock,
     suite: &crate::Suite,
     request: &DatasetPreparation<'_>,
     store: &crate::Store,

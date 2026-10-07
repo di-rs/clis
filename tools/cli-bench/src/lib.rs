@@ -46,3 +46,12 @@ pub use check::{
     ExperimentPreparation, PreparedExperiment, ValidatedExperiment, ValidationFinding,
     ValidationObservation, ValidationReport, prepare_experiment, validate_experiment,
 };
+
+mod timing;
+pub use timing::{
+    TimingBatch, TimingKind, TimingObservation, TimingSample, TimingStep, measure_timing,
+    parse_hyperfine_sample, timing_schedule,
+};
+
+mod lock;
+pub use lock::MeasurementLock;

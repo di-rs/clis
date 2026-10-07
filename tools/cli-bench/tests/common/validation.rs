@@ -8,6 +8,7 @@ use std::{
 };
 pub type TestResult = Result<(), Box<dyn std::error::Error>>;
 pub struct Fixture {
+    pub measurement_lock: MeasurementLock,
     pub root: assert_fs::TempDir,
     pub suite: Suite,
     pub request: RunRequest,
@@ -22,6 +23,7 @@ pub fn script(root: &Path, name: &str, body: &str) -> Result<PathBuf, BenchError
 }
 impl Fixture {
     pub fn new(candidate: &str, previous: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let measurement_lock = MeasurementLock::acquire(&AtomicBool::new(false), || Ok(()))?;
         let root = assert_fs::TempDir::new()?;
         let base = fs::canonicalize(root.path())?;
         let suite = parse_suite(include_str!("../inputs/minimal-suite.toml"))?;
@@ -54,6 +56,7 @@ impl Fixture {
             cancellation: Arc::new(AtomicBool::new(false)),
         });
         Ok(Self {
+            measurement_lock,
             root,
             suite,
             request,
@@ -61,8 +64,9 @@ impl Fixture {
             runner,
         })
     }
-    pub fn prepare(&self) -> Result<PreparedExperiment, BenchError> {
+    pub fn prepare(&self) -> Result<PreparedExperiment<'_>, BenchError> {
         prepare_experiment(
+            &self.measurement_lock,
             &ExperimentPreparation {
                 run: &self.request,
                 suite: &self.suite,

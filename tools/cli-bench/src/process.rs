@@ -100,6 +100,12 @@ impl ProcessRunner {
     pub const fn new(policy: ExecutionPolicy) -> Self {
         Self { policy }
     }
+    pub(crate) fn bounded(&self, timeout: Duration, max_stream_bytes: u64) -> Self {
+        let mut policy = self.policy.clone();
+        policy.timeout = policy.timeout.min(timeout);
+        policy.max_stream_bytes = policy.max_stream_bytes.min(max_stream_bytes);
+        Self::new(policy)
+    }
     /// Execute a command, capturing with fixed-size buffers and enforcing its limits.
     ///
     /// # Errors
