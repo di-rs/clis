@@ -146,6 +146,8 @@ def decode(raw):
 
 
 def tree_bytes(root, limit):
+    if not stat.S_ISDIR(root.lstat().st_mode):
+        raise ValueError('non-directory or symlink evidence root')
     total = 0
     for path in root.rglob('*'):
         mode = path.lstat().st_mode
@@ -163,6 +165,47 @@ def failure(stage, message, code=None):
     return {'stage': stage, 'message': message[:1024], 'exit_code': code}
 
 
+def bounded_regular_file(path, limit):
+    if not stat.S_ISREG(path.lstat().st_mode):
+        raise ValueError('nonregular inventory member')
+    with path.open('rb') as source:
+        raw = source.read(limit + 1)
+    if len(raw) > limit:
+        raise ValueError('inventory member exceeds byte bound')
+    return raw
+
+
+def run_inventory(root):
+    """Find at most three safe local run paths without ingesting history text.
+
+    This inventory only chooses CLI export inputs. The Rust exporter still
+    verifies each sealed bundle before copying any evidence.
+    """
+    runs = root / 'data' / 'runs'
+    inventory = {package: [] for package in PACKAGES}
+    for directory in (root / 'data', runs):
+        if not directory.exists() and not directory.is_symlink():
+            return inventory
+        if not stat.S_ISDIR(directory.lstat().st_mode):
+            raise ValueError('non-directory or symlink inventory directory')
+    for count, run in enumerate(runs.iterdir()):
+        if count >= 3:
+            raise ValueError('sealed-run inventory exceeds three runs')
+        if not stat.S_ISDIR(run.lstat().st_mode):
+            raise ValueError('non-directory or symlink run directory')
+        if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', run.name):
+            raise ValueError('invalid inventory run identifier')
+        manifest = read_json(bounded_regular_file(run / 'manifest.json', PUBLICATION_LIMIT))
+        if not isinstance(manifest, dict) or manifest.get('run_id') != run.name:
+            raise ValueError('inventory manifest/run path mismatch')
+        suite = tomllib.loads(bounded_regular_file(run / 'resolved-suite.toml', 8 * 1024 * 1024).decode())
+        package = suite.get('package')
+        if package not in PACKAGES or suite.get('id') != package:
+            raise ValueError('inventory suite package/id mismatch')
+        inventory[package].append(run)
+    return inventory
+
+
 def finalize(root, cli, identity, profile, platform, setup_stage):
     """Project all suites, preserving failures and small metadata if export fails."""
     value = {'schema_version': 1, 'repository': identity['repository'], 'run_id': identity['run_id'],
@@ -178,6 +221,14 @@ def finalize(root, cli, identity, profile, platform, setup_stage):
     full = root / 'full'
     full.mkdir(parents=True, exist_ok=True)
     used = tree_bytes(full, EVIDENCE_LIMIT) + PUBLICATION_LIMIT
+    projection_errors = []
+    inventory_ok = True
+    try:
+        inventory = run_inventory(root)
+    except (ValueError, OSError) as error:
+        inventory_ok = False
+        inventory = {package: [] for package in PACKAGES}
+        projection_errors.append(f'sealed-run inventory unavailable: {str(error)[:512]}')
     for package in PACKAGES:
         entry = {'package': package, 'records': [], 'failure': None}
         status_path = root / 'status' / f'{package}.json'
@@ -185,33 +236,39 @@ def finalize(root, cli, identity, profile, platform, setup_stage):
             entry['failure'] = read_json(status_path.read_bytes())
         else:
             entry['failure'] = failure(setup_stage, 'No completed measurement command; inspect workflow setup/build logs.')
-        if cli.is_file() and (root / 'data' / 'runs').is_dir():
+        if inventory_ok and cli.is_file() and (root / 'data' / 'runs').is_dir():
             try:
-                # Rust loads/verifies sealed evidence and performs its sole history projection.
+                # Rust remains the sole history projector; its output is bounded
+                # independently of the metadata inventory used for full export.
                 projected_path = root / f'{package}-history.json'
                 with projected_path.open('wb') as projected:
                     subprocess.run([str(cli), 'history', '-d', str(root / 'data' / 'runs'), '-s', package, '-f', 'json'],
                                    stdout=projected, stderr=subprocess.PIPE, timeout=120, check=True)
                 with projected_path.open('rb') as projected:
                     entry['records'] = read_json(projected.read(PUBLICATION_LIMIT + 1))
+                ids = [record['publication']['manifest']['run_id'] for record in entry['records']]
+                if set(ids) != {run.name for run in inventory[package]}:
+                    raise ValueError('projection run IDs differ from safe inventory')
                 if not entry['records'] and entry['failure'] is None:
-                    entry['failure'] = failure('projection', 'Successful command did not produce a sealed run.')
-                for record in entry['records']:
-                    run_id = record['publication']['manifest']['run_id']
-                    if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', run_id):
-                        raise ValueError('invalid local run identifier')
-                    run = root / 'data' / 'runs' / run_id
+                    raise ValueError('Successful command did not produce a sealed run.')
+            except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError) as error:
+                projection_errors.append(f'{package}: compact projection unavailable: {str(error)[:512]}')
+            # Full evidence is independent: a failed/oversized compact projection
+            # must not prevent the exporter from verifying available sealed runs.
+            for run in inventory[package]:
+                try:
                     (root / 'exports').mkdir(exist_ok=True)
-                    destination = root / 'exports' / package
+                    name = package if len(inventory[package]) == 1 else f'{package}-{run.name}'
+                    destination = root / 'exports' / name
                     subprocess.run([str(cli), 'export', '-i', str(run), '-o', str(destination)],
                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=120, check=True)
                     size = tree_bytes(destination, EVIDENCE_LIMIT - used)
-                    shutil.copytree(destination, full / package)
+                    shutil.copytree(destination, full / name)
                     used += size
-            except (ValueError, KeyError, OSError, subprocess.SubprocessError) as error:
-                value['omissions'].append(f'{package}: full export/projection unavailable: {str(error)[:512]}')
-                if entry['failure'] is None:
-                    entry['failure'] = failure('artifact', 'Full export or projection failed; see omissions.')
+                except (ValueError, OSError, subprocess.SubprocessError) as error:
+                    value['omissions'].append(f'{package}: full export unavailable for {run.name}: {str(error)[:512]}')
+                    if entry['failure'] is None:
+                        entry['failure'] = failure('artifact', 'Full export failed; see omissions.')
         value['suites'].append(entry)
     for log in sorted((root / 'logs').glob('*')):
         if not log.is_file() or log.is_symlink():
@@ -230,12 +287,14 @@ def finalize(root, cli, identity, profile, platform, setup_stage):
     output = root / 'publication'
     output.mkdir(exist_ok=True)
     try:
+        if projection_errors:
+            value['omissions'].extend(projection_errors)
+            raise ValueError('; '.join(projection_errors))
         raw = encode(value)
     except ValueError as error:
         # Preserve a bounded failure, never partial observations presented as success.
         for entry in value['suites']:
-            ids = [record.get('publication', {}).get('manifest', {}).get('run_id', 'unknown')
-                   for record in entry['records']]
+            ids = [run.name for run in inventory[entry['package']]]
             value['omissions'].append(f"{entry['package']}: publication history omitted ({', '.join(str(i)[:128] for i in ids[:4]) or 'no run'}): {str(error)[:256]}")
             entry['records'] = []
             entry['failure'] = failure('projection', 'Publication validation/aggregate cap failed; original history unavailable in compact transport.')

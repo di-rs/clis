@@ -69,7 +69,14 @@ for publication. CI exports omit inputs and binaries, retain other sealed eviden
 and retain up to 1 MiB per command log. Original local resources are not deleted.
 Full evidence is untrusted and replay still needs exact original executables.
 
-If combined history exceeds 16 MiB or projection validation fails, fail the job
+Full export uses a separate bounded local inventory (at most three regular run
+directories, matching manifest run IDs and package/suite IDs). Inventory metadata
+reads have fixed byte limits and reject symlinks. The existing Rust exporter
+still verifies each sealed bundle. An oversized individual history response or
+failed history command therefore cannot skip available safe run paths or their
+omitted-ID diagnostics.
+
+If individual or combined history exceeds 16 MiB or projection validation fails, fail the job
 and emit a small **projection-failure envelope**: zero records, explicit failure
 for every suite, and omitted run IDs/reason in `omissions`. Retain the available
 full bundles independently. Never silently truncate suite text or observations,
