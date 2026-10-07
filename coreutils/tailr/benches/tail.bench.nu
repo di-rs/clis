@@ -1,7 +1,11 @@
 #!/usr/bin/env nu
-# Forward the documented Python runner arguments, including absolute binaries.
-def --wrapped main [...args: string] {
-    let root = ($env.FILE_PWD | path join "../../.." | path expand)
-    ^python3 ($root | path join "scripts/benchmark_tail.py") ...$args
-    if $env.LAST_EXIT_CODE != 0 { exit $env.LAST_EXIT_CODE }
-}
+
+let input = "./tailr/benches/data/1M.txt"
+let reference = "tail"
+let candidate = "target/release/tailr"
+
+^hyperfine -i -L prg $"($reference),($candidate)" $"{{prg}} ($input) > /dev/null"  
+^hyperfine -i -L prg $"($reference),($candidate)" $"{{prg}} -n 100000 ($input) > /dev/null"
+
+^hyperfine -i -L prg $"($reference),($candidate)" $"{{prg}} -c 100 ($input) > /dev/null"
+^hyperfine -i -L prg $"($reference),($candidate)" $"{{prg}} -c 1000000 ($input) > /dev/null"

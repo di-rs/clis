@@ -2,5 +2,5 @@
 extend-exclude = ["**/tests/inputs/**", "**/tests/expected/**", "**/benches/data/**", "docs/superpowers/**"]
 
 [default.extend-identifiers]
-# Recorded benchmark commit identity, not the English misspelling "abd".
+# Existing commit identifier, not the English misspelling "abd".
 c646abd = "c646abd"

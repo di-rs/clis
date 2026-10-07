@@ -5,13 +5,23 @@ fuzz dependencies to production members. Use the repository's dated nightly,
 its rust-src component and cargo-fuzz 0.13.2:
 
 ```sh
-bash scripts/fuzz.sh parsu_xml 15
-bash scripts/fuzz.sh tail_bytes 15
+cargo fetch --locked --manifest-path fuzz/Cargo.toml
+host_target=$(rustc -vV | sed -n 's/^host: //p')
+export CARGO_NET_OFFLINE=true
+cargo fuzz build parsu_xml --target "$host_target"
+git diff --exit-code -- Cargo.lock fuzz/Cargo.lock
+cargo fuzz run parsu_xml fuzz/corpus/parsu_xml --target "$host_target" -- -runs=0 -max_len=4096 -timeout=5 -rss_limit_mb=1024
+mkdir -p fuzz/runs/parsu_xml/corpus
+cp -R fuzz/corpus/parsu_xml/. fuzz/runs/parsu_xml/corpus/
+cargo fuzz run parsu_xml fuzz/runs/parsu_xml/corpus --target "$host_target" -- -max_total_time=15 -max_len=4096 -timeout=5 -rss_limit_mb=1024
+git diff --exit-code -- Cargo.lock fuzz/Cargo.lock
 ```
 
-Run from the repository root with cargo-fuzz on PATH. The wrapper locks Cargo's
-build/metadata calls (cargo-fuzz itself has no `--locked` flag), replays reviewed
-seeds, then runs mutations for the selected time. It also rejects lockfile changes.
+Run from the repository root with cargo-fuzz on PATH. Replace `parsu_xml` with
+`tail_bytes` to exercise the other target. Cargo-fuzz 0.13.2 has no `--locked`
+flag: fetch the committed graph with Cargo, build/run offline, and reject any
+lockfile change before accepting the result. CI shows each command directly and
+checks the lockfiles after building, replaying seeds and running mutations.
 Inputs are limited to 4096 bytes, five seconds per input and 1024 MiB RSS. These
 are resource bounds, not completeness or panic-freedom guarantees for larger inputs.
 

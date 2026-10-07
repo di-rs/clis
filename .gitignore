@@ -1,8 +1,5 @@
 /target
 /docs/superpowers/plans/
 
-# Python policy-check bytecode.
-__pycache__/
-
 /tests/consumers/target/
 /utils/comp_macro/wip/

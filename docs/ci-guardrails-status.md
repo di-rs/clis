@@ -1,35 +1,40 @@
-# Guardrail implementation and evidence
+# Guardrail verification
 
-[Contributor commands](../CONTRIBUTING.md#checks) · [Assessment](ci-guardrails.md)
+[Contributor commands](../CONTRIBUTING.md#checks) · [Guardrail scope](ci-guardrails.md)
 
-This rollout starts at `b3b80d2` and excludes release publication/packaging, SBOM
-and provenance. Passing these checks does not certify GNU parity or all north-star
-requirements. Linux and macOS are runtime targets; stable/MSRV and Windows are
-not support promises.
+The branch includes master `0d8caa8`. The Rust tree passes 777 workspace tests,
+nine doctests, strict Clippy/rustdoc, Biggie's CSV feature combinations and the
+separately locked consumer. The macro diagnostics fix rejects incomplete trailing
+clauses that were previously accepted. Dependency audits cover 226 root, 58
+consumer and 61 fuzz packages.
 
-| Guardrail | Command/check | Evidence and scope |
-| --- | --- | --- |
-| Dated compiler, locked graph, unsafe prohibition | `quality`; rust-toolchain/Cargo/prek configuration | Native [first CI run](https://github.com/di-rs/clis/actions/runs/37440893625) passes. Unsafe test member accepted before policy, rejected afterwards; safe control passes. Dependencies are outside the first-party unsafe guarantee. |
-| Test timeout and both platforms | `tests (linux)`, `tests (macos)` | First CI run passes. Local baseline 737 tests and three doctests; a 180-second hanging probe was terminated after 120 seconds. JUnit retained 14 days. |
-| Package isolation and features | `packages`; cargo-hack, `scripts/check_features.py` | All 21 packages pass independently. Biggie now exposes optional CSV; its three feature configurations pass after merging `0d8caa8`. Four detector/exit-propagation tests pass. |
-| Merge enforcement | Repository ruleset `24529961` | Read-back confirms active `master` target, PR/current-base/all ten observed Actions checks/resolved conversations and force-push/deletion protection, with empty bypass list. A draft PR alone does not prove ready-to-merge eligibility. |
-| Dependency policy | `dependencies`; `bash scripts/check-dependencies.sh` | Refreshed audit: 217 dependencies, no findings. License/source negative probes fail; unavailable advisory source fails. First-party MIT metadata filled in; two unused dev-dependencies removed; yanked chacha20 updated to 0.10.2. Duplicate versions are reported, not universally banned. |
-| Metadata, links, spelling | `docs-policy` | [Merged CI](https://github.com/di-rs/clis/actions/runs/37498819662) passes, including docs-policy. Eight Python policy tests pass; all local Markdown links pass and a broken anchor fails. Recorded benchmark SHA is an exact spelling exception. Remote links are weekly evidence. |
-| Security updates | Dependabot setting/configuration | Security updates enabled and read back; existing secret scanning and push protection retained. |
+[Native CI](https://github.com/di-rs/clis/actions/runs/37499609165) and
+[both fuzz jobs](https://github.com/di-rs/clis/actions/runs/37499609222) passed
+before the configuration simplification. This revision removes the repository
+script layer; equivalent Cargo and security-tool commands are visible in CI and
+prek configuration. Zizmor remains required in CI and gains a local hook.
+The updated workflow run must pass before treating the simplified wiring as
+verified remotely.
 
-| Domain/API and macro diagnostics | `quality`, `packages`, native tests | biggie/tailr library guards and an independently locked consumer pass. Four new tail I/O tests and four compile-fail fixtures pass. Malformed trailing macro clauses were wrongly accepted and are now rejected. Merged default/all-feature suites: 777 tests and nine doctests. Before the Biggie merge, optimized-profile testing passed 742 tests and three doctests. |
-| Security and runtime probes | CodeQL, weekly maintenance | Both [CodeQL Rust/Actions analyses](https://github.com/di-rs/clis/actions/runs/37496873201) pass on the pre-merge guardrail commit. Native targeted Miri: 12 parsu and four tail tests pass. Coverage collected from 742 tests, including library and CLI files; no coverage floor. |
-| Fuzzing | Required `fuzz (parsu_xml)` and `fuzz (tail_bytes)` | [Both Linux fuzz jobs](https://github.com/di-rs/clis/actions/runs/37498819633) pass on the merged commit, with uploaded corpus/log artifacts. Native macOS 15-second smoke: 8,246,664 tail and 1,530,376 XML executions without a crash. Separate graph audited; libFuzzer 0.4.13 has a scoped NCSA exception. Locked Cargo child commands and lockfile comparisons guard resolution. |
-| Live GNU references | Weekly/manual compatibility | 97/97 scoped tail cases match GNU Coreutils 9.12 on macOS. Binary streams, statuses, failure evidence and fixture provenance are retained. Eight failure-path tests pass. Other utilities are outside this matrix. |
-| Benchmarks | Weekly/manual benchmark workflow | Five runner tests pass, including wrong-output rejection and killing timed-out descendants. Native full timing passes correctness and retains 180 samples; merged Biggie passes smoke. Existing seekable last-lines code remains about 13 times slower than GNU in the exploratory run; collection does not accept that gap. Remote scheduled evidence remains pending. |
+On 2026-10-07 the direct commands passed locally: all 777 tests and nine doctests,
+strict Clippy, the standalone consumer, both 15-second fuzz runs with unchanged
+lockfiles, refreshed audits of all three graphs, cargo-deny/machete, actionlint,
+zizmor, local links and spelling. The `zizmor` and `domain-clippy` hooks also pass.
 
-Root, consumer and fuzz graphs pass refreshed audit/license/source checks and
-unused-dependency analysis (226, 58 and 61 locked packages respectively). All 23 Python harness/policy tests pass. Scheduled jobs require an actual recorded run
-before being described as operational. The redundant historical `parsu/Cargo.lock`
-is not the active workspace graph. Existing findr/lsr/pwdr library-boundary debt
-and Kara's nightly requirement remain separate migrations.
+Earlier deliberate probes rejected first-party unsafe code, forbidden licenses
+and registries, unavailable advisory data and a broken documentation anchor.
+A hanging test was terminated at the configured 120-second limit.
+Targeted Miri passed 12 parsu and four tail tests. The earlier optimized and
+coverage run passed 742 tests before master's later Biggie additions; that
+count is not relabeled as evidence for the newer tree.
 
-The three newly scheduled workflows (maintenance, compatibility and benchmarks)
-returned HTTP 404 on manual dispatch before default-branch registration. They
-remain awaiting merge and real native runs. The PR merge is a separate decision;
-merging master into this branch does not activate default-branch schedules.
+Master ruleset `24529961` was read back with ten required Actions checks,
+current-base enforcement and no bypass actors. A draft PR alone does not prove
+the failed/missing-check merge-state scenario. Dependabot security updates are
+enabled; secret scanning and push protection remain enabled.
+
+Maintenance workflow dispatch previously returned HTTP 404 before registration
+on the default branch. Its scheduled native runs remain pending merge and actual
+execution. Stable/beta readiness probes do not establish an MSRV guarantee.
+Existing findr/lsr/pwdr boundary debt and Kara's nightly requirement remain separate
+migrations. Release work is excluded.

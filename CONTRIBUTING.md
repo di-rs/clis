@@ -37,14 +37,14 @@ Start with the affected package, using `catr` as an example:
 ```sh
 cargo nextest run --locked -p catr
 cargo test --locked -p catr --doc
-cargo clippy --locked -p catr --all-targets --all-features -- -D warnings
+cargo clippy --locked -p catr --all-targets --all-features -- -D warnings -F unsafe_code
 ```
 
 The doctest command requires a library target. Then, for Rust changes:
 
 ```sh
 cargo fmt --all -- --check
-cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings -F unsafe_code
 cargo nextest run --locked --workspace --profile ci
 cargo test --locked --workspace --doc
 ```
@@ -79,17 +79,19 @@ PRs and pushes to `master` run `quality`, native `tests (linux)` and
 Compiler/test jobs deny warnings. `quality` checks formatting, Clippy and
 workspace rustdoc; nextest and doctests run separately on each platform.
 `packages` uses cargo-hack 0.6.45 to compile each member independently and check
-its feature powerset. `python3 scripts/check_features.py` reports member features
-and runs full-feature nextest/doctests if any exist; currently none do.
+its feature powerset, then runs full-feature nextest and doctests directly.
 Mutually exclusive features need a documented valid-combination policy before
 introduction. Required workflows have no path filters.
 
-Run policy-script tests with `python3 -m unittest discover -s scripts/tests`
-(Python 3.11 or newer). Workflow syntax/security checks use actionlint 1.7.12 and
-`zizmor --offline --no-progress .github/workflows` (1.30.1).
+Workflow syntax/security checks use actionlint 1.7.12 and
+[zizmor](https://github.com/zizmorcore/zizmor) 1.30.1. Install zizmor with
+`cargo install zizmor --version 1.30.1 --locked`, then run
+`prek run zizmor --all-files` or `zizmor --offline --no-progress .github/workflows`.
+The local hook checks workflow edits; CI runs it as part of the required
+`workflows` job. Commands live in the workflow and hook configuration.
 
-`docs-policy` checks manifest lint/license inheritance, Python policy tests, local
-Markdown links/anchors (lychee 0.24.2) and prose spelling (typos 1.50.3).
+`docs-policy` checks local Markdown links/anchors (lychee 0.24.2) and prose spelling
+(typos 1.50.3). Cargo/Clippy enforce compiler lints; cargo-deny checks licenses.
 Use `git ls-files -z -- '*.md' | xargs -0 lychee --offline --include-fragments=anchor-only --`
 and `git ls-files -- '*.md' | typos --force-exclude --file-list -` locally.
 Fixtures and generated data keep their intentional bytes; they are excluded from
@@ -97,8 +99,8 @@ spelling. Remote links run weekly with bounded retries and remain non-required.
 The [guardrail evidence record](docs/ci-guardrails-status.md) distinguishes
 implemented checks, verified runs and remaining limitations.
 
-The `domain-clippy` hook runs `bash scripts/check-domain.sh` for biggie/tailr
-library targets. Its separate Clippy configuration prohibits global streams,
+The `domain-clippy` hook selects `.config/domain-clippy` for biggie/tailr library
+targets with `CLIPPY_CONF_DIR`. Its configuration prohibits global streams,
 process arguments/environment and diagnostic initialization without applying
 those domain restrictions to legitimate CLI adapters. Other workspace lints
 still apply to all targets. `tests/consumers` is a separately locked workspace:
@@ -109,10 +111,13 @@ diagnostics before accepting new snapshots during toolchain updates.
 
 ## Dependency policy
 
-Run `bash scripts/check-dependencies.sh` with cargo-audit 0.22.2,
-cargo-deny 0.20.2 and cargo-machete 0.9.2. It refreshes RustSec into a fresh
-temporary database, fails on vulnerabilities or yanked crates, and checks the
-root and any consumer/fuzz lockfiles. Network/database failures fail the check.
+Use cargo-audit 0.22.2, cargo-deny 0.20.2 and cargo-machete 0.9.2. For each of
+`Cargo.toml`, `tests/consumers/Cargo.toml` and `fuzz/Cargo.toml`, run
+`cargo audit --file PATH/TO/Cargo.lock --deny yanked` and
+`cargo deny --locked --manifest-path PATH/TO/Cargo.toml --config "$PWD/deny.toml" check licenses sources bans`.
+Then run `cargo machete --with-metadata`. The required and scheduled workflows
+show these commands directly and refresh RustSec into a fresh runner directory.
+Vulnerabilities, yanked crates and network/database failures fail the check.
 `deny.toml` permits the observed MIT, Apache-2.0 and Unicode-3.0 license options,
 rejects unknown registries/Git sources, and reports duplicate versions for review.
 Any exception needs an exact crate/version, reason and removal condition.
@@ -138,10 +143,9 @@ create `target/coverage`, run `cargo llvm-cov nextest --locked --workspace --all
 instrumented CLI subprocesses; doctests are tested separately and are not in
 these coverage totals. There is no percentage threshold or third-party upload.
 
-[Fuzz instructions](fuzz/README.md) describe corpus replay, short PR smoke and
-longer scheduled runs. [Tail reference provenance](coreutils/tailr/tests/expected/README.md)
-describes the separate GNU comparisons. Neither references nor Nushell are
-required for ordinary tests. Missing tools or failed probes remain visible.
+[Fuzz instructions](fuzz/README.md) describe direct cargo-fuzz commands for corpus
+replay, short PR smoke and longer scheduled runs. Missing tools or failed probes
+remain visible.
 
 ## Test conventions
 

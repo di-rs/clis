@@ -71,44 +71,46 @@ Nushell is required only for `.nu` runners. Rust library microbenchmarks can iso
 hot paths after profiling; add a benchmark dependency/target only when needed.
 A library microbenchmark does not establish whole-command superiority.
 
-The [tail runner](../scripts/benchmark_tail.py) compares both the candidate and
-previous Rust binary against an explicit GNU tail before timing any case. It
-retains raw streams, statuses, input and executable checksums, revision/lockfile
-identities, generation options and all Hyperfine samples. It rejects missing
-references, timeouts, unexpected statuses and byte differences. The scope is
-last-lines and last-bytes from files plus last-lines from stdin, with identical
-warm-cache inputs, output sinks and pipeline overhead for every binary.
+The existing [tail runner](../coreutils/tailr/benches/tail.bench.nu) is a starting
+point, not a validated benchmark harness: its input path still uses `./tailr/`
+instead of `coreutils/tailr/`, and it uses `-i`. Repair those issues and add result
+validation before using that runner as evidence.
 
-Build candidate and baseline in separate directories with their own lockfiles
-and the same dated compiler. Set the following paths/revisions to those actual
-builds; the output directory must be empty. Run from the workspace root:
+The following POSIX-shell recipe is a local example, not a recorded result. It
+requires Python 3 for deterministic fixture generation, Hyperfine, `cmp`, and a
+chosen reference `tail`. Run from the workspace root; set `REF_TAIL` to its absolute
+GNU executable path and record its version separately.
+Use paths without embedded quotes or shell metacharacters in this shell recipe.
 
 ```sh
-python3 scripts/benchmark_tail.py \
-  --candidate "$CANDIDATE_TAIL" --baseline "$PREVIOUS_TAIL" \
-  --generator "$BIGGIE" --reference "$GNU_TAIL" \
-  --candidate-revision "$CANDIDATE_SHA" --baseline-revision "$PREVIOUS_SHA" \
-  --generator-revision "$CANDIDATE_SHA" \
-  --candidate-lockfile Cargo.lock --baseline-lockfile "$PREVIOUS_LOCK" \
-  --generator-lockfile Cargo.lock --cases coreutils/tailr/benches/cases.json \
-  --output-dir target/benchmarks/tailr
+set -eu
+: "${REF_TAIL:?Set REF_TAIL to an absolute GNU tail executable path}"
+export LC_ALL=C TZ=UTC
+cargo build --locked --release -p tailr
+out="$(pwd)/target/benchmarks/tailr"
+candidate="$(pwd)/target/release/tailr"
+mkdir -p "$out"
+data="$out/lines.txt"
+python3 - "$data" <<'PYDATA'
+from pathlib import Path
+import sys
+Path(sys.argv[1]).write_bytes(b"0123456789abcdef\n" * 1_000_000)
+PYDATA
+"$REF_TAIL" -n 10 "$data" > "$out/reference.out" 2> "$out/reference.err"
+"$candidate" -n 10 "$data" > "$out/candidate.out" 2> "$out/candidate.err"
+cmp "$out/reference.out" "$out/candidate.out"
+test ! -s "$out/reference.err"
+test ! -s "$out/candidate.err"
+hyperfine --warmup 3 --runs 20 --export-json "$out/result.json" \
+  --command-name reference "\"$REF_TAIL\" -n 10 \"$data\" > /dev/null" \
+  --command-name candidate "\"$candidate\" -n 10 \"$data\" > /dev/null"
 ```
 
-Use Hyperfine 1.20.0 and Python 3.11 or later. Add `--smoke` for 1,000 records;
-the full fixture has 1,000,000 records generated with Biggie seed 42, four words
-of eight characters and LF endings. Both use three warmups and 20 samples.
-[The Nushell entry](../coreutils/tailr/benches/tail.bench.nu) forwards these same
-arguments (tested with Nushell 0.116.1). Neither runner ignores failures.
-
-The [benchmark workflow](../.github/workflows/benchmarks.yml) runs weekly/manual
-Linux timings and native macOS smoke checks. Manual dispatch accepts a baseline
-ref; an empty ref uses the candidate's parent commit. Missing or unbuildable
-baselines fail explicitly. Each run retains 30-day evidence and reports ratios
-against previous Rust and GNU, without a required timing threshold. Hardware and
-build metadata accompany the raw samples. The existing tracing harness also
-records bare/off/debug CSV with the same redirected stderr sink. These stage
-measurements exclude initialization and terminal rendering; they do not measure
-startup, allocations or peak memory.
+The recipe checks successful statuses through `set -e`, exact stdout through
+`cmp`, and empty stderr for this successful case. It covers one warm-cache,
+seekable-file scenario only. Repeat the correctness gate for other options,
+streaming input, and the previous Rust baseline; no single recipe demonstrates
+full compatibility or representative performance.
 
 ## Reproducibility record
 
@@ -139,7 +141,8 @@ more because it now performs required work; disclose that instead of hiding it.
 
 Ordinary shared CI runners are appropriate for correctness and benchmark smoke
 checks, not an unexplained hard timing threshold. Dedicated performance jobs and
-regression budgets can be added after a stable baseline is established. The current scheduled workflow collects evidence without a timing budget. When tools/hardware/references are unavailable,
+regression budgets can be added after a stable baseline is established. They are
+not configured by this document. When tools/hardware/references are unavailable,
 report what remains unmeasured and provide the reproduction recipe; never fabricate
 numbers or claim performance verification from a successful build.
 Documentation-only standards work does not require running timings or manufacturing

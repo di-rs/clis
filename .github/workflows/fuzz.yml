@@ -45,13 +45,32 @@ jobs:
           echo "b5b704018b63e0f151c17a057ac53b5111e1db545d1b9f72fee79f08a545931c  $RUNNER_TEMP/cargo-fuzz.tar.gz" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/cargo-fuzz.tar.gz" -C "$RUNNER_TEMP" cargo-fuzz
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-      - name: Replay and bounded fuzz run
+      - name: Record environment and fetch locked dependencies
         run: |
-          mkdir -p "fuzz/runs/$FUZZ_TARGET"
+          mkdir -p "fuzz/runs/$FUZZ_TARGET/corpus"
           rustc -Vv > "fuzz/runs/$FUZZ_TARGET/environment.txt"
           git rev-parse HEAD >> "fuzz/runs/$FUZZ_TARGET/environment.txt"
           cargo fuzz --version >> "fuzz/runs/$FUZZ_TARGET/environment.txt"
-          bash scripts/fuzz.sh "$FUZZ_TARGET" "$FUZZ_SECONDS" 2>&1 | tee "fuzz/runs/$FUZZ_TARGET/run.log"
+          cargo fetch --locked --manifest-path fuzz/Cargo.toml
+          cp -R "fuzz/corpus/$FUZZ_TARGET/." "fuzz/runs/$FUZZ_TARGET/corpus/"
+      - name: Build the native fuzz target
+        env:
+          CARGO_NET_OFFLINE: 'true'
+        run: |
+          cargo fuzz build "$FUZZ_TARGET" --target x86_64-unknown-linux-gnu 2>&1 | tee "fuzz/runs/$FUZZ_TARGET/build.log"
+          git diff --exit-code -- Cargo.lock fuzz/Cargo.lock
+      - name: Replay reviewed seeds
+        env:
+          CARGO_NET_OFFLINE: 'true'
+        run: |
+          cargo fuzz run "$FUZZ_TARGET" "fuzz/corpus/$FUZZ_TARGET" --target x86_64-unknown-linux-gnu -- -runs=0 -max_len=4096 -timeout=5 -rss_limit_mb=1024 2>&1 | tee "fuzz/runs/$FUZZ_TARGET/replay.log"
+          git diff --exit-code -- Cargo.lock fuzz/Cargo.lock
+      - name: Bounded fuzz run
+        env:
+          CARGO_NET_OFFLINE: 'true'
+        run: |
+          cargo fuzz run "$FUZZ_TARGET" "fuzz/runs/$FUZZ_TARGET/corpus" --target x86_64-unknown-linux-gnu -- -max_total_time="$FUZZ_SECONDS" -max_len=4096 -timeout=5 -rss_limit_mb=1024 2>&1 | tee "fuzz/runs/$FUZZ_TARGET/run.log"
+          git diff --exit-code -- Cargo.lock fuzz/Cargo.lock
       - name: Preserve failures and corpus
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

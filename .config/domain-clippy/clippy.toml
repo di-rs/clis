@@ -1,4 +1,4 @@
-# This config is used only by scripts/check-domain.sh on audited domain libraries.
+# The domain-clippy hook selects this config for biggie/tailr libraries only.
 disallowed-methods = [
   { path = "std::io::stdin", reason = "Accept caller-owned input in domain APIs." },
   { path = "std::io::stdout", reason = "Accept caller-owned output in domain APIs." },

@@ -31,12 +31,6 @@ at the beginning, while unsigned or negative zero produces no output. Repeated
 There is no follow (`-f`) mode or size suffix syntax. File-open errors do not by
 themselves make the command fail.
 
-Live GNU reference cases and capture commands are recorded in
-[fixture provenance](tests/expected/README.md). Direct API tests check byte
-selection, short reads/writes, error propagation and caller-owned flushing.
-
 Existing benchmark script: [benches/tail.bench.nu](benches/tail.bench.nu).
 
 [Workspace README](../../README.md)
-
-Benchmark smoke and full runs use [the correctness-checked runner](../../docs/benchmarking.md#tooling-and-a-correctness-first-recipe). Both the previous Rust revision and an explicitly selected GNU tail must match before timing starts.

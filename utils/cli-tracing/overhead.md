@@ -45,23 +45,3 @@ across preliminary reruns. There is no demonstrated startup win or regression.
 
 Full throughput, memory/allocations, terminal rendering cost, Linux performance,
 and GNU/BSD comparisons remain unmeasured. See the [measurement procedure](../../docs/benchmarking.md).
-
-## Guardrail harness validation on 2026-10-06
-
-A fresh run at guardrail revision `b1b66bf` used Apple M5 Max (18 logical CPUs,
-64 GiB RAM), Darwin 27.0.0, the same dated compiler above, and release/default
-features. Raw CSV and hardware metadata are retained locally under
-`target/benchmark-evidence/full-host`; the scheduled workflow retains future
-artifacts for 30 days. This is an uncontrolled workstation result.
-
-| Mode | Median ns/operation | Min–max ns/operation |
-| --- | ---: | ---: |
-| bare | 174.67 | 171.43–190.01 |
-| disabled | 171.92 | 169.06–174.55 |
-| debug | 1492.96 | 1480.26–1507.19 |
-
-All 18 reported samples passed the existing checksum assertion. Each mode had
-three warmups and six reported samples, with stderr redirected identically to
-`/dev/null`. Initialization and terminal rendering remain outside the measurement;
-these timings do not establish memory or startup improvements. This evidence
-predates master's later Biggie/shared-CLI merge and is not a measurement of it.

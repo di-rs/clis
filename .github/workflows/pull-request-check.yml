@@ -100,9 +100,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: '3.13'
       - uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
           tool: cargo-hack@0.6.45,cargo-nextest@0.9.146
@@ -110,8 +107,8 @@ jobs:
       - run: rustc -Vv
       - run: cargo hack check --locked --workspace --all-targets
       - run: cargo hack check --locked --workspace --feature-powerset
-      - run: python3 -m unittest discover -s scripts/tests
-      - run: python3 scripts/check_features.py
+      - run: cargo nextest run --locked --workspace --all-features --profile ci
+      - run: cargo test --locked --workspace --all-features --doc
       - run: cargo run --locked --manifest-path tests/consumers/Cargo.toml
       - run: git diff --exit-code
 
@@ -123,17 +120,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: '3.13'
       - uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
-          tool: prek@0.5.5,typos@1.50.3
+          tool: typos@1.50.3
           fallback: none
       - name: Install verified lychee
-        run: bash scripts/install-lychee.sh
-      - run: prek run workspace-policy --all-files --show-diff-on-failure
-      - run: prek run policy-tests --all-files --show-diff-on-failure
+        run: |
+          curl --fail --silent --show-error --location --max-time 120 \
+            https://github.com/lycheeverse/lychee/releases/download/lychee-v0.24.2/lychee-x86_64-unknown-linux-musl.tar.gz \
+            --output "$RUNNER_TEMP/lychee.tar.gz"
+          echo "73657a111819a30c47c08352896796f23d64e4eb2b3ed39b6d32149241566fc5  $RUNNER_TEMP/lychee.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/lychee.tar.gz" -C "$RUNNER_TEMP" --strip-components=1 lychee-x86_64-unknown-linux-musl/lychee
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - name: Local links and anchors
         run: git ls-files -z -- '*.md' | xargs -0 lychee --offline --include-fragments=anchor-only --
       - name: Prose spelling
@@ -155,7 +153,12 @@ jobs:
           tool: cargo-audit@0.22.2,cargo-deny@0.20.2,cargo-machete@0.9.2
           fallback: none
       - name: Audit and enforce dependency policy
-        run: bash scripts/check-dependencies.sh
+        run: |
+          for manifest in Cargo.toml tests/consumers/Cargo.toml fuzz/Cargo.toml; do
+            cargo audit --db "$RUNNER_TEMP/advisory-db" --file "${manifest%Cargo.toml}Cargo.lock" --deny yanked
+            cargo deny --locked --manifest-path "$manifest" --config "$PWD/deny.toml" check licenses sources bans
+          done
+          cargo machete --with-metadata
 
   workflows:
     name: workflows
