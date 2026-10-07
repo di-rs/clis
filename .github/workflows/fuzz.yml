@@ -47,37 +47,37 @@ jobs:
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - name: Record environment and fetch locked dependencies
         run: |
-          mkdir -p "fuzz/runs/$FUZZ_TARGET/corpus"
-          rustc -Vv > "fuzz/runs/$FUZZ_TARGET/environment.txt"
-          git rev-parse HEAD >> "fuzz/runs/$FUZZ_TARGET/environment.txt"
-          cargo fuzz --version >> "fuzz/runs/$FUZZ_TARGET/environment.txt"
-          cargo fetch --locked --manifest-path fuzz/Cargo.toml
-          cp -R "fuzz/corpus/$FUZZ_TARGET/." "fuzz/runs/$FUZZ_TARGET/corpus/"
+          mkdir -p "tools/fuzz/runs/$FUZZ_TARGET/corpus"
+          rustc -Vv > "tools/fuzz/runs/$FUZZ_TARGET/environment.txt"
+          git rev-parse HEAD >> "tools/fuzz/runs/$FUZZ_TARGET/environment.txt"
+          cargo fuzz --version >> "tools/fuzz/runs/$FUZZ_TARGET/environment.txt"
+          cargo fetch --locked --manifest-path tools/fuzz/Cargo.toml
+          cp -R "tools/fuzz/corpus/$FUZZ_TARGET/." "tools/fuzz/runs/$FUZZ_TARGET/corpus/"
       - name: Build the native fuzz target
         env:
           CARGO_NET_OFFLINE: 'true'
         run: |
-          cargo fuzz build "$FUZZ_TARGET" --target x86_64-unknown-linux-gnu 2>&1 | tee "fuzz/runs/$FUZZ_TARGET/build.log"
-          git diff --exit-code -- Cargo.lock fuzz/Cargo.lock
+          cargo fuzz build --fuzz-dir tools/fuzz "$FUZZ_TARGET" --target x86_64-unknown-linux-gnu 2>&1 | tee "tools/fuzz/runs/$FUZZ_TARGET/build.log"
+          git diff --exit-code -- Cargo.lock tools/fuzz/Cargo.lock
       - name: Replay reviewed seeds
         env:
           CARGO_NET_OFFLINE: 'true'
         run: |
-          cargo fuzz run "$FUZZ_TARGET" "fuzz/corpus/$FUZZ_TARGET" --target x86_64-unknown-linux-gnu -- -runs=0 -max_len=4096 -timeout=5 -rss_limit_mb=1024 2>&1 | tee "fuzz/runs/$FUZZ_TARGET/replay.log"
-          git diff --exit-code -- Cargo.lock fuzz/Cargo.lock
+          cargo fuzz run --fuzz-dir tools/fuzz "$FUZZ_TARGET" "tools/fuzz/corpus/$FUZZ_TARGET" --target x86_64-unknown-linux-gnu -- -runs=0 -max_len=4096 -timeout=5 -rss_limit_mb=1024 2>&1 | tee "tools/fuzz/runs/$FUZZ_TARGET/replay.log"
+          git diff --exit-code -- Cargo.lock tools/fuzz/Cargo.lock
       - name: Bounded fuzz run
         env:
           CARGO_NET_OFFLINE: 'true'
         run: |
-          cargo fuzz run "$FUZZ_TARGET" "fuzz/runs/$FUZZ_TARGET/corpus" --target x86_64-unknown-linux-gnu -- -max_total_time="$FUZZ_SECONDS" -max_len=4096 -timeout=5 -rss_limit_mb=1024 2>&1 | tee "fuzz/runs/$FUZZ_TARGET/run.log"
-          git diff --exit-code -- Cargo.lock fuzz/Cargo.lock
+          cargo fuzz run --fuzz-dir tools/fuzz "$FUZZ_TARGET" "tools/fuzz/runs/$FUZZ_TARGET/corpus" --target x86_64-unknown-linux-gnu -- -max_total_time="$FUZZ_SECONDS" -max_len=4096 -timeout=5 -rss_limit_mb=1024 2>&1 | tee "tools/fuzz/runs/$FUZZ_TARGET/run.log"
+          git diff --exit-code -- Cargo.lock tools/fuzz/Cargo.lock
       - name: Preserve failures and corpus
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fuzz-${{ matrix.target }}
           path: |
-            fuzz/artifacts/${{ matrix.target }}/
-            fuzz/runs/${{ matrix.target }}/
+            tools/fuzz/artifacts/${{ matrix.target }}/
+            tools/fuzz/runs/${{ matrix.target }}/
           retention-days: 14
           if-no-files-found: error

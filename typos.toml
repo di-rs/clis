@@ -2,5 +2,7 @@
 extend-exclude = ["**/tests/inputs/**", "**/tests/expected/**", "**/benches/data/**", "docs/superpowers/**"]
 
 [default.extend-identifiers]
+# Preserve the exact user-specified notice.
+PERMITED = "PERMITED"
 # Existing commit identifier, not the English misspelling "abd".
 c646abd = "c646abd"

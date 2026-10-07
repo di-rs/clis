@@ -32,7 +32,7 @@ jobs:
           fallback: none
       - name: Refreshed audit and dependency policy
         run: |
-          for manifest in Cargo.toml tests/consumers/Cargo.toml fuzz/Cargo.toml; do
+          for manifest in Cargo.toml tests/consumers/Cargo.toml tools/fuzz/Cargo.toml; do
             cargo audit --db "$RUNNER_TEMP/advisory-db" --file "${manifest%Cargo.toml}Cargo.lock" --deny yanked
             cargo deny --locked --manifest-path "$manifest" --config "$PWD/deny.toml" check licenses sources bans
           done

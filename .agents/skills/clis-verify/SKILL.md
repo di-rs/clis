@@ -5,7 +5,7 @@ description: Use when checking a Rust change, investigating test or lint failure
 
 # Workspace verification
 
-Run from the workspace root. Read `AGENTS.md`, [CONTRIBUTING checks](../../../CONTRIBUTING.md#checks), and
+Run from the workspace root. Read `AGENTS.md`, `.github/workflows/pull-request-check.yml`, and
 `prek.toml`; those files govern check commands if they change. Map edited paths
 to Cargo packages, including consumers of changed utility libraries. Preserve
 unrelated work and inspect the current diff before attributing failures.
@@ -21,8 +21,8 @@ cargo-nextest. Check missing prerequisites and report unavailable verification;
 do not silently substitute a smaller suite or install tools as incidental work.
 
 Before editing Rust, establish the affected-package baseline. After editing, follow
-the package-then-workspace commands in CONTRIBUTING against the final diff; that
-guide is the single source for the command list. Select actual packages and include
+the affected-package checks followed by the commands in `prek.toml` and the CI
+workflow against the final diff. Select actual packages and include
 consumers of shared changes. Package doctests require a library target. Build the
 affected binary or consumer example when relevant to the change. Reuse available
 baseline results when their inputs remain unchanged.

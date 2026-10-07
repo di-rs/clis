@@ -1,6 +1,6 @@
 # Library-first Rust architecture
 
-[Project overview](../README.md) · [Contributing](../CONTRIBUTING.md)
+[Project overview](../README.md)
 
 This guide explains the boundaries required by [U1 and U8](north-star.md#every-utility).
 It is a migration target, not a claim that every package already follows it.
@@ -35,7 +35,7 @@ A growing utility normally uses this layout:
     options.rs       # domain configuration, when it merits its own module
     error.rs         # typed errors, when more than io::Error is needed
     <operation>.rs   # focused implementation modules, when needed
-  tests/             # follow CONTRIBUTING's shared test conventions
+  tests/             # CLI and direct library tests with small reusable fixtures
   benches/           # CLI benchmark recipe and/or registered library benchmarks
 ```
 

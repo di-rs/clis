@@ -13,8 +13,8 @@ members = ["."]
 
 [dependencies]
 libfuzzer-sys = "0.4"
-parsu = { path = "../parsu" }
-tailr = { path = "../coreutils/tailr" }
+parsu = { path = "../../parsu" }
+tailr = { path = "../../coreutils/tailr" }
 
 [[bin]]
 name = "parsu_xml"

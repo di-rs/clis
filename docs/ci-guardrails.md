@@ -1,6 +1,6 @@
 # Rust workspace guardrails
 
-[Contributor commands](../CONTRIBUTING.md#checks) · [Verification record](ci-guardrails-status.md)
+[Project overview](../README.md)
 
 This workspace contains CLI utilities, reusable libraries and a terminal editor.
 The checks below cover the supported Linux/macOS targets and the current nightly
@@ -29,7 +29,7 @@ for CodeQL's security-results upload. Checkout credentials are not persisted.
 Cargo commands use `--locked` where supported. Cargo-fuzz lacks that option,
 so CI fetches with `cargo fetch --locked`, builds/runs offline, and rejects
 lockfile changes after each stage. This limitation is explicit in the
-[fuzz instructions](../fuzz/README.md).
+[fuzz instructions](../tools/fuzz/README.md).
 
 The `domain-clippy` hook applies the separate domain configuration to biggie and
 tailr libraries, which must accept caller-owned I/O and return errors rather

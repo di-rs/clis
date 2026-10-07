@@ -5,7 +5,7 @@ description: Use when naming a branch, committing changes, or opening or updatin
 
 # Git delivery
 
-Read the root `AGENTS.md`, [CONTRIBUTING checks](../../../CONTRIBUTING.md#checks),
+Read the root `AGENTS.md`, [CI workflow](../../../.github/workflows/pull-request-check.yml),
 and `prek.toml`. Execute the requested parts of the workflow. A commit request alone
 stays local; opening a PR includes pushing its feature branch. For local review,
 leave changes uncommitted on the requested branch, including the default branch.

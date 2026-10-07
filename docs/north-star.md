@@ -1,7 +1,6 @@
 # CLI north star
 
-[Project overview](../README.md) · [Utility template](templates/utility.md) ·
-[Contribution workflow](../CONTRIBUTING.md)
+[Project overview](../README.md) · [Utility template](templates/utility.md)
 
 Build readable, predictable Unix-style commands whose useful operations are also
 available directly to Rust applications. Prioritize GNU behavior parity in existing
@@ -35,7 +34,7 @@ API tests and a compiled consumer example. See [architecture](architecture.md).
 
 ### U2 — Consistent tests
 
-Use the shared [test conventions](../CONTRIBUTING.md#test-conventions): CLI tests,
+Use CLI tests,
 direct library tests, and small reusable fixtures. Assert observable results and
 failure paths, including relevant byte boundaries and read/write failures. Ordinary
 tests are hermetic; reference capture and timing are explicit separate workflows.

@@ -5,16 +5,16 @@ fuzz dependencies to production members. Use the repository's dated nightly,
 its rust-src component and cargo-fuzz 0.13.2:
 
 ```sh
-cargo fetch --locked --manifest-path fuzz/Cargo.toml
+cargo fetch --locked --manifest-path tools/fuzz/Cargo.toml
 host_target=$(rustc -vV | sed -n 's/^host: //p')
 export CARGO_NET_OFFLINE=true
-cargo fuzz build parsu_xml --target "$host_target"
-git diff --exit-code -- Cargo.lock fuzz/Cargo.lock
-cargo fuzz run parsu_xml fuzz/corpus/parsu_xml --target "$host_target" -- -runs=0 -max_len=4096 -timeout=5 -rss_limit_mb=1024
-mkdir -p fuzz/runs/parsu_xml/corpus
-cp -R fuzz/corpus/parsu_xml/. fuzz/runs/parsu_xml/corpus/
-cargo fuzz run parsu_xml fuzz/runs/parsu_xml/corpus --target "$host_target" -- -max_total_time=15 -max_len=4096 -timeout=5 -rss_limit_mb=1024
-git diff --exit-code -- Cargo.lock fuzz/Cargo.lock
+cargo fuzz build --fuzz-dir tools/fuzz parsu_xml --target "$host_target"
+git diff --exit-code -- Cargo.lock tools/fuzz/Cargo.lock
+cargo fuzz run --fuzz-dir tools/fuzz parsu_xml tools/fuzz/corpus/parsu_xml --target "$host_target" -- -runs=0 -max_len=4096 -timeout=5 -rss_limit_mb=1024
+mkdir -p tools/fuzz/runs/parsu_xml/corpus
+cp -R tools/fuzz/corpus/parsu_xml/. tools/fuzz/runs/parsu_xml/corpus/
+cargo fuzz run --fuzz-dir tools/fuzz parsu_xml tools/fuzz/runs/parsu_xml/corpus --target "$host_target" -- -max_total_time=15 -max_len=4096 -timeout=5 -rss_limit_mb=1024
+git diff --exit-code -- Cargo.lock tools/fuzz/Cargo.lock
 ```
 
 Run from the repository root with cargo-fuzz on PATH. Replace `parsu_xml` with

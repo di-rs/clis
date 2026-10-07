@@ -65,11 +65,10 @@ cargo test --locked -p catr --doc
 cargo build --locked --release -p catr
 ```
 
-See [CONTRIBUTING](CONTRIBUTING.md) for workspace checks and fixture conventions.
 Benchmarks require additional tools described in the
 [benchmarking guide](docs/benchmarking.md); they are not prerequisites for ordinary tests.
 
-## Workspace and contributor guides
+## Workspace guides
 
 Commands live under `coreutils/` and in `calr/`, `biggie/`, `parsu/`, and `kara/`.
 [`utils/cli-tracing`](utils/cli-tracing/README.md) provides shared CLI logging, tracing, and error reporting;
@@ -82,7 +81,6 @@ adapters, not in reusable domain operations.
 | [North star](docs/north-star.md) | Universal standards, port requirements, and evidence statuses. |
 | [Utility template](docs/templates/utility.md) | A reusable app contract with flags, limits, and audit evidence. |
 | [AGENTS.md](AGENTS.md) | Mandatory repository guidance for coding agents. |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Change workflow, checks, and review requirements. |
 | [Architecture](docs/architecture.md) | Library/CLI boundaries, sharing, and a Rust consumer example. |
 | [Observability](docs/observability.md) | Errors, diagnostic levels and sinks, stage timing, and lifecycle. |
 | [Compatibility](docs/compatibility.md) | GNU references, BSD additions, and fixture capture. |
