@@ -509,6 +509,254 @@ mod tests {
         );
     }
 
+    fn repository_suite(id: &str) -> TestResultSuite {
+        use std::{
+            path::PathBuf,
+            sync::{Arc, atomic::AtomicBool},
+            time::Duration,
+        };
+        let manifest = std::fs::canonicalize(
+            std::env::var_os("CLIS_BENCH_WORKSPACE_MANIFEST")
+                .ok_or("set CLIS_BENCH_WORKSPACE_MANIFEST for repository acceptance")?,
+        )?;
+        let cwd = manifest.parent().ok_or("manifest has no parent")?;
+        let mut environment: std::collections::BTreeMap<String, String> =
+            ["PATH", "HOME", "RUSTUP_HOME", "CARGO_HOME"]
+                .into_iter()
+                .filter_map(|key| std::env::var(key).ok().map(|value| (key.into(), value)))
+                .collect();
+        environment.insert("RUSTUP_AUTO_INSTALL".into(), "0".into());
+        let search = environment.get("PATH").ok_or("Cargo PATH missing")?;
+        let cargo = std::env::split_paths(search)
+            .map(|path| cwd.join(path).join("cargo"))
+            .find(|path| path.is_file())
+            .ok_or("Cargo missing")?;
+        let scratch = assert_fs::TempDir::new()?;
+        let paths = crate::CapturePaths {
+            stdout: scratch.path().join("metadata.json"),
+            stderr: scratch.path().join("metadata.stderr"),
+        };
+        let runner = crate::ProcessRunner::new(crate::ExecutionPolicy {
+            timeout: Duration::from_secs(120),
+            max_stream_bytes: 16_777_216,
+            cancellation: Arc::new(AtomicBool::new(false)),
+        });
+        runner
+            .execute(
+                &crate::CommandSpec {
+                    program: cargo,
+                    argv: vec![
+                        "metadata".into(),
+                        "--no-deps".into(),
+                        "--offline".into(),
+                        "--locked".into(),
+                        "--format-version".into(),
+                        "1".into(),
+                        "--manifest-path".into(),
+                        manifest.to_str().ok_or("manifest must be UTF-8")?.into(),
+                    ],
+                    cwd: cwd.into(),
+                    environment,
+                    stdin: crate::CommandInput::Null,
+                    stdout: crate::CommandOutput::Capture,
+                },
+                &paths,
+            )?
+            .check_expected(0)?;
+        let metadata: serde_json::Value = serde_json::from_slice(&std::fs::read(paths.stdout)?)?;
+        let packages = metadata["packages"]
+            .as_array()
+            .ok_or("missing Cargo packages")?;
+        let members = metadata["workspace_members"]
+            .as_array()
+            .ok_or("missing workspace members")?;
+        let mut selected = packages
+            .iter()
+            .filter(|package| package["name"] == id && members.contains(&package["id"]));
+        let package = selected
+            .next()
+            .ok_or("requested repository package missing")?;
+        if selected.next().is_some() {
+            return Err("ambiguous repository package".into());
+        }
+        let package_manifest = PathBuf::from(
+            package["manifest_path"]
+                .as_str()
+                .ok_or("package manifest missing")?,
+        );
+        let suite = package
+            .pointer("/metadata/cli-bench/suite")
+            .and_then(serde_json::Value::as_str)
+            .ok_or("package suite metadata missing")?;
+        let path = package_manifest
+            .parent()
+            .ok_or("package has no parent")?
+            .join(suite);
+        let parsed = parse_suite(&std::fs::read_to_string(path)?)?;
+        check_equal(parsed.package.as_str(), id)?;
+        Ok(parsed)
+    }
+    type TestResultSuite = Result<crate::Suite, Box<dyn std::error::Error>>;
+
+    #[test]
+    fn suite_reference_policy_defaults_to_allowed_and_can_be_disabled() -> TestResult {
+        let compatible = parse_suite(MINIMAL)?;
+        check_equal(
+            serde_json::to_value(&compatible)?["allow_reference"] == true,
+            true,
+        )?;
+        let restricted = parse_suite(&format!("allow_reference = false\n{MINIMAL}"))?;
+        check_equal(
+            serde_json::to_value(&restricted)?["allow_reference"] == false,
+            true,
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "requires explicit CLIS_BENCH_WORKSPACE_MANIFEST repository resource"]
+    fn repository_acceptance_biggie_profiles_validate_exact_output_bytes_and_role_inheritance()
+    -> TestResult {
+        let suite = repository_suite("biggie")?;
+        check_equal(suite.allow_reference, false)?;
+        for (id, full, smoke) in [
+            ("text", 3_600_000, 36_000),
+            ("records", 200_000, 2_000),
+            ("bytes", 16_777_216, 65_536),
+            ("confirm-text", 5_600_000, 28_000),
+            ("confirm-bytes", 8_388_609, 65_536),
+        ] {
+            let case = suite
+                .cases
+                .iter()
+                .find(|case| case.id == id)
+                .ok_or("missing case")?;
+            for (profile, bytes) in [
+                (MeasurementProfile::Full, full),
+                (MeasurementProfile::Smoke, smoke),
+            ] {
+                let effective = case.effective(profile);
+                let shapes: Vec<_> = effective
+                    .correctness
+                    .iter()
+                    .filter(|rule| {
+                        matches!(
+                            rule,
+                            CorrectnessRule::TextShape { .. }
+                                | CorrectnessRule::Records { .. }
+                                | CorrectnessRule::BytePattern { .. }
+                        )
+                    })
+                    .cloned()
+                    .collect();
+                check_equal(crate::dataset::declared_bytes(&shapes)?, bytes)?;
+                check_equal(effective.work.as_ref().ok_or("missing work")?.amount, bytes)?;
+                check_equal(effective.role_argv.is_empty(), true)?;
+                check_equal(
+                    effective.correctness.iter().any(|rule| {
+                        matches!(
+                            rule,
+                            CorrectnessRule::Comparator {
+                                target: crate::ComparisonTarget::Previous,
+                                ..
+                            }
+                        )
+                    }),
+                    true,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "requires explicit CLIS_BENCH_WORKSPACE_MANIFEST repository resource"]
+    fn repository_acceptance_tail_profiles_validate_bounded_inputs_and_distinct_pipeline()
+    -> TestResult {
+        let suite = repository_suite("tailr")?;
+        for (id, full, smoke) in [
+            ("text", 14_400_000, 36_000),
+            ("tiny", 10, 10),
+            ("confirm-text", 27_000_162, 54_000),
+            ("boundary-4095", 4095, 4095),
+            ("boundary-4096", 4096, 4096),
+            ("boundary-4097", 4097, 4097),
+        ] {
+            let data = suite
+                .datasets
+                .iter()
+                .find(|data| data.id == id)
+                .ok_or("missing dataset")?;
+            check_equal(crate::dataset::declared_bytes(&data.checks)?, full)?;
+            let checks = data
+                .profiles
+                .get(&MeasurementProfile::Smoke)
+                .map_or(&data.checks, |recipe| &recipe.checks);
+            check_equal(crate::dataset::declared_bytes(checks)?, smoke)?;
+        }
+        let file = suite
+            .cases
+            .iter()
+            .find(|case| case.id == "file-lines")
+            .ok_or("missing file case")?;
+        let pipe = suite
+            .cases
+            .iter()
+            .find(|case| case.id == "pipe-lines")
+            .ok_or("missing pipe case")?;
+        check_equal(matches!(file.io.stdin, StdinPolicy::Null {}), true)?;
+        check_equal(matches!(pipe.io.stdin, StdinPolicy::Pipe { .. }), true)?;
+        check_equal(file.work.is_none() && pipe.work.is_none(), true)?;
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "requires explicit CLIS_BENCH_WORKSPACE_MANIFEST repository resource"]
+    fn repository_acceptance_mkdir_expands_generated_records_and_resets_each_state() -> TestResult {
+        let suite = repository_suite("mkdirr")?;
+        for (id, count) in [
+            ("absent", 4),
+            ("existing", 4),
+            ("confirm-absent", 8),
+            ("confirm-existing", 8),
+        ] {
+            let case = suite
+                .cases
+                .iter()
+                .find(|case| case.id == id)
+                .ok_or("missing case")?;
+            let dataset = if id.starts_with("confirm-") {
+                "confirm-paths"
+            } else {
+                "paths"
+            };
+            check_equal(case.argv == ["-p", &format!("@records:{dataset}")], true)?;
+            check_equal(case.role_argv.is_empty(), true)?;
+            check_equal(case.work.as_ref().ok_or("missing work")?.amount, count)?;
+            let MutationSetup::Directories { paths } = &case.mutation else {
+                return Err("missing reset".into());
+            };
+            check_equal(paths.is_empty(), id.ends_with("absent"))?;
+            let rule = case
+                .correctness
+                .iter()
+                .find_map(|rule| match rule {
+                    CorrectnessRule::DirectoryTree {
+                        paths,
+                        compare_mode_to,
+                    } => Some((paths, compare_mode_to)),
+                    _ => None,
+                })
+                .ok_or("missing tree check")?;
+            check_equal(*rule.1, Some(crate::ComparisonTarget::SelectedBaselines))?;
+            if id.ends_with("existing") {
+                check_equal(paths, rule.0)?;
+            }
+            check_equal(rule.0.len(), if count == 4 { 8 } else { 32 })?;
+        }
+        Ok(())
+    }
+
     #[test]
     fn accepts_the_checked_in_minimal_suite() {
         assert!(parse_suite(include_str!("../tests/inputs/minimal-suite.toml")).is_ok());

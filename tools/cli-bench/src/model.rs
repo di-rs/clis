@@ -342,6 +342,9 @@ pub struct CaseSpec {
 #[serde(deny_unknown_fields)]
 pub struct Suite {
     pub schema_version: u32,
+    /// Whether an explicit external reference role may be selected.
+    #[serde(default = "default_allow_reference")]
+    pub allow_reference: bool,
     pub id: String,
     pub package: String,
     pub binary: String,
@@ -357,6 +360,10 @@ pub struct Suite {
         deserialize_with = "deserialize_environment"
     )]
     pub environment: BTreeMap<String, String>,
+}
+
+const fn default_allow_reference() -> bool {
+    true
 }
 
 fn default_environment() -> BTreeMap<String, String> {

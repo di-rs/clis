@@ -1,0 +1,179 @@
+# Approved v1 recipes; full base settings and explicit smoke overrides.
+# See docs/superpowers/specs/2026-10-06-cli-bench-experiments.md.
+schema_version = 1
+id = "tailr"
+package = "tailr"
+binary = "tailr"
+
+[generator]
+revision = "0d8caa8387d446e91ef263c1ecab88870b735eb5"
+package = "biggie"
+binary = "biggie"
+
+[environment]
+LC_ALL = "C"
+TZ = "UTC"
+CLIS_LOG_LEVEL = "off"
+
+[[datasets]]
+id = "text"
+argv = ["text", "--lines", "400000", "--words-per-line", "4", "--word-length", "8", "--seed", "42", "@output"]
+output = "text.txt"
+checks = [{ kind = "text-shape", records = 400000, words_per_record = 4, word_length = 8 }]
+
+[datasets.profiles.smoke]
+argv = ["text", "--lines", "1000", "--words-per-line", "4", "--word-length", "8", "--seed", "42", "@output"]
+checks = [{ kind = "text-shape", records = 1000, words_per_record = 4, word_length = 8 }]
+
+[[datasets]]
+id = "tiny"
+argv = ["text", "--lines", "2", "--words-per-line", "1", "--word-length", "4", "--seed", "42", "@output"]
+output = "tiny.txt"
+checks = [{ kind = "text-shape", records = 2, words_per_record = 1, word_length = 4 }]
+
+[[datasets]]
+id = "confirm-text"
+argv = ["text", "--lines", "500003", "--words-per-line", "3", "--word-length", "17", "--seed", "43", "@output"]
+output = "confirm-text.txt"
+checks = [{ kind = "text-shape", records = 500003, words_per_record = 3, word_length = 17 }]
+
+[datasets.profiles.smoke]
+argv = ["text", "--lines", "1000", "--words-per-line", "3", "--word-length", "17", "--seed", "43", "@output"]
+checks = [{ kind = "text-shape", records = 1000, words_per_record = 3, word_length = 17 }]
+
+[[datasets]]
+id = "boundary-4095"
+argv = ["bytes", "--bytes", "4095", "--pattern-hex", "61620a", "@output"]
+output = "boundary-4095.txt"
+checks = [{ kind = "byte-pattern", bytes = 4095, pattern_hex = "61620a" }]
+
+[[datasets]]
+id = "boundary-4096"
+argv = ["bytes", "--bytes", "4096", "--pattern-hex", "61620a", "@output"]
+output = "boundary-4096.txt"
+checks = [{ kind = "byte-pattern", bytes = 4096, pattern_hex = "61620a" }]
+
+[[datasets]]
+id = "boundary-4097"
+argv = ["bytes", "--bytes", "4097", "--pattern-hex", "61620a", "@output"]
+output = "boundary-4097.txt"
+checks = [{ kind = "byte-pattern", bytes = 4097, pattern_hex = "61620a" }]
+
+[[cases]]
+id = "file-lines"
+purpose = "Read final 10 lines from regular file"
+argv = ["-n", "10", "@input:text"]
+expected_status = 0
+correctness = [{ kind = "comparator", target = "selected-baselines", stream = "stdout" }, { kind = "tail-slice", dataset = "text", unit = "lines", count = 10, stream = "stdout" }, { kind = "empty-stderr" }]
+
+[cases.io.stdin]
+kind = "null"
+
+[cases.io.stdout]
+kind = "drained-pipe"
+
+[[cases]]
+id = "file-bytes"
+purpose = "Read final 1000 bytes from regular file"
+argv = ["-c", "1000", "@input:text"]
+expected_status = 0
+correctness = [{ kind = "comparator", target = "selected-baselines", stream = "stdout" }, { kind = "tail-slice", dataset = "text", unit = "bytes", count = 1000, stream = "stdout" }, { kind = "empty-stderr" }]
+
+[cases.io.stdin]
+kind = "null"
+
+[cases.io.stdout]
+kind = "drained-pipe"
+
+[[cases]]
+id = "pipe-lines"
+purpose = "Read final 10 lines from finite cat | tail pipeline"
+argv = ["-n", "10", "-"]
+expected_status = 0
+correctness = [{ kind = "comparator", target = "selected-baselines", stream = "stdout" }, { kind = "tail-slice", dataset = "text", unit = "lines", count = 10, stream = "stdout" }, { kind = "empty-stderr" }]
+
+[cases.io.stdin]
+kind = "pipe"
+dataset = "text"
+
+[cases.io.stdout]
+kind = "drained-pipe"
+
+[[cases]]
+id = "startup"
+purpose = "Read final 1 lines from regular file"
+argv = ["-n", "1", "@input:tiny"]
+expected_status = 0
+correctness = [{ kind = "comparator", target = "selected-baselines", stream = "stdout" }, { kind = "tail-slice", dataset = "tiny", unit = "lines", count = 1, stream = "stdout" }, { kind = "empty-stderr" }]
+
+[cases.io.stdin]
+kind = "null"
+
+[cases.io.stdout]
+kind = "drained-pipe"
+
+[[cases]]
+id = "confirm-file-lines"
+purpose = "Read final 10 lines from regular file"
+argv = ["-n", "10", "@input:confirm-text"]
+expected_status = 0
+correctness = [{ kind = "comparator", target = "selected-baselines", stream = "stdout" }, { kind = "tail-slice", dataset = "confirm-text", unit = "lines", count = 10, stream = "stdout" }, { kind = "empty-stderr" }]
+
+[cases.io.stdin]
+kind = "null"
+
+[cases.io.stdout]
+kind = "drained-pipe"
+
+[[cases]]
+id = "confirm-pipe-lines"
+purpose = "Read final 10 lines from finite cat | tail pipeline"
+argv = ["-n", "10", "-"]
+expected_status = 0
+correctness = [{ kind = "comparator", target = "selected-baselines", stream = "stdout" }, { kind = "tail-slice", dataset = "confirm-text", unit = "lines", count = 10, stream = "stdout" }, { kind = "empty-stderr" }]
+
+[cases.io.stdin]
+kind = "pipe"
+dataset = "confirm-text"
+
+[cases.io.stdout]
+kind = "drained-pipe"
+
+[[cases]]
+id = "confirm-boundary-4095"
+purpose = "Read final 10 lines from regular file"
+argv = ["-n", "10", "@input:boundary-4095"]
+expected_status = 0
+correctness = [{ kind = "comparator", target = "selected-baselines", stream = "stdout" }, { kind = "tail-slice", dataset = "boundary-4095", unit = "lines", count = 10, stream = "stdout" }, { kind = "empty-stderr" }]
+
+[cases.io.stdin]
+kind = "null"
+
+[cases.io.stdout]
+kind = "drained-pipe"
+
+[[cases]]
+id = "confirm-boundary-4096"
+purpose = "Read final 10 lines from regular file"
+argv = ["-n", "10", "@input:boundary-4096"]
+expected_status = 0
+correctness = [{ kind = "comparator", target = "selected-baselines", stream = "stdout" }, { kind = "tail-slice", dataset = "boundary-4096", unit = "lines", count = 10, stream = "stdout" }, { kind = "empty-stderr" }]
+
+[cases.io.stdin]
+kind = "null"
+
+[cases.io.stdout]
+kind = "drained-pipe"
+
+[[cases]]
+id = "confirm-boundary-4097"
+purpose = "Read final 10 lines from regular file"
+argv = ["-n", "10", "@input:boundary-4097"]
+expected_status = 0
+correctness = [{ kind = "comparator", target = "selected-baselines", stream = "stdout" }, { kind = "tail-slice", dataset = "boundary-4097", unit = "lines", count = 10, stream = "stdout" }, { kind = "empty-stderr" }]
+
+[cases.io.stdin]
+kind = "null"
+
+[cases.io.stdout]
+kind = "drained-pipe"

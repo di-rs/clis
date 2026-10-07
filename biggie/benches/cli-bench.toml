@@ -1,0 +1,113 @@
+# Approved v1 recipes; full base settings and explicit smoke overrides.
+# See docs/superpowers/specs/2026-10-06-cli-bench-experiments.md.
+schema_version = 1
+id = "biggie"
+allow_reference = false
+package = "biggie"
+binary = "biggie"
+datasets = []
+
+[generator]
+revision = "0d8caa8387d446e91ef263c1ecab88870b735eb5"
+package = "biggie"
+binary = "biggie"
+
+[environment]
+LC_ALL = "C"
+TZ = "UTC"
+CLIS_LOG_LEVEL = "off"
+
+[[cases]]
+id = "text"
+purpose = "Generate independently checked text to a drained stdout pipe"
+argv = ["--lines", "100000", "--words-per-line", "4", "--word-length", "8", "--seed", "42", "-"]
+expected_status = 0
+correctness = [{ kind = "comparator", target = "previous", stream = "stdout" }, { kind = "text-shape", records = 100000, words_per_record = 4, word_length = 8 }, { kind = "empty-stderr" }]
+work = { amount = 3600000, unit = "bytes" }
+
+[cases.io.stdin]
+kind = "null"
+
+[cases.io.stdout]
+kind = "drained-pipe"
+
+[cases.profiles.smoke]
+argv = ["--lines", "1000", "--words-per-line", "4", "--word-length", "8", "--seed", "42", "-"]
+correctness = [{ kind = "comparator", target = "previous", stream = "stdout" }, { kind = "text-shape", records = 1000, words_per_record = 4, word_length = 8 }, { kind = "empty-stderr" }]
+work = { amount = 36000, unit = "bytes" }
+
+[[cases]]
+id = "records"
+purpose = "Generate independently checked records to a drained stdout pipe"
+argv = ["records", "-r", "miss", "-r", "Hit", "-r", "", "--repeat", "2", "--cycles", "10000", "-"]
+expected_status = 0
+correctness = [{ kind = "comparator", target = "previous", stream = "stdout" }, { kind = "records", records = ["miss", "Hit", ""], repeat = 2, cycles = 10000 }, { kind = "empty-stderr" }]
+work = { amount = 200000, unit = "bytes" }
+
+[cases.io.stdin]
+kind = "null"
+
+[cases.io.stdout]
+kind = "drained-pipe"
+
+[cases.profiles.smoke]
+argv = ["records", "-r", "miss", "-r", "Hit", "-r", "", "--repeat", "2", "--cycles", "100", "-"]
+correctness = [{ kind = "comparator", target = "previous", stream = "stdout" }, { kind = "records", records = ["miss", "Hit", ""], repeat = 2, cycles = 100 }, { kind = "empty-stderr" }]
+work = { amount = 2000, unit = "bytes" }
+
+[[cases]]
+id = "bytes"
+purpose = "Generate independently checked bytes to a drained stdout pipe"
+argv = ["bytes", "--bytes", "16777216", "--pattern-hex", "00ff1b0d0a", "-"]
+expected_status = 0
+correctness = [{ kind = "comparator", target = "previous", stream = "stdout" }, { kind = "byte-pattern", bytes = 16777216, pattern_hex = "00ff1b0d0a" }, { kind = "empty-stderr" }]
+work = { amount = 16777216, unit = "bytes" }
+
+[cases.io.stdin]
+kind = "null"
+
+[cases.io.stdout]
+kind = "drained-pipe"
+
+[cases.profiles.smoke]
+argv = ["bytes", "--bytes", "65536", "--pattern-hex", "00ff1b0d0a", "-"]
+correctness = [{ kind = "comparator", target = "previous", stream = "stdout" }, { kind = "byte-pattern", bytes = 65536, pattern_hex = "00ff1b0d0a" }, { kind = "empty-stderr" }]
+work = { amount = 65536, unit = "bytes" }
+
+[[cases]]
+id = "confirm-text"
+purpose = "Generate independently checked confirm-text to a drained stdout pipe"
+argv = ["--lines", "200000", "--words-per-line", "7", "--word-length", "3", "--seed", "43", "-"]
+expected_status = 0
+correctness = [{ kind = "comparator", target = "previous", stream = "stdout" }, { kind = "text-shape", records = 200000, words_per_record = 7, word_length = 3 }, { kind = "empty-stderr" }]
+work = { amount = 5600000, unit = "bytes" }
+
+[cases.io.stdin]
+kind = "null"
+
+[cases.io.stdout]
+kind = "drained-pipe"
+
+[cases.profiles.smoke]
+argv = ["--lines", "1000", "--words-per-line", "7", "--word-length", "3", "--seed", "43", "-"]
+correctness = [{ kind = "comparator", target = "previous", stream = "stdout" }, { kind = "text-shape", records = 1000, words_per_record = 7, word_length = 3 }, { kind = "empty-stderr" }]
+work = { amount = 28000, unit = "bytes" }
+
+[[cases]]
+id = "confirm-bytes"
+purpose = "Generate independently checked confirm-bytes to a drained stdout pipe"
+argv = ["bytes", "--bytes", "8388609", "--pattern-hex", "0d0a00ff", "-"]
+expected_status = 0
+correctness = [{ kind = "comparator", target = "previous", stream = "stdout" }, { kind = "byte-pattern", bytes = 8388609, pattern_hex = "0d0a00ff" }, { kind = "empty-stderr" }]
+work = { amount = 8388609, unit = "bytes" }
+
+[cases.io.stdin]
+kind = "null"
+
+[cases.io.stdout]
+kind = "drained-pipe"
+
+[cases.profiles.smoke]
+argv = ["bytes", "--bytes", "65536", "--pattern-hex", "0d0a00ff", "-"]
+correctness = [{ kind = "comparator", target = "previous", stream = "stdout" }, { kind = "byte-pattern", bytes = 65536, pattern_hex = "0d0a00ff" }, { kind = "empty-stderr" }]
+work = { amount = 65536, unit = "bytes" }

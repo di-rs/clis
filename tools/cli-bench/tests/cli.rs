@@ -122,14 +122,28 @@ fn build_rejects_ambiguous_packages_without_guessing_a_binary()
 }
 
 #[test]
-fn missing_suite_returns_operational_failure() {
+fn missing_suite_returns_operational_failure() -> Result<(), Box<dyn std::error::Error>> {
+    let root = assert_fs::TempDir::new()?;
     cargo_bin_cmd!()
+        .current_dir(root.path())
         .env_remove("CLIS_LOG_LEVEL")
-        .args(["run", "-s", "tailr", "-a", "/candidate", "-x", "/reference"])
+        .args([
+            "run",
+            "-s",
+            "missing.toml",
+            "-a",
+            "/candidate",
+            "-x",
+            "/reference",
+        ])
         .assert()
         .code(1)
         .stdout("")
-        .stderr(predicate::str::contains("suite"));
+        .stderr(predicate::str::contains("provide a suite TOML path"));
+    if root.path().join(".cli-bench").exists() {
+        return Err("missing suite created a store".into());
+    }
+    Ok(())
 }
 
 #[test]
@@ -215,13 +229,14 @@ fn composed_cli(check_only: bool) -> Result<(), Box<dyn std::error::Error>> {
         .arg(&suite)
         .arg("-a")
         .arg(candidate)
-        .arg("-p")
+        .arg("-P")
         .arg(previous)
         .arg("-g")
         .arg(generator)
         .arg("-d")
         .arg(fixture.store.root())
         .env("NO_COLOR", "1")
+        .env("PATH", "")
         .assert()
         .success();
     let record: cli_bench::PublicationRecord =
@@ -245,7 +260,7 @@ fn composed_cli(check_only: bool) -> Result<(), Box<dyn std::error::Error>> {
         .arg(&suite)
         .arg("-a")
         .arg(candidate)
-        .arg("-p")
+        .arg("-P")
         .arg(previous)
         .arg("-g")
         .arg(generator)

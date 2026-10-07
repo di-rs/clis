@@ -443,6 +443,11 @@ pub fn bind_roles(
     runner: &ProcessRunner,
 ) -> Result<RoleBindings, BenchError> {
     crate::validate_suite(suite)?;
+    if !suite.allow_reference && request.reference.is_some() {
+        return Err(crate::BenchError::invalid(
+            "suite disallows reference roles",
+        ));
+    }
     if request.previous.is_none() && request.reference.is_none() {
         return Err(build_error(
             "comparison requires an explicit previous or reference executable",
@@ -983,11 +988,7 @@ fn check_source_tree(directory: &Path, root: &Path) -> Result<(), BenchError> {
         if kind.is_dir() {
             check_source_tree(&item.path(), root)?;
         } else if kind.is_symlink() {
-            if !std::fs::canonicalize(item.path())?.starts_with(root) {
-                return Err(build_error(
-                    "committed symlink escapes isolated source snapshot",
-                ));
-            }
+            validate_source_link(&item.path(), root)?;
         } else if kind.is_file() {
             let mut prefix = [0_u8; 128];
             let count = std::fs::File::open(item.path())?.read(&mut prefix)?;
@@ -998,6 +999,106 @@ fn check_source_tree(directory: &Path, root: &Path) -> Result<(), BenchError> {
                     "Git LFS sources are unsupported; supply an explicitly built executable",
                 ));
             }
+        }
+    }
+    Ok(())
+}
+
+// Resolve existing symlink ancestors before deciding containment. Missing components
+// may remain lexical (a dangling fixture), but no step may leave the owned root.
+fn validate_source_link(path: &Path, root: &Path) -> Result<(), BenchError> {
+    use std::{collections::VecDeque, ffi::OsString, path::Component};
+    let failure = |reason: &str| {
+        build_error(format!(
+            "committed source symlink {}: {reason}",
+            path.display()
+        ))
+    };
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| failure("escapes isolated source snapshot"))?;
+    let mut pending: VecDeque<OsString> = relative
+        .components()
+        .map(|part| part.as_os_str().to_owned())
+        .collect();
+    let mut resolved = root.to_path_buf();
+    let mut hops = 0_u32;
+    while let Some(part) = pending.pop_front() {
+        let component = Path::new(&part)
+            .components()
+            .next()
+            .ok_or_else(|| failure("unsupported empty resolution component"))?;
+        match component {
+            Component::CurDir => continue,
+            Component::ParentDir => {
+                if resolved == root || !resolved.pop() || !resolved.starts_with(root) {
+                    return Err(failure("escapes isolated source snapshot"));
+                }
+                continue;
+            }
+            Component::Normal(_) => resolved.push(&part),
+            _ => return Err(failure("unsupported resolution component")),
+        }
+        let metadata = match std::fs::symlink_metadata(&resolved) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(failure(&format!(
+                    "resolution failed at {}: {error}",
+                    resolved.display()
+                )));
+            }
+        };
+        if metadata.file_type().is_symlink() {
+            hops = hops
+                .checked_add(1)
+                .ok_or_else(|| failure("symlink hop count overflow"))?;
+            if hops > 40 {
+                return Err(failure(
+                    "resolution exceeded 40 symlink hops (cycle or unsupported chain)",
+                ));
+            }
+            let target = std::fs::read_link(&resolved)
+                .map_err(|error| failure(&format!("resolution cannot read link: {error}")))?;
+            let target = if target.is_absolute() {
+                // Canonicalize the deepest existing ancestor, including OS path
+                // aliases, then validate the missing suffix component by component.
+                let mut ancestor = target;
+                let mut suffix = VecDeque::new();
+                let anchored = loop {
+                    match std::fs::canonicalize(&ancestor) {
+                        Ok(anchor) => break anchor.join(suffix.iter().collect::<PathBuf>()),
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                            let last = ancestor
+                                .components()
+                                .next_back()
+                                .ok_or_else(|| failure("unsupported absolute resolution"))?;
+                            suffix.push_front(last.as_os_str().to_owned());
+                            if !ancestor.pop() {
+                                return Err(failure("unsupported absolute resolution"));
+                            }
+                        }
+                        Err(error) => {
+                            return Err(failure(&format!("absolute resolution failed: {error}")));
+                        }
+                    }
+                };
+                resolved = root.to_path_buf();
+                anchored
+                    .strip_prefix(root)
+                    .map_err(|_| failure("escapes isolated source snapshot"))?
+                    .to_path_buf()
+            } else {
+                if !resolved.pop() {
+                    return Err(failure("resolution has no parent"));
+                }
+                target
+            };
+            for component in target.components().rev() {
+                pending.push_front(component.as_os_str().to_owned());
+            }
+        } else if !metadata.is_dir() && !pending.is_empty() {
+            return Err(failure("resolution encountered a non-directory ancestor"));
         }
     }
     Ok(())
@@ -1304,6 +1405,62 @@ mod tests {
     }
 
     #[test]
+    fn contained_dangling_source_links_allow_repository_fixtures_but_reject_escapes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use std::os::unix::fs::symlink;
+        let root = assert_fs::TempDir::new()?;
+        let source = root.path().join("source");
+        std::fs::create_dir_all(source.join("a/b"))?;
+        std::fs::create_dir(source.join("d"))?;
+        std::fs::write(source.join("a/b/b.csv"), "fixture")?;
+        let link = source.join("d/b.csv");
+        symlink("../a/b.csv", &link)?;
+        reject_lfs(&source)?;
+        std::fs::remove_file(&link)?;
+        symlink(source.join("a/missing.csv"), &link)?;
+        reject_lfs(&source)?;
+        std::fs::remove_file(&link)?;
+        for target in [
+            PathBuf::from("../../outside-missing"),
+            root.path().join("outside-missing"),
+        ] {
+            symlink(target, &link)?;
+            let error = reject_lfs(&source)
+                .err()
+                .ok_or("dangling external link accepted")?;
+            require(error.to_string().contains("d/b.csv"), "missing link path")?;
+            require(
+                error.to_string().contains("escapes"),
+                "missing containment diagnostic",
+            )?;
+            std::fs::remove_file(&link)?;
+        }
+        let outside = root.path().join("outside");
+        std::fs::create_dir(&outside)?;
+        symlink(&outside, source.join("ancestor"))?;
+        symlink("../ancestor/missing", &link)?;
+        let canonical_source = std::fs::canonicalize(&source)?;
+        require(
+            validate_source_link(&canonical_source.join("d/b.csv"), &canonical_source).is_err(),
+            "symlink ancestor escape accepted",
+        )?;
+        require(
+            reject_lfs(&source).is_err(),
+            "existing ancestor escape accepted",
+        )?;
+        std::fs::remove_file(source.join("ancestor"))?;
+        std::fs::remove_file(&link)?;
+        symlink("cycle-b", source.join("cycle-a"))?;
+        symlink("cycle-a", source.join("cycle-b"))?;
+        let error = reject_lfs(&source).err().ok_or("cycle accepted")?;
+        require(
+            error.to_string().contains("resolution"),
+            "missing cycle diagnostic",
+        )?;
+        Ok(())
+    }
+
+    #[test]
     fn build_policy_rejects_argument_injection_and_flag_separator() {
         for value in ["", "--release", "x\0y", "a\nb", "a\u{1f}b"] {
             assert!(validate_build_token(value).is_err());
@@ -1316,6 +1473,45 @@ mod tests {
         ] {
             assert!(validate_build_token(value).is_ok());
         }
+    }
+
+    #[test]
+    fn disabled_reference_policy_rejects_binding_before_any_executable_or_resource_access()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let guard = test_measurement_lock()?;
+        let root = assert_fs::TempDir::new()?;
+        let store = Store::open(&root.path().join("evidence"))?;
+        let suite = crate::parse_suite(&format!(
+            "allow_reference = false\n{}",
+            include_str!("../tests/inputs/minimal-suite.toml")
+        ))?;
+        let request = RoleRequest {
+            repository: root.path().join("missing-repository"),
+            candidate: ExecutableSource::Prebuilt(root.path().join("missing-candidate")),
+            previous: None,
+            reference: Some(root.path().join("missing-reference")),
+            generator: None,
+            git: None,
+            tools: None,
+            cache_root: root.path().join("missing-cache"),
+            home: root.path().join("missing-home"),
+            config: root.path().join("missing-config"),
+            pipeline: None,
+        };
+        let error = bind_roles(&guard, &request, &suite, &store, &build_support::runner())
+            .err()
+            .ok_or("disabled reference was accepted")?;
+        require(
+            error
+                .to_string()
+                .contains("suite disallows reference roles"),
+            "missing policy diagnostic",
+        )?;
+        require(
+            !request.cache_root.exists(),
+            "created cache for rejected reference",
+        )?;
+        Ok(())
     }
 
     #[test]

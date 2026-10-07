@@ -91,13 +91,13 @@ The following interfaces are the implementation target, not working commands yet
 ```sh
 cargo build --locked --release -p cli-bench
 
-# Saved suite names resolve from tools/cli-bench/suites/index.toml.
-target/release/cli-bench run -s tailr -r HEAD -x "$GNU_TAIL"
-target/release/cli-bench run -s tailr -r HEAD -b "$OLD_SHA"
-target/release/cli-bench run -s tailr -r HEAD -b "$OLD_SHA" -x "$GNU_TAIL"
+# Packages declare benches/cli-bench.toml in [package.metadata.cli-bench].
+target/release/cli-bench run -p tailr -r HEAD -x "$GNU_TAIL"
+target/release/cli-bench run -p tailr -r HEAD -b "$OLD_SHA"
+target/release/cli-bench run -p tailr -r HEAD -b "$OLD_SHA" -x "$GNU_TAIL"
 
 # Prebuilt paths avoid compilation; source provenance may be incomplete.
-target/release/cli-bench run -s tailr -a "$NEW_TAILR" -p "$OLD_TAILR" -g "$BIGGIE"
+target/release/cli-bench run -p tailr -a "$NEW_TAILR" -P "$OLD_TAILR" -g "$BIGGIE"
 
 target/release/cli-bench report -i "$RUN_DIR" -f markdown
 target/release/cli-bench compare -i "$RUN_DIR" -b previous -a candidate -f json
@@ -117,13 +117,23 @@ target/release/cli-bench replay -i "$BUNDLE_DIR" -g "$BIGGIE"
 | `export` | Copy a portable evidence directory; optional `-I/--with-inputs`, `-B/--with-binaries`. Never overwrite an existing destination. |
 | `replay` | Reconstruct a new run from the resolved bundle recipe, verifying identities/hashes; explicit replacement bindings are required for absent binaries. Preserve the old bundle. |
 
-Run/check flags: `-s/--suite` ID or TOML path, repeatable `-c/--case`,
-`-r/--candidate-ref` or `-a/--candidate`, `-b/--previous-ref` or `-p/--previous`,
+Run/check flags: mutually exclusive `-p/--package` workspace package or
+`-s/--suite` explicit TOML path, repeatable `-c/--case`,
+`-r/--candidate-ref` or `-a/--candidate`, `-b/--previous-ref` or `-P/--previous`,
 `-x/--reference`, `-g/--biggie` or `-G/--generator-ref`, `-t/--toolchain`,
 `-F/--features`, `-N/--no-default-features`, `-m/--measurement-profile`,
 `-d/--data-dir`, `-M/--manifest-path`, `-f/--format` and `-H/--hyperfine`.
 Optional `--experiment`, `--hypothesis` and `--change-summary` flags follow the
 [experiment contract](2026-10-06-cli-bench-experiments.md#1-optional-experiment-metadata).
+Package discovery uses `cargo metadata --no-deps --offline --locked --format-version 1`
+and optional `-M/--manifest-path`, with bounded explicit process resources and
+`RUSTUP_AUTO_INSTALL=0`. It selects exactly one workspace member by package name;
+`[package.metadata.cli-bench] suite = "benches/cli-bench.toml"` must declare a
+contained file whose `suite.package` matches. Package metadata discovery does no
+compilation/network, and explicit suite files/offline commands bypass Cargo.
+The current invoking checkout supplies one suite for every compared role/revision;
+exact submitted/resolved text is retained. No embedded registry or per-role recipe
+loading exists. Missing/ambiguous metadata/resources fail before measured work.
 Reference paths are always explicit; never substitute native BSD tools for GNU.
 Replay accepts the prebuilt role flags and reference/Biggie bindings, not arbitrary
 new case parameters. Help/version use `-h/-V`; logging uses the shared `-L` setup.
@@ -148,6 +158,7 @@ reject unsupported non-UTF-8 invocation paths explicitly rather than lossy conve
 | Suite field | Meaning |
 | --- | --- |
 | `id`, `package`, `binary` | Stable case family and exact Cargo targets. |
+| `allow_reference` | Defaults to true; false rejects an explicit reference in CLI/library binding before execution. Bundled Biggie is previous/candidate only. |
 | `generator` | Repository revision pinned to a full SHA, package `biggie`, build feature policy; explicit CLI binding may replace it and is recorded. |
 | `environment` | Child-only allowlisted settings, starting with `LC_ALL=C`, `TZ=UTC`, `CLIS_LOG_LEVEL=off`; isolated HOME/config directories. |
 | `limits` | Explicit resource caps; defaults above. |

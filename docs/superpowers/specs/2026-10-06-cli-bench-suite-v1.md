@@ -119,7 +119,13 @@ kind = "drained-pipe"
 - `Work`: `amount: u64` (positive), `unit: WorkUnit` (closed `bytes`,
   `records`, `directory-operations`). Omission means no throughput claim.
   The runner later divides this declared numerator by elapsed seconds.
-- `Suite`: required `schema_version: u32`, `id: String`, `package: String`,
+- `Suite`: `allow_reference: bool = true` permits explicit external reference roles.
+  Omitted values preserve previous suites' reference support; `false` rejects a
+  selected reference before executable/resource access in library binding and
+  before measurement-tool discovery/store creation in the CLI. Bundled Biggie sets `false`
+  because it has no reference counterpart. The field participates in the normal
+  submitted/resolved suite and frozen contract identity; it does not silently drop
+  an explicitly selected role. Required `schema_version: u32`, `id: String`, `package: String`,
   `binary: String`, `generator: GeneratorSpec`, `datasets: Vec<DatasetSpec>`,
   `cases: Vec<CaseSpec>`; `build: BuildPolicy = defaults`, `limits: Limits = defaults`;
   `environment: BTreeMap<String, String> = {LC_ALL="C", TZ="UTC", CLIS_LOG_LEVEL="off"}`.
@@ -232,3 +238,19 @@ Task 1 executable exposes `-h/--help`, `-V/--version` and shared `-L/--log-level
 No arguments prints help; unknown arguments return 2. Future commands are not
 listed as working. Run/check role-conflict parser tests are assigned to Task 4, which
 owns executable binding, instead of adding unused parser code in Task 1.
+
+## Package ownership and CLI discovery
+
+Initial recipes live at `biggie/benches/cli-bench.toml`,
+`coreutils/tailr/benches/cli-bench.toml` and `coreutils/mkdirr/benches/cli-bench.toml`.
+Each owning manifest declares `[package.metadata.cli-bench] suite` with the contained
+relative path and includes the TOML in its Cargo package. CLI run/check selects one
+workspace member using `-p/--package`, discovered with bounded locked/offline
+`cargo metadata --no-deps --offline --locked --format-version 1` and optional
+`-M/--manifest-path`. It rejects missing/ambiguous packages or metadata, escaping
+suite paths and mismatched `suite.package` before workload execution. Mutually
+exclusive `-s/--suite PATH` reads explicit TOML without Cargo discovery. The previous
+binary shorthand is `-P/--previous` for run/check/replay; build `-p` remains package.
+The current checkout's suite applies to every role/revision and preserves normal
+submitted/resolved source and contract identity. Public Rust parsing stays explicit;
+there is no central registry, sibling embedding or per-role recipe loading.

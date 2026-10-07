@@ -2,22 +2,108 @@
 
 [Workspace](../../README.md) · [Design](../../docs/superpowers/specs/2026-10-06-cli-bench-design.md)
 
-An original benchmark harness under development. The current slice provides
-strict suite parsing/validation, immutable evidence/artifact storage for Rust
-callers, bounded child execution, role/profile invocation resolution, and CLI
-help/version/logging, isolated Cargo revision builds, executable binding, and
-verified Biggie dataset preparation, correctness gating, controlled Hyperfine timing,
-and per-user measurement coordination.
-Local run/check composition, independent RSS, deterministic analysis and offline report/compare in terminal/JSON/Markdown are implemented. Portable export/strict replay and local history are implemented; hosted publication remains planned.
+An original correctness-checked CLI benchmark harness. Local build/check/run,
+independent elapsed/RSS measurements, report/compare, portable export, strict
+replay and compact history are implemented. The package-owned Biggie, tailr and mkdirr
+suites use only Biggie-generated content and have explicit primary and confirmation
+cases. Hosted publication and workflow operation remain planned.
 
 ## Quick start
 
 Run from the workspace root:
 
 ```sh
-cargo run --locked -p cli-bench -- --help
-cargo run --locked -p cli-bench -- --version
+cargo build --locked --release -p cli-bench -p biggie -p tailr -p mkdirr
+target/release/cli-bench --help
+target/release/cli-bench check -p tailr -a target/release/tailr \
+  -x /absolute/path/to/GNU/tail -g target/release/biggie -m smoke
+target/release/cli-bench run -p tailr -r HEAD -b PREVIOUS_SHA \
+  -x /absolute/path/to/GNU/tail -H /absolute/path/to/hyperfine -m smoke
 ```
+
+Replace reference/tool paths and `PREVIOUS_SHA` explicitly. Use canonical regular executable paths (resolve symlinks before binding roles).
+Native BSD `tail` or
+`mkdir` does not stand in for GNU. Hyperfine must be exactly 1.20.0; discovery never
+installs tools. Prebuilt roles have unknown build provenance, even when their
+filenames suggest a version. Git-built roles resolve committed refs once, exclude local utility
+edits, use isolated source/target roots and one locked release policy. An identical
+utility source comparison proves plumbing only.
+
+### Selection and command flags
+
+Select one workspace package with `-p/--package`, like Cargo. Each package declares
+its contained suite path in `Cargo.toml`:
+
+```toml
+[package.metadata.cli-bench]
+suite = "benches/cli-bench.toml"
+```
+
+Discovery uses `cargo metadata --no-deps --offline --locked --format-version 1`,
+without compilation, network or implicit toolchain installation. Run from the
+workspace or package directory, or pass `-M/--manifest-path` from elsewhere. The
+selected suite must belong to that package; missing/ambiguous packages, missing
+metadata, escaping paths and mismatched `suite.package` fail before workload work.
+The invoking checkout's single suite applies to every selected role/revision;
+compared revisions do not supply independent recipes. Exact submitted and resolved
+suite text remains evidence. Keep suite TOML included in the owning Cargo package.
+
+Alternatively use `-s/--suite PATH` for an explicit TOML file. It conflicts with
+`--package` and performs no Cargo discovery; explicit-file prebuilt selection and
+offline report/export/replay remain usable without Cargo. Rust callers provide
+suite text through the unchanged library APIs. There is no central registry.
+No `--case` means every declared case, including confirmation. Repeating a case or
+selecting an unknown case fails. Ordering follows declaration order.
+
+| Command | Implemented flags and defaults |
+| --- | --- |
+| `run`, `check` | `-p/--package` workspace package or mutually exclusive `-s/--suite` TOML path; repeatable `-c/--case`; `-r/--candidate-ref` or `-a/--candidate`; `-b/--previous-ref` or `-P/--previous`; optional `-x/--reference`; `-g/--biggie` or `-G/--generator-ref`; `-t/--toolchain`; comma-delimited/repeatable `-F/--features`; `-N/--no-default-features`; `-m/--measurement-profile full|smoke` (full); `-d/--data-dir` (.cli-bench); `-M/--manifest-path` Cargo manifest for package discovery/Git repository context; `-f/--format terminal|json|markdown` (terminal); `-H/--hyperfine` explicit engine path. |
+| `build` | `-p/--package`, `-r/--revision`; optional `-t/--toolchain`, `-F/--features`, `-N/--no-default-features`, `-d/--data-dir` (.cli-bench). Requires the package's sole binary; Rust API/suites allow explicit binary choice. |
+| `report` | `-i/--input` sealed run or bundle directory; `-f/--format` (terminal). |
+| `compare` | `-i/--input`, `-b/--baseline`, `-a/--candidate` distinct present role names; `-f/--format` (terminal). Only compares roles in that run. |
+| `export` | `-i/--input`, `-o/--output` create-new directory; `-I/--with-inputs`, `-B/--with-binaries`. |
+| `replay` | `-i/--input`; optional exact-byte replacements `-a/--candidate`, `-P/--previous`, `-x/--reference`, `-g/--biggie`, `-H/--hyperfine`; `-d/--data-dir` (.cli-bench), `-f/--format` (terminal). |
+| `history` | `-d/--directory` (.cli-bench/runs); optional `-s/--suite`; `-f/--format` (terminal). |
+
+Run/check requires a candidate and at least one comparator. Ref/path variants for
+a role conflict. Generator selection defaults to the suite's pinned SHA, independently
+of the Biggie candidate. CLI build flags override suite settings; omitted values
+inherit the suite, then the installed active toolchain. `-F` replaces the feature
+list; `-N` enables no-default-features. All Rust roles share toolchain, target,
+features, flags and strip policy. Tagged runs/checks additionally accept long-only
+`--experiment ID`, `--hypothesis TEXT`, `--change-summary TEXT`; all three and a
+previous Git ref are required together. The fixed starting SHA/contract and every
+attempt persist under `experiments/`; use a new ID after changing the contract.
+
+| Suite | Primary case IDs | Separate confirmation case IDs |
+| --- | --- | --- |
+| [Biggie](../../biggie/benches/cli-bench.toml) | `text`, `records`, `bytes` | `confirm-text`, `confirm-bytes` |
+| [tailr](../../coreutils/tailr/benches/cli-bench.toml) | `file-lines`, `file-bytes`, `pipe-lines`, `startup` | `confirm-file-lines`, `confirm-pipe-lines`, `confirm-boundary-4095`, `confirm-boundary-4096`, `confirm-boundary-4097` |
+| [mkdirr](../../coreutils/mkdirr/benches/cli-bench.toml) | `absent`, `existing` | `confirm-absent`, `confirm-existing` |
+
+The exact [full/smoke recipes](../../docs/superpowers/specs/2026-10-06-cli-bench-design.md#initial-suites)
+and [confirmation contract](../../docs/superpowers/specs/2026-10-06-cli-bench-experiments.md#3-separately-named-confirmation-cases)
+own sizes, seeds, patterns and independent checks. Biggie has no GNU counterpart:
+the suite's `allow_reference = false` rejects an explicit reference before execution.
+Other suites default to `allow_reference = true`; direct Rust role binding enforces
+the same policy. Use previous/candidate, and select only `-c text` for revisions predating records
+and bytes. Unsupported selected shapes fail visibly; they are never dropped.
+
+Select primary cases explicitly while tuning, then select confirmation cases
+under full settings after fixing the candidate and starting revision:
+
+```sh
+target/release/cli-bench run -p biggie -r HEAD -b PREVIOUS_SHA \
+  -c text -c records -c bytes --experiment biggie-attempts \
+  --hypothesis 'Describe the expected effect' --change-summary 'Describe this attempt'
+target/release/cli-bench run -p biggie -r FINAL_SHA -b PREVIOUS_SHA \
+  -c confirm-text -c confirm-bytes --experiment biggie-attempts \
+  --hypothesis 'Confirm the selected candidate' --change-summary 'Final confirmation'
+```
+
+These examples perform no tuning themselves. Reports retain negative outcomes;
+smoke is wiring-only. Same-source native acceptance does not establish a gain.
+
 
 ## CLI contract
 
@@ -34,7 +120,18 @@ Source-local model/suite/store/artifact/host/process/invocation/build/timing/loc
 tests in `tests/process.rs`, `tests/cli.rs`, and the public
 consumer lifecycle in `tests/library.rs` cover the implemented interface. Native macOS 27.0.1 arm64 checks are recorded in the task report; Linux
 has not been run. No performance conclusion or GNU/BSD compatibility claim is
-made for this custom harness. Production benchmark workloads and Linux execution remain unverified.
+made for this custom harness. Native Linux execution remains unverified. Native macOS real-suite evidence is indexed in the Task 11 acceptance report; consult its run IDs and limits before drawing conclusions.
+
+Three source-local repository acceptance tests validate the actual package-owned
+recipes without embedding sibling files into the shipped harness or duplicating
+recipes. They require an explicit containing-workspace resource and fail when it
+is missing or wrong; ordinary packaged tests remain self-contained. Run them from
+the workspace root in addition to the contributor checks:
+
+```sh
+CLIS_BENCH_WORKSPACE_MANIFEST="$PWD/Cargo.toml" cargo nextest run --locked \
+  -p cli-bench --run-ignored only -E 'test(repository_acceptance_)'
+```
 
 ## Rust library
 
@@ -112,10 +209,9 @@ environment/globs, or interpret embedded tokens. Invocation resolution rejects n
 scratch paths; caller-owned execution roots must be real directories. This is
 containment validation for cooperative workloads, not a hostile-filesystem sandbox.
 
-Current output is plain help/version text and build JSON, with no pager or prompt. Shared logging
+Output includes plain help/version, build JSON and terminal/JSON/Markdown reports, with no pager or prompt. Shared logging
 uses stderr and is initialized only by the CLI. No timing or optimization gain is
-claimed. The harness currently makes no standards-compliance certification; this
-slice implements its configuration/adapter foundation and records platform gaps.
+claimed. The harness makes no standards-compliance certification; the assessment below records implemented interfaces and evidence gaps.
 
 
 ## Evidence library
@@ -334,7 +430,7 @@ reference fails. No GNU/BSD substitution is performed.
 
 `run` and `check` accept a suite TOML path with `-s/--suite`, repeatable
 `-c/--case`, candidate `-r/--candidate-ref` or `-a/--candidate`, previous
-`-b/--previous-ref` or `-p/--previous`, explicit `-x/--reference`, and generator
+`-b/--previous-ref` or `-P/--previous`, explicit `-x/--reference`, and generator
 `-G/--generator-ref` or `-g/--biggie`. A candidate and at least one comparator
 are required. `-t/--toolchain`, `-F/--features`, `-N/--no-default-features`,
 `-m/--measurement-profile full|smoke`, `-d/--data-dir`, `-M/--manifest-path`,
@@ -757,13 +853,15 @@ identities, and creates a new run ID through the normal guarded run pipeline:
 
 ```sh
 cli-bench replay -i complete-run -d .cli-bench -f json
-cli-bench replay -i exported-run -a /exact/candidate -p /exact/previous -g /exact/biggie
+cli-bench replay -i exported-run -a /exact/candidate -P /exact/previous -g /exact/biggie
 ```
 
 Use `-x/--reference` for an originally selected reference and `-H/--hyperfine`
 for the original engine. Replacements must have the exact saved executable bytes;
 matching source or a newly built executable with a different hash is insufficient.
-The running harness must also match the original hash/version. Saved check runs
+The running harness must also match the original hash/version. Historical command
+records retain their original flag syntax; consult the retained harness's help when
+replaying an older record. Saved check runs
 remain checks even when they have an engine identity. Replay allocates new owned
 HOME/config/scratch resources; original host paths remain provenance data. Biggie
 regenerates datasets through the saved recipe/shape/hash gate, even when an export
@@ -772,6 +870,25 @@ new attempt rather than refreshing its expected hash. To change resources,
 settings, cases or recipes, use `run` as a separately identified experiment.
 Older runs lacking the execution resource record remain reportable/exportable;
 strict replay rejects unresolved resource provenance rather than guessing.
+
+On native macOS 27.0.1, the exported `/bin/cat` copy received SIGKILL although its
+bytes, SHA-256 and mode matched the working original. The OS mechanism is unknown;
+retaining exact bytes does not guarantee that a relocated system executable can run.
+The failed full-resource replay remains evidence, with no measurements accepted.
+For this platform, retain the complete `-I -B` export for identity evidence, then
+create a separate input-only bundle and supply the original local executables:
+
+```sh
+cli-bench export -i .cli-bench/runs/RUN_ID -o input-only-run -I
+cli-bench replay -i input-only-run -a /exact/candidate -P /exact/previous \
+  -x /exact/GNU/reference -g /exact/biggie -H /exact/hyperfine
+```
+
+Include only originally selected roles. This bundle explicitly omits executable
+bytes; the running harness must still match. The adapter discovers Bash and cat
+through its existing PATH policy and uses `/usr/bin/time`; all must match the saved
+identities and actual hashes before workloads execute. Keep those exact local tools
+available. No signing, binary modification or relaxed identity check is required.
 
 The public APIs are `export_bundle`, `load_bundle`, `replay_bindings`,
 `replay_tools`, `replay_request`, `history_record`, `append_history` and
@@ -809,3 +926,46 @@ hosts. These operations neither fetch/push Git nor alter a history branch.
 Ordinary coverage uses original tiny plumbing fixtures and private real locks
 for detailed faults, with representative public API/CLI workflows on the production
 lock. No Task 10 performance result or additional native Linux evidence is claimed.
+
+
+Source snapshots permit dangling symlinks only when resolution proves that every
+component remains inside the owned checkout. Existing symlink ancestors are resolved;
+external targets (including missing targets), cycles beyond forty link hops and
+unsupported resolution fail with the original link path in the diagnostic. This
+preserves unrelated dangling fixtures without importing uncommitted external source.
+
+## Boundaries, environment and requirement assessment
+
+Direct elapsed observations include process startup. Biggie stdout is drained through
+an explicit pipe. Tail file cases pass a seekable input path, while pipe cases time
+the complete finite `bash`/`cat` producer and consumer pipeline, including its startup;
+these scopes cannot be interpreted as isolated tail startup. Startup uses two tiny
+Biggie text records. All outputs use explicit drained sinks. No cold-cache claim or
+seek-tail byte throughput is made. Mkdir expands safe Biggie path records and resets
+an owned scratch tree before every correctness check, warmup, timing and RSS process;
+its numerator is requested directory operations. Permissions are compared to each
+selected baseline, and the exact parent tree is checked after every mutation.
+
+Measurement children receive only suite-allowlisted `LC_ALL`, `TZ`, `CLIS_LOG_LEVEL`
+(default C/UTC/off), plus owned HOME/config and required explicit execution settings;
+parent values do not silently override suite settings. Adapter build/tool discovery
+uses selected PATH/HOME/Cargo/Rustup/SDK/temp values and `RUSTUP_AUTO_INSTALL=0`.
+Harness logging uses explicit `-L` over `CLIS_LOG_LEVEL` over off; it does not set the
+workload's logging. No public lock bypass or global cwd/environment mutation exists.
+
+| [North-star requirement](../../docs/north-star.md#every-utility) | Current assessment |
+| --- | --- |
+| U1 reusable Rust operations | Typed parsing, building, gating, measurement, analysis, storage and replay APIs; direct integration consumers and compiled `inspect_report` example. |
+| U2 consistent tests | Source-local unit tests and isolated real locks; process/CLI/library integrations and explicit native opt-ins; small original plumbing fixtures. |
+| U3 useful documentation | Flags, operands, defaults, recipes, public consumers and limitations documented here and in the schema/design. |
+| U4 text/bytes | UTF-8 config/argv and strict paths; byte-exact data checks including NUL, control bytes and unterminated boundaries; no lossy path conversion or stream normalization. Terminal width/graphemes are inapplicable to machine data. |
+| U5 terminal usability | Plain ANSI-free terminal/Markdown, structured JSON, stdout data and stderr diagnostics; no color, pager, prompt or width-sensitive layout. |
+| U6 CLI review | Subcommand help/version, explicit role conflicts, bounded failure/cancellation, environment precedence, offline recovery and versioned strict schemas; installation requires existing external tools. |
+| U7 platforms | Native macOS observations recorded separately; native Linux unverified. Configured future CI is not observed hosted execution. |
+| U8 maintainability | Original focused modules, no first-party unsafe code, bounded resources and explicit caller ownership; real-suite evidence checks plumbing and makes no optimization claim. |
+| U9 observability | Typed library failures, shared CLI logging, retained stage events and error causes; stage/lifecycle policy follows the [observability guide](../../docs/observability.md). |
+
+P1–P4 port requirements are inapplicable to this custom harness: it has no GNU/BSD
+original or utility hot path whose superiority is claimed. It supplies evidence for
+ports' P4 work using the governing [benchmark policy](../../docs/benchmarking.md).
+This is an assessment, not universal parity or platform certification.

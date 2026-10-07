@@ -1,3 +1,5 @@
+mod discovery;
+
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use cli_bench::{
     BoundTool, CaseId, ExecutableSource, ExecutionPolicy, ExperimentPreparation, ExperimentRequest,
@@ -104,7 +106,7 @@ pub struct ReplayArgs {
     pub input: PathBuf,
     #[arg(short = 'a', long)]
     pub candidate: Option<PathBuf>,
-    #[arg(short = 'p', long)]
+    #[arg(short = 'P', long)]
     pub previous: Option<PathBuf>,
     #[arg(short = 'x', long)]
     pub reference: Option<PathBuf>,
@@ -320,15 +322,27 @@ pub struct BuildArgs {
 #[command(group(clap::ArgGroup::new("candidate-binding").required(true).args(["candidate_ref", "candidate"])),
     group(clap::ArgGroup::new("comparator-binding").required(true).multiple(true).args(["previous_ref", "previous", "reference"])))]
 pub struct SelectionArgs {
-    #[arg(short, long)]
-    pub suite: String,
+    #[arg(
+        short,
+        long,
+        conflicts_with = "suite",
+        required_unless_present = "suite"
+    )]
+    pub package: Option<String>,
+    #[arg(
+        short,
+        long,
+        conflicts_with = "package",
+        required_unless_present = "package"
+    )]
+    pub suite: Option<PathBuf>,
     #[arg(short = 'r', long, conflicts_with = "candidate")]
     pub candidate_ref: Option<String>,
     #[arg(short = 'a', long)]
     pub candidate: Option<PathBuf>,
     #[arg(short = 'b', long, conflicts_with = "previous")]
     pub previous_ref: Option<String>,
-    #[arg(short = 'p', long)]
+    #[arg(short = 'P', long)]
     pub previous: Option<PathBuf>,
     #[arg(short = 'x', long)]
     pub reference: Option<PathBuf>,
@@ -532,9 +546,12 @@ struct SelectionResources {
     platform: Platform,
     harness: BoundTool,
 }
-fn load_selection(args: &SelectionArgs) -> anyhow::Result<SelectionSetup> {
+fn load_selection(
+    args: &SelectionArgs,
+    cancellation: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> anyhow::Result<SelectionSetup> {
     let cwd = std::env::current_dir()?;
-    let repository = if let Some(manifest) = &args.manifest_path {
+    let mut repository = if let Some(manifest) = &args.manifest_path {
         let path = std::fs::canonicalize(cwd.join(manifest))?;
         path.parent()
             .ok_or_else(|| anyhow::anyhow!("manifest has no parent"))?
@@ -542,13 +559,29 @@ fn load_selection(args: &SelectionArgs) -> anyhow::Result<SelectionSetup> {
     } else {
         cwd.clone()
     };
-    let source = std::fs::read_to_string(cwd.join(&args.suite)).map_err(|error| {
-        anyhow::anyhow!(
-            "cannot load suite {}: {error}; provide a suite TOML path",
-            args.suite
-        )
-    })?;
+    let source = if let Some(path) = &args.suite {
+        std::fs::read_to_string(cwd.join(path)).map_err(|error| {
+            anyhow::anyhow!(
+                "cannot load suite {}: {error}; provide a suite TOML path",
+                path.display()
+            )
+        })?
+    } else {
+        let (workspace, source) = discovery::discover_package_suite(
+            &cwd,
+            args.manifest_path.as_deref(),
+            args.package
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("package or suite selection required"))?,
+            cancellation,
+        )?;
+        repository = workspace;
+        source
+    };
     let mut suite = parse_suite(&source)?;
+    if !suite.allow_reference && args.reference.is_some() {
+        anyhow::bail!("suite disallows reference roles; select a previous/candidate comparison");
+    }
     if let Some(toolchain) = &args.toolchain {
         suite.build.toolchain = Some(toolchain.clone());
     }
@@ -586,7 +619,7 @@ fn execute_selection_inner(
     cancellation: &std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> anyhow::Result<std::process::ExitCode> {
     let measurement_lock = acquire_measurement_lock(cancellation)?;
-    let setup = load_selection(args)?;
+    let setup = load_selection(args, cancellation)?;
     let SelectionSetup {
         suite,
         store,
@@ -995,15 +1028,125 @@ mod tests {
     use super::Cli;
 
     #[test]
+    fn package_selection_and_previous_short_flags_are_unambiguous() {
+        for command in ["run", "check"] {
+            assert!(
+                Cli::try_parse_validated_from([
+                    "cli-bench",
+                    command,
+                    "-p",
+                    "tailr",
+                    "-a",
+                    "/candidate",
+                    "-P",
+                    "/previous"
+                ])
+                .is_ok()
+            );
+            assert_eq!(
+                Cli::try_parse_validated_from([
+                    "cli-bench",
+                    command,
+                    "-p",
+                    "tailr",
+                    "-s",
+                    "custom.toml",
+                    "-a",
+                    "/candidate",
+                    "-P",
+                    "/previous"
+                ])
+                .err()
+                .map(|error| error.kind()),
+                Some(clap::error::ErrorKind::ArgumentConflict)
+            );
+            assert_eq!(
+                Cli::try_parse_validated_from([
+                    "cli-bench",
+                    command,
+                    "-a",
+                    "/candidate",
+                    "-P",
+                    "/previous"
+                ])
+                .err()
+                .map(|error| error.kind()),
+                Some(clap::error::ErrorKind::MissingRequiredArgument)
+            );
+        }
+        assert!(
+            Cli::try_parse_validated_from([
+                "cli-bench",
+                "replay",
+                "-i",
+                "bundle",
+                "-P",
+                "/previous"
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_validated_from(["cli-bench", "build", "-p", "tailr", "-r", "HEAD"])
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn cli_rejects_disallowed_reference_before_creating_store_or_discovering_tools()
+    -> anyhow::Result<()> {
+        let root = assert_fs::TempDir::new()?;
+        let custom = root.path().join("custom.toml");
+        std::fs::write(
+            &custom,
+            format!(
+                "allow_reference = false\n{}",
+                include_str!("../tests/inputs/minimal-suite.toml")
+            ),
+        )?;
+        let selection = custom.to_string_lossy().into_owned();
+        let (cli, _) = Cli::try_parse_validated_from([
+            "cli-bench",
+            "check",
+            "-s",
+            &selection,
+            "-a",
+            "/missing-candidate",
+            "-P",
+            "/missing-previous",
+            "-x",
+            "/missing-reference",
+            "-g",
+            "/missing-generator",
+        ])?;
+        let Some(super::Command::Check(mut args)) = cli.command else {
+            anyhow::bail!("check command missing");
+        };
+        args.data_dir = root.path().join("uncreated-store");
+        let error = super::load_selection(
+            &args,
+            &std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        )
+        .err()
+        .ok_or_else(|| anyhow::anyhow!("reference was accepted"))?;
+        anyhow::ensure!(
+            error
+                .to_string()
+                .contains("suite disallows reference roles")
+        );
+        anyhow::ensure!(!args.data_dir.exists());
+        Ok(())
+    }
+
+    #[test]
     fn run_and_check_reject_conflicting_role_bindings() {
         for command in ["run", "check"] {
             for conflicting in [
                 vec!["-r", "HEAD", "-a", "/candidate", "-x", "/reference"],
-                vec!["-a", "/candidate", "-b", "HEAD~1", "-p", "/previous"],
+                vec!["-a", "/candidate", "-b", "HEAD~1", "-P", "/previous"],
                 vec![
                     "-a",
                     "/candidate",
-                    "-p",
+                    "-P",
                     "/previous",
                     "-G",
                     "HEAD",

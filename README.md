@@ -32,6 +32,7 @@ and limitations.
 | [wcr](coreutils/wcr/README.md) | Count lines, words, bytes, and characters | GNU `wc` |
 | [calr](calr/README.md) | Print month or year calendars | util-linux `cal` |
 | [biggie](biggie/README.md) | Generate text, records, fields, bytes and sorted pairs | No direct counterpart |
+| [cli-bench](tools/cli-bench/README.md) | Correctness-checked CLI benchmark evidence | Custom harness |
 | [parsu](parsu/README.md) | Parse a restricted XML-like language | No direct counterpart |
 | [kara](kara/README.md) | Edit text in a terminal | No direct counterpart |
 
@@ -66,8 +67,9 @@ cargo build --locked --release -p catr
 ```
 
 See [CONTRIBUTING](CONTRIBUTING.md) for workspace checks and fixture conventions.
-Benchmarks require additional tools described in the
-[benchmarking guide](docs/benchmarking.md); they are not prerequisites for ordinary tests.
+The [cli-bench harness](tools/cli-bench/README.md) provides Biggie, tailr and mkdirr
+suites, elapsed/RSS evidence, export and replay. Benchmarks require additional tools
+described in the [benchmarking guide](docs/benchmarking.md); they are not prerequisites for ordinary tests.
 
 ## Workspace and contributor guides
 

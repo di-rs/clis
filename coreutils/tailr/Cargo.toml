@@ -15,3 +15,6 @@ pretty_assertions = "1.4.0"
 
 [lints]
 workspace = true
+
+[package.metadata.cli-bench]
+suite = "benches/cli-bench.toml"
