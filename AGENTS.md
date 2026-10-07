@@ -27,6 +27,9 @@ to copy. Root and app READMEs distinguish current support from plans.
 - Prefer one utility or reusable capability per change. State the affected behavior,
   library API, tests, and performance impact before editing. Preserve unrelated work,
   tutorial credits, and consumer contracts; do not modify Kara incidentally.
+- Keep added flags, fallbacks, and abstractions justified by the user's intent.
+  Remove unnecessary additions from the current change rather than adding more
+  machinery to support them; preserve established behavior outside the task.
 - Establish the affected baseline. Add a failing regression for a behavior fix,
   implement the domain operation, then connect the CLI adapter. Use typed options
   and explicit resources; CLI and Rust callers share the implementation.
@@ -40,11 +43,27 @@ to copy. Root and app READMEs distinguish current support from plans.
 - Put Rust unit tests in `#[cfg(test)] mod tests` in the same source file as the
   implementation. Reserve `tests/`, including `tests/library.rs`, for integration
   tests and their support files; follow [test conventions](CONTRIBUTING.md#test-conventions).
+- Use `anyhow` for application error handling and `thiserror` for typed errors
+  when callers need to match variants and take different actions. Apply this to
+  new or changed error handling; keep unrelated migrations out of scope.
+- Prioritize end-to-end (E2E) CLI tests for most changes. Use unit tests
+  selectively for complex logic or hard-to-reach edge cases; they need not cover
+  every implementation detail or duplicate E2E coverage. Retain direct API tests
+  for changed library contracts as required by CONTRIBUTING.
+- Derive expected results from documented behavior, worked examples, or an
+  independent reference, not the implementation under test. Test observable
+  results; source-text matching does not prove runtime behavior.
+- Ground review findings in a reachable input or execution path and a concrete
+  impact, with source or test evidence. Respect the user's accepted tradeoffs.
 - Implement originally. Review licensing/attribution before importing third-party
   code, tests, or fixtures; do not copy GNU implementation code into this MIT repo.
 - Check the final diff, relevant commands and examples, and links. Use the exact
   [check workflow](CONTRIBUTING.md#checks); report checks actually run and limitations.
   Do not weaken tests, hide errors, or fabricate benchmark evidence to obtain a pass.
+- Reuse passing checks while their code, fixtures, configuration, and relevant
+  environment remain unchanged. Rerun only checks affected by new changes,
+  failures, or unresolved concerns; preparing a commit or PR adds no check run.
+  Documentation-only changes use the documentation checks in CONTRIBUTING.
 - Documentation-only work establishes or audits contracts. Report implementation
   defects as concrete follow-ups unless a scoped fix is authorized.
 

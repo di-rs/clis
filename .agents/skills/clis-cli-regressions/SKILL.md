@@ -13,6 +13,16 @@ In a tests-and-documentation task, report discovered production
 defects without silently changing production behavior or blessing a defect as
 intended behavior.
 
+Prioritize end-to-end CLI tests for most changes. Add unit tests selectively for
+complex logic or cases that are difficult to exercise through the binary;
+exhaustive implementation coverage and duplicate E2E assertions are unnecessary.
+Derive expected results from documented behavior, a worked example, or an
+independent reference. Each case should reject a plausible wrong result; avoid
+copying the implementation's calculation into its expected-value calculation.
+Exercise the binary or public library interface instead of asserting that source
+files contain particular strings. Comparing output bytes or fixture contents is
+appropriate when those bytes are the behavior being tested.
+
 Build a small case matrix for the changed behavior: arguments, input, exit
 status, stdout, stderr, and filesystem effects. Include relevant flags/conflicts,
 errors, empty input, stdin, and boundaries such as Unicode, invalid UTF-8, or an
