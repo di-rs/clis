@@ -73,6 +73,8 @@ described in the [benchmarking guide](docs/benchmarking.md); they are not prereq
 CI benchmarks only affected CLIs, keeps tests unconditional, and updates one PR
 comment with labelled current/retained results. It uploads no benchmark artifacts;
 remote storage is deferred to [#12](https://github.com/di-rs/clis/issues/12).
+The [local acceptance record](docs/evidence/2026-10-07-cli-bench-acceptance.md)
+indexes observed checks, native evidence and remaining platform/hosted gaps.
 
 ## Workspace and contributor guides
 

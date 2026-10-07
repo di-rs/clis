@@ -491,9 +491,10 @@ evidence.
 Follow package then workspace checks in CONTRIBUTING, public API docs/examples,
 Python helpers and inline comment tests, actionlint and zizmor including auditor persona. Validate actual Actions runs after
 default-branch registration; before that label remote execution unverified. A
-workflow definition passing lint is not a successful publication/history trial.
-Test comment update/stale suppression, a default-branch history append and repeat
-publication idempotence. Do not modify repository merge rules to enforce timing.
+workflow definition passing lint is not an observed comment update. Test affected-only
+measurement, comment update/retention, docs-only skips, stale-run suppression and
+failed partial reruns. Remote artifact/history storage is deferred to issue 12.
+Do not modify repository merge rules to enforce timing.
 
 Acceptance requires all R1–R10 implemented, the three suites executable locally
 and through the workflow, two comparison modes demonstrated with declared identity,
