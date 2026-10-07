@@ -78,7 +78,15 @@ fn native_time_adapter_contracts_plumbing_only() -> TestResult {
         },
         path,
     };
-    for mode in ["zero", "one", "diagnostic", "pipe", "file", "signal"] {
+    for mode in [
+        "zero",
+        "one",
+        "diagnostic",
+        "normal-warning",
+        "pipe",
+        "file",
+        "signal",
+    ] {
         let mut fixture = native_fixture(mode)?;
         fixture.root = fixture.root.into_persistent();
         eprintln!(
@@ -97,10 +105,42 @@ fn native_time_adapter_contracts_plumbing_only() -> TestResult {
                 result.is_err(),
                 "signal accepted as normal expected exit 143",
             )?;
+            if platform == Platform::Darwin {
+                let outcome: serde_json::Value = serde_json::from_slice(&std::fs::read(
+                    writer
+                        .path()
+                        .join("raw/rss/last-line-Candidate-1.outcome.json"),
+                )?)?;
+                require(
+                    outcome.get("status").and_then(serde_json::Value::as_str) == Some("Signal(15)"),
+                    "native Darwin SIGTERM was not retained as a signal",
+                )?;
+            }
         } else {
             let samples = result?;
             require(samples.len() == 2, "native smoke sample count wrong")?;
             for sample in samples {
+                if mode == "normal-warning" {
+                    require(
+                        sample.status == 143,
+                        "normal native exit 143 was not preserved",
+                    )?;
+                    require(
+                        std::fs::read(writer.path().join(&sample.target_stderr))?
+                            == b"time: command terminated abnormally\n",
+                        "normal native target warning changed",
+                    )?;
+                    let outcome: serde_json::Value = serde_json::from_slice(&std::fs::read(
+                        writer
+                            .path()
+                            .join(sample.raw_resource.with_extension("outcome.json")),
+                    )?)?;
+                    require(
+                        outcome.get("status").and_then(serde_json::Value::as_str)
+                            == Some("Exit(143)"),
+                        "normal native status was not retained as an exit",
+                    )?;
+                }
                 let raw = std::fs::read(writer.path().join(sample.raw_resource))?;
                 require(
                     parse_peak_rss(platform, &raw)? == sample.rss,
@@ -119,6 +159,9 @@ fn native_fixture(mode: &str) -> Result<Fixture, Box<dyn std::error::Error>> {
     let body = match mode {
         "one" => "printf 'EFGH\\n'; exit 1",
         "diagnostic" => "printf 'EFGH\\n'; printf 'target diagnostic without newline' >&2",
+        "normal-warning" => {
+            "printf 'EFGH\\n'; printf 'time: command terminated abnormally\\n' >&2; exit 143"
+        }
         "pipe" => "test -p /dev/stdin || exit 9; test -p /dev/stdout || exit 8; /bin/cat",
         "file" => "test -f /dev/stdin || exit 9; /bin/cat",
         "signal" => {
@@ -141,10 +184,10 @@ kill -TERM "$$""#
     if mode == "one" {
         case.expected_status = 1;
     }
-    if mode == "signal" {
+    if matches!(mode, "signal" | "normal-warning") {
         case.expected_status = 143;
     }
-    if mode == "diagnostic" {
+    if matches!(mode, "diagnostic" | "normal-warning") {
         case.correctness = vec![
             CorrectnessRule::Literal {
                 stream: Stream::Stdout,
@@ -152,7 +195,12 @@ kill -TERM "$$""#
             },
             CorrectnessRule::Literal {
                 stream: Stream::Stderr,
-                text: "target diagnostic without newline".into(),
+                text: if mode == "normal-warning" {
+                    "time: command terminated abnormally\n"
+                } else {
+                    "target diagnostic without newline"
+                }
+                .into(),
             },
         ];
     }

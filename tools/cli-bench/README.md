@@ -548,10 +548,12 @@ GNU resource output uses a separate bounded `-o` file; target stderr remains
 separate, and both the wrapper outcome and reported target status must match.
 Signal warnings fail. Darwin preserves the combined native stderr stream, checks
 the exact validated target diagnostic prefix by byte count/hash, then validates
-the resource trailer separately. Its abnormal-termination warning fails even
-when the wrapper's numeric exit equals an expected normal exit. Target diagnostics
-containing that warning text are explicitly ambiguous and RSS is unavailable for
-that boundary. No extra wrapper shell changes the command accounting scope.
+the resource trailer separately. Warning text in the resource trailer fails;
+matching literal target diagnostics remain valid, including normal exit 143.
+The installed native Darwin adapter propagated SIGTERM as `Signal(15)`, rejected
+by the exact process-status check against expected normal exit 143. A shell's
+numeric status 143 does not establish a native `Exit(143)`. No extra wrapper shell
+changes the command accounting scope.
 
 Every sample resets mutation scratch and checks status, diagnostics and declared
 effects. Each case repeats the full correctness gate afterward. Final identity

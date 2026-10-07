@@ -52,9 +52,14 @@ CLI_BENCH_TIME=/usr/bin/time cargo test --locked -p cli-bench \
 ```
 
 It preserves and prints temporary raw roots for direct zero/one exits, target
-diagnostics without a newline, pipeline/file I/O and SIGTERM disguised by native
-time as numeric exit 143. Each uses a tiny original script and literal fixture
-data, not actual benchmark content. The selected time binary hash, native output,
+diagnostics without a newline, normal exit 143 with the literal target diagnostic
+`time: command terminated abnormally`, pipeline/file I/O and SIGTERM rejection
+against expected normal exit 143. The retained native Darwin outcome is
+`Signal(15)`, separately from the ordinary target's `Exit(143)`; the earlier
+shell probe's numeric status 143 did not establish a native normal exit. Original
+tool fixtures separately test rejection of warning text in the resource trailer
+when the wrapper's numeric exit matches. Each uses a tiny original script and
+literal fixture data, not actual benchmark content. The selected time binary hash, native output,
 target prefix, argv, outcome and final checks are retained. Native macOS execution
 passed; no Linux native execution was available. These are adapter correctness
 probes, not benchmark data or performance measurements.

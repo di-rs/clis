@@ -287,15 +287,6 @@ fn retain_diagnostics(
     };
     std::fs::write(target_stderr, target)?;
     crate::verify_file(target_stderr, &diagnostic.stderr)?;
-    if platform == Platform::Darwin
-        && target
-            .windows(b"time: command terminated abnormally".len())
-            .any(|bytes| bytes == b"time: command terminated abnormally")
-    {
-        return Err(failure(
-            "Darwin target diagnostics are ambiguous with time's termination warning; RSS unavailable",
-        ));
-    }
     if let Some(trailer) = trailer {
         std::fs::write(resource, trailer)?;
     }
@@ -583,16 +574,15 @@ mod tests {
         Ok(())
     }
     #[test]
-    fn darwin_target_warning_is_explicitly_ambiguous() -> TestResult {
-        let mut fixture = crate::test_support::validation_fixture(
-            "printf 'time: command terminated abnormally\\n' >&2",
-            "printf 'time: command terminated abnormally\\n' >&2",
-        )?;
-        fixture.suite.cases.first_mut().ok_or("case")?.correctness =
-            vec![CorrectnessRule::Literal {
-                stream: Stream::Stderr,
-                text: "time: command terminated abnormally\n".into(),
-            }];
+    fn darwin_normal_exit_143_with_literal_warning_diagnostic_is_accepted() -> TestResult {
+        let body = "printf 'time: command terminated abnormally\\n' >&2; exit 143";
+        let mut fixture = crate::test_support::validation_fixture(body, body)?;
+        let case = fixture.suite.cases.first_mut().ok_or("case")?;
+        case.expected_status = 143;
+        case.correctness = vec![CorrectnessRule::Literal {
+            stream: Stream::Stderr,
+            text: "time: command terminated abnormally\n".into(),
+        }];
         let tool = time_tool(&fixture, Platform::Darwin, "")?;
         let mut writer = fixture.store.begin_run(&fixture.suite)?;
         let validated = validate_experiment(
@@ -600,17 +590,22 @@ mod tests {
             &mut writer,
             &fixture.runner,
         )?;
-        require(
-            measure_rss(
-                &validated,
-                &mut writer,
-                &fixture.runner,
-                &tool,
-                Platform::Darwin,
-            )
-            .is_err(),
-            "ambiguous native warning accepted",
+        let samples = measure_rss(
+            &validated,
+            &mut writer,
+            &fixture.runner,
+            &tool,
+            Platform::Darwin,
         )?;
+        require(samples.len() == 2, "normal-exit warning samples missing")?;
+        for sample in samples {
+            require(sample.status == 143, "normal exit 143 was not preserved")?;
+            require(
+                std::fs::read(writer.path().join(sample.target_stderr))?
+                    == b"time: command terminated abnormally\n",
+                "literal target warning changed",
+            )?;
+        }
         Ok(())
     }
     #[test]
