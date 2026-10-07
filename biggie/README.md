@@ -130,4 +130,4 @@ See the [API examples](src/lib.rs) and operation-module doctests.
 The same seed/options/build/platform reproduce the same random data; bytes may
 change across rand versions or platforms. Biggie has no direct GNU/BSD counterpart.
 
-[Workspace README](../README.md) · [Contributor checks](../CONTRIBUTING.md#checks)
+[Workspace README](../README.md)

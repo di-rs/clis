@@ -1,0 +1,5 @@
+error: expected one of: identifier, `::`, `<`, `_`, literal, `const`, `ref`, `mut`, `&`, parentheses, square brackets, `..`, `const`
+ --> tests/ui/invalid_pattern.rs:3:25
+  |
+3 |     let _ = comp![x for + in [1, 2]];
+  |                         ^

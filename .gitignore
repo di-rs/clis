@@ -1,2 +1,5 @@
 /target
 /docs/superpowers/plans/
+
+/tests/consumers/target/
+/utils/comp_macro/wip/

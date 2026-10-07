@@ -14,7 +14,6 @@ to copy. Root and app READMEs distinguish current support from plans.
 ## Read for the affected work
 
 - [README](README.md): app index, status, quick start.
-- [CONTRIBUTING](CONTRIBUTING.md): workflow, checks, test conventions.
 - [Architecture](docs/architecture.md): public APIs, boundaries, ownership, sharing.
 - [Compatibility](docs/compatibility.md): GNU baseline, BSD additions, reference capture.
 - [Observability](docs/observability.md): errors, logging, stage timings, lifecycle.
@@ -46,7 +45,7 @@ to copy. Root and app READMEs distinguish current support from plans.
 - Prioritize end-to-end (E2E) CLI tests for most changes. Use unit tests
   selectively for complex logic or hard-to-reach edge cases; they need not cover
   every implementation detail or duplicate E2E coverage. Retain direct API tests
-  for changed library contracts as required by CONTRIBUTING.
+  for changed library contracts.
 - Derive expected results from documented behavior, worked examples, or an
   independent reference, not the implementation under test. Test observable
   results; source-text matching does not prove runtime behavior.
@@ -55,12 +54,12 @@ to copy. Root and app READMEs distinguish current support from plans.
 - Implement originally. Review licensing/attribution before importing third-party
   code, tests, or fixtures; do not copy GNU implementation code into this MIT repo.
 - Check the final diff, relevant commands and examples, and links. Use the exact
-  [check workflow](CONTRIBUTING.md#checks); report checks actually run and limitations.
+  [CI workflow](.github/workflows/pull-request-check.yml); report checks actually run and limitations.
   Do not weaken tests, hide errors, or fabricate benchmark evidence to obtain a pass.
 - Reuse passing checks while their code, fixtures, configuration, and relevant
   environment remain unchanged. Rerun only checks affected by new changes,
   failures, or unresolved concerns; preparing a commit or PR adds no check run.
-  Documentation-only changes use the documentation checks in CONTRIBUTING.
+  Documentation-only changes use the documentation checks in the CI workflow.
 - Documentation-only work establishes or audits contracts. Report implementation
   defects as concrete follow-ups unless a scoped fix is authorized.
 

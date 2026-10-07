@@ -64,7 +64,7 @@ in a tests-and-documentation-only task.
 
 For an authorized behavior fix, run the targeted test before the fix and confirm
 it fails for the intended reason; apply the scoped fix, then run package checks
-and the workspace suite from [CONTRIBUTING checks](../../../CONTRIBUTING.md#checks). For coverage of existing
+and the workspace suite from the [CI workflow](../../../.github/workflows/pull-request-check.yml). For coverage of existing
 behavior, verify the new cases pass and assert the intended contract, including
 status and stderr. Use `catr/tests/cli.rs` for output/stdin patterns,
 `pwdr/tests/cli.rs` for environment isolation, and `lsr/tests/cli.rs` for temporary

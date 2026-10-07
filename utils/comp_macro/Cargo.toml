@@ -1,4 +1,5 @@
 [package]
+license.workspace = true
 name = "comp_python_macro"
 version = "0.1.0"
 edition = "2024"
@@ -13,3 +14,6 @@ syn = {version = "3.0.3", features = ["full"]}
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+trybuild = "1.0"

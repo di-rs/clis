@@ -45,9 +45,9 @@ but the same library-reuse and code-quality goals apply to their useful operatio
 
 ## Development
 
-Use Rust nightly, selected by [rust-toolchain.toml](rust-toolchain.toml), with
-`rustfmt` and `clippy`. The toolchain currently floats rather than pinning a date;
-record `rustc -Vv` when reproducing a result. Install
+Use the dated Rust nightly pinned by [rust-toolchain.toml](rust-toolchain.toml), with
+`rustfmt` and `clippy`. Record `rustc -Vv` when reproducing a result;
+compiler updates must pass both native platform jobs. Install
 [cargo-nextest](https://nexte.st/docs/installation/pre-built-binaries/) for the test commands below.
 Linux and macOS are the runtime targets; per-utility validation is still incremental.
 Kara requires an interactive terminal.
@@ -65,11 +65,10 @@ cargo test --locked -p catr --doc
 cargo build --locked --release -p catr
 ```
 
-See [CONTRIBUTING](CONTRIBUTING.md) for workspace checks and fixture conventions.
 Benchmarks require additional tools described in the
 [benchmarking guide](docs/benchmarking.md); they are not prerequisites for ordinary tests.
 
-## Workspace and contributor guides
+## Workspace guides
 
 Commands live under `coreutils/` and in `calr/`, `biggie/`, `parsu/`, and `kara/`.
 [`utils/cli-tracing`](utils/cli-tracing/README.md) provides shared CLI logging, tracing, and error reporting;
@@ -82,7 +81,6 @@ adapters, not in reusable domain operations.
 | [North star](docs/north-star.md) | Universal standards, port requirements, and evidence statuses. |
 | [Utility template](docs/templates/utility.md) | A reusable app contract with flags, limits, and audit evidence. |
 | [AGENTS.md](AGENTS.md) | Mandatory repository guidance for coding agents. |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Change workflow, checks, and review requirements. |
 | [Architecture](docs/architecture.md) | Library/CLI boundaries, sharing, and a Rust consumer example. |
 | [Observability](docs/observability.md) | Errors, diagnostic levels and sinks, stage timing, and lifecycle. |
 | [Compatibility](docs/compatibility.md) | GNU references, BSD additions, and fixture capture. |

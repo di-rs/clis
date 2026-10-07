@@ -1,0 +1,5 @@
+error: expected `in`
+ --> tests/ui/missing_in.rs:3:27
+  |
+3 |     let _ = comp![x for x [1, 2]];
+  |                           ^

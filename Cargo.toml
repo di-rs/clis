@@ -1,5 +1,6 @@
 [workspace]
 resolver = "3"
+exclude = ["tests/consumers", "tools/fuzz"]
 members = ["biggie", "calr", "kara", "parsu", "utils/*", "coreutils/*"]
 
 [workspace.package]
@@ -26,6 +27,9 @@ assert_cmd = "2.2.2"
 assert_fs = "1.1.4"
 predicates = "3.1.4"
 pretty_assertions = "1.4.1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 pedantic = { level = "deny", priority = -1 }

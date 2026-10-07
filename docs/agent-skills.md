@@ -3,7 +3,7 @@
 Skills live in `.agents/skills/<name>/SKILL.md` and are available to humans as
 repeatable workflows as well as to agents. The [north star](north-star.md) owns
 requirements, the [utility template](templates/utility.md) owns the contract shape,
-and [CONTRIBUTING](../CONTRIBUTING.md) owns check commands. Skills orchestrate those
+and [CI](../.github/workflows/pull-request-check.yml) defines required checks. Skills orchestrate those
 sources rather than duplicate their policies. No global installation is required.
 
 ## Choose a workflow

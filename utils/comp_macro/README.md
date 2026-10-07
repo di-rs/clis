@@ -15,3 +15,6 @@ comp![x for vec in vec_of_vecs for x in vec if x > 0] // Nested arrays
 ```
 
 This was created using the awesome [Logan Smith's tutorial](https://www.youtube.com/watch?v=SMCRQj9Hbx8)
+
+Malformed conditions and incomplete `for` clauses produce compiler diagnostics.
+The compile-fail suite verifies these cases against the pinned compiler.

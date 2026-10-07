@@ -1,4 +1,6 @@
 //! Streaming synthetic data generators with typed options and caller-owned writers.
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+
 mod ending;
 mod random;
 mod text;
