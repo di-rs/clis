@@ -23,6 +23,8 @@ by Git. They are available in this checkout, not distributed with this document.
 | `.cli-bench/acceptance/task11/preservation.json` | Prior copy verification: 73,699 files / 1,742,131,318 bytes, every SHA-256 matched. Mapping is explained in `PRESERVATION.md`. |
 | `.cli-bench/acceptance/sdd/2026-10-06-cli-bench/` | Preserved task reports, review reports and logs, including final Task 12 and Task 13 replacement verification. |
 | `.cli-bench/acceptance/sdd/preservation.json` | Source/destination paths, sizes and SHA-256 verification for the handoff copy. |
+| `.cli-bench/acceptance/sdd/final-review/` | Final review, approved fixes, scoped re-review and fresh verification logs. |
+| `.cli-bench/acceptance/sdd/final-review-preservation.json` | Verified final handoff: 56 files / 1,771,946 bytes, every SHA-256 matched. |
 
 Original evidence remains intact. Recorded temporary paths and provenance were
 not rewritten; use the preservation mappings to find their durable copies. The
@@ -36,16 +38,17 @@ events, and missing named comparators were discovered after preparation/workload
 The approved fix batch distinguishes caller workflow identity for package overrides
 and adds shared selected-case/profile comparator preflight before preparation.
 Zero-child regressions preserve submitted source and tagged failure/attempt records.
-Broad review is complete with these two fixes; the controller's scoped re-review is
-pending. This is not an unqualified whole-branch approval.
+Broad review and the scoped re-review of fix commit `e8582bf` are complete. Both
+findings are addressed, with no new issues or open implementation findings. Native
+Linux and hosted operational observations remain unverified as described below.
 
 The final fix batch freshly ran the package-then-workspace sequence below. All
 final commands exited zero; initial regression/test-construction/lint failures and
 the exact corrections remain in `final-fixes-report.md` and its logs. Current fix
-logs are under `.superpowers/sdd/2026-10-06-cli-bench/final-fixes-logs/`; their planned
-durable handoff location is `.cli-bench/acceptance/sdd/final-review/`, copied and
-verified by the controller after scoped review. Earlier logs remain in the preserved
-SDD directory indexed above.
+logs are under `.superpowers/sdd/2026-10-06-cli-bench/final-fixes-logs/`; they and the
+review reports are copied and hash-verified under
+`.cli-bench/acceptance/sdd/final-review/`. Earlier logs remain in the preserved SDD
+directory indexed above.
 
 | Command from workspace root | Recorded result / retained log |
 | --- | --- |
@@ -68,9 +71,8 @@ SDD directory indexed above.
 | `zizmor --offline --no-progress .github/workflows` | No findings/warnings; `final-fixes-logs/zizmor-final.log`. |
 | `zizmor --offline --no-progress --persona auditor --no-ignores .github/workflows` | No findings/warnings or suppressions; `final-fixes-logs/zizmor-auditor-final.log`. |
 
-Log paths in the table are relative to the current fix SDD directory above; the
-controller will preserve them at the stated durable handoff location. The seven
-ordinary skips are four native plumbing opt-ins and three repository-resource
+Log paths in the table are relative to the durable final-review directory above.
+The seven ordinary skips are four native plumbing opt-ins and three repository-resource
 opt-ins; the latter passed separately. Earlier native plumbing fixtures and real
 workloads have their own evidence, not ordinary-suite native coverage. Task 12's
 initial dataset-fault test timeout and approved test-only deadline correction are
@@ -181,8 +183,8 @@ checked after buffering; see the [transport limits](../../tools/cli-bench/ci/TRA
 
 No Docker/image setup, tool installation, workflow activation, push, PR creation,
 merge, settings change, remote comment or remote history write was performed for
-Task 14. Broad whole-branch review found the two approved defects addressed here; the
-controller owns the pending scoped re-review. Remote
+Task 14 or final review closure. Broad review found the two defects addressed here;
+scoped re-review confirmed both fixes without new findings. Remote
 artifact/history publication is outside this release, not a pending acceptance
 operation. This document and its local evidence index record the current limits
 without treating unperformed work as complete.
