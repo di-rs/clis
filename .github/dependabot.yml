@@ -1,7 +1,7 @@
 version: 2
 updates:
   - package-ecosystem: cargo
-    directories: [/, /tests/consumers, /tools/fuzz]
+    directories: [/, /tests/consumers]
     schedule:
       interval: weekly
     open-pull-requests-limit: 5

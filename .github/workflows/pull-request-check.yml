@@ -122,7 +122,7 @@ jobs:
           persist-credentials: false
       - uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
-          tool: typos@1.50.3
+          tool: prek@0.5.5,typos@1.50.3
           fallback: none
       - name: Install verified lychee
         run: |
@@ -133,9 +133,9 @@ jobs:
           tar -xzf "$RUNNER_TEMP/lychee.tar.gz" -C "$RUNNER_TEMP" --strip-components=1 lychee-x86_64-unknown-linux-musl/lychee
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - name: Local links and anchors
-        run: git ls-files -z -- '*.md' | xargs -0 lychee --offline --include-fragments=anchor-only --
+        run: prek run lychee --all-files --show-diff-on-failure
       - name: Prose spelling
-        run: git ls-files -- '*.md' | typos --force-exclude --file-list -
+        run: prek run typos --all-files --show-diff-on-failure
       - run: git diff --exit-code
 
   dependencies:
@@ -154,7 +154,7 @@ jobs:
           fallback: none
       - name: Audit and enforce dependency policy
         run: |
-          for manifest in Cargo.toml tests/consumers/Cargo.toml tools/fuzz/Cargo.toml; do
+          for manifest in Cargo.toml tests/consumers/Cargo.toml; do
             cargo audit --db "$RUNNER_TEMP/advisory-db" --file "${manifest%Cargo.toml}Cargo.lock" --deny yanked
             cargo deny --locked --manifest-path "$manifest" --config "$PWD/deny.toml" check licenses sources bans
           done
@@ -172,7 +172,7 @@ jobs:
       - name: 🛠️ Install workflow security auditor
         uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
-          tool: zizmor@1.30.1
+          tool: prek@0.5.5,zizmor@1.30.1
           fallback: none
       - name: 🛠️ Install pinned workflow linter
         run: |
@@ -181,8 +181,9 @@ jobs:
             --output "$RUNNER_TEMP/actionlint.tar.gz"
           echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - name: 🔍 Lint workflow syntax and shell commands
-        run: '"$RUNNER_TEMP/actionlint" -color'
+        run: prek run actionlint --all-files --show-diff-on-failure
       - name: 🛡️ Audit workflow security without tokens
         run: zizmor --offline --no-progress .github/workflows
 

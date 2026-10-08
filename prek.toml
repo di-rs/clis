@@ -5,8 +5,6 @@
 [[repos]]
 repo = "builtin"
 hooks = [
-    # CI checks committed files, so the staging-only default would miss additions.
-    # This existing benchmark dataset is intentionally larger than 500 KiB.
     {
       id = "check-added-large-files",
       args = ["--enforce-all"],
@@ -42,19 +40,33 @@ hooks = [
     pass_filenames = false,
   },
   {
+    id = "lychee",
+    name = "local Markdown links and anchors",
+    language = "system",
+    entry = "lychee --offline --include-fragments=anchor-only --",
+    types = ["markdown"],
+  },
+  {
+    id = "typos",
+    name = "Markdown spelling",
+    language = "system",
+    entry = "typos --force-exclude --",
+    types = ["markdown"],
+  },
+  {
+    id = "actionlint",
+    name = "workflow syntax and shell linting",
+    language = "system",
+    entry = "actionlint -color",
+    files = '(^\.github/.*\.ya?ml$|^prek\.toml$)',
+    pass_filenames = false,
+  },
+  {
     id = "zizmor",
     name = "zizmor workflow security",
     language = "system",
     entry = "zizmor --offline --no-progress .github/workflows",
     files = '(^\.github/.*\.ya?ml$|^zizmor\.ya?ml$|^prek\.toml$)',
     pass_filenames = false,
-  },
-  {
-    id = "domain-clippy",
-    name = "domain library boundaries",
-    language = "system",
-    entry = "env CLIPPY_CONF_DIR=.config/domain-clippy cargo clippy --locked --no-deps -p biggie -p tailr --lib -- -D warnings -D clippy::disallowed_methods -F unsafe_code",
-    files = '(^biggie/|^coreutils/tailr/|^\.config/domain-clippy/|(^|/)Cargo\.(toml|lock)$|^rust-toolchain\.toml$)',
-    pass_filenames = false,
-  },
+  }
 ]

@@ -1,6 +1,5 @@
 [workspace]
 resolver = "3"
-exclude = ["tests/consumers", "tools/fuzz"]
 members = ["biggie", "calr", "kara", "parsu", "utils/*", "coreutils/*"]
 
 [workspace.package]

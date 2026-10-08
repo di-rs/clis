@@ -1,4 +1,0 @@
-/target/
-/artifacts/
-# Runtime-discovered corpus stays separate from reviewed regression seeds.
-/runs/
