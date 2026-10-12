@@ -65,11 +65,10 @@ fn buffered(
     let mut writer = BufWriter::with_capacity(64 * 1024, writer);
     generate(&mut writer).context("Cannot write generated output")?;
     flush(&mut writer)?;
-    log::info!("generated output: {count} {unit}s");
+    log::info!(count, unit; "generated output");
     Ok(())
 }
 pub fn flush(writer: &mut impl Write) -> Result<()> {
-    let _span = tracing::debug_span!("flush").entered();
     writer.flush().context("Cannot flush generated output")
 }
 pub fn reject_alias(left: &Path, right: &Path) -> Result<()> {
@@ -123,7 +122,7 @@ pub fn pair(left_path: &Path, right_path: &Path, options: &biggie::PairOptions) 
     left_flush?;
     right_flush?;
     let (left_count, right_count) = options.record_counts()?;
-    log::info!("generated pair: {left_count} left records, {right_count} right records");
+    log::info!(left_count, right_count; "generated pair");
     let mut stdout = io::stdout().lock();
     writeln!(
         stdout,

@@ -137,12 +137,7 @@ impl FieldOptions {
 pub fn generate_fields(mut writer: impl Write, options: &FieldOptions) -> Result<()> {
     options.validate()?;
     let mut rng = rng_from_seed(options.seed);
-    let span = tracing::debug_span!(
-        "generate_fields",
-        requested_records = options.lines,
-        records_written = tracing::field::Empty
-    );
-    let _entered = span.enter();
+    log::debug!(requested_records = options.lines; "generating fields");
     let mut cell = Vec::new();
     let mut row = Vec::new();
     let mut index = 0_u64;
@@ -186,7 +181,7 @@ pub fn generate_fields(mut writer: impl Write, options: &FieldOptions) -> Result
             .write_all(bytes)
             .context("Cannot write generated data")?;
     }
-    span.record("records_written", options.lines);
+    log::debug!(records_written = options.lines; "generation complete");
     Ok(())
 }
 fn cell_value<'a>(

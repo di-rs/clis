@@ -1,4 +1,5 @@
 use clap::Parser;
+use std::io::Write;
 
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
@@ -13,10 +14,21 @@ struct Args {
     omit_newline: bool,
 }
 
-fn main() {
-    let Args { text, omit_newline } = Args::parse();
-
+fn main() -> std::process::ExitCode {
+    let logging = cli_log::init("echor");
+    let Args { text, omit_newline } = match logging.parse::<Args>() {
+        Ok(args) => args,
+        Err(status) => return status,
+    };
     let ending = if omit_newline { "" } else { "\n" };
-
-    print!("{}{ending}", text.join(" "));
+    let mut stdout = std::io::stdout().lock();
+    let result = write!(stdout, "{}{ending}", text.join(" ")).and_then(|()| stdout.flush());
+    let status = match result {
+        Ok(()) => 0,
+        Err(error) => {
+            cli_log::diagnostic!("Error: {error}");
+            1
+        }
+    };
+    logging.finish(status)
 }

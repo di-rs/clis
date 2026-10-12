@@ -28,12 +28,14 @@ for test commands and regression guidance.
 | [parsu](parsu/README.md) | Parse a restricted XML-like language |
 | [kara](kara/README.md) | Edit text in a terminal |
 
+All binaries write structured events and errors to local rotating log files. See
+[logging configuration and the dashboard contract](utils/cli-log/README.md).
+
 ## Libraries
 
 | Project | Purpose |
 | --- | --- |
-| [cli-tracing](utils/cli-tracing/README.md) | Shared CLI logging, tracing, and error reporting |
-| [comp_macro](utils/comp_macro/README.md) | Python-style comprehension macro |
+| [cli-log](utils/cli-log/README.md) | Shared structured file logging and error reporting |
 
 See [LICENSE](LICENSE) for the MIT license. Retain existing tutorial and other
 attribution in individual packages when extending their implementations.

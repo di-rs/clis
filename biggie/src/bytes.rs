@@ -45,12 +45,7 @@ pub fn generate_bytes(mut writer: impl Write, options: &ByteOptions) -> Result<(
         ByteSource::Random { seed } => Some(rng_from_seed(seed)),
         ByteSource::Pattern(_) => None,
     };
-    let span = tracing::debug_span!(
-        "generate_bytes",
-        requested_bytes = options.bytes,
-        bytes_written = tracing::field::Empty
-    );
-    let _entered = span.enter();
+    log::debug!(requested_bytes = options.bytes; "generating bytes");
     let mut buffer = [0_u8; 8192];
     let mut remaining = options.bytes;
     let mut position = 0_usize;
@@ -76,6 +71,6 @@ pub fn generate_bytes(mut writer: impl Write, options: &ByteOptions) -> Result<(
             .context("Cannot write generated data")?;
         remaining = remaining.saturating_sub(count);
     }
-    span.record("bytes_written", options.bytes);
+    log::debug!(bytes_written = options.bytes; "generation complete");
     Ok(())
 }

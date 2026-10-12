@@ -1,23 +1,24 @@
-use clap::Parser;
 use std::io::{BufWriter, Write};
 
 mod cli;
 use crate::cli::{Cli, CliError};
 use lsr::{find_files, get_formatted_output};
 
-fn main() {
-    let cli = Cli::parse();
-    let result = run(&cli);
+fn main() -> std::process::ExitCode {
+    let logging = cli_log::init("lsr");
+    let cli = match logging.parse::<Cli>() {
+        Ok(cli) => cli,
+        Err(status) => return status,
+    };
 
-    match result {
-        Ok(()) => {
-            std::process::exit(exitcode::OK);
-        }
+    let status = match run(&cli) {
+        Ok(()) => exitcode::OK,
         Err(e) => {
-            eprintln!("Error: {e}");
-            std::process::exit(exitcode::DATAERR);
+            cli_log::diagnostic!("Error: {e}");
+            exitcode::DATAERR
         }
-    }
+    };
+    logging.finish(status)
 }
 
 fn run(cli: &Cli) -> Result<(), CliError> {
@@ -33,6 +34,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         }
     }
 
+    writer.flush()?;
     Ok(())
 }
 

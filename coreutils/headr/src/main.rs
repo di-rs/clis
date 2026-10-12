@@ -4,25 +4,31 @@ use std::{
     path::Path,
 };
 
-use clap::{CommandFactory, Parser};
+use clap::CommandFactory;
 use headr::{write_bytes, write_file_header, write_lines};
 
 mod cli;
 use crate::cli::{Args, CliError};
 
-fn main() {
-    match run(&Args::parse()) {
-        Ok(()) => {
-            std::process::exit(exitcode::OK);
-        }
+fn main() -> std::process::ExitCode {
+    let logging = cli_log::init("headr");
+    let cli = match logging.parse::<Args>() {
+        Ok(cli) => cli,
+        Err(status) => return status,
+    };
+
+    let status = match run(&cli) {
+        Ok(()) => exitcode::OK,
         Err(CliError::Config) => {
-            std::process::exit(exitcode::CONFIG);
+            cli_log::record_error(CliError::Config);
+            exitcode::CONFIG
         }
         Err(e) => {
-            eprintln!("Error: {e}");
-            std::process::exit(exitcode::DATAERR);
+            cli_log::diagnostic!("Error: {e}");
+            exitcode::DATAERR
         }
-    }
+    };
+    logging.finish(status)
 }
 
 fn run(args: &Args) -> Result<(), CliError> {
@@ -45,9 +51,10 @@ fn run(args: &Args) -> Result<(), CliError> {
                     write_lines(reader, &mut writer, args.lines)?;
                 }
             }
-            Err(e) => eprintln!("{}: {e}", filename.display()),
+            Err(e) => cli_log::diagnostic!("{}: {e}", filename.display()),
         }
     }
+    writer.flush()?;
     Ok(())
 }
 

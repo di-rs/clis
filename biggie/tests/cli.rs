@@ -1,19 +1,289 @@
 use assert_cmd::cargo::cargo_bin_cmd;
 use assert_fs::{TempDir, prelude::*};
 use predicates::prelude::*;
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 fn command() -> assert_cmd::Command {
     let mut command = cargo_bin_cmd!();
     for key in [
         "CLIS_LOG_LEVEL",
-        "CLIS_LOG_FORMAT",
-        "CLIS_LOG_FILE",
-        "CLIS_TIMINGS",
+        "CLIS_LOG_DIR",
+        "CLIS_LOG_STDERR",
+        "CLIS_LOG_SESSION",
     ] {
         command.env_remove(key);
     }
+    command.env("CLIS_LOG_LEVEL", "off");
     command
+}
+
+fn log_files(root: &Path) -> Result<Vec<PathBuf>> {
+    fs::read_dir(root)?
+        .filter_map(|entry| match entry {
+            Ok(entry) => {
+                let path = entry.path();
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| {
+                        name.starts_with("biggie_") && name.ends_with("_rCURRENT.jsonl")
+                    })
+                    .then_some(Ok(path))
+            }
+            Err(error) => Some(Err(error.into())),
+        })
+        .collect()
+}
+
+fn log_records(root: &Path) -> Result<Vec<serde_json::Value>> {
+    let file = log_files(root)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| std::io::Error::other("missing Biggie invocation log"))?;
+    fs::read_to_string(file)?
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<std::result::Result<_, _>>()
+        .map_err(Into::into)
+}
+
+#[allow(
+    clippy::panic_in_result_fn,
+    reason = "Assertion verifies logging opt-out creates no invocation files."
+)]
+fn assert_no_logs(root: &Path) -> Result<()> {
+    assert_eq!(log_files(root)?, Vec::<PathBuf>::new());
+    Ok(())
+}
+
+#[allow(
+    clippy::panic_in_result_fn,
+    reason = "Assertions verify persistent parser errors and operation counts."
+)]
+fn assert_argument_error(root: &Path) -> Result<()> {
+    assert!(log_records(root)?.iter().any(|record| {
+        record
+            .pointer("/kv/event")
+            .and_then(serde_json::Value::as_str)
+            == Some("argument_error")
+    }));
+    Ok(())
+}
+
+#[allow(
+    clippy::panic_in_result_fn,
+    reason = "Assertion verifies the operation's completed line count."
+)]
+fn assert_completed_lines(root: &Path, count: u64) -> Result<()> {
+    assert!(log_records(root)?.iter().any(|record| {
+        record
+            .pointer("/kv/lines_written")
+            .and_then(serde_json::Value::as_u64)
+            == Some(count)
+    }));
+    Ok(())
+}
+
+#[test]
+#[allow(
+    clippy::panic_in_result_fn,
+    reason = "Assertions verify the command's persistent log contract."
+)]
+fn command_persists_debug_counters_and_completion_without_stderr() -> Result<()> {
+    let dir = TempDir::new()?;
+    command()
+        .env("CLIS_LOG_DIR", dir.path())
+        .env("CLIS_LOG_STDERR", "off")
+        .env("CLIS_LOG_SESSION", "test-shell")
+        .args(["-", "-n", "2", "-w", "0", "-L", "debug"])
+        .assert()
+        .success()
+        .stdout("\n\n")
+        .stderr("");
+    let records = log_records(dir.path())?;
+    assert_eq!(
+        records.first().map(|record| &record["kv"]["event"]),
+        Some(&serde_json::json!("command_started"))
+    );
+    let started = records
+        .first()
+        .ok_or_else(|| std::io::Error::other("missing startup event"))?;
+    assert_eq!(started["level"], "INFO");
+    assert_eq!(started["kv"]["command"], "biggie");
+    assert_eq!(started["kv"]["session_id"], "test-shell");
+    let invocation = started["kv"]["invocation_id"]
+        .as_str()
+        .ok_or_else(|| std::io::Error::other("missing invocation identifier"))?;
+    assert_eq!(
+        log_files(dir.path())?,
+        vec![
+            dir.path()
+                .join(format!("biggie_{invocation}_rCURRENT.jsonl"))
+        ]
+    );
+    assert!(
+        records
+            .iter()
+            .any(|record| record["level"] == "DEBUG" && record["kv"]["lines_written"] == 2)
+    );
+    assert_eq!(
+        records.last().map(|record| &record["kv"]["event"]),
+        Some(&serde_json::json!("command_finished"))
+    );
+    assert_eq!(
+        records.last().map(|record| &record["kv"]["exit_code"]),
+        Some(&serde_json::json!(0))
+    );
+    Ok(())
+}
+
+#[test]
+#[allow(
+    clippy::panic_in_result_fn,
+    reason = "Assertions verify argument and runtime errors in persistent logs."
+)]
+fn failures_persist_errors_and_numeric_completion_by_default() -> Result<()> {
+    let dir = TempDir::new()?;
+    for (args, event, status) in [
+        (vec!["missing/output", "-n", "1"], "error", 1),
+        (vec!["--lines=invalid"], "argument_error", 2),
+    ] {
+        command()
+            .current_dir(dir.path())
+            .env_remove("CLIS_LOG_LEVEL")
+            .env("CLIS_LOG_DIR", dir.path().join(event))
+            .args(args)
+            .assert()
+            .code(status)
+            .stdout("");
+        let records = log_records(&dir.path().join(event))?;
+        assert!(records.iter().any(|record| record["kv"]["event"] == event));
+        assert_eq!(
+            records.last().map(|record| &record["kv"]["exit_code"]),
+            Some(&serde_json::json!(status))
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn explicit_off_disables_persistence_even_with_invalid_environment() -> Result<()> {
+    let dir = TempDir::new()?;
+    command()
+        .env("CLIS_LOG_LEVEL", "invalid")
+        .env("CLIS_LOG_DIR", dir.path())
+        .args(["bytes", "-", "-b", "0", "-L", "off"])
+        .assert()
+        .success()
+        .stdout("")
+        .stderr("");
+    assert_no_logs(dir.path())?;
+    Ok(())
+}
+
+#[test]
+fn explicit_off_applies_to_argument_failures() -> Result<()> {
+    for args in [
+        vec!["bytes", "-", "-b", "invalid", "-L", "off"],
+        vec!["-Loff", "bytes", "-", "-b", "invalid"],
+        vec!["bytes", "-", "-b", "invalid", "--log-level=off"],
+        vec!["bytes", "-", "--unknown", "--log-level", "off"],
+        vec!["text", "-", "-w", "invalid", "-NLoff"],
+    ] {
+        let dir = TempDir::new()?;
+        command()
+            .env("CLIS_LOG_LEVEL", "info")
+            .env("CLIS_LOG_DIR", dir.path())
+            .args(args)
+            .assert()
+            .code(2)
+            .stdout("");
+        assert_no_logs(dir.path())?;
+    }
+    Ok(())
+}
+
+#[test]
+fn explicit_debug_persists_argument_failures_when_environment_is_off() -> Result<()> {
+    let dir = TempDir::new()?;
+    command()
+        .env("CLIS_LOG_DIR", dir.path())
+        .args(["bytes", "-", "-b", "invalid", "-Ldebug"])
+        .assert()
+        .code(2)
+        .stdout("");
+    assert_argument_error(dir.path())?;
+    Ok(())
+}
+
+#[test]
+fn log_level_operands_do_not_override_error_logging() -> Result<()> {
+    for args in [
+        vec!["bytes", "-b", "invalid", "--", "--log-level=off"],
+        vec!["records", "-", "-c", "invalid", "-rLoff"],
+        vec!["records", "-", "-c", "invalid", "--record=--log-level=off"],
+    ] {
+        let dir = TempDir::new()?;
+        command()
+            .env("CLIS_LOG_LEVEL", "info")
+            .env("CLIS_LOG_DIR", dir.path())
+            .args(args)
+            .assert()
+            .code(2)
+            .stdout("");
+        assert_argument_error(dir.path())?;
+    }
+    Ok(())
+}
+
+#[test]
+#[allow(
+    clippy::panic_in_result_fn,
+    reason = "Assertions verify generation counters for each operation."
+)]
+fn operation_logs_include_completed_counts() -> Result<()> {
+    let dir = TempDir::new()?;
+    for (name, args, fields) in [
+        (
+            "bytes",
+            vec!["bytes", "-", "-b", "3"],
+            serde_json::json!({"bytes_written":3}),
+        ),
+        (
+            "records",
+            vec!["records", "-", "-r", "sample", "-c", "2"],
+            serde_json::json!({"records_written":2}),
+        ),
+        (
+            "fields",
+            vec!["fields", "-", "-n", "2"],
+            serde_json::json!({"records_written":2}),
+        ),
+        (
+            "pair",
+            vec![
+                "pair", "-l", "left", "-r", "right", "-a", "0", "-j", "2", "-b", "0",
+            ],
+            serde_json::json!({"left_written":2,"right_written":2}),
+        ),
+    ] {
+        command()
+            .current_dir(dir.path())
+            .env("CLIS_LOG_DIR", dir.path().join(name))
+            .args(args)
+            .args(["-L", "debug"])
+            .assert()
+            .success()
+            .stderr("");
+        let records = log_records(&dir.path().join(name))?;
+        assert!(
+            records.iter().any(|record| record["kv"] == fields),
+            "missing {name} completion counter"
+        );
+    }
+    Ok(())
 }
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -143,8 +413,10 @@ fn seeded_output_is_reproducible_across_files_and_stdout() -> Result<()> {
 }
 
 #[test]
-fn stdout_contains_only_data_even_with_logging() {
+fn stdout_contains_only_data_even_with_logging() -> Result<()> {
+    let dir = TempDir::new()?;
     command()
+        .env("CLIS_LOG_DIR", dir.path())
         .args([
             "-",
             "-n",
@@ -157,7 +429,8 @@ fn stdout_contains_only_data_even_with_logging() {
         .assert()
         .success()
         .stdout(b"\n\n".as_slice())
-        .stderr(predicate::str::contains("lines_written=2"));
+        .stderr("");
+    Ok(())
 }
 
 #[test]
@@ -359,32 +632,25 @@ fn explicit_level_overrides_environment() -> Result<()> {
         .current_dir(dir.path())
         .args(["-n", "1"])
         .env("CLIS_LOG_LEVEL", "info")
+        .env("CLIS_LOG_DIR", dir.path().join("logs"))
         .assert()
         .success()
-        .stderr(
-            predicate::str::contains("generated output")
-                .and(predicate::str::contains("close").not()),
-        );
+        .stderr("");
     Ok(())
 }
 
 #[test]
-fn debug_verbosity_collects_stage_timings() -> Result<()> {
+fn debug_verbosity_persists_operation_counts() -> Result<()> {
     let dir = TempDir::new()?;
     command()
         .current_dir(dir.path())
+        .env("CLIS_LOG_DIR", dir.path().join("logs"))
         .args(["-n", "2", "--log-level=debug"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Done, wrote 2 lines"))
-        .stderr(
-            predicate::str::contains("generate")
-                .and(predicate::str::contains("lines_written=2"))
-                .and(predicate::str::contains("flush"))
-                .and(predicate::str::contains("time.busy="))
-                .and(predicate::str::contains("time.idle="))
-                .and(predicate::str::contains("\u{1b}").not()),
-        );
+        .stderr("");
+    assert_completed_lines(&dir.path().join("logs"), 2)?;
     assert_text(&dir.path().join("out.txt"), 2)
 }
 
@@ -394,6 +660,7 @@ fn invalid_environment_level_does_not_create_data() -> Result<()> {
     command()
         .current_dir(dir.path())
         .args(["output", "-n", "1"])
+        .env("CLIS_LOG_DIR", dir.path().join("logs"))
         .env("CLIS_LOG_LEVEL", "invalid")
         .assert()
         .code(2)
@@ -434,6 +701,7 @@ fn required_errors_are_reported_once_at_every_level() -> Result<()> {
             .current_dir(dir.path())
             .args(["missing/output", "-n", "1"])
             .arg(format!("--log-level={level}"))
+            .env("CLIS_LOG_DIR", dir.path().join("logs"))
             .assert()
             .code(1)
             .stdout("")
@@ -461,6 +729,7 @@ fn rejects_undocumented_log_levels_before_creating_output() -> Result<()> {
             .current_dir(dir.path())
             .args(["-n", "1"])
             .arg(format!("--log-level={level}"))
+            .env("CLIS_LOG_DIR", dir.path().join("logs"))
             .assert()
             .code(2)
             .stdout("");

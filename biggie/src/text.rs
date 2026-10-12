@@ -171,13 +171,7 @@ fn generate_words<W: Write>(
 ) -> io::Result<()> {
     let mut rng = rng_from_seed(options.seed);
     let num_lines = options.lines;
-    let stage = tracing::debug_span!(
-        "generate",
-        requested_lines = num_lines,
-        lines_written = tracing::field::Empty
-    );
-    let _entered = stage.enter();
-    log::debug!("generating random text: {num_lines} requested lines");
+    log::debug!(requested_lines = num_lines; "generating random text");
     let mut word_buffer = [0_u8; 8192];
     for line in 0..num_lines {
         let num_words = rng.random_range(options.words_per_line.clone());
@@ -192,9 +186,7 @@ fn generate_words<W: Write>(
             writer.write_all(options.line_ending.bytes())?;
         }
     }
-    // Record on this span, not a caller's parent when this stage is filtered out.
-    stage.record("lines_written", num_lines);
-    log::trace!("generation complete: {num_lines} lines");
+    log::debug!(lines_written = num_lines; "generation complete");
     Ok(())
 }
 

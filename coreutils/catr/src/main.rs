@@ -1,7 +1,7 @@
-use clap::{CommandFactory, Parser};
+use clap::CommandFactory;
 use std::{
     fs::File,
-    io::{BufRead, BufReader, BufWriter, IsTerminal, stdin},
+    io::{BufRead, BufReader, BufWriter, IsTerminal, Write, stdin},
 };
 
 use crate::cli::{Args, CliError};
@@ -9,19 +9,25 @@ use catr::write_lines;
 
 mod cli;
 
-fn main() {
-    match run(&Args::parse()) {
-        Ok(()) => {
-            std::process::exit(exitcode::OK);
-        }
+fn main() -> std::process::ExitCode {
+    let logging = cli_log::init("catr");
+    let cli = match logging.parse::<Args>() {
+        Ok(cli) => cli,
+        Err(status) => return status,
+    };
+
+    let status = match run(&cli) {
+        Ok(()) => exitcode::OK,
         Err(CliError::Config) => {
-            std::process::exit(exitcode::CONFIG);
+            cli_log::record_error(CliError::Config);
+            exitcode::CONFIG
         }
         Err(e) => {
-            eprintln!("Error: {e}");
-            std::process::exit(exitcode::DATAERR);
+            cli_log::diagnostic!("Error: {e}");
+            exitcode::DATAERR
         }
-    }
+    };
+    logging.finish(status)
 }
 
 fn run(args: &Args) -> Result<(), CliError> {
@@ -32,9 +38,10 @@ fn run(args: &Args) -> Result<(), CliError> {
             Ok(reader) => {
                 write_lines(reader, &mut writer, &args.into())?;
             }
-            Err(e) => eprintln!("Failed to open {filename}: {e}"),
+            Err(e) => cli_log::diagnostic!("Failed to open {filename}: {e}"),
         }
     }
+    writer.flush()?;
     Ok(())
 }
 

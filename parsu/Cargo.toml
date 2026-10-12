@@ -6,6 +6,7 @@ description = "Simple XML parser with combinators"
 edition = "2024"
 
 [dependencies]
+cli-log = { path = "../utils/cli-log" }
 clap = { workspace = true }
 color-eyre = { workspace = true }
 

@@ -1,4 +1,3 @@
-use clap::Parser;
 use std::io::{BufWriter, Write};
 use walkdir::WalkDir;
 
@@ -6,17 +5,21 @@ mod cli;
 use crate::cli::{Cli, CliError};
 use findr::{is_name_matches, is_type_matches};
 
-fn main() {
-    let cli = Cli::parse();
-    match run(cli) {
-        Ok(()) => {
-            std::process::exit(exitcode::OK);
-        }
+fn main() -> std::process::ExitCode {
+    let logging = cli_log::init("findr");
+    let cli = match logging.parse::<Cli>() {
+        Ok(cli) => cli,
+        Err(status) => return status,
+    };
+
+    let status = match run(cli) {
+        Ok(()) => exitcode::OK,
         Err(e) => {
-            eprintln!("Error: {e}");
-            std::process::exit(exitcode::DATAERR);
+            cli_log::diagnostic!("Error: {e}");
+            exitcode::DATAERR
         }
-    }
+    };
+    logging.finish(status)
 }
 
 fn run(cli: Cli) -> Result<(), CliError> {
@@ -34,12 +37,13 @@ fn run(cli: Cli) -> Result<(), CliError> {
                     }
                 }
                 Err(e) => {
-                    eprintln!("{e}");
+                    cli_log::diagnostic!("{e}");
                 }
             }
         }
     }
 
+    writer.flush()?;
     Ok(())
 }
 

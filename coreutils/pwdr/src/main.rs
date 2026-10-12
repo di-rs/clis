@@ -1,16 +1,26 @@
 use std::{io::BufWriter, io::Write};
 
-use clap::Parser;
 use color_eyre::Result;
 
 mod cli;
 use cli::Cli;
 use pwdr::{logical_path, physical_path};
 
-fn main() -> Result<()> {
+fn main() -> Result<std::process::ExitCode> {
     color_eyre::install()?;
-    let cli = Cli::parse();
-    run(&cli)
+    let logging = cli_log::init("pwdr");
+    let cli = match logging.parse::<Cli>() {
+        Ok(cli) => cli,
+        Err(status) => return Ok(status),
+    };
+    match run(&cli) {
+        Ok(()) => Ok(logging.finish(0)),
+        Err(error) => {
+            cli_log::record_error(format_args!("{error:#}"));
+            let _ = logging.finish(1);
+            Err(error)
+        }
+    }
 }
 
 fn run(cli: &Cli) -> Result<()> {
@@ -24,6 +34,7 @@ fn run(cli: &Cli) -> Result<()> {
 
     writeln!(writer, "{}", path.display())?;
 
+    writer.flush()?;
     Ok(())
 }
 

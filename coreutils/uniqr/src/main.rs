@@ -1,4 +1,4 @@
-use clap::{CommandFactory, Parser};
+use clap::CommandFactory;
 use std::{
     fs::File,
     io::{BufRead, BufReader, BufWriter, IsTerminal, Write, stdin},
@@ -8,32 +8,39 @@ mod cli;
 use crate::cli::{Cli, CliError};
 use uniqr::{UniqueList, report_unique_lines};
 
-fn main() {
-    let cli = Cli::parse();
-    match run(cli) {
-        Ok(()) => {
-            std::process::exit(exitcode::OK);
-        }
+fn main() -> std::process::ExitCode {
+    let logging = cli_log::init("uniqr");
+    let cli = match logging.parse::<Cli>() {
+        Ok(cli) => cli,
+        Err(status) => return status,
+    };
+
+    let status = match run(cli) {
+        Ok(()) => exitcode::OK,
         Err(CliError::Config) => {
-            std::process::exit(exitcode::CONFIG);
+            cli_log::record_error(CliError::Config);
+            exitcode::CONFIG
         }
         Err(CliError::FileOpen { err, path }) => {
+            cli_log::record_error(format_args!("{path}: {err}"));
             eprint!("{path}: {err}");
-            std::process::exit(exitcode::IOERR);
+            exitcode::IOERR
         }
         Err(e) => {
-            eprintln!("Error: {e}");
-            std::process::exit(exitcode::DATAERR);
+            cli_log::diagnostic!("Error: {e}");
+            exitcode::DATAERR
         }
-    }
+    };
+    logging.finish(status)
 }
 
 fn run(cli: Cli) -> Result<(), CliError> {
     let reader = get_reader(&cli.input_file)?;
-    let writer = get_writer(cli.output_file)?;
+    let mut writer = get_writer(cli.output_file)?;
 
     let list = UniqueList::from_reader(reader)?;
-    report_unique_lines(writer, list, cli.count)?;
+    report_unique_lines(&mut writer, list, cli.count)?;
+    writer.flush()?;
 
     Ok(())
 }

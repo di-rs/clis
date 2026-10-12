@@ -1,4 +1,4 @@
-use clap::{CommandFactory, Parser};
+use clap::CommandFactory;
 use std::{
     fs::File,
     io::{BufRead, BufReader, BufWriter, IsTerminal, Write, stdin},
@@ -8,19 +8,25 @@ mod cli;
 use crate::cli::{Cli, CliError};
 use wcr::{FileInfo, get_file_info};
 
-fn main() {
-    match run(Cli::parse()) {
-        Ok(()) => {
-            std::process::exit(exitcode::OK);
-        }
+fn main() -> std::process::ExitCode {
+    let logging = cli_log::init("wcr");
+    let cli = match logging.parse::<Cli>() {
+        Ok(cli) => cli,
+        Err(status) => return status,
+    };
+
+    let status = match run(cli) {
+        Ok(()) => exitcode::OK,
         Err(CliError::Config) => {
-            std::process::exit(exitcode::CONFIG);
+            cli_log::record_error(CliError::Config);
+            exitcode::CONFIG
         }
         Err(e) => {
-            eprintln!("Error: {e}");
-            std::process::exit(exitcode::DATAERR);
+            cli_log::diagnostic!("Error: {e}");
+            exitcode::DATAERR
         }
-    }
+    };
+    logging.finish(status)
 }
 
 fn run(mut cli: Cli) -> Result<(), CliError> {
@@ -35,7 +41,7 @@ fn run(mut cli: Cli) -> Result<(), CliError> {
                 cli.write_info_line(&mut writer, &info, filename)?;
                 total_info.add(&info);
             }
-            Err(e) => eprintln!("{filename}: {e}"),
+            Err(e) => cli_log::diagnostic!("{filename}: {e}"),
         }
     }
 
@@ -43,6 +49,7 @@ fn run(mut cli: Cli) -> Result<(), CliError> {
         cli.write_info_line(&mut writer, &total_info, "total")?;
     }
 
+    writer.flush()?;
     Ok(())
 }
 
