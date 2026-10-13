@@ -1,6 +1,6 @@
 use clap::Args;
 use log::LevelFilter;
-use std::{env, ffi::OsString, path::PathBuf};
+use std::{env, ffi::OsString, fs::DirBuilder, io, path::PathBuf};
 
 /// Shared file logging arguments for a Clap parser.
 #[derive(Args, Debug)]
@@ -68,8 +68,20 @@ pub fn env_level(key: &str, default: LevelFilter) -> (LevelFilter, Option<String
     }
 }
 
-pub fn log_dir() -> Option<PathBuf> {
-    nonempty_env("CLIS_LOG_DIR").or_else(default_log_dir)
+/// Resolve storage and privately create missing directories without changing existing modes.
+pub fn log_dir() -> io::Result<PathBuf> {
+    let root = nonempty_env("CLIS_LOG_DIR")
+        .or_else(default_log_dir)
+        .ok_or_else(|| io::Error::other("no log directory is available"))?;
+    let mut builder = DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(&root)?;
+    Ok(root)
 }
 
 fn nonempty_env(key: &str) -> Option<PathBuf> {

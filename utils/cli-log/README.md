@@ -34,9 +34,9 @@ CLIS_LOG_LEVEL=off catr input.txt
 
 ## Integrate a binary
 
-Initialize once, after installing other panic/reporting hooks. Reusable libraries
-must not initialize a logger. Flush application data writers and join workers
-before finishing the session.
+Use `run` to initialize logging, parse arguments, and record the returned exit
+status. Install panic/reporting hooks first. Reusable libraries must not initialize
+a logger. Flush application data writers and join workers before returning.
 
 ```rust,no_run
 use clap::Parser;
@@ -48,23 +48,24 @@ struct Cli {
 }
 
 fn main() -> ExitCode {
-    let session = cli_log::init("example");
-    let cli = match session.parse::<Cli>() {
-        Ok(cli) => cli,
-        Err(status) => return status,
-    };
-    match std::fs::metadata(&cli.input) {
+    cli_log::run("example", |cli: Cli| match std::fs::metadata(&cli.input) {
         Ok(metadata) => {
             log::info!(bytes = metadata.len(); "input inspected");
-            session.finish(0)
+            0
         }
         Err(error) => {
             cli_log::diagnostic!("example: {error}");
-            session.finish(1)
+            1
         }
-    }
+    })
 }
 ```
+
+For a command returning a rich error report, `try_run("name", |cli| run(&cli))`
+logs failures, records status 1, and returns the original error for the existing
+reporter. Success records status 0. Both helpers handle Clap exits without running
+the operation or recording completion twice. Specialized parsing and console
+setup can still use `init`, `Session::parse`, and `Session::finish` directly.
 
 `record_error` persists an error already displayed in a rich report or message
 bar. `diagnostic!` also prints a plain stderr line. `Session::parse` preserves
@@ -105,8 +106,9 @@ records after rotation. A kill or uncaught panic can leave a start without a
 finish; reconcile this with child process status. No dashboard, collector, custom
 schema, or database is included here.
 
-Writes use the backend's direct mode, without an asynchronous queue. File
-permissions follow the process umask; logging is not an fsync-backed audit trail.
+Writes use the backend's direct mode, without an asynchronous queue. New Unix log
+directories are private (`0700`); existing directory permissions stay unchanged.
+File permissions follow the process umask. Logging is not an fsync-backed audit trail.
 No argv, environment dump, stdin, or file contents are automatically collected.
 Application and parser errors can contain paths or rejected values; messages are
 not automatically redacted. Grepr logs match activity without matched contents.

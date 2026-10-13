@@ -20,6 +20,7 @@ fn command(root: &Path, case: &str, level: &str) -> Result<Command> {
         .env("CLIS_LOG_DIR", root)
         .env("CLIS_LOG_LEVEL", level)
         .env("CLIS_LOG_STDERR", "off")
+        .env_remove("CLIS_RUN_COUNT")
         .env_remove("CLIS_LOG_SESSION");
     Ok(command)
 }
@@ -47,11 +48,54 @@ struct Cli {
     count: usize,
 }
 
+#[derive(Parser)]
+struct RunnerCli {
+    #[arg(long = "exact")]
+    _exact: bool,
+    #[arg(long = "nocapture")]
+    _nocapture: bool,
+    _test_name: String,
+    #[arg(long, env = "CLIS_RUN_COUNT")]
+    count: usize,
+}
+
 #[test]
 fn driver() -> Result<()> {
     let Ok(case) = std::env::var("CLIS_TEST_CASE") else {
         return Ok(());
     };
+    if case.starts_with("run_") {
+        let status = if matches!(case.as_str(), "run_result" | "run_error") {
+            match cli_log::try_run("example", |cli: RunnerCli| {
+                assert_eq!(cli.count, 42);
+                if case == "run_error" {
+                    Err("operation failed")
+                } else {
+                    Ok(())
+                }
+            }) {
+                Ok(status) => status,
+                Err(error) => {
+                    assert_eq!(error, "operation failed");
+                    writeln!(std::io::stderr().lock(), "report: {error}")?;
+                    std::process::ExitCode::FAILURE
+                }
+            }
+        } else {
+            cli_log::run("example", |cli: RunnerCli| {
+                assert_eq!(cli.count, 42);
+                65
+            })
+        };
+        let expected = match case.as_str() {
+            "run_result" => 0,
+            "run_error" => 1,
+            "run_parse_error" => 2,
+            _ => 65,
+        };
+        assert_eq!(status, std::process::ExitCode::from(expected));
+        return Ok(());
+    }
     if case == "panic" {
         std::panic::set_hook(Box::new(|_| eprintln!("previous-hook")));
     }
@@ -100,6 +144,54 @@ fn driver() -> Result<()> {
         session.finish(status),
         std::process::ExitCode::from(u8::try_from(status)?)
     );
+    Ok(())
+}
+
+#[test]
+fn runners_preserve_results_and_finish_once_including_parse_errors() -> Result<()> {
+    for (case, argument, status) in [
+        ("run_status", "42", 65),
+        ("run_result", "42", 0),
+        ("run_error", "42", 1),
+        ("run_parse_error", "invalid", 2),
+    ] {
+        let root = assert_fs::TempDir::new()?;
+        let output = command(root.path(), case, "info")?
+            .env("CLIS_RUN_COUNT", argument)
+            .output()?;
+        assert!(output.status.success(), "{output:?}");
+        let records = records(root.path())?;
+        for event in ["command_started", "command_finished"] {
+            assert_eq!(
+                records
+                    .iter()
+                    .filter(|v| v.pointer("/kv/event") == Some(&Value::from(event)))
+                    .count(),
+                1,
+            );
+        }
+        assert!(
+            records
+                .iter()
+                .any(|v| v.pointer("/kv/exit_code") == Some(&Value::from(status)))
+        );
+        if case == "run_error" {
+            assert_eq!(output.stderr, b"report: operation failed\n");
+            assert!(
+                records
+                    .iter()
+                    .any(|v| v.get("text") == Some(&Value::from("operation failed")))
+            );
+        } else if case == "run_parse_error" {
+            assert!(
+                records
+                    .iter()
+                    .any(|v| v.pointer("/kv/event") == Some(&Value::from("argument_error")))
+            );
+        } else {
+            assert_eq!(output.stderr, b"");
+        }
+    }
     Ok(())
 }
 

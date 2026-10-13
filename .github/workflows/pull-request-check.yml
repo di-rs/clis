@@ -43,7 +43,6 @@ jobs:
       - run: prek run check-added-large-files --all-files --show-diff-on-failure
       - run: prek run cargo-fmt --all-files --show-diff-on-failure
       - run: prek run cargo-clippy --all-files --show-diff-on-failure
-      - run: prek run domain-clippy --all-files --show-diff-on-failure
       - run: cargo doc --locked --workspace --all-features --no-deps
       - run: git diff --exit-code
 

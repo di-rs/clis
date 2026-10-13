@@ -6,19 +6,7 @@ use mkdirr::create_directory;
 
 fn main() -> Result<std::process::ExitCode> {
     color_eyre::install()?;
-    let logging = cli_log::init("mkdirr");
-    let cli = match logging.parse::<Cli>() {
-        Ok(cli) => cli,
-        Err(status) => return Ok(status),
-    };
-    match run(&cli) {
-        Ok(()) => Ok(logging.finish(0)),
-        Err(error) => {
-            cli_log::record_error(format_args!("{error:#}"));
-            let _ = logging.finish(1);
-            Err(error)
-        }
-    }
+    cli_log::try_run("mkdirr", |cli| run(&cli))
 }
 
 fn run(cli: &Cli) -> Result<()> {

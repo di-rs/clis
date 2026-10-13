@@ -7,20 +7,16 @@ use crate::cli::{Cli, CliError};
 use calr::{CalendarDate, Month, format_month, get_today};
 
 fn main() -> std::process::ExitCode {
-    let logging = cli_log::init("calr");
-    let mut cli = match logging.parse::<Cli>() {
-        Ok(cli) => cli,
-        Err(status) => return status,
-    };
-    cli.setup_default();
-    let status = match run(&cli) {
-        Ok(()) => exitcode::OK,
-        Err(e) => {
-            cli_log::diagnostic!("Error: {e}");
-            exitcode::DATAERR
+    cli_log::run("calr", |mut cli: Cli| {
+        cli.setup_default();
+        match run(&cli) {
+            Ok(()) => exitcode::OK,
+            Err(e) => {
+                cli_log::diagnostic!("Error: {e}");
+                exitcode::DATAERR
+            }
         }
-    };
-    logging.finish(status)
+    })
 }
 
 fn run(cli: &Cli) -> Result<(), CliError> {

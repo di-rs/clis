@@ -5,20 +5,13 @@ use crate::cli::{Cli, CliError};
 use lsr::{find_files, get_formatted_output};
 
 fn main() -> std::process::ExitCode {
-    let logging = cli_log::init("lsr");
-    let cli = match logging.parse::<Cli>() {
-        Ok(cli) => cli,
-        Err(status) => return status,
-    };
-
-    let status = match run(&cli) {
+    cli_log::run("lsr", |cli| match run(&cli) {
         Ok(()) => exitcode::OK,
         Err(e) => {
             cli_log::diagnostic!("Error: {e}");
             exitcode::DATAERR
         }
-    };
-    logging.finish(status)
+    })
 }
 
 fn run(cli: &Cli) -> Result<(), CliError> {

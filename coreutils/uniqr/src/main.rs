@@ -9,13 +9,7 @@ use crate::cli::{Cli, CliError};
 use uniqr::{UniqueList, report_unique_lines};
 
 fn main() -> std::process::ExitCode {
-    let logging = cli_log::init("uniqr");
-    let cli = match logging.parse::<Cli>() {
-        Ok(cli) => cli,
-        Err(status) => return status,
-    };
-
-    let status = match run(cli) {
+    cli_log::run("uniqr", |cli| match run(cli) {
         Ok(()) => exitcode::OK,
         Err(CliError::Config) => {
             cli_log::record_error(CliError::Config);
@@ -30,8 +24,7 @@ fn main() -> std::process::ExitCode {
             cli_log::diagnostic!("Error: {e}");
             exitcode::DATAERR
         }
-    };
-    logging.finish(status)
+    })
 }
 
 fn run(cli: Cli) -> Result<(), CliError> {

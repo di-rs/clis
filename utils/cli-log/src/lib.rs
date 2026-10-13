@@ -26,6 +26,45 @@ pub struct Session {
     started: Instant,
 }
 
+/// Initialize logging, parse arguments, and record the operation's exit status.
+///
+/// The operation owns command-specific diagnostics and status mapping. Clap
+/// help/version and argument failures finish the session without calling it.
+pub fn run<C: clap::Parser>(command: &str, operation: impl FnOnce(C) -> i32) -> ExitCode {
+    let session = init(command);
+    match session.parse::<C>() {
+        Ok(cli) => session.finish(operation(cli)),
+        Err(status) => status,
+    }
+}
+
+/// Run a fallible command, preserving its error for the caller's rich reporter.
+///
+/// Install reporting/panic hooks before calling this helper. Success records
+/// status 0; operation errors are logged without printing and record status 1.
+/// Clap exits retain their original status and skip the operation.
+///
+/// # Errors
+/// Returns the original operation error, including its context chain.
+pub fn try_run<C: clap::Parser, E: Display>(
+    command: &str,
+    operation: impl FnOnce(C) -> Result<(), E>,
+) -> Result<ExitCode, E> {
+    let session = init(command);
+    let cli = match session.parse::<C>() {
+        Ok(cli) => cli,
+        Err(status) => return Ok(status),
+    };
+    match operation(cli) {
+        Ok(()) => Ok(session.finish(0)),
+        Err(error) => {
+            record_error(format_args!("{error:#}"));
+            let _ = session.finish(1);
+            Err(error)
+        }
+    }
+}
+
 /// Configure the crates.io backend from `CLIS_LOG_*`, without failing the CLI.
 #[must_use]
 pub fn init(command: &str) -> Session {
@@ -59,7 +98,7 @@ pub fn init_with_level(command: &str, level: LevelFilter) -> Session {
     let mut file_level = LevelFilter::Off;
     if level != LevelFilter::Off {
         let file = config::log_dir()
-            .ok_or_else(|| "no log directory is available".to_owned())
+            .map_err(|error| error.to_string())
             .and_then(|root| {
                 FileLogWriter::builder(
                     FileSpec::default()

@@ -11,13 +11,7 @@ mod cli;
 use crate::cli::{Args, CliError};
 
 fn main() -> std::process::ExitCode {
-    let logging = cli_log::init("headr");
-    let cli = match logging.parse::<Args>() {
-        Ok(cli) => cli,
-        Err(status) => return status,
-    };
-
-    let status = match run(&cli) {
+    cli_log::run("headr", |cli| match run(&cli) {
         Ok(()) => exitcode::OK,
         Err(CliError::Config) => {
             cli_log::record_error(CliError::Config);
@@ -27,8 +21,7 @@ fn main() -> std::process::ExitCode {
             cli_log::diagnostic!("Error: {e}");
             exitcode::DATAERR
         }
-    };
-    logging.finish(status)
+    })
 }
 
 fn run(args: &Args) -> Result<(), CliError> {

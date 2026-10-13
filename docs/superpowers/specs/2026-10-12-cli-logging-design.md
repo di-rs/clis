@@ -10,6 +10,8 @@ log directories, records start/finish/error/panic events, and preserves existing
 terminal diagnostics and exit statuses. It delegates serialization, file writing,
 rotation, cleanup, and console output to the backend. Do not implement a custom
 schema, writer, lock protocol, truncation policy, or interrupted-write recovery.
+Shared `run`/`try_run` helpers handle initialization, parsing, and completion;
+command-specific diagnostics and status mappings remain in each binary.
 
 Use native JSON Lines and one file family per CLI invocation. This avoids shared
 rotation coordination between processes. The startup event holds the optional
@@ -29,6 +31,7 @@ flush application buffers so output failures return a failing status; Echor
 reports these with status 1 instead of panicking. Setup failures warn without
 replacing the command's status. Messages can include application-supplied data;
 there is no automatic content capture or redaction.
+New Unix log directories use `0700`; existing permissions remain unchanged.
 
 The [utility README](../../../utils/cli-log/README.md) documents integration,
 configuration, native records, and operational limits. Tests cover this adapter's

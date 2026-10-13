@@ -181,3 +181,39 @@ fn console_threshold_is_independent_of_file_threshold() -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(unix)]
+#[test]
+fn newly_created_log_directories_are_private() -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = assert_fs::TempDir::new()?;
+    let parent = root.path().join("private");
+    let logs = parent.join("logs");
+    let output = run(command(root.path())?.env("CLIS_LOG_DIR", &logs))?;
+    assert_eq!(output.stderr, b"");
+    for path in [&parent, &logs] {
+        assert_eq!(std::fs::metadata(path)?.permissions().mode() & 0o777, 0o700);
+    }
+    assert!(has_message(&records(&logs)?, "info-message"));
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn existing_log_directory_permissions_are_preserved() -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = assert_fs::TempDir::new()?;
+    let logs = root.path().join("existing");
+    std::fs::create_dir(&logs)?;
+    std::fs::set_permissions(&logs, std::fs::Permissions::from_mode(0o750))?;
+    let output = run(command(root.path())?.env("CLIS_LOG_DIR", &logs))?;
+    assert_eq!(output.stderr, b"");
+    assert_eq!(
+        std::fs::metadata(&logs)?.permissions().mode() & 0o777,
+        0o750
+    );
+    assert!(has_message(&records(&logs)?, "info-message"));
+    Ok(())
+}

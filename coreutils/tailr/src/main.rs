@@ -9,13 +9,7 @@ use crate::cli::{Cli, CliError};
 use tailr::{get_total_lines, print_bytes, print_lines, print_stream_bytes, print_stream_lines};
 
 fn main() -> std::process::ExitCode {
-    let logging = cli_log::init("tailr");
-    let cli = match logging.parse::<Cli>() {
-        Ok(cli) => cli,
-        Err(status) => return status,
-    };
-
-    let status = match run(&cli) {
+    cli_log::run("tailr", |cli| match run(&cli) {
         Ok(()) => exitcode::OK,
         Err(CliError::FileOpen(_, e)) => {
             cli_log::diagnostic!("{e}");
@@ -25,8 +19,7 @@ fn main() -> std::process::ExitCode {
             cli_log::diagnostic!("Error: {e}");
             exitcode::DATAERR
         }
-    };
-    logging.finish(status)
+    })
 }
 
 fn run(cli: &Cli) -> Result<(), CliError> {
