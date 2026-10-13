@@ -191,14 +191,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bool"
-version = "0.1.0"
-dependencies = [
- "assert_cmd",
- "predicates",
-]
-
-[[package]]
 name = "bstr"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -666,6 +658,14 @@ dependencies = [
  "autocfg",
  "indenter",
  "once_cell",
+]
+
+[[package]]
+name = "false"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "predicates",
 ]
 
 [[package]]
@@ -1733,6 +1733,14 @@ dependencies = [
  "tracing-core",
  "tracing-log",
  "tracing-serde",
+]
+
+[[package]]
+name = "true"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "predicates",
 ]
 
 [[package]]

@@ -1,0 +1,12 @@
+[package]
+license.workspace = true
+name = "true"
+version = "0.1.0"
+edition = "2024"
+
+[dev-dependencies]
+assert_cmd = { workspace = true }
+predicates = { workspace = true }
+
+[lints]
+workspace = true

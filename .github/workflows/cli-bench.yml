@@ -2,26 +2,63 @@ name: CLI benchmark suites
 
 on:
   pull_request:
-    paths: ["tools/cli-bench/**", "**/benches/*.toml", "pyproject.toml", "uv.lock", ".python-version", ".github/workflows/cli-bench.yml"]
-  push:
     branches: [master]
-    paths: ["tools/cli-bench/**", "**/benches/*.toml", "pyproject.toml", "uv.lock", ".python-version", ".github/workflows/cli-bench.yml"]
-  workflow_dispatch:
-    inputs:
-      suite:
-        description: Suite TOML path (empty runs all suites)
-        type: string
-        default: coreutils/tailr/benches/cli-bench.toml
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 jobs:
+  select:
+    if: github.event.action != 'edited' || github.event.changes.body != null
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      suites: ${{ steps.selection.outputs.suites }}
+      packages: ${{ steps.selection.outputs.packages }}
+      runs: ${{ steps.selection.outputs.runs }}
+      warmup: ${{ steps.selection.outputs.warmup }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.13.0'
+          enable-cache: false
+      - name: Select affected or requested CLIs
+        id: selection
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          uv run --locked python tools/cli-bench/select_suites.py \
+            --base "$BASE_SHA" --head "$HEAD_SHA" --event "$GITHUB_EVENT_PATH" > selection.json
+          uv run --locked python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          selection = json.loads(Path("selection.json").read_text())
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
+              for key in ("suites", "packages", "runs", "warmup"):
+                  print(f"{key}={json.dumps(selection[key])}", file=output)
+          PY
+      - name: Selection details
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cli-bench-selection
+          path: selection.json
+          retention-days: 14
+          if-no-files-found: error
+
   suites:
+    needs: select
+    if: needs.select.outputs.suites != '[]'
+    concurrency:
+      group: cli-bench-${{ github.event.pull_request.number }}-${{ matrix.os }}
+      cancel-in-progress: true
     strategy:
       fail-fast: false
       matrix:
@@ -41,28 +78,47 @@ jobs:
         with:
           tool: hyperfine@2.0.0
           fallback: none
-      - name: Test runner
-        run: uv run --locked python -m unittest discover -s tools/cli-bench -p 'test_*.py' -v
-      - run: cargo build --locked --release --workspace --bins
+      - name: Build selected CLIs
+        shell: bash
+        env:
+          PACKAGES: ${{ needs.select.outputs.packages }}
+        run: |
+          uv run --locked python - <<'PY'
+          import json
+          import os
+          import subprocess
+
+          packages = json.loads(os.environ["PACKAGES"])
+          if not packages:
+              raise SystemExit("No CLI packages selected")
+          subprocess.run([
+              "cargo", "build", "--locked", "--release", "--bins",
+              *[argument for package in packages for argument in ("-p", package)],
+          ], check=True)
+          PY
       - name: Run suites
         shell: bash
         env:
-          SUITE: ${{ inputs.suite }}
-          EVENT: ${{ github.event_name }}
+          SUITES: ${{ needs.select.outputs.suites }}
+          RUNS: ${{ needs.select.outputs.runs }}
+          WARMUP: ${{ needs.select.outputs.warmup }}
         run: |
-          runs=1
-          warmup=0
-          if [[ "$EVENT" == workflow_dispatch ]]; then
-            runs=20
-            warmup=3
-          fi
-          suites=(coreutils/*/benches/*.toml biggie/benches/*.toml calr/benches/*.toml parsu/benches/*.toml)
-          if [[ -n "$SUITE" ]]; then suites=("$SUITE"); fi
-          for suite in "${suites[@]}"; do
-            uv run --locked python tools/cli-bench/bench.py "$suite" \
-              --warmup "$warmup" --runs "$runs" \
-              --output "target/benchmarks/${suite//\//-}"
-          done
+          uv run --locked python - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          suites = json.loads(os.environ["SUITES"])
+          if not suites:
+              raise SystemExit("No benchmark suites selected")
+          for suite in suites:
+              subprocess.run([
+                  sys.executable, "tools/cli-bench/bench.py", suite,
+                  "--warmup", os.environ["WARMUP"], "--runs", os.environ["RUNS"],
+                  "--output", "target/benchmarks/" + suite.replace("/", "-"),
+              ], check=True)
+          PY
       - name: Benchmark reports
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

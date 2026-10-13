@@ -1,6 +1,6 @@
 [package]
 license.workspace = true
-name = "bool"
+name = "false"
 version = "0.1.0"
 edition = "2024"
 

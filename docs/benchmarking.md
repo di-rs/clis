@@ -1,6 +1,8 @@
 # Benchmarking
 
 Each finite CLI owns TOML suites under its `benches/` directory.
+Each CLI has its own Cargo package, with matching package and binary names;
+see the [repository rules](../AGENTS.md).
 [Biggie](../biggie/README.md) generates inputs once; [hyperfine 2](https://github.com/sharkdp/hyperfine/releases/tag/v2.0.0)
 measures the executables directly, including warmups, timing and peak RSS.
 The [runner](../tools/cli-bench/bench.py) requires Python 3.11+ and uses only the
@@ -118,15 +120,72 @@ environment sets `LC_ALL=C`, `TZ=UTC` and `CLIS_LOG_LEVEL=off`; an optional suit
 uv run --locked python -m unittest discover -s tools/cli-bench -p 'test_*.py' -v
 ```
 
-The [workflow](../.github/workflows/cli-bench.yml) checks runner changes and runs
-one-sample suite smoke checks on Linux and macOS. Manual dispatch runs the chosen
-suite with normal measurement settings and saves reports as workflow artifacts.
+The [workflow](../.github/workflows/cli-bench.yml) runs for pull requests targeting
+`master`. There are no benchmark runs on pushes, merges, or a schedule. A small
+selection job examines the whole PR's diff from its merge base, then Linux and
+macOS jobs build only the selected CLI packages (plus Biggie when needed).
+An empty selection skips both benchmark jobs.
+
+| Changed files | Automatic selection |
+| --- | --- |
+| CLI source, manifest, or build script | That package's suites. |
+| Suite TOML | That suite. |
+| Biggie or its shared tracing implementation | Biggie and suites using generated input. |
+| Other shared Rust implementations | All suites, conservatively. |
+| Root Cargo manifest/lockfile, Rust toolchain, or `.cargo/` configuration | All suites, conservatively. |
+| Benchmark runner, selector, benchmark workflow, or Python version pin | All suites. |
+| Documentation, correctness tests, or Python development-tool configuration | No native benchmarks. Ordinary CI checks still run. |
+
+Global Rust changes deliberately over-select: a dev-only lockfile edit can run
+all suites. This keeps selection simple without pretending that unchanged CLI
+source means unchanged dependencies. Removed suites are not run; renamed source
+files count on both sides of the rename.
+
+Automatic checks use one measurement and no warmup. To request full measurements
+for specific CLIs, put this standalone line in the PR description:
+
+```text
+Benchmark-CLIs: tailr,wcr
+```
+
+This overrides automatic selection and runs exactly those CLIs with three
+warmups and twenty measurements. `Benchmark-CLIs: all` explicitly selects every
+CLI with a suite. `Benchmark-CLIs: auto`, or no field, restores automatic selection.
+Unknown names fail with a diagnostic. Editing this field triggers a new run;
+unrelated PR-description edits do not rerun benchmarks. The request applies to
+subsequent commits until changed back to `auto`, and works for fork contributors
+subject to GitHub's normal workflow approval settings.
+
+Reports are saved as workflow artifacts. The
+[reporting workflow](../.github/workflows/cli-bench-report.yml) updates one PR
+comment with the tested revision, selected CLIs, measurements, build and suite
+duration per OS, and total runner time. It runs trusted default-branch code with
+permission to post, while benchmark jobs have read-only permissions. Artifacts
+are parsed as data; PR code is not executed by the reporter. Stale revisions do
+not overwrite newer results. The reporting workflow becomes active once its
+definition is on `master`; that does not trigger benchmarks on merge.
+
 Hosted smoke measurements verify execution; use a quiet local machine for
 performance conclusions, inspect variance, and repeat meaningful differences.
 
+## CI runtime
+
+Before selective builds, a [full smoke run](https://github.com/di-rs/clis/actions/runs/38452689584)
+of all 19 suites took 72 seconds on Linux and 88 seconds on macOS. Release builds
+accounted for 57/63 seconds; suite execution took 5/8 seconds. The jobs overlapped,
+so elapsed time was about 90 seconds plus queueing, while their summed runner
+time was 160 seconds. These are observed durations, not billing estimates.
+
+Selective builds avoid compiling unrelated CLIs. Exact duration depends mainly
+on selected dependencies, runner load, and whether full measurements were
+requested. Every results comment reports actual durations so estimates can be
+checked against real runs. Full measurements repeat each command 23 times
+including warmups, in addition to generation and preflight checks; they do not
+repeat compilation for each sample.
+
 Kara is interactive and has no finite CLI benchmark here. Suites without a
 portable system-output match use previous-version comparisons. There is no custom
-statistics engine, build cache, history database, replay format or PR-comment bot.
+statistics engine, build cache, history database, or replay format.
 
 The runner follows hyperfine's [manual](https://github.com/sharkdp/hyperfine/blob/v2.0.0/doc/hyperfine.1)
 for direct commands, preparation, input and exports. See [Testing](testing.md)

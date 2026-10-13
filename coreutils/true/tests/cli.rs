@@ -17,13 +17,3 @@ fn true_exits_zero_silently() {
 fn true_ignores_arguments() {
     assert_silent_status(cargo_bin_cmd!("true").args(["--help", "ignored"]), 0);
 }
-
-#[test]
-fn false_exits_one_silently() {
-    assert_silent_status(&mut cargo_bin_cmd!("false"), 1);
-}
-
-#[test]
-fn false_ignores_arguments() {
-    assert_silent_status(cargo_bin_cmd!("false").args(["--help", "ignored"]), 1);
-}

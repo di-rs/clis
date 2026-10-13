@@ -14,8 +14,8 @@
 From the workspace root, put starting paths before the filters:
 
 ```sh
-cargo run -p findr -- coreutils/bool -t f
-cargo run -p findr -- coreutils/bool -n '\.rs$'
+cargo run -p findr -- coreutils/true -t f
+cargo run -p findr -- coreutils/true -n '\.rs$'
 ```
 
 ## Differences and limits
