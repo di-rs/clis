@@ -69,8 +69,8 @@ obtain a pass.
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.13 or newer
 and run Python tooling from the repository root. The uv workspace shares
 [configuration](../pyproject.toml) and a committed [lockfile](../uv.lock).
-[.python-version](../.python-version) selects Python 3.14 locally; CI checks
-Python 3.11 and 3.14.
+[.python-version](../.python-version) selects Python 3.15 locally and in CI.
+The workspace, Ruff, and mypy all target Python 3.15 or newer.
 
 ```sh
 uv sync --locked --all-packages

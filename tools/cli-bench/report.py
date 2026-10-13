@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.15
 """Render PR benchmark artifacts as data; optionally update the caller's sticky comment."""
 
 import argparse
@@ -383,7 +383,7 @@ def generate(api: GitHub, repo: str, run_id: int, *, author: str | None = None) 
                 }
             else:
                 suites.extend(read_suites(data, system))
-        except (ValueError, KeyError, UnicodeError, zipfile.BadZipFile, RecursionError):
+        except ValueError, KeyError, UnicodeError, zipfile.BadZipFile, RecursionError:
             warnings.append(f"{name}: invalid artifact data omitted.")
     markdown = render(repo, run, jobs, suites, selection, warnings)
     if author is not None:

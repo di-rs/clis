@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.15
 """Select per-package benchmark suites for the complete pull-request diff."""
 
 import argparse

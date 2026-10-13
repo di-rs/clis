@@ -1,10 +1,10 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.15
 """Run trusted per-CLI TOML cases with Biggie and hyperfine 2.x."""
 
 import sys
 
-if sys.version_info < (3, 11):  # noqa: UP036 -- Direct script users need the version diagnostic.
-    sys.exit("cli-bench requires Python 3.11 or newer (for example, python3.14).")
+if sys.version_info < (3, 15):  # noqa: UP036 -- Direct script users need the version diagnostic.
+    sys.exit("cli-bench requires Python 3.15 or newer; run it with uv run --locked python.")
 
 import argparse
 import filecmp

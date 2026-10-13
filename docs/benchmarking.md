@@ -5,7 +5,7 @@ Each CLI has its own Cargo package, with matching package and binary names;
 see the [repository rules](../AGENTS.md).
 [Biggie](../biggie/README.md) generates inputs once; [hyperfine 2](https://github.com/sharkdp/hyperfine/releases/tag/v2.0.0)
 measures the executables directly, including warmups, timing and peak RSS.
-The [runner](../tools/cli-bench/bench.py) requires Python 3.11+ and uses only the
+The [runner](../tools/cli-bench/bench.py) requires Python 3.15+ and uses only the
 standard library. The root [uv workspace](testing.md#python-tooling) manages its
 interpreter and development checks.
 
