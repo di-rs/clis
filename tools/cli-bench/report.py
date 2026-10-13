@@ -6,9 +6,11 @@ import io
 import json
 import os
 import re
+import selectors
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 import zipfile
 from dataclasses import dataclass
@@ -20,6 +22,7 @@ from typing import cast
 MAX_JSON = 2 * 1024 * 1024
 MAX_ZIP = 8 * 1024 * 1024
 MAX_MEMBER = 1024 * 1024
+REQUEST_TIMEOUT = 60
 SYSTEMS = ("ubuntu-24.04", "macos-15")
 PLATFORMS = {"ubuntu-24.04": "Linux", "macos-15": "macOS"}
 WORKFLOW = ".github/workflows/cli-bench.yml"
@@ -57,22 +60,39 @@ class GitHub:
         self, path: str, *, method: str = "GET", body: object = None, limit: int = MAX_JSON
     ) -> bytes:
         command = ["gh", "api", "--hostname", "github.com", "--method", method, path]
-        with tempfile.TemporaryFile() as payload, tempfile.TemporaryFile() as errors:
+        with tempfile.TemporaryFile() as payload:
             if body is not None:
                 payload.write(json.dumps(body).encode())
                 payload.seek(0)
                 command += ["--input", "-"]
+            deadline = time.monotonic() + REQUEST_TIMEOUT
             with subprocess.Popen(
-                command, stdin=payload, stdout=subprocess.PIPE, stderr=errors
+                command, stdin=payload, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
             ) as process:
                 assert process.stdout is not None
-                data = process.stdout.read(limit + 1)
-                if len(data) > limit:
-                    process.kill()
-                    raise ValueError("GitHub response exceeds size limit")
-                if process.wait(timeout=60):
-                    raise ValueError("GitHub API request failed")
-                return data
+                try:
+                    data = bytearray()
+                    with selectors.DefaultSelector() as selector:
+                        selector.register(process.stdout, selectors.EVENT_READ)
+                        while True:
+                            remaining = deadline - time.monotonic()
+                            if remaining <= 0 or not selector.select(remaining):
+                                raise subprocess.TimeoutExpired(command, REQUEST_TIMEOUT)
+                            chunk = os.read(
+                                process.stdout.fileno(), min(65536, limit + 1 - len(data))
+                            )
+                            if not chunk:
+                                break
+                            data.extend(chunk)
+                            if len(data) > limit:
+                                raise ValueError("GitHub response exceeds size limit")
+                    if process.wait(timeout=max(0, deadline - time.monotonic())):
+                        raise ValueError("GitHub API request failed")
+                    return bytes(data)
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                    process.wait()
 
     def json(self, path: str) -> object:
         return cast(object, json.loads(self.request(path)))

@@ -1,11 +1,52 @@
 """Reporter regressions using real ZIP/JSON data and a fake GitHub transport."""
 
+import os
 import struct
+import subprocess
+import time
+from collections.abc import Callable
+from pathlib import Path
 from typing import cast
 
 import pytest
 import report
 from conftest import BASE, REPO, FakeGitHub, archive, benchmark, suite_files
+
+
+@pytest.mark.parametrize("mode", ["no-output", "stdout-closed", "trickle"])
+def test_github_request_deadline_kills_and_reaps_stalled_process(
+    gh_process: Callable[[str], Path], monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    pid_path = gh_process(
+        f"mode = {mode!r}\n"
+        "if mode == 'stdout-closed':\n    os.close(1)\n"
+        "if mode == 'trickle':\n"
+        "    for _ in range(20):\n        os.write(1, b'x')\n        time.sleep(0.1)\n"
+        "else:\n    time.sleep(2)\n"
+    )
+    monkeypatch.setattr(report, "REQUEST_TIMEOUT", 0.4)
+    started = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        report.GitHub().request("user")
+    assert time.monotonic() - started < 1.5
+    with pytest.raises(ChildProcessError):
+        os.waitpid(int(pid_path.read_text()), os.WNOHANG)
+
+
+@pytest.mark.parametrize("size", [16, 17], ids=["exact-limit", "over-limit"])
+def test_github_request_keeps_byte_limit_and_reaps_child(
+    gh_process: Callable[[str], Path], size: int
+) -> None:
+    pid_path = gh_process(
+        f"os.write(1, b'x' * {size})\n" + ("time.sleep(2)\n" if size > 16 else "")
+    )
+    if size == 16:
+        assert report.GitHub().request("user", limit=16) == b"x" * 16
+    else:
+        with pytest.raises(ValueError, match="exceeds size limit"):
+            report.GitHub().request("user", limit=16)
+    with pytest.raises(ChildProcessError):
+        os.waitpid(int(pid_path.read_text()), os.WNOHANG)
 
 
 def test_renders_real_means_ratio_smoke_and_parallel_runner_timing(github: FakeGitHub) -> None:

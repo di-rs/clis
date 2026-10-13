@@ -4,9 +4,11 @@ import io
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import zipfile
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NotRequired, TypedDict, cast
@@ -176,7 +178,9 @@ class Bench:
         ]
         if compare:
             command += ["--baseline", str(self.baseline)]
-        return subprocess.run(command + list(args), env=self.env, capture_output=True, text=True)
+        return subprocess.run(
+            command + list(args), env=self.env, capture_output=True, text=True, timeout=10
+        )
 
     def events(self) -> list[Event]:
         return (
@@ -240,9 +244,46 @@ sys.exit(1 if mode == 'failure' else 0)
     )
 
 
+@pytest.fixture
+def hanging_process(tmp_path: Path) -> Iterator[tuple[str, Path]]:
+    pids = tmp_path / "hanging-pids.json"
+    body = f"""
+import json, os, pathlib, signal, subprocess, sys, time
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(5)'])
+pathlib.Path({str(pids)!r}).write_text(json.dumps([os.getpid(), child.pid]))
+time.sleep(5)
+child.wait()
+"""
+    yield body, pids
+    if pids.exists():
+        for pid in json.loads(pids.read_text()):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
 REPO = "di-rs/clis"
 SHA = "a" * 40
 BASE = f"repos/{REPO}"
+
+
+@pytest.fixture
+def gh_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[str], Path]:
+    monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ.get("PATH", ""))
+
+    def create(body: str) -> Path:
+        pid_path = tmp_path / "gh-pid"
+        fixture_executable(
+            tmp_path,
+            "gh",
+            "import pathlib, time\n"
+            f"pathlib.Path({str(pid_path)!r}).write_text(str(os.getpid()))\n" + body,
+        )
+        return pid_path
+
+    return create
 
 
 def archive(files: dict[str, object]) -> bytes:

@@ -9,17 +9,19 @@ if sys.version_info < (3, 15):  # noqa: UP036 -- Direct script users need the ve
 import argparse
 import filecmp
 import json
+import math
 import os
 import platform
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import tempfile
 import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import NotRequired, TypedDict, TypeGuard, cast
+from typing import IO, NotRequired, TypedDict, TypeGuard, cast
 
 ROOT = Path(__file__).resolve().parents[2]
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
@@ -54,6 +56,7 @@ class Metadata(TypedDict):
     completed_cases: list[str]
     warmup: int
     runs: int
+    timeout: float
     env: dict[str, str]
     error: NotRequired[str]
 
@@ -68,6 +71,7 @@ class Arguments(argparse.Namespace):
     cases: list[str] | None
     warmup: int
     runs: int
+    timeout: float
     output: Path | None
     list: bool
 
@@ -171,47 +175,92 @@ def executable(value: str | Path) -> str:
     return str(Path(cast(str, found)).resolve())
 
 
-def version(path: str) -> str | None:
-    try:
-        result = subprocess.run(
+def execute(
+    command: str | list[str],
+    *,
+    timeout: float,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+    shell: bool = False,
+    stdin: IO[bytes] | int | None = None,
+    stdout: IO[bytes] | int | None = None,
+    stderr: IO[bytes] | int | None = None,
+    check: bool = True,
+) -> int:
+    """Bound a subprocess and kill its process group on timeout or interruption."""
+    with subprocess.Popen(
+        command,
+        cwd=cwd,
+        env=env,
+        shell=shell,
+        stdin=stdin,
+        stdout=stdout,
+        stderr=stderr,
+        start_new_session=True,
+    ) as process:
+        try:
+            returncode = process.wait(timeout=timeout)
+        except BaseException:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait()
+            raise
+    if check and returncode:
+        raise subprocess.CalledProcessError(returncode, command)
+    return returncode
+
+
+def version(path: str, timeout: float) -> str | None:
+    with tempfile.TemporaryFile() as output:
+        returncode = execute(
             [path, "--version"],
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
+            stdout=output,
             stderr=subprocess.DEVNULL,
-            timeout=5,
+            timeout=min(5, timeout),
+            check=False,
         )
-        return (
-            result.stdout[:4096].decode("utf-8", "replace").strip()
-            if result.returncode == 0
-            else None
-        )
-    except subprocess.TimeoutExpired:
-        return None
+        output.seek(0)
+        return output.read(4096).decode("utf-8", "replace").strip() if returncode == 0 else None
 
 
 def preflight(
-    case: Case, commands: list[list[str]], work: Path, captures: Path, env: dict[str, str]
+    case: Case,
+    commands: list[list[str]],
+    work: Path,
+    captures: Path,
+    env: dict[str, str],
+    timeout: float,
 ) -> None:
     outputs = []
     for index, command in enumerate(commands):
         if "prepare" in case:
-            subprocess.run(case["prepare"], shell=True, cwd=work, env=env, check=True)
+            execute(case["prepare"], shell=True, cwd=work, env=env, timeout=timeout)
         output = captures / f"{case['name']}-{index}.stdout"
         error = captures / f"{case['name']}-{index}.stderr"
         source = work / case["stdin"] if "stdin" in case else Path(os.devnull)
         with source.open("rb") as stdin, output.open("wb") as stdout, error.open("wb") as stderr:
-            result = subprocess.run(
-                command, stdin=stdin, stdout=stdout, stderr=stderr, cwd=work, env=env
+            returncode = execute(
+                command,
+                stdin=stdin,
+                stdout=stdout,
+                stderr=stderr,
+                cwd=work,
+                env=env,
+                timeout=timeout,
+                check=False,
             )
-        if result.returncode != case.get("expected_exit", 0):
+        if returncode != case.get("expected_exit", 0):
             with error.open("rb") as diagnostic:
                 detail = diagnostic.read(4096).decode("utf-8", "replace")
             raise ValueError(
-                f"{case['name']}: {command[0]} exited {result.returncode}, "
+                f"{case['name']}: {command[0]} exited {returncode}, "
                 f"expected {case.get('expected_exit', 0)}\n{detail}"
             )
         if "check" in case:
-            subprocess.run(case["check"], shell=True, cwd=work, env=env, check=True)
+            execute(case["check"], shell=True, cwd=work, env=env, timeout=timeout)
         outputs.append(output)
     if len(outputs) == 2:
         require(
@@ -261,11 +310,6 @@ def run(args: Arguments, suite: Suite, cases: list[Case]) -> None:
         executable(args.biggie or ROOT / "target/release/biggie") if suite.get("generate") else None
     )
     hyperfine = executable(args.hyperfine)
-    hyperfine_version = version(hyperfine)
-    require(
-        hyperfine_version and re.match(r"hyperfine 2\.", hyperfine_version),
-        "hyperfine 2.x is required",
-    )
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
     output = (args.output or ROOT / "target/benchmarks" / f"{suite['binary']}-{stamp}").resolve()
     output.mkdir(parents=True, exist_ok=False)
@@ -279,12 +323,13 @@ def run(args: Arguments, suite: Suite, cases: list[Case]) -> None:
             "biggie": biggie,
             "hyperfine": hyperfine,
         },
-        "hyperfine_version": hyperfine_version,
+        "hyperfine_version": None,
         "generate": suite.get("generate", []),
         "cases": [case["name"] for case in cases],
         "completed_cases": [],
         "warmup": args.warmup,
         "runs": args.runs,
+        "timeout": args.timeout,
         "env": {"LC_ALL": "C", "TZ": "UTC", "CLIS_LOG_LEVEL": "off", "CLIS_LOG_STDERR": "off"}
         | suite.get("env", {}),
     }
@@ -297,6 +342,12 @@ def run(args: Arguments, suite: Suite, cases: list[Case]) -> None:
     save_metadata()
     try:
         shutil.copyfile(args.suite, output / "suite.toml")
+        hyperfine_version = version(hyperfine, args.timeout)
+        metadata["hyperfine_version"] = hyperfine_version
+        require(
+            hyperfine_version and re.match(r"hyperfine 2\.", hyperfine_version),
+            "hyperfine 2.x is required",
+        )
         env = os.environ | metadata["env"]
         with tempfile.TemporaryDirectory(prefix="cli-bench-") as temporary_name:
             temporary = Path(temporary_name).resolve()
@@ -306,7 +357,7 @@ def run(args: Arguments, suite: Suite, cases: list[Case]) -> None:
             for directory in (work, staging, captures):
                 directory.mkdir()
             for recipe in suite.get("generate", []):
-                subprocess.run([cast(str, biggie), *recipe], cwd=work, env=env, check=True)
+                execute([cast(str, biggie), *recipe], cwd=work, env=env, timeout=args.timeout)
             for case in cases:
                 print(f"Benchmarking {case['name']}", flush=True)
                 commands = [[candidate, *case["args"]]]
@@ -315,7 +366,7 @@ def run(args: Arguments, suite: Suite, cases: list[Case]) -> None:
                         case["args"] if args.baseline else case.get("reference_args", case["args"])
                     )
                     commands.insert(0, [baseline, *reference_args])
-                preflight(case, commands, work, captures, env)
+                preflight(case, commands, work, captures, env, args.timeout)
                 shell_commands = [shlex.join(command) for command in commands]
                 json_path, markdown_path = (
                     staging / f"{case['name']}.json",
@@ -344,7 +395,7 @@ def run(args: Arguments, suite: Suite, cases: list[Case]) -> None:
                 if baseline:
                     invocation += ["--command-name", "baseline" if args.baseline else "reference"]
                 invocation += ["--command-name", "candidate", "--", *shell_commands]
-                subprocess.run(invocation, cwd=work, env=env, check=True)
+                execute(invocation, cwd=work, env=env, timeout=args.timeout)
                 validate_report(json_path, shell_commands, args.runs, expected)
                 require(
                     markdown_path.is_file() and markdown_path.stat().st_size,
@@ -378,6 +429,12 @@ def main() -> int:
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--runs", type=int, default=20)
     parser.add_argument(
+        "--timeout",
+        type=float,
+        default=300,
+        help="seconds per generator, hook, preflight or complete hyperfine case (default: 300)",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         help="new report directory (default: target/benchmarks/<binary>-<timestamp>)",
@@ -385,6 +442,10 @@ def main() -> int:
     parser.add_argument("--list", action="store_true", help="list cases without running tools")
     args = parser.parse_args(namespace=Arguments())
     try:
+        require(
+            math.isfinite(args.timeout) and args.timeout > 0,
+            "timeout must be a finite positive number of seconds",
+        )
         require(
             args.warmup >= 0 and args.runs > 0,
             "warmup must be nonnegative and runs must be positive",

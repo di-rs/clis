@@ -4,6 +4,7 @@ import json
 import shlex
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ def assert_failed_unpublished(bench: Bench, result: subprocess.CompletedProcess[
     assert not (bench.output / "sample.json").exists()
     assert not (bench.output / "sample.md").exists()
     assert (bench.output / "metadata.json").exists(), result.stderr
+    assert (bench.output / "suite.toml").read_bytes() == bench.suite.read_bytes()
     metadata = json.loads((bench.output / "metadata.json").read_text())
     assert metadata["status"] == "failed"
 
@@ -184,4 +186,50 @@ def test_existing_output_is_not_overwritten(bench: Bench) -> None:
     result = bench.run_bench()
     assert result.returncode != 0
     assert sentinel.read_text() == "existing"
+    assert not bench.events()
+
+
+@pytest.mark.parametrize(
+    "phase", ["generate", "prepare", "preflight", "check", "hyperfine", "version"]
+)
+def test_timeout_stops_process_tree_and_records_failure(
+    bench: Bench, hanging_process: tuple[str, Path], phase: str
+) -> None:
+    body, pids = hanging_process
+    hanging = bench.executable("hanging", body, version="hyperfine 2.0.0")
+    case, top = 'name = "sample"\nargs = []', ""
+    if phase in ("prepare", "check"):
+        case += f"\n{phase} = {json.dumps(shlex.quote(str(hanging)))}"
+    elif phase == "generate":
+        bench.biggie = hanging
+        top = 'generate = [["input.txt"]]'
+    elif phase == "preflight":
+        bench.candidate = hanging
+    else:
+        bench.hyperfine = hanging
+        if phase == "version":
+            hanging.write_text(f"#!{sys.executable}\n{body}")
+    bench.write_suite(case, top)
+    started = time.monotonic()
+    result = bench.run_bench("--timeout", "0.5", compare=False)
+    assert time.monotonic() - started < 4
+    assert_failed_unpublished(bench, result)
+    metadata = json.loads((bench.output / "metadata.json").read_text())
+    assert "timed out" in metadata["error"]
+    assert metadata["completed_cases"] == []
+    # Orphaned zombies may await init on Linux; neither process may still execute.
+    for pid in json.loads(pids.read_text()):
+        state = subprocess.run(
+            ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True
+        ).stdout.strip()
+        assert not state or state.startswith("Z"), (pid, state)
+
+
+@pytest.mark.parametrize("timeout", ["0", "-1", "nan", "inf"])
+def test_invalid_timeout_fails_without_running_tools(bench: Bench, timeout: str) -> None:
+    bench.write_suite()
+    result = bench.run_bench("--timeout", timeout)
+    assert result.returncode != 0
+    assert "timeout must be" in result.stderr
+    assert not bench.output.exists()
     assert not bench.events()

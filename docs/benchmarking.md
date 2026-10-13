@@ -35,6 +35,13 @@ to keep reports across `cargo clean`. Each case produces hyperfine's native JSON
 and Markdown; the directory also contains the suite and run metadata. A failed
 run is marked failed, and failed/partial case reports are not published as results.
 
+On Linux and macOS, each generator, shell hook, preflight command and complete
+hyperfine case has a five-minute deadline. Use `--timeout 600` to allow ten minutes
+per phase for longer benchmarks; this includes all warmups and measurements in
+each hyperfine case. The version probe is capped at five seconds. A timeout or
+interruption kills the command's process group, including shell and hyperfine
+children, and records the failure in the run metadata.
+
 ## Compare with an earlier version
 
 Pass an existing executable with `--baseline`. Both versions use the case's
