@@ -31,6 +31,4 @@ at the beginning, while unsigned or negative zero produces no output. Repeated
 There is no follow (`-f`) mode or size suffix syntax. File-open errors do not by
 themselves make the command fail.
 
-Existing benchmark script: [benches/tail.bench.nu](benches/tail.bench.nu).
-
 [Workspace README](../../README.md)

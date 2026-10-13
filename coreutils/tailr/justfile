@@ -1,5 +1,2 @@
-bench:
-    ./benches/tail.bench.nu
-
 outs:
     ./mk-outs.nu
