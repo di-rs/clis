@@ -285,7 +285,8 @@ def run(args: Arguments, suite: Suite, cases: list[Case]) -> None:
         "completed_cases": [],
         "warmup": args.warmup,
         "runs": args.runs,
-        "env": {"LC_ALL": "C", "TZ": "UTC", "CLIS_LOG_LEVEL": "off"} | suite.get("env", {}),
+        "env": {"LC_ALL": "C", "TZ": "UTC", "CLIS_LOG_LEVEL": "off", "CLIS_LOG_STDERR": "off"}
+        | suite.get("env", {}),
     }
 
     def save_metadata() -> None:

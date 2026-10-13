@@ -20,6 +20,7 @@ pub fn find_files(paths: &[PathBuf], show_hidden: bool) -> Result<Vec<PathBuf>, 
         let metadata = match path.metadata() {
             Ok(metadata) => metadata,
             Err(error) => {
+                log::error!("{}: {error}", path.display());
                 eprintln!("{}: {error}", path.display());
                 continue;
             }

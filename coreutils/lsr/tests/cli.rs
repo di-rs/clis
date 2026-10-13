@@ -352,3 +352,81 @@ fn missing_path_does_not_hide_valid_files() -> Result<()> {
         ));
     Ok(())
 }
+
+// These regressions catch missing persistence without changing terminal contracts.
+#[test]
+fn handled_file_error_is_persisted_with_successful_completion() -> Result<()> {
+    let logs = TempDir::new()?;
+    cargo_bin_cmd!()
+        .env("CLIS_LOG_DIR", logs.path())
+        .env("CLIS_LOG_LEVEL", "info")
+        .env("CLIS_LOG_STDERR", "off")
+        .arg("missing-log-test-input")
+        .assert()
+        .success()
+        .stdout("")
+        .stderr(predicate::str::contains("missing-log-test-input:"));
+    let records = read_log_records(&logs)?;
+    if !(records.iter().any(|record| {
+        record["level"] == "ERROR"
+            && record["text"]
+                .as_str()
+                .is_some_and(|message| message.contains("missing-log-test-input"))
+    })) {
+        return Err("missing logged input error".into());
+    }
+    if !(records.iter().any(|record| {
+        record["kv"]["event"] == "command_finished" && record["kv"]["exit_code"] == 0
+    })) {
+        return Err("missing successful completion".into());
+    }
+    Ok(())
+}
+
+#[test]
+fn invalid_argument_is_persisted_with_clap_status() -> Result<()> {
+    let logs = TempDir::new()?;
+    cargo_bin_cmd!()
+        .env("CLIS_LOG_DIR", logs.path())
+        .env("CLIS_LOG_LEVEL", "info")
+        .env("CLIS_LOG_STDERR", "off")
+        .arg("--unknown")
+        .assert()
+        .code(2)
+        .stdout("")
+        .stderr(predicate::str::contains("--unknown"));
+    let records = read_log_records(&logs)?;
+    if !(records.iter().any(|record| {
+        record["kv"]["event"] == "argument_error"
+            && record["text"]
+                .as_str()
+                .is_some_and(|message| message.contains("--unknown"))
+    })) {
+        return Err("missing logged argument error".into());
+    }
+    if !(records.iter().any(|record| {
+        record["kv"]["event"] == "command_finished" && record["kv"]["exit_code"] == 2
+    })) {
+        return Err("missing Clap failure completion".into());
+    }
+    Ok(())
+}
+
+fn read_log_records(logs: &TempDir) -> Result<Vec<serde_json::Value>> {
+    let mut records = Vec::new();
+    for entry in fs::read_dir(logs.path())? {
+        let path = entry?.path();
+        if path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("lsr_"))
+            && path
+                .extension()
+                .is_some_and(|extension| extension == "jsonl")
+        {
+            for line in fs::read_to_string(path)?.lines() {
+                records.push(serde_json::from_str(line)?);
+            }
+        }
+    }
+    Ok(records)
+}

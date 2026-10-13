@@ -1,4 +1,3 @@
-use clap::Parser;
 use itertools::izip;
 use std::io::{BufWriter, Write};
 
@@ -7,21 +6,17 @@ use crate::cli::{Cli, CliError};
 
 use calr::{CalendarDate, Month, format_month, get_today};
 
-fn main() {
-    let mut cli = Cli::parse();
-    cli.setup_default();
-
-    let result = run(&cli);
-
-    match result {
-        Ok(()) => {
-            std::process::exit(exitcode::OK);
+fn main() -> std::process::ExitCode {
+    cli_log::run("calr", |mut cli: Cli| {
+        cli.setup_default();
+        match run(&cli) {
+            Ok(()) => exitcode::OK,
+            Err(e) => {
+                cli_log::diagnostic!("Error: {e}");
+                exitcode::DATAERR
+            }
         }
-        Err(e) => {
-            eprintln!("Error: {e}");
-            std::process::exit(exitcode::DATAERR);
-        }
-    }
+    })
 }
 
 fn run(cli: &Cli) -> Result<(), CliError> {
@@ -55,6 +50,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         }
     }
 
+    writer.flush()?;
     Ok(())
 }
 

@@ -57,8 +57,8 @@ class SelectionTests(unittest.TestCase):
             self.write(f"{directory}/Cargo.toml", f'[package]\nname = "{name}"\n')
             self.write(f"{directory}/src/main.rs", "fn main() {}\n")
             self.write_suite(directory, name, generate=name == "tailr")
-        self.write("utils/cli-tracing/Cargo.toml", '[package]\nname = "cli-tracing"\n')
-        self.write("utils/cli-tracing/src/lib.rs", "// tracing\n")
+        self.write("utils/cli-log/Cargo.toml", '[package]\nname = "cli-log"\n')
+        self.write("utils/cli-log/src/lib.rs", "// logging\n")
         self.write("outside/benches/cli-bench.toml", 'binary = "outside"\n')
         self.git("init", "-b", "main")
         self.git("config", "user.name", "Selector Tests")
@@ -177,7 +177,7 @@ class SelectionTests(unittest.TestCase):
             "README.md",
             "coreutils/tailr/README.md",
             "coreutils/tailr/tests/cli.rs",
-            "utils/cli-tracing/tests/basic.rs",
+            "utils/cli-log/tests/basic.rs",
             "biggie/benches/performance.rs",
             "tools/cli-bench/test_bench.py",
             "tools/cli-bench/test_select_suites.py",
@@ -211,11 +211,15 @@ class SelectionTests(unittest.TestCase):
                 self.commit()
                 self.assertEqual(self.selection()["suites"], ALL_SUITES)
 
-    def test_generator_and_tracing_production_changes_select_generated_suites(self) -> None:
-        for path in ("biggie/src/main.rs", "utils/cli-tracing/src/lib.rs"):
+    def test_biggie_production_changes_select_biggie_and_generated_suites(self) -> None:
+        for path, content in (
+            ("biggie/src/main.rs", "// changed\n"),
+            ("biggie/build.rs", "fn main() {}\n"),
+            ("biggie/Cargo.toml", '[package]\nname = "biggie"\nversion = "0.1.1"\n'),
+        ):
             with self.subTest(path=path):
                 self.git("reset", "--hard", self.base)
-                self.write(path, "// changed\n")
+                self.write(path, content)
                 self.commit()
                 result = self.selection()
                 self.assertEqual(
@@ -224,10 +228,13 @@ class SelectionTests(unittest.TestCase):
                 )
                 self.assertEqual(result["packages"], ["biggie", "tailr"])
 
-    def test_other_shared_utility_production_changes_conservatively_select_all(self) -> None:
+    def test_shared_logger_and_other_utility_production_changes_select_all(self) -> None:
         self.write("utils/shared/Cargo.toml", '[package]\nname = "shared"\n')
         self.base = self.commit()
         for path, content in (
+            ("utils/cli-log/src/lib.rs", "// shared logger\n"),
+            ("utils/cli-log/build.rs", "fn main() {}\n"),
+            ("utils/cli-log/Cargo.toml", '[package]\nname = "cli-log"\nversion = "0.1.1"\n'),
             ("utils/shared/src/lib.rs", "// shared helper\n"),
             ("utils/shared/build.rs", "fn main() {}\n"),
             ("utils/shared/Cargo.toml", '[package]\nname = "shared"\nversion = "0.1.1"\n'),

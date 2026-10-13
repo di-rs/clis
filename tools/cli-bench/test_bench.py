@@ -19,6 +19,7 @@ class Event(TypedDict):
     hyperfine: NotRequired[list[str]]
     argv: NotRequired[list[str]]
     locale: NotRequired[str]
+    logging: NotRequired[list[str]]
 
 
 class BenchTests(unittest.TestCase):
@@ -38,7 +39,8 @@ class BenchTests(unittest.TestCase):
 import pathlib
 pathlib.Path(sys.argv[1]).write_text(sys.argv[2])
 with open(os.environ['TRACE'], 'a') as trace:
-    trace.write(json.dumps({'generate': sys.argv[1:], 'cwd': os.getcwd()}) + '\\n')
+    trace.write(json.dumps({'generate': sys.argv[1:], 'cwd': os.getcwd(),
+        'logging': [os.environ.get('CLIS_LOG_LEVEL'), os.environ.get('CLIS_LOG_STDERR')]}) + '\\n')
 """,
         )
         self.hyperfine = self.executable(
@@ -47,7 +49,8 @@ with open(os.environ['TRACE'], 'a') as trace:
 import pathlib
 args = sys.argv[1:]
 with open(os.environ['TRACE'], 'a') as trace:
-    trace.write(json.dumps({'hyperfine': args, 'cwd': os.getcwd()}) + '\\n')
+    trace.write(json.dumps({'hyperfine': args, 'cwd': os.getcwd(),
+        'logging': [os.environ.get('CLIS_LOG_LEVEL'), os.environ.get('CLIS_LOG_STDERR')]}) + '\\n')
 def option(name):
     return args[args.index(name) + 1]
 commands = args[args.index('--') + 1:]
@@ -131,11 +134,13 @@ sys.exit(1 if mode == 'failure' else 0)
     def test_generation_stdin_literal_arguments_and_old_binary_comparison(self) -> None:
         body = """
 with open(os.environ['TRACE'], 'a') as trace:
-    trace.write(json.dumps({'argv': sys.argv[1:], 'cwd': os.getcwd(), 'locale': os.environ['LC_ALL']}) + '\\n')
+    trace.write(json.dumps({'argv': sys.argv[1:], 'cwd': os.getcwd(), 'locale': os.environ['LC_ALL'],
+        'logging': [os.environ.get('CLIS_LOG_LEVEL'), os.environ.get('CLIS_LOG_STDERR')]}) + '\\n')
 sys.stdout.buffer.write(sys.stdin.buffer.read())
 """
         self.candidate = self.executable("candidate 'quoted'", body)
         self.baseline = self.executable("baseline", body)
+        self.env.update(CLIS_LOG_LEVEL="debug", CLIS_LOG_STDERR="trace")
         self.write_suite(
             'name = "sample"\nargs = ["space \' $HOME *"]\n'
             'reference_args = ["different BSD arguments"]\nstdin = "input file.txt"',
@@ -148,6 +153,7 @@ sys.stdout.buffer.write(sys.stdin.buffer.read())
         calls = [event for event in events if "argv" in event]
         self.assertEqual([event["argv"] for event in calls], [["space ' $HOME *"]] * 2)
         self.assertEqual([event["locale"] for event in calls], ["C", "C"])
+        self.assertTrue(all(event["logging"] == ["off", "off"] for event in events))
         self.assertTrue(all(not Path(event["cwd"]).exists() for event in events))
         engine = next(event["hyperfine"] for event in events if "hyperfine" in event)
         commands = engine[engine.index("--") + 1 :]

@@ -71,12 +71,7 @@ impl RecordOptions {
 pub fn generate_records(mut writer: impl Write, options: &RecordOptions) -> Result<()> {
     options.validate()?;
     let total = options.total_records()?;
-    let span = tracing::debug_span!(
-        "generate_records",
-        requested_records = total,
-        records_written = tracing::field::Empty
-    );
-    let _entered = span.enter();
+    log::debug!(requested_records = total; "generating records");
     let mut remaining = total;
     if total > 0 {
         for _ in 0..options.cycles {
@@ -93,6 +88,6 @@ pub fn generate_records(mut writer: impl Write, options: &RecordOptions) -> Resu
             }
         }
     }
-    span.record("records_written", total);
+    log::debug!(records_written = total; "generation complete");
     Ok(())
 }

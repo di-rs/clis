@@ -131,3 +131,48 @@ fn requires_directory_operand() -> Result<()> {
         .stderr(predicate::str::is_empty().not());
     Ok(())
 }
+
+#[test]
+fn rich_error_is_persisted_with_failing_completion() -> Result<()> {
+    let dir = TempDir::new()?;
+    let logs = TempDir::new()?;
+    dir.child("parent-file").write_str("keep me")?;
+    command(&dir)
+        .env("CLIS_LOG_DIR", logs.path())
+        .env("CLIS_LOG_LEVEL", "info")
+        .env("CLIS_LOG_STDERR", "off")
+        .arg("parent-file/child")
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr(predicate::str::contains("parent-file/child"));
+    let mut records: Vec<serde_json::Value> = Vec::new();
+    for entry in std::fs::read_dir(logs.path())? {
+        let path = entry?.path();
+        if path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("mkdirr_"))
+            && path
+                .extension()
+                .is_some_and(|extension| extension == "jsonl")
+        {
+            for line in std::fs::read_to_string(path)?.lines() {
+                records.push(serde_json::from_str(line)?);
+            }
+        }
+    }
+    if !(records.iter().any(|record| {
+        record["kv"]["event"] == "error"
+            && record["text"]
+                .as_str()
+                .is_some_and(|message| message.contains("parent-file/child"))
+    })) {
+        return Err("missing rich error record".into());
+    }
+    if !(records.iter().any(|record| {
+        record["kv"]["event"] == "command_finished" && record["kv"]["exit_code"] == 1
+    })) {
+        return Err("missing failing completion".into());
+    }
+    Ok(())
+}

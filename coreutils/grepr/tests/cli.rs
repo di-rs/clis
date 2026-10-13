@@ -409,3 +409,38 @@ fn recursive_search_visits_nested_files_without_reading_directories() -> Result<
     assert_eq!(lines, expected);
     Ok(())
 }
+
+#[test]
+fn debug_logging_preserves_match_output_without_storing_input() -> Result<()> {
+    let logs = TempDir::new()?;
+    let secret = "private-match-payload-782541";
+    cargo_bin_cmd!()
+        .env("CLIS_LOG_DIR", logs.path())
+        .env("CLIS_LOG_LEVEL", "debug")
+        .args(["--verbose", "--verbose", "--verbose", "private-match"])
+        .write_stdin(format!("{secret}\n"))
+        .assert()
+        .success()
+        .stdout(format!("{secret}\n"))
+        .stderr(predicate::str::contains(secret).not());
+    let mut persisted = String::new();
+    for entry in fs::read_dir(logs.path())? {
+        let path = entry?.path();
+        if path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("grepr_"))
+            && path
+                .extension()
+                .is_some_and(|extension| extension == "jsonl")
+        {
+            persisted.push_str(&fs::read_to_string(path)?);
+        }
+    }
+    if !(persisted.contains("matched input line")) {
+        return Err("missing match event".into());
+    }
+    if persisted.contains(secret) {
+        return Err("input content leaked into diagnostic file".into());
+    }
+    Ok(())
+}

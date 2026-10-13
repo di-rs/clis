@@ -3,7 +3,7 @@ use std::{
     io::{BufRead, BufReader, BufWriter, IsTerminal, Write, stdin},
 };
 
-use clap::{CommandFactory, Parser};
+use clap::CommandFactory;
 use color_eyre::{
     Result,
     eyre::{Context, bail},
@@ -14,10 +14,9 @@ use cli::Cli;
 
 use parsu::parse_xml;
 
-fn main() -> Result<()> {
+fn main() -> Result<std::process::ExitCode> {
     color_eyre::install()?;
-    let cli = Cli::parse();
-    run(&cli)
+    cli_log::try_run("parsu", |cli| run(&cli))
 }
 
 fn run(cli: &Cli) -> Result<()> {
@@ -32,6 +31,7 @@ fn run(cli: &Cli) -> Result<()> {
         Err(e) => bail!("cannot parse part of the input: {e}"),
     }
 
+    writer.flush()?;
     Ok(())
 }
 

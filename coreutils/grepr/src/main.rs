@@ -1,39 +1,39 @@
-use clap::{CommandFactory, Parser};
+use clap::CommandFactory;
 use grepr::{count_matches, find_files, find_matches};
 use human_panic::setup_panic;
 use log::info;
+use std::io::Write;
 
 mod cli;
 use crate::cli::{Cli, CliError, get_reader, get_writer};
 
-fn main() {
+fn main() -> std::process::ExitCode {
     setup_panic!();
+    let logging = cli_log::init("grepr");
+    let cli = match logging.parse::<Cli>() {
+        Ok(cli) => cli,
+        Err(status) => return status,
+    };
+    logging.set_stderr_level(cli.verbosity.log_level_filter());
     info!("starting up");
-
-    let cli = Cli::parse();
-    env_logger::Builder::new()
-        .filter_level(cli.verbosity.log_level_filter())
-        .init();
 
     let _ = ctrlc::set_handler(move || {
         println!("received Ctrl+C!");
     });
 
-    let result = run(&cli);
-
-    match result {
-        Ok(()) => {
-            std::process::exit(exitcode::OK);
-        }
+    let status = match run(&cli) {
+        Ok(()) => exitcode::OK,
         Err(CliError::Config) => {
+            cli_log::record_error(CliError::Config);
             let _ = Cli::command().print_help();
-            std::process::exit(exitcode::CONFIG);
+            exitcode::CONFIG
         }
         Err(e) => {
-            eprintln!("Error: {e}");
-            std::process::exit(exitcode::DATAERR);
+            cli_log::diagnostic!("Error: {e}");
+            exitcode::DATAERR
         }
-    }
+    };
+    logging.finish(status)
 }
 
 fn run(cli: &Cli) -> Result<(), CliError> {
@@ -53,10 +53,11 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                     } else {
                         find_matches(reader, &mut writer, &pattern, cli.invert)?;
                     }
+                    writer.flush()?;
                 }
-                Err(e) => eprintln!("Failed to open {}: {e}", entry.display()),
+                Err(e) => cli_log::diagnostic!("Failed to open {}: {e}", entry.display()),
             },
-            Err(e) => eprintln!("{e}"),
+            Err(e) => cli_log::diagnostic!("{e}"),
         }
     }
     Ok(())

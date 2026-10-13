@@ -114,17 +114,9 @@ def affected_suites(suites: list[Suite], base: str, head: str) -> list[Suite]:
         if path in GLOBAL_PATHS or path.startswith(".cargo/"):
             return suites
         parts = path.split("/")
-        if (
-            len(parts) > 2
-            and parts[0] == "utils"
-            and parts[1] != "cli-tracing"
-            and production_change(path, f"utils/{parts[1]}")
-        ):
+        if len(parts) > 2 and parts[0] == "utils" and production_change(path, f"utils/{parts[1]}"):
             return suites
-    generator_changed = any(
-        production_change(path, "biggie") or production_change(path, "utils/cli-tracing")
-        for path in paths
-    )
+    generator_changed = any(production_change(path, "biggie") for path in paths)
     return [
         suite
         for suite in suites

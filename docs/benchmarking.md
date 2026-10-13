@@ -111,7 +111,8 @@ the suite's `check` must assert the behavior that matters.
 Arguments are quoted for direct execution with `--shell=none`; shell expansion
 and pipelines do not occur in `args`. Output is drained with `--output=pipe` so
 programs cannot skip work merely because stdout is `/dev/null`. The default
-environment sets `LC_ALL=C`, `TZ=UTC` and `CLIS_LOG_LEVEL=off`; an optional suite
+environment sets `LC_ALL=C`, `TZ=UTC`, `CLIS_LOG_LEVEL=off` and
+`CLIS_LOG_STDERR=off`; an optional suite
 `env` table can override these values.
 
 ## Verification and scope
@@ -130,8 +131,8 @@ An empty selection skips both benchmark jobs.
 | --- | --- |
 | CLI source, manifest, or build script | That package's suites. |
 | Suite TOML | That suite. |
-| Biggie or its shared tracing implementation | Biggie and suites using generated input. |
-| Other shared Rust implementations | All suites, conservatively. |
+| Biggie implementation | Biggie and suites using generated input. |
+| Shared Rust implementations, including CLI logging | All suites, conservatively. |
 | Root Cargo manifest/lockfile, Rust toolchain, or `.cargo/` configuration | All suites, conservatively. |
 | Benchmark runner, selector, benchmark workflow, or Python version pin | All suites. |
 | Documentation, correctness tests, or Python development-tool configuration | No native benchmarks. Ordinary CI checks still run. |

@@ -38,12 +38,12 @@ pub struct Cli {
     #[command(flatten)]
     pub text: text::TextArgs,
     #[command(flatten)]
-    pub logging: cli_tracing::GlobalLogArgs,
+    pub logging: cli_log::GlobalLogArgs,
 }
 /// Validated command and resolved diagnostics; parsing details stay at the edge.
 pub struct ParsedCli {
     pub command: Command,
-    pub logging: cli_tracing::LogArgs,
+    pub logging: cli_log::LogArgs,
 }
 
 #[derive(Subcommand, Debug)]
@@ -60,8 +60,66 @@ pub enum Command {
     Pair(pair::PairArgs),
 }
 impl Cli {
-    pub fn parse_validated() -> ParsedCli {
-        Self::try_parse_validated_from(std::env::args_os()).unwrap_or_else(|error| error.exit())
+    /// Recover global logging flags even when another argument fails validation.
+    pub fn error_log_level() -> Option<log::LevelFilter> {
+        let mut command = Self::command();
+        command.build();
+        let mut args = std::env::args_os().skip(1).peekable();
+        let mut logging_args = Vec::new();
+        while let Some(arg) = args.next() {
+            let Some(arg) = arg.to_str() else {
+                continue;
+            };
+            if arg == "--" {
+                break;
+            }
+            if let Some(value) = arg.strip_prefix("--log-level=") {
+                logging_args.extend([
+                    std::ffi::OsString::from("--log-level"),
+                    std::ffi::OsString::from(value),
+                ]);
+                continue;
+            }
+            let value = if arg == "--log-level" {
+                args.next_if(|value| !value.to_string_lossy().starts_with('-'))
+            } else {
+                let Some(shorts) = arg.strip_prefix('-').filter(|arg| !arg.starts_with('-')) else {
+                    continue;
+                };
+                let mut shorts = shorts.chars();
+                let mut value = None;
+                while let Some(short) = shorts.next() {
+                    if short == 'L' {
+                        let attached = shorts.as_str().strip_prefix('=').unwrap_or(shorts.as_str());
+                        value = if attached.is_empty() {
+                            args.next_if(|value| !value.to_string_lossy().starts_with('-'))
+                        } else {
+                            Some(std::ffi::OsString::from(attached))
+                        };
+                        break;
+                    }
+                    if !command.get_arguments().any(|arg| {
+                        arg.get_short() == Some(short) && !arg.get_action().takes_values()
+                    }) {
+                        break;
+                    }
+                }
+                value
+            };
+            if let Some(value) = value {
+                logging_args.extend([std::ffi::OsString::from("--log-level"), value]);
+            }
+        }
+        ErrorLogging::try_parse_from(logging_args)
+            .ok()?
+            .logging
+            .resolve()
+            .ok()
+            .map(|logging| logging.level())
+    }
+
+    pub fn parse_validated() -> Result<ParsedCli, clap::Error> {
+        Self::try_parse_validated_from(std::env::args_os())
     }
 
     fn try_parse_validated_from(
@@ -103,6 +161,13 @@ impl Cli {
             logging,
         })
     }
+}
+
+#[derive(Parser)]
+#[command(no_binary_name = true, args_override_self = true)]
+struct ErrorLogging {
+    #[command(flatten)]
+    logging: cli_log::GlobalLogArgs,
 }
 pub fn parse_range(value: &str) -> Result<RangeInclusive<u32>, String> {
     let (start, end) = value.split_once("..=").unwrap_or((value, value));

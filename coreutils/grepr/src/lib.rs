@@ -1,5 +1,3 @@
-#[cfg(not(test))]
-use log::warn;
 use regex::Regex;
 use std::{
     io::{BufRead, Write},
@@ -112,8 +110,7 @@ where
         let matches_pattern = pattern.is_match(&line);
         if matches_pattern ^ invert {
             cb(&line)?;
-            #[cfg(not(test))]
-            warn!("found line with pattern: {pattern} - {line}");
+            log::debug!("matched input line");
         }
 
         line.clear();
