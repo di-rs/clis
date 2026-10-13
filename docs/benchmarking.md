@@ -3,16 +3,17 @@
 Each finite CLI owns TOML suites under its `benches/` directory.
 [Biggie](../biggie/README.md) generates inputs once; [hyperfine 2](https://github.com/sharkdp/hyperfine/releases/tag/v2.0.0)
 measures the executables directly, including warmups, timing and peak RSS.
-The [runner](../tools/cli-bench/bench.py) requires Python 3.11+ and no Python packages.
-On macOS, the system Python may be too old; use an installed Python 3.11+ instead.
+The [runner](../tools/cli-bench/bench.py) requires Python 3.11+ and uses only the
+standard library. The root [uv workspace](testing.md#python-tooling) manages its
+interpreter and development checks.
 
 ## Run a suite
 
-From the workspace root, with `hyperfine` on PATH:
+From the workspace root, with `uv` and `hyperfine` on PATH:
 
 ```sh
 cargo build --locked --release --workspace --bins
-python3 tools/cli-bench/bench.py coreutils/tailr/benches/cli-bench.toml
+uv run --locked python tools/cli-bench/bench.py coreutils/tailr/benches/cli-bench.toml
 ```
 
 This compares `target/release/tailr` with the suite's system `tail`.
@@ -21,8 +22,8 @@ or `--reference /path/to/gtail` to select another implementation. System tools
 on Linux are usually GNU; a system comparison is not a general parity claim.
 
 ```sh
-python3 tools/cli-bench/bench.py coreutils/tailr/benches/cli-bench.toml --list
-python3 tools/cli-bench/bench.py coreutils/tailr/benches/cli-bench.toml \
+uv run --locked python tools/cli-bench/bench.py coreutils/tailr/benches/cli-bench.toml --list
+uv run --locked python tools/cli-bench/bench.py coreutils/tailr/benches/cli-bench.toml \
   --case file-lines --warmup 1 --runs 3 --output /tmp/tail-smoke
 ```
 
@@ -46,7 +47,7 @@ do not already exist. Replace `HEAD~1` with the desired tag or commit:
 git worktree add --detach /tmp/clis-before HEAD~1
 cargo build --locked --release --manifest-path /tmp/clis-before/Cargo.toml \
   --target-dir /tmp/clis-before-target -p tailr
-python3 tools/cli-bench/bench.py coreutils/tailr/benches/cli-bench.toml \
+uv run --locked python tools/cli-bench/bench.py coreutils/tailr/benches/cli-bench.toml \
   --baseline /tmp/clis-before-target/release/tailr
 git worktree remove /tmp/clis-before
 ```
@@ -114,7 +115,7 @@ environment sets `LC_ALL=C`, `TZ=UTC` and `CLIS_LOG_LEVEL=off`; an optional suit
 ## Verification and scope
 
 ```sh
-python3 -m unittest discover -s tools/cli-bench -p 'test_*.py' -v
+uv run --locked python -m unittest discover -s tools/cli-bench -p 'test_*.py' -v
 ```
 
 The [workflow](../.github/workflows/cli-bench.yml) checks runner changes and runs

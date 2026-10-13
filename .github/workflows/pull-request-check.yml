@@ -46,6 +46,34 @@ jobs:
       - run: cargo doc --locked --workspace --all-features --no-deps
       - run: git diff --exit-code
 
+  python:
+    name: python (${{ matrix.python }})
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.14']
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.13.0'
+          python-version: ${{ matrix.python }}
+          enable-cache: false
+      - uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
+        with:
+          tool: prek@0.5.5
+          fallback: none
+      - run: uv sync --locked --all-packages
+      - run: prek run ruff --all-files --show-diff-on-failure
+      - run: prek run ruff-format --all-files --show-diff-on-failure
+      - run: prek run mypy --all-files --show-diff-on-failure
+      - run: prek run python-tests --all-files --show-diff-on-failure
+      - run: git diff --exit-code
+
   tests:
     name: tests (${{ matrix.platform }})
     strategy:
