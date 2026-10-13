@@ -118,7 +118,7 @@ environment sets `LC_ALL=C`, `TZ=UTC`, `CLIS_LOG_LEVEL=off` and
 ## Verification and scope
 
 ```sh
-uv run --locked python -m unittest discover -s tools/cli-bench -p 'test_*.py' -v
+uv run --locked pytest
 ```
 
 The [workflow](../.github/workflows/cli-bench.yml) runs for pull requests targeting

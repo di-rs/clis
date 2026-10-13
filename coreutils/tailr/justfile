@@ -1,5 +1,0 @@
-bench:
-    cd ../.. && uv run --locked python tools/cli-bench/bench.py coreutils/tailr/benches/cli-bench.toml
-
-outs:
-    ./mk-outs.nu

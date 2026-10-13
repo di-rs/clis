@@ -77,7 +77,7 @@ uv sync --locked --all-packages
 uv run --locked ruff check .
 uv run --locked ruff format --check .
 uv run --locked mypy
-uv run --locked python -m unittest discover -s tools/cli-bench -p 'test_*.py' -v
+uv run --locked pytest
 ```
 
 Ruff checks imports and common errors; mypy checks all Python files under `tools/`
@@ -86,12 +86,16 @@ The `ruff`, `ruff-format`, `mypy`, and `python-tests` prek hooks run the same
 commands locally and in CI. They require uv on PATH; uv manages the interpreter
 and locked development dependencies.
 
+Keep each tool's Python tests in its `tests/` directory. Use pytest functions,
+plain assertions, and parametrized cases; put reusable fixtures in `conftest.py`.
+Prefer pytest's temporary directories and monkeypatching to manual setup and cleanup.
+
 Each Python tool gets a `pyproject.toml` under `tools/` and an entry in the root
 `tool.uv.workspace.members` list. The first member is
 [cli-bench](../tools/cli-bench/pyproject.toml), a script project with no runtime
 dependencies. Keep shared lint and type settings at the root. After changing
 dependencies or workspace members, run `uv lock` and commit `uv.lock`; add new
-tools' tests to the shared test hook as needed.
+tools' test directories to the root pytest `testpaths` list as needed.
 
 ## Documentation checks
 

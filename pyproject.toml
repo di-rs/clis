@@ -5,7 +5,11 @@ requires-python = ">=3.11"
 dependencies = []
 
 [dependency-groups]
-dev = ["mypy", "ruff"]
+dev = [
+    "mypy",
+    "pytest>=9.1.1",
+    "ruff",
+]
 
 [tool.uv]
 package = false
@@ -25,3 +29,8 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
 python_version = "3.11"
 files = ["tools"]
 strict = true
+
+[tool.pytest]
+testpaths = ["tools/cli-bench/tests"]
+pythonpath = ["tools/cli-bench"]
+addopts = ["--strict-config", "--strict-markers"]

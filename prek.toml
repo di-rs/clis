@@ -66,7 +66,7 @@ hooks = [
     id = "python-tests",
     name = "Python regression tests",
     language = "system",
-    entry = "uv run --locked python -m unittest discover -s tools/cli-bench -p 'test_*.py' -v",
+    entry = "uv run --locked pytest",
     files = '(\.pyi?$|(^|/)pyproject\.toml$|^(uv\.lock|\.python-version|prek\.toml)$)',
     pass_filenames = false,
   },

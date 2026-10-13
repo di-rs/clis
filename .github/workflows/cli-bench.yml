@@ -33,9 +33,9 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          uv run --locked python tools/cli-bench/select_suites.py \
+          uv run --locked --no-dev python tools/cli-bench/select_suites.py \
             --base "$BASE_SHA" --head "$HEAD_SHA" --event "$GITHUB_EVENT_PATH" > selection.json
-          uv run --locked python - <<'PY'
+          uv run --locked --no-dev python - <<'PY'
           import json
           import os
           from pathlib import Path
@@ -73,7 +73,6 @@ jobs:
         with:
           version: '0.13.0'
           enable-cache: false
-      - run: uv sync --locked --all-packages
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: hyperfine@2.0.0
@@ -83,7 +82,7 @@ jobs:
         env:
           PACKAGES: ${{ needs.select.outputs.packages }}
         run: |
-          uv run --locked python - <<'PY'
+          uv run --locked --no-dev python - <<'PY'
           import json
           import os
           import subprocess
@@ -103,7 +102,7 @@ jobs:
           RUNS: ${{ needs.select.outputs.runs }}
           WARMUP: ${{ needs.select.outputs.warmup }}
         run: |
-          uv run --locked python - <<'PY'
+          uv run --locked --no-dev python - <<'PY'
           import json
           import os
           import subprocess
