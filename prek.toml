@@ -8,7 +8,6 @@ hooks = [
     {
       id = "check-added-large-files",
       args = ["--enforce-all"],
-      exclude = '^coreutils/tailr/benches/data/1M\.txt$',
     },
 ]
 
