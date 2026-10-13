@@ -6,7 +6,7 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     commit-message:
-      prefix: build
+      prefix: ':arrow_up: deps'
       include: scope
     groups:
       security-updates:
@@ -21,5 +21,5 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     commit-message:
-      prefix: ci
+      prefix: ':arrow_up: deps'
       include: scope
