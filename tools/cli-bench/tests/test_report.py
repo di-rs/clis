@@ -15,11 +15,92 @@ def test_renders_real_means_ratio_smoke_and_parallel_runner_timing(github: FakeG
     assert "https://github.com/di-rs/clis/actions/runs/500" in result
     assert "tailr" in result
     assert "2.000 ms | 4.000 ms | 0.50×" in result
-    assert "Smoke: 1 measured run" in result
+    assert "**Smoke check:** 1 measured run" in result
+    assert "do not establish statistically significant performance changes" in result
     assert "4m 20s elapsed" in result
     assert "7m 10s summed runner time" in result
     assert "3m 00s | 1m 00s | 30s" in result
     assert "@everyone" not in result
+
+
+def test_groups_both_platforms_by_cli_and_sorts_cases(github: FakeGitHub) -> None:
+    suites = [
+        report.Suite(
+            binary,
+            "complete",
+            1,
+            [
+                report.Measurement(system, binary, case, 0.002, 0.004, "reference")
+                for case in ("z-last", "a-first")
+                for system in ("macos-15", "ubuntu-24.04")
+            ],
+        )
+        for binary in ("wcr", "tailr")
+    ]
+    result = report.render(REPO, github.run, github.jobs, suites, {}, [])
+    sections = result.split("<details>")[1:]
+    assert len(sections) == 2
+    for section, binary in zip(sections, ("tailr", "wcr"), strict=True):
+        assert f"<strong>{binary}</strong> · 2 cases · Linux, macOS" in section
+        assert "| Case | Platform | This PR | System | Relative time |" in section
+        assert "| `a-first` | Linux | 2.000 ms | 4.000 ms | 0.50× |" in section
+        assert section.index("| `a-first` | Linux") < section.index("| `a-first` | macOS")
+        assert section.index("| `a-first` | macOS") < section.index("| `z-last` | Linux")
+    reversed_suites = [
+        report.Suite(suite.binary, suite.status, suite.runs, list(reversed(suite.rows)))
+        for suite in reversed(suites)
+    ]
+    assert report.render(REPO, github.run, github.jobs, reversed_suites, {}, []) == result
+    assert "| Linux | 3m 00s | 1m 00s | 30s | Passed |" in result
+    assert "| macOS | 4m 00s | 1m 00s | 30s | Passed |" in result
+
+
+@pytest.mark.parametrize(
+    ("kind", "comparison", "header"),
+    [
+        ("reference", 0.004, "| Case | Platform | This PR | System | Relative time |"),
+        ("baseline", 0.004, "| Case | Platform | This PR | Previous version | Relative time |"),
+        ("candidate", None, "| Case | Platform | This PR |"),
+    ],
+)
+def test_labels_comparison_source_and_omits_empty_columns(
+    github: FakeGitHub, kind: str, comparison: float | None, header: str
+) -> None:
+    rows = [report.Measurement("ubuntu-24.04", "tailr", "sample", 0.002, comparison, kind)]
+    suites = [report.Suite("tailr", "complete", 1, rows)]
+    result = report.render(REPO, github.run, github.jobs, suites, {}, [])
+    section = result.split("<details>")[1]
+    assert header + "\n" in section
+    assert "<strong>tailr</strong> · 1 case · Linux" in section
+    if comparison is None:
+        assert "Relative time" not in section
+        assert "| `sample` | Linux | 2.000 ms |\n" in section
+        assert "—" not in section
+    else:
+        assert "2.000 ms | 4.000 ms | 0.50×" in section
+
+
+def test_grouped_results_keep_global_200_measurement_limit(github: FakeGitHub) -> None:
+    suites = [
+        report.Suite(
+            binary,
+            "complete",
+            1,
+            [
+                report.Measurement(
+                    "ubuntu-24.04", binary, f"case-{case:03}", 0.002, None, "candidate"
+                )
+                for case in range(102)
+            ],
+        )
+        for binary in ("tailr", "wcr")
+    ]
+    result = report.render(REPO, github.run, github.jobs, suites, {}, [])
+    assert result.count("| `case-") == 200
+    assert result.count("<details>") == result.count("</details>") == 2
+    assert "Showing the first 200 of 204 measurements" in result
+    assert "full results are in the run artifacts" in result
+    assert "| `case-098`" not in result.split("<strong>wcr</strong>")[1]
 
 
 @pytest.mark.parametrize(
@@ -95,8 +176,8 @@ def test_20_run_request_is_distinct_from_smoke(github: FakeGitHub) -> None:
     )
     result = report.generate(github, REPO, 500)
     assert result is not None
-    assert "Requested: 20 measured runs" in result
-    assert "Smoke:" not in result
+    assert "**Requested benchmark:** 20 measured runs" in result
+    assert "Smoke check:" not in result
 
 
 @pytest.mark.parametrize(
@@ -139,7 +220,7 @@ def test_build_failure_still_reports_selection_and_timing(github: FakeGitHub) ->
     }
     result = report.generate(github, REPO, 500)
     assert result is not None
-    assert "failure" in result
+    assert "**Failed**" in result
     assert "tailr" in result
     assert "No completed benchmark measurements" in result
 

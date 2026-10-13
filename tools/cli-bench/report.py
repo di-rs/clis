@@ -13,6 +13,7 @@ import tomllib
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime
+from itertools import groupby
 from pathlib import Path, PurePosixPath
 from typing import cast
 
@@ -20,6 +21,7 @@ MAX_JSON = 2 * 1024 * 1024
 MAX_ZIP = 8 * 1024 * 1024
 MAX_MEMBER = 1024 * 1024
 SYSTEMS = ("ubuntu-24.04", "macos-15")
+PLATFORMS = {"ubuntu-24.04": "Linux", "macos-15": "macOS"}
 WORKFLOW = ".github/workflows/cli-bench.yml"
 MARKER = re.compile(r"<!-- cli-bench-report number=(\d+) run=(\d+) attempt=(\d+) -->")
 
@@ -204,6 +206,61 @@ def clock(value: float) -> str:
     return f"{minutes}m {rest:02}s" if minutes else f"{rest}s"
 
 
+def result_label(value: object) -> str:
+    status = identifier(value)
+    return {"success": "Passed", "failure": "Failed"}.get(status, status.replace("_", " ").title())
+
+
+def measurement_tables(rows: list[Measurement]) -> list[str]:
+    ordered = sorted(rows, key=lambda row: (row.binary, row.case, SYSTEMS.index(row.system)))
+    lines = ["#### Measurements", "", "Mean wall-clock time; lower is better."]
+    if any(row.comparison is not None for row in rows):
+        lines.append("Relative time is this PR ÷ comparison; below 1× means less wall time.")
+    for binary, group in groupby(ordered[:200], key=lambda row: row.binary):
+        cases = list(group)
+        count = len({row.case for row in cases})
+        platforms = ", ".join(
+            PLATFORMS[system] for system in SYSTEMS if any(row.system == system for row in cases)
+        )
+        kinds = {row.kind for row in cases if row.comparison is not None}
+        comparison_label = (
+            "System"
+            if kinds == {"reference"}
+            else "Previous version"
+            if kinds == {"baseline"}
+            else "Comparison"
+        )
+        lines += [
+            "",
+            "<details>",
+            f"<summary><strong>{binary}</strong> · {count} case{'s' if count != 1 else ''} · {platforms}</summary>",
+            "",
+            "| Case | Platform | This PR |"
+            + (f" {comparison_label} | Relative time |" if kinds else ""),
+            "| --- | --- | ---: |" + (" ---: | ---: |" if kinds else ""),
+        ]
+        for row in cases:
+            line = f"| `{row.case}` | {PLATFORMS[row.system]} | {row.candidate * 1000:.3f} ms |"
+            if kinds:
+                comparison = (
+                    f"{row.comparison * 1000:.3f} ms" if row.comparison is not None else "—"
+                )
+                if row.comparison is not None and len(kinds) > 1:
+                    comparison += " (system)" if row.kind == "reference" else " (previous version)"
+                ratio = (
+                    f"{row.candidate / row.comparison:.2f}×" if row.comparison is not None else "—"
+                )
+                line += f" {comparison} | {ratio} |"
+            lines.append(line)
+        lines += ["", "</details>"]
+    if len(rows) > 200:
+        lines += [
+            "",
+            f"Showing the first 200 of {len(rows)} measurements; full results are in the run artifacts.",
+        ]
+    return lines
+
+
 def render(
     repo: str,
     run: dict[str, object],
@@ -220,30 +277,35 @@ def render(
     if "runs" in selection:
         counts.add(integer(selection["runs"], 1000))
     mode = (
-        "Smoke: 1 measured run per command."
+        "**Smoke check:** 1 measured run per command. These samples check execution; "
+        "they do not establish statistically significant performance changes."
         if counts == {1}
-        else "Requested: 20 measured runs per command."
+        else "**Requested benchmark:** 20 measured runs per command. "
+        "Relative times are descriptive; no statistical regression test was performed."
         if counts == {20}
         else "Measurement count unavailable or inconsistent."
     )
-    status = identifier(run["conclusion"])
+    status = result_label(run["conclusion"])
     lines = [
         f"<!-- cli-bench-report number={number} run={run_id} attempt={attempt} -->",
-        "### CLI benchmark results",
+        "### CLI benchmarks",
         "",
         f"**{status}** · `{sha[:12]}` · "
         f"[Run {number}, attempt {attempt}](https://github.com/{repo}/actions/runs/{run_id}/attempts/{attempt})",
         "",
-        "Selected CLIs: " + (", ".join(f"`{name}`" for name in binaries) or "unavailable") + ".",
-        f"{mode} Ratios are descriptive, not a statistical regression test.",
+        "**Selected CLIs:** " + (", ".join(f"`{name}`" for name in binaries) or "unavailable"),
         "",
-        "| OS | Job | Build | Suites | Status |",
+        f"> {mode}",
+        "",
+        "#### CI time",
+        "",
+        "| Platform | Total job | Build | Benchmarks | Result |",
         "| --- | ---: | ---: | ---: | --- |",
     ]
     for system in SYSTEMS:
         job = next((item for item in jobs if item.get("name") == f"suites ({system})"), None)
         if job is None:
-            lines.append(f"| {system} | — | — | — | not run |")
+            lines.append(f"| {PLATFORMS[system]} | — | — | — | Not run |")
             continue
         steps = [table(value) for value in array(job.get("steps", []))]
         times = [
@@ -251,37 +313,24 @@ def render(
             for name in ("Build selected CLIs", "Run suites")
         ]
         lines.append(
-            f"| {system} | {clock(duration(job))} | {times[0]} | {times[1]} | "
-            f"{identifier(job.get('conclusion'))} |"
+            f"| {PLATFORMS[system]} | {clock(duration(job))} | {times[0]} | {times[1]} | "
+            f"{result_label(job.get('conclusion'))} |"
         )
     starts = [value for job in jobs if (value := seconds(job.get("started_at"))) is not None]
     ends = [value for job in jobs if (value := seconds(job.get("completed_at"))) is not None]
     elapsed = max(ends) - min(starts) if starts and ends else 0
     lines += [
         "",
-        f"**{clock(elapsed)} elapsed** from first job start to last finish; "
-        f"**{clock(sum(duration(job) for job in jobs))} summed runner time** "
-        "(parallel jobs plus selection, excluding queue time).",
+        f"**{clock(elapsed)} elapsed** · "
+        f"**{clock(sum(duration(job) for job in jobs))} summed runner time**",
+        "",
+        "Elapsed spans the first job start to the last finish. Runner time adds parallel jobs "
+        "and selection, excluding queue time. Platforms: Ubuntu 24.04 and macOS 15.",
         "",
     ]
     rows = [row for suite in suites for row in suite.rows]
     if rows:
-        lines += [
-            "<details><summary>Native wall-clock means</summary>",
-            "",
-            "| OS | CLI / case | Candidate | Reference / baseline | Candidate ÷ comparison |",
-            "| --- | --- | ---: | ---: | ---: |",
-        ]
-        for row in rows[:200]:
-            comparison = f"{row.comparison * 1000:.3f} ms" if row.comparison else "—"
-            ratio = f"{row.candidate / row.comparison:.2f}×" if row.comparison else "—"
-            lines.append(
-                f"| {row.system} | {row.binary} / {row.case} | {row.candidate * 1000:.3f} ms | "
-                f"{comparison} | {ratio} |"
-            )
-        lines += ["", "Below 1× means the candidate took less wall time.", "", "</details>"]
-        if len(rows) > 200:
-            lines += ["", "Table limited to 200 cases; full results are in the run artifacts."]
+        lines += measurement_tables(rows)
     else:
         lines.append("No completed benchmark measurements were available.")
     if any(suite.status != "complete" for suite in suites):

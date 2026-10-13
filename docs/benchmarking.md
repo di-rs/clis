@@ -159,7 +159,7 @@ subject to GitHub's normal workflow approval settings.
 
 Reports are saved as workflow artifacts. The
 [reporting workflow](../.github/workflows/cli-bench-report.yml) updates one PR
-comment with the tested revision, selected CLIs, measurements, build and suite
+comment with the tested revision, a results table for each CLI, build and suite
 duration per OS, and total runner time. It runs trusted default-branch code with
 permission to post, while benchmark jobs have read-only permissions. Artifacts
 are parsed as data; PR code is not executed by the reporter. Stale revisions do
