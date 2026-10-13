@@ -7,6 +7,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import textwrap
 import zipfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -18,6 +19,24 @@ import report
 from select_suites import Selection
 
 TOOLS = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture
+def suite_workflow(tmp_path: Path) -> Path:
+    workflow = (TOOLS.parents[1] / ".github/workflows/cli-bench.yml").read_text()
+    step = workflow.split("      - name: Run suites\n", 1)[1]
+    code = step.split("<<'PY'\n", 1)[1].split("          PY\n", 1)[0]
+    script = tmp_path / "run-suites.py"
+    script.write_text(textwrap.dedent(code))
+    runner = tmp_path / "tools/cli-bench/bench.py"
+    runner.parent.mkdir(parents=True)
+    runner.write_text(
+        "import json, os, sys\n"
+        "with open('invocations.jsonl', 'a') as trace:\n"
+        "    trace.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        "sys.exit(1 if sys.argv[1] in json.loads(os.environ['FAILED_SUITES']) else 0)\n"
+    )
+    return script
 
 
 @dataclass

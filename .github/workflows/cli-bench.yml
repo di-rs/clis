@@ -111,12 +111,17 @@ jobs:
           suites = json.loads(os.environ["SUITES"])
           if not suites:
               raise SystemExit("No benchmark suites selected")
+          failed = []
           for suite in suites:
-              subprocess.run([
+              result = subprocess.run([
                   sys.executable, "tools/cli-bench/bench.py", suite,
                   "--warmup", os.environ["WARMUP"], "--runs", os.environ["RUNS"],
                   "--output", "target/benchmarks/" + suite.replace("/", "-"),
-              ], check=True)
+              ])
+              if result.returncode:
+                  failed.append(suite)
+          if failed:
+              raise SystemExit("Failed suites: " + ", ".join(failed))
           PY
       - name: Benchmark reports
         if: ${{ !cancelled() }}
