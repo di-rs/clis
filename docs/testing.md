@@ -64,6 +64,39 @@ fixtures, configuration, and environment remain unchanged. Report commands,
 outcomes, and unverified platforms or missing tools; do not weaken checks to
 obtain a pass.
 
+## Python tooling
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.13 or newer
+and run Python tooling from the repository root. The uv workspace shares
+[configuration](../pyproject.toml) and a committed [lockfile](../uv.lock).
+[.python-version](../.python-version) selects Python 3.15 locally and in CI.
+The workspace, Ruff, and mypy all target Python 3.15 or newer.
+
+```sh
+uv sync --locked --all-packages
+uv run --locked ruff check .
+uv run --locked ruff format --check .
+uv run --locked mypy
+uv run --locked pytest
+```
+
+Ruff checks imports and common errors; mypy checks all Python files under `tools/`
+in strict mode. To apply formatting, run `uv run --locked ruff format .`.
+The `ruff`, `ruff-format`, `mypy`, and `python-tests` prek hooks run the same
+commands locally and in CI. They require uv on PATH; uv manages the interpreter
+and locked development dependencies.
+
+Keep each tool's Python tests in its `tests/` directory. Use pytest functions,
+plain assertions, and parametrized cases; put reusable fixtures in `conftest.py`.
+Prefer pytest's temporary directories and monkeypatching to manual setup and cleanup.
+
+Each Python tool gets a `pyproject.toml` under `tools/` and an entry in the root
+`tool.uv.workspace.members` list. The first member is
+[cli-bench](../tools/cli-bench/pyproject.toml), a script project with no runtime
+dependencies. Keep shared lint and type settings at the root. After changing
+dependencies or workspace members, run `uv lock` and commit `uv.lock`; add new
+tools' test directories to the root pytest `testpaths` list as needed.
+
 ## Documentation checks
 
 For documentation-only changes, check local links, anchors, spelling, and whitespace:

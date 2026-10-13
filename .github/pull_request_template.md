@@ -22,3 +22,8 @@ A short sentence is enough. -->
 failures or unverified behavior. For performance claims or hot-path changes, link
 benchmark evidence or state why it is unavailable. Omit logs, test counts, and
 repeated runs. This reports completed verification; it does not request new checks. -->
+
+<!-- Keep auto for affected-suite smoke checks. To request full measurements for
+specific CLIs, replace auto with comma-separated names, for example tailr,wcr.
+Use all explicitly to benchmark every CLI with a suite. -->
+Benchmark-CLIs: auto

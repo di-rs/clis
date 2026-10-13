@@ -1,0 +1,7 @@
+binary = "false"
+reference = "false"
+
+[[cases]]
+name = "failure"
+args = []
+expected_exit = 1

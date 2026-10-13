@@ -1,0 +1,14 @@
+binary = "catr"
+reference = "cat"
+generate = [
+  ["text", "--seed", "42", "--lines", "100000", "input.txt"],
+  ["records", "--record", "alpha", "--record", "", "--record", "beta", "--repeat", "4", "--cycles", "25000", "blank-lines.txt"],
+]
+
+[[cases]]
+name = "copy-text"
+args = ["input.txt"]
+
+[[cases]]
+name = "number-and-squeeze"
+args = ["-b", "-s", "blank-lines.txt"]

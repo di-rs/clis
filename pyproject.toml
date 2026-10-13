@@ -1,0 +1,36 @@
+[project]
+name = "clis-tools"
+version = "0.1.0"
+requires-python = ">=3.15"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "mypy",
+    "pytest>=9.1.1",
+    "ruff",
+]
+
+[tool.uv]
+package = false
+required-version = ">=0.13.0"
+
+[tool.uv.workspace]
+members = ["tools/cli-bench"]
+
+[tool.ruff]
+target-version = "py315"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.15"
+files = ["tools"]
+strict = true
+
+[tool.pytest]
+testpaths = ["tools/cli-bench/tests"]
+pythonpath = ["tools/cli-bench"]
+addopts = ["--strict-config", "--strict-markers"]

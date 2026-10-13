@@ -2,17 +2,18 @@
 
 A Rust workspace of command-line utilities and reusable libraries. Each project's
 README describes its usage, API, and current limitations. See [Testing](docs/testing.md)
-for test commands and regression guidance.
+for test commands and regression guidance, and [Benchmarking](docs/benchmarking.md)
+for per-CLI TOML suites using Biggie and hyperfine.
 
 ## Apps
 
 | Project | Purpose |
 | --- | --- |
-| [bool](coreutils/bool/README.md) | `true` and `false` exit-status commands |
 | [catr](coreutils/catr/README.md) | Concatenate and number text lines |
 | [commr](coreutils/commr/README.md) | Compare two sorted inputs |
 | [cutr](coreutils/cutr/README.md) | Select bytes, characters, or fields |
 | [echor](coreutils/echor/README.md) | Print arguments |
+| [false](coreutils/false/README.md) | Return failure without output |
 | [findr](coreutils/findr/README.md) | Find paths by name and file type |
 | [grepr](coreutils/grepr/README.md) | Search text with regular expressions |
 | [headr](coreutils/headr/README.md) | Print the start of text inputs |
@@ -21,6 +22,7 @@ for test commands and regression guidance.
 | [pwdr](coreutils/pwdr/README.md) | Print the working directory |
 | [tailr](coreutils/tailr/README.md) | Print the end of files |
 | [touchr](coreutils/touchr/README.md) | Create files or update timestamps |
+| [true](coreutils/true/README.md) | Return success without output |
 | [uniqr](coreutils/uniqr/README.md) | Filter or count adjacent repeated lines |
 | [wcr](coreutils/wcr/README.md) | Count lines, words, bytes, and characters |
 | [calr](calr/README.md) | Print month or year calendars |

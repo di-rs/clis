@@ -31,4 +31,7 @@ at the beginning, while unsigned or negative zero produces no output. Repeated
 There is no follow (`-f`) mode or size suffix syntax. File-open errors do not by
 themselves make the command fail.
 
+Benchmark suite: [benches/cli-bench.toml](benches/cli-bench.toml).
+See [Benchmarking](../../docs/benchmarking.md) for system and previous-version comparisons.
+
 [Workspace README](../../README.md)

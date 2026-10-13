@@ -1,0 +1,15 @@
+# Unquoted ASCII fields keep CSV-aware cutr and the system cut equivalent.
+binary = "cutr"
+reference = "cut"
+generate = [
+  ["fields", "--seed", "42", "--lines", "100000", "--fields", "8", "--delimiter", ",", "fields.txt"],
+  ["text", "--seed", "42", "--lines", "100000", "--words-per-line", "1", "--word-length", "128", "text.txt"],
+]
+
+[[cases]]
+name = "select-fields"
+args = ["-d", ",", "-f", "2,4-6", "fields.txt"]
+
+[[cases]]
+name = "select-bytes"
+args = ["-b", "2-12,40-60", "text.txt"]

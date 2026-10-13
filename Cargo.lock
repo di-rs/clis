@@ -183,17 +183,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bool"
-version = "0.1.0"
-dependencies = [
- "assert_cmd",
- "assert_fs",
- "cli-log",
- "predicates",
- "serde_json",
-]
-
-[[package]]
 name = "bstr"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -624,6 +613,17 @@ dependencies = [
  "autocfg",
  "indenter",
  "once_cell",
+]
+
+[[package]]
+name = "false"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "assert_fs",
+ "cli-log",
+ "predicates",
+ "serde_json",
 ]
 
 [[package]]
@@ -1724,6 +1724,15 @@ dependencies = [
  "sharded-slab",
  "thread_local",
  "tracing-core",
+]
+
+[[package]]
+name = "true"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "cli-log",
+ "predicates",
 ]
 
 [[package]]

@@ -1,0 +1,10 @@
+binary = "findr"
+reference = "find"
+
+# A single matching leaf permits exact output comparison regardless of traversal order.
+# Build the immutable tree on the first preparation, outside measurement.
+[[cases]]
+name = "filtered-tree"
+args = ["tree", "-t", "f", "-n", "^needle[.]txt$"]
+reference_args = ["tree", "-type", "f", "-name", "needle.txt"]
+prepare = 'if [ ! -d tree ]; then i=0; while [ "$i" -lt 64 ]; do mkdir -p "tree/branch-$i/leaf"; j=0; while [ "$j" -lt 8 ]; do : > "tree/branch-$i/leaf/file-$j.txt"; j=$((j + 1)); done; i=$((i + 1)); done; : > tree/branch-32/leaf/needle.txt; fi'

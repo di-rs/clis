@@ -13,8 +13,8 @@
 From the workspace root:
 
 ```sh
-cargo run -p lsr -- coreutils/bool
-cargo run -p lsr -- -la coreutils/bool
+cargo run -p lsr -- coreutils/true
+cargo run -p lsr -- -la coreutils/true
 ```
 
 ## Differences and limits

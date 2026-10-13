@@ -1,0 +1,16 @@
+binary = "mkdirr"
+reference = "mkdir"
+
+[[cases]]
+name = "nested-parents"
+args = ["work/one/two/three/four/five/six/seven/eight"]
+reference_args = ["-p", "work/one/two/three/four/five/six/seven/eight"]
+prepare = "rm -rf work"
+check = "test -d work/one/two/three/four/five/six/seven/eight"
+
+[[cases]]
+name = "sibling-directories"
+args = ["work/one", "work/two", "work/three", "work/four", "work/five", "work/six", "work/seven", "work/eight"]
+reference_args = ["-p", "work/one", "work/two", "work/three", "work/four", "work/five", "work/six", "work/seven", "work/eight"]
+prepare = "rm -rf work"
+check = 'for name in one two three four five six seven eight; do test -d "work/$name" || exit 1; done'

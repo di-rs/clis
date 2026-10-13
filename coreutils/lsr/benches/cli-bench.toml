@@ -1,0 +1,14 @@
+# lsr's unsorted full paths and long-listing layout differ from system ls.
+binary = "lsr"
+env = { TZ = "UTC" }
+generate = [["text", "--seed", "42", "--lines", "512", "--words-per-line", "1", "--word-length", "16", "names.txt"]]
+
+[[cases]]
+name = "directory-entries"
+args = ["entries"]
+prepare = 'if [ ! -d entries ]; then mkdir entries; while IFS= read -r name; do : > "entries/$name"; done < names.txt; touch -t 202001010000 entries/*; fi'
+
+[[cases]]
+name = "long-directory-listing"
+args = ["-l", "entries"]
+prepare = 'if [ ! -d entries ]; then mkdir entries; while IFS= read -r name; do : > "entries/$name"; done < names.txt; touch -t 202001010000 entries/*; fi'

@@ -1,0 +1,14 @@
+# ASCII input avoids headr's lossy decoding of arbitrary binary bytes.
+binary = "headr"
+reference = "head"
+generate = [["text", "--seed", "42", "--lines", "100000", "input.txt"]]
+
+[[cases]]
+name = "line-prefix"
+args = ["-n", "50000", "input.txt"]
+
+[[cases]]
+name = "byte-prefix-stdin"
+args = ["-c", "1048576", "-"]
+reference_args = ["-c", "1048576"]
+stdin = "input.txt"

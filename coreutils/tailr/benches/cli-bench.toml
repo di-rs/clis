@@ -1,0 +1,21 @@
+binary = "tailr"
+reference = "tail"
+generate = [
+  ["text", "--seed", "42", "--lines", "100000", "input.txt"],
+  ["bytes", "--seed", "42", "--bytes", "16777216", "input.bin"],
+]
+
+[[cases]]
+name = "file-lines"
+args = ["-n", "1000", "input.txt"]
+
+[[cases]]
+name = "last-bytes-file"
+args = ["-c", "65536", "input.bin"]
+
+# Redirected stdin is seekable; this does not measure pipe throughput.
+[[cases]]
+name = "last-lines-stdin"
+args = ["-n", "1000", "-"]
+reference_args = ["-n", "1000"]
+stdin = "input.txt"

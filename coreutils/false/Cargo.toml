@@ -1,0 +1,17 @@
+[package]
+license.workspace = true
+name = "false"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cli-log = { path = "../../utils/cli-log" }
+
+[dev-dependencies]
+serde_json.workspace = true
+assert_fs.workspace = true
+assert_cmd = { workspace = true }
+predicates = { workspace = true }
+
+[lints]
+workspace = true

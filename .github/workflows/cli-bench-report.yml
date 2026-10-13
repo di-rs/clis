@@ -1,0 +1,38 @@
+name: CLI benchmark report
+
+# Trusted default-branch checkout only; bounded artifacts are data, never executed or extracted.
+on: # zizmor: ignore[dangerous-triggers]
+  workflow_run:
+    workflows: [CLI benchmark suites]
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  group: cli-bench-report-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  report:
+    if: ${{ github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion != 'cancelled' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    steps:
+      # workflow_run checks out the trusted default-branch SHA, never the PR head.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.13.0'
+          enable-cache: false
+      - name: Report benchmark results
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: uv run --locked --no-dev python tools/cli-bench/report.py --repo "$REPOSITORY" --run-id "$RUN_ID" --post

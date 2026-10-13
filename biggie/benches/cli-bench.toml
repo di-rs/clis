@@ -1,0 +1,14 @@
+# Biggie has no system counterpart; compare deterministic output with a prior build.
+binary = "biggie"
+
+[[cases]]
+name = "ascii-text"
+args = ["text", "--seed", "42", "--lines", "100000", "-"]
+
+[[cases]]
+name = "csv-fields"
+args = ["fields", "--seed", "42", "--lines", "100000", "--fields", "8", "--format", "csv", "--delimiter", ",", "-"]
+
+[[cases]]
+name = "random-bytes"
+args = ["bytes", "--seed", "42", "--bytes", "8388608", "-"]

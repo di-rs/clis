@@ -1,6 +1,6 @@
 [package]
 license.workspace = true
-name = "bool"
+name = "true"
 version = "0.1.0"
 edition = "2024"
 
@@ -8,8 +8,6 @@ edition = "2024"
 cli-log = { path = "../../utils/cli-log" }
 
 [dev-dependencies]
-serde_json.workspace = true
-assert_fs.workspace = true
 assert_cmd = { workspace = true }
 predicates = { workspace = true }
 

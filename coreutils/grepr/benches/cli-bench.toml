@@ -1,0 +1,13 @@
+binary = "grepr"
+reference = "grep"
+env = { LC_ALL = "C" }
+generate = [["records", "--record", "INFO ready", "--record", "WARN retry", "--record", "ERROR request failed", "--cycles", "50000", "events.txt"]]
+
+[[cases]]
+name = "matching-lines"
+args = ["^ERROR", "events.txt"]
+
+[[cases]]
+name = "count-alternation"
+args = ["-c", "ERROR|WARN", "events.txt"]
+reference_args = ["-E", "-c", "ERROR|WARN", "events.txt"]
