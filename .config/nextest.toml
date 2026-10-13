@@ -1,0 +1,8 @@
+[profile.ci]
+fail-fast = false
+retries = 0
+slow-timeout = { period = "30s", terminate-after = 4 }
+global-timeout = "10m"
+
+[profile.ci.junit]
+path = "junit.xml"

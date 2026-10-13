@@ -1,11 +1,11 @@
 [package]
+license.workspace = true
 name = "bool"
 version = "0.1.0"
 edition = "2024"
 
 [dev-dependencies]
 assert_cmd = { workspace = true }
-pretty_assertions = { workspace = true }
 predicates = { workspace = true }
 
 [lints]

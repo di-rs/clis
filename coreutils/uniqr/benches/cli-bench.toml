@@ -1,0 +1,15 @@
+# Plain output is portable; count-prefix padding differs between implementations.
+binary = "uniqr"
+reference = "uniq"
+generate = [
+  ["records", "--record", "alpha", "--record", "beta", "--record", "gamma", "--repeat", "8", "--cycles", "12500", "runs.txt"],
+  ["text", "--seed", "42", "--lines", "100000", "distinct.txt"],
+]
+
+[[cases]]
+name = "collapse-runs"
+args = ["runs.txt"]
+
+[[cases]]
+name = "retain-distinct-lines"
+args = ["distinct.txt"]

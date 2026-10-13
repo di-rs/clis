@@ -1,0 +1,14 @@
+# Fixed-width output is not portable across system wc implementations.
+binary = "wcr"
+generate = [
+  ["text", "--seed", "42", "--lines", "100000", "ascii.txt"],
+  ["text", "--seed", "42", "--lines", "20000", "--alphabet-chars", "猫犬鳥長", "--length-unit", "scalars", "--words-per-line", "6", "--word-length", "6", "unicode.txt"],
+]
+
+[[cases]]
+name = "all-counts"
+args = ["ascii.txt"]
+
+[[cases]]
+name = "unicode-characters"
+args = ["-m", "unicode.txt"]

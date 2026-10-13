@@ -1,4 +1,5 @@
 [package]
+license.workspace = true
 name = "parsu"
 version = "0.1.0"
 description = "Simple XML parser with combinators"

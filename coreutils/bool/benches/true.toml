@@ -1,0 +1,6 @@
+binary = "true"
+reference = "true"
+
+[[cases]]
+name = "success"
+args = []

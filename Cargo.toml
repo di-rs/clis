@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["biggie", "calr", "kara", "parsu", "utils/*", "coreutils/*", "tools/cli-bench"]
+members = ["biggie", "calr", "kara", "parsu", "utils/*", "coreutils/*"]
 
 [workspace.package]
 authors = ["Dima P <dimapm@pm.me>"]
@@ -27,6 +27,9 @@ assert_fs = "1.1.4"
 predicates = "3.1.4"
 pretty_assertions = "1.4.1"
 
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
 [workspace.lints.clippy]
 pedantic = { level = "deny", priority = -1 }
 nursery = { level = "deny", priority = -1 }
@@ -43,8 +46,3 @@ panic_in_result_fn = "deny"
 panic = "deny"
 exit = "deny"
 as_conversions = "deny"
-
-# Native cli-bench fixtures repeatedly hash compiler binaries; keep the SHA-256
-# implementation optimized in tests without changing release build policy.
-[profile.test.package.sha2]
-opt-level = 3

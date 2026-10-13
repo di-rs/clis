@@ -1,0 +1,12 @@
+# Fixed historical dates avoid today's highlighting and clock-dependent output.
+# Calendar layout differs from system cal; use a prior calr build for comparison.
+binary = "calr"
+env = { TZ = "UTC" }
+
+[[cases]]
+name = "leap-month"
+args = ["-m", "2", "2024"]
+
+[[cases]]
+name = "whole-year"
+args = ["2024"]

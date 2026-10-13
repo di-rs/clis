@@ -1,0 +1,7 @@
+binary = "pwdr"
+reference = "pwd"
+
+# Physical mode avoids differences in inherited logical PWD handling.
+[[cases]]
+name = "physical-path"
+args = ["-P"]

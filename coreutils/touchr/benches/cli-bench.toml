@@ -1,0 +1,18 @@
+binary = "touchr"
+reference = "touch"
+env = { TZ = "UTC" }
+generate = [["text", "--seed", "42", "--lines", "10000", "input.txt"]]
+
+[[cases]]
+name = "create-files"
+args = ["work/one", "work/two", "work/three", "work/four", "work/five", "work/six", "work/seven", "work/eight"]
+reference_args = ["-m", "work/one", "work/two", "work/three", "work/four", "work/five", "work/six", "work/seven", "work/eight"]
+prepare = "rm -rf work; mkdir work"
+check = 'for name in one two three four five six seven eight; do test -f "work/$name" && test ! -s "work/$name" || exit 1; done'
+
+[[cases]]
+name = "set-modification-time"
+args = ["-t", "20240102030405", "work/existing.txt"]
+reference_args = ["-m", "-t", "202401020304.05", "work/existing.txt"]
+prepare = "rm -rf work; mkdir work; cp input.txt work/existing.txt; touch -t 202401020304.05 work/expected-time"
+check = "cmp input.txt work/existing.txt && test ! work/existing.txt -nt work/expected-time && test ! work/existing.txt -ot work/expected-time"

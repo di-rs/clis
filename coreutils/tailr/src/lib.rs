@@ -1,3 +1,5 @@
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+
 use std::{
     collections::VecDeque,
     io::{BufRead, BufReader, Read, Seek, SeekFrom, Write},

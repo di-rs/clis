@@ -1,0 +1,8 @@
+# The parser's Rust debug output has no equivalent system command.
+binary = "parsu"
+generate = [["records", "--record", '<child name="benchmark" value="42"/>', "--cycles", "4096", "children.xml"]]
+
+[[cases]]
+name = "wide-document"
+args = ["input.xml"]
+prepare = "{ printf '<root>'; cat children.xml; printf '</root>\n'; } > input.xml"

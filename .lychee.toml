@@ -1,0 +1,5 @@
+# Local links/anchors block PRs. Remote availability is checked separately weekly.
+timeout = 20
+max_retries = 2
+retry_wait_time = 2
+exclude_all_private = true

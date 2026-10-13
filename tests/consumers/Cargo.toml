@@ -1,0 +1,15 @@
+[package]
+name = "clis-consumer-check"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[workspace]
+
+[dependencies]
+biggie = { path = "../../biggie" }
+tailr = { path = "../../coreutils/tailr" }
+
+[lints.rust]
+unsafe_code = "forbid"

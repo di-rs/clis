@@ -1,0 +1,10 @@
+binary = "echor"
+reference = "echo"
+
+[[cases]]
+name = "print-arguments"
+args = ["benchmark", "several", "plain", "text", "arguments"]
+
+[[cases]]
+name = "without-newline"
+args = ["-n", "benchmark", "without", "a", "newline"]

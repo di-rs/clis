@@ -1,0 +1,12 @@
+binary = "commr"
+reference = "comm"
+env = { LC_ALL = "C" }
+generate = [["pair", "--seed", "42", "--left", "left.txt", "--right", "right.txt", "--left-only", "25000", "--shared", "50000", "--right-only", "25000"]]
+
+[[cases]]
+name = "all-columns"
+args = ["left.txt", "right.txt"]
+
+[[cases]]
+name = "shared-only"
+args = ["-1", "-2", "left.txt", "right.txt"]

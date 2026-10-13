@@ -1,206 +1,132 @@
-# Benchmarking and performance acceptance
+# Benchmarking
 
-[Project overview](../README.md) · [Compatibility](compatibility.md)
+Each finite CLI owns TOML suites under its `benches/` directory.
+[Biggie](../biggie/README.md) generates inputs once; [hyperfine 2](https://github.com/sharkdp/hyperfine/releases/tag/v2.0.0)
+measures the executables directly, including warmups, timing and peak RSS.
+The [runner](../tools/cli-bench/bench.py) requires Python 3.11+ and no Python packages.
+On macOS, the system Python may be too old; use an installed Python 3.11+ instead.
 
-The [north star's P4](north-star.md#p4--correctness-checked-benchmarks) sets the target:
-beat references on declared priority workloads, with explicit acceptance of measured
-regressions. This guide owns the measurement procedure. Every port needs a recipe;
-adding the standard does not mean missing recipes or results already exist.
+## Run a suite
 
-## Correctness gate before timing
+From the workspace root, with `hyperfine` on PATH:
 
-Confirm matching stdout bytes, expected status, diagnostics, and relevant side
-effects for every benchmark case before measuring it. Both commands must do the
-same work under the same options, input, locale, environment, and output policy.
-A missing flag, dropped binary data, ignored error, or omitted filesystem work
-invalidates the comparison. Select cases from the utility's documented contract.
+```sh
+cargo build --locked --release --workspace --bins
+python3 tools/cli-bench/bench.py coreutils/tailr/benches/cli-bench.toml
+```
 
-Do not use blanket Hyperfine `-i`/`--ignore-failure`: it can make a failed command
-look fast. Commands such as `false` and grep-like no-match cases legitimately return
-nonzero; a case-specific wrapper must validate the exact expected status and fail
-on any other outcome. Do not simply append `|| true` or discard failed samples.
-Correctness checks and setup belong outside the timed command, unless end-to-end
-setup is explicitly the workload being measured.
+This compares `target/release/tailr` with the suite's system `tail`.
+Use `--reference /usr/bin/tail` to choose the macOS BSD executable explicitly,
+or `--reference /path/to/gtail` to select another implementation. System tools
+on Linux are usually GNU; a system comparison is not a general parity claim.
 
-## Baselines, build, and workload coverage
+```sh
+python3 tools/cli-bench/bench.py coreutils/tailr/benches/cli-bench.toml --list
+python3 tools/cli-bench/bench.py coreutils/tailr/benches/cli-bench.toml \
+  --case file-lines --warmup 1 --runs 3 --output /tmp/tail-smoke
+```
 
-Build release binaries before invoking Hyperfine; do not time `cargo run` or debug
-builds. Compare the new Rust implementation with both the previous Rust revision
-and GNU (or the explicitly selected non-GNU baseline). For adopted BSD-only features,
-compare equivalent behavior to that named BSD reference where applicable; do not
-pass an unsupported flag to GNU and time its failure. Use separate output directories or
-retained artifacts so a rebuild cannot silently overwrite the old baseline.
-Run comparisons on the same host; timings from different machines/OSes cannot be
-combined into an implementation speedup. Identify every executable explicitly.
+The output directory must be new. Defaults are three warmups and twenty measured
+runs, with results under `target/benchmarks/`. Use `--output` outside `target/`
+to keep reports across `cargo clean`. Each case produces hyperfine's native JSON
+and Markdown; the directory also contains the suite and run metadata. A failed
+run is marked failed, and failed/partial case reports are not published as results.
 
-Declare priority workloads before measuring, with their user purpose and resource
-constraints. A useful suite covers the applicable dimensions below, not every cross-product:
+## Compare with an earlier version
 
-| Dimension | Representative cases |
+Pass an existing executable with `--baseline`. Both versions use the case's
+candidate arguments; system-specific `reference_args` are only for `--reference`
+or the suite's default reference. `--candidate` and `--biggie` also accept explicit
+executable paths. Compilation is separate from measurement.
+
+For example, build an earlier revision in a separate checkout, using paths that
+do not already exist. Replace `HEAD~1` with the desired tag or commit:
+
+```sh
+git worktree add --detach /tmp/clis-before HEAD~1
+cargo build --locked --release --manifest-path /tmp/clis-before/Cargo.toml \
+  --target-dir /tmp/clis-before-target -p tailr
+python3 tools/cli-bench/bench.py coreutils/tailr/benches/cli-bench.toml \
+  --baseline /tmp/clis-before-target/release/tailr
+git worktree remove /tmp/clis-before
+```
+
+Build both versions with comparable toolchains, features and flags. An older
+binary must support the selected case's arguments. Suites without a suitable
+system reference run the candidate alone unless `--baseline` is supplied.
+
+## Write a suite
+
+Paths in cases and generator arguments are relative to one temporary directory.
+The runner resolves executable paths before entering it and removes it on exit.
+Both versions receive the same generated files. Biggie accepts its ordinary
+argument arrays, including `text`, `records`, `fields`, `bytes` and `pair`:
+
+```toml
+binary = "tailr"
+reference = "/usr/bin/tail"
+generate = [
+  ["text", "--seed", "42", "--lines", "100000", "input.txt"],
+]
+
+[[cases]]
+name = "file-lines"
+args = ["-n", "100", "input.txt"]
+
+[[cases]]
+name = "stdin-lines"
+args = ["-n", "100", "-"]
+stdin = "input.txt"
+```
+
+`generate` is optional. Seed random recipes explicitly. Biggie does not promise
+identical random data across versions or platforms; comparisons within a run
+share the exact same generated input. Temporary inputs are not retained for replay.
+
+Optional case fields:
+
+| Field | Purpose |
 | --- | --- |
-| Startup | Empty/tiny valid workloads; process launch overhead matters for small tools. |
-| Throughput | Medium/large data; bytes per second and elapsed time. |
-| Input shape | Short/long records, binary/Unicode where supported, many small files. |
-| Access | Stdin/pipes versus regular seekable files; warm versus cold cache when measured. |
-| Options | Common defaults, expensive supported flags, and meaningful combinations. |
-| Resources | Peak memory and allocations where relevant; concurrency and retained state. |
-| Mutation | Equivalent initial filesystem state restored before every iteration. |
+| `reference_args` | Arguments for the system reference when its spelling differs. |
+| `stdin` | File reopened for every invocation; this is seekable stdin, not a producer pipe. |
+| `prepare` | Shell command before every preflight, warmup and measured invocation. |
+| `check` | Shell assertion after each untimed preflight, for filesystem effects. |
+| `expected_exit` | Exact expected exit status; defaults to zero. |
 
-Generate deterministic data once with recorded parameters/checksums. Keep large
-inputs and raw local outputs outside tracked fixtures. The harness stores evidence
-under `.cli-bench/` and isolated Cargo caches under `target/cli-bench/`.
-Use [biggie](../biggie/README.md) for every harness benchmark dataset.
-Use `--seed` and record its revision, lockfile, platform, and complete command;
-the same seed/options reproduce bytes within the same build/platform, not across
-arbitrary upgrades. Retain the exact input plus checksum for all compared binaries
-and later reruns. Word-count/length ranges support short and long records, and
-line-ending options cover LF, CRLF and an unterminated final record. Biggie also
-supplies Unicode/custom alphabets, literal record schedules, delimited/CSV fields,
-raw byte budgets and sorted overlapping pairs. Its README records these contracts
-and the optional CSV feature. Use small explicit fixtures for permanent regressions.
-For `mkdir`, `touch`, and other mutating tools, reset the sandbox before each run;
-otherwise later runs may measure a cheaper operation. Do not use destructive cache
-clearing or privileged machine-wide changes without explicit authorization.
-Custom apps use a prior implementation or another justified baseline, not an
-invented GNU/BSD original. Kara needs operation-level measurements rather than an
-uncontrolled interactive-session comparison.
+For a command that creates files, reset only its output area with
+`prepare = "rm -rf work && mkdir work"`, use arguments under `work/`, and assert
+the expected effects with a `check` such as `test -d work/a/b`. Preparation is
+outside the measured time. Generator outputs must not be changed by a benchmark.
+Suites are trusted code: `prepare` and `check` execute through `/bin/sh`.
 
-## Tooling and a correctness-first recipe
+The runner checks exit status and compares stdout bytes before timing when a
+baseline exists. It also checks the exit statuses in hyperfine's measured results.
+This is a small guard against measuring different work, not a replacement for
+the CLI's correctness tests. Stderr is not compared. For filesystem effects,
+the suite's `check` must assert the behavior that matters.
 
-The [cli-bench harness](../tools/cli-bench/README.md) uses exactly
-[Hyperfine 1.20.0](https://github.com/sharkdp/hyperfine/tree/v1.20.0) for elapsed
-observations and native process resource tools for separate RSS samples. External
-tools must already be installed and identified explicitly; the harness does not
-install tools. `cargo bench` remains the separate Rust-library entry point.
+Arguments are quoted for direct execution with `--shell=none`; shell expansion
+and pipelines do not occur in `args`. Output is drained with `--output=pipe` so
+programs cannot skip work merely because stdout is `/dev/null`. The default
+environment sets `LC_ALL=C`, `TZ=UTC` and `CLIS_LOG_LEVEL=off`; an optional suite
+`env` table can override these values.
 
-The package-owned [tailr suite](../coreutils/tailr/benches/cli-bench.toml) replaces the retired
-Nushell entry point. Its datasets are generated by the pinned Biggie CLI with
-explicit seeds/patterns and exact byte/shape assertions. This working recipe runs
-from the workspace root; set `GNU_TAIL` to an absolute GNU executable and
-`HYPERFINE` to the installed 1.20.0 binary. On Homebrew these may be
-`/opt/homebrew/bin/gtail` and `/opt/homebrew/bin/hyperfine`; verify your own paths and bind canonical regular files rather than symlinks.
+## Verification and scope
 
 ```sh
-set -eu
-: "${GNU_TAIL:?Set an absolute GNU tail executable path}"
-: "${HYPERFINE:?Set the Hyperfine 1.20.0 executable path}"
-cargo build --locked --release -p cli-bench -p biggie -p tailr
-"$GNU_TAIL" --version
-"$HYPERFINE" --version
-target/release/cli-bench check -p tailr -a target/release/tailr \
-  -x "$GNU_TAIL" -g target/release/biggie -m smoke
-target/release/cli-bench run -p tailr -a target/release/tailr \
-  -x "$GNU_TAIL" -g target/release/biggie -H "$HYPERFINE" \
-  -c file-lines -c file-bytes -c pipe-lines -c startup
+python3 -m unittest discover -s tools/cli-bench -p 'test_*.py' -v
 ```
 
-The last command uses full settings. A prior Rust role can be added with
-`-P /absolute/path/to/retained/tailr`, or use `-r CANDIDATE_SHA -b PREVIOUS_SHA`
-for matched isolated Git builds. Record the GNU version together with the reference
-executable hash used by the run; prebuilt artifact records deliberately do not guess
-package metadata. Use explicit `confirm-*` case selection under full settings for
-separate confirmation after choosing the candidate, following the
-[experiment contract](superpowers/specs/2026-10-06-cli-bench-experiments.md).
-Omitting case flags runs every declared case, including confirmation.
-Package selection reads the current invoking checkout's declared suite through
-locked, offline Cargo metadata; that one recipe applies to all compared revisions.
-Use `-M Cargo.toml` to select workspace resources from another directory, or an
-explicit `-s path/to/suite.toml` to bypass discovery. Package/suite choices conflict.
-The real package-owned recipe acceptance group also runs with the explicit resource
-command documented in the [harness README](../tools/cli-bench/README.md#evidence-and-limits).
+The [workflow](../.github/workflows/cli-bench.yml) checks runner changes and runs
+one-sample suite smoke checks on Linux and macOS. Manual dispatch runs the chosen
+suite with normal measurement settings and saves reports as workflow artifacts.
+Hosted smoke measurements verify execution; use a quiet local machine for
+performance conclusions, inspect variance, and repeat meaningful differences.
 
-Correctness is checked before any timing. Full runs use three separately checked
-warmups and two batches of twenty elapsed observations per role, in forward then
-reverse role order: forty elapsed observations total, plus five fresh RSS processes.
-Smoke uses one checked warmup, two observations per batch and one RSS process;
-it suppresses performance conclusions. The adapter verifies the bounded Hyperfine
-JSON export, command order/count, exact exit status and sample ordinals before
-accepting observations. Expected nonzero direct outcomes use only the declared exact status in the
-engine adapter, and the exported exit code must match; arbitrary failure is never
-accepted. Nonzero pipeline outcomes are unsupported. Input/tool hashes are checked again before completion.
-Missing requested RSS makes a run incomplete and unsuccessful.
+Kara is interactive and has no finite CLI benchmark here. Suites without a
+portable system-output match use previous-version comparisons. There is no custom
+statistics engine, build cache, history database, replay format or PR-comment bot.
 
-Direct cases include executable startup; real finite pipe cases include the
-identified shell/producer/consumer pipeline. Tail regular-file and pipe access are
-separate cases with independent slice oracles and baseline equality. Mutating mkdir
-cases reset absent/existing state before every invocation and verify the exact tree
-and modes afterward. Inputs are reused without destructive cache eviction; there
-is no cold-cache or larger-file-scaling claim for these bounded initial recipes.
-
-Run/check exits zero when complete evidence is produced, including a slower
-candidate. Operational/validation failures exit 1, invalid CLI input exits 2;
-handled SIGINT/SIGTERM exit 130/143 after cleanup. Offline report/compare exit zero
-when rendering succeeds, while preserving the saved failed/incomplete outcome.
-
-Keep evidence outside `target/` before rebuilding executables. For a returned run
-ID, export exact resources and retain the bundle plus the reference version/hash:
-
-```sh
-target/release/cli-bench export -i .cli-bench/runs/RUN_ID \
-  -o /absolute/path/to/new-evidence-bundle -I -B
-target/release/cli-bench report -i /absolute/path/to/new-evidence-bundle -f markdown
-target/release/cli-bench history -d .cli-bench/runs -s tailr -f json
-target/release/cli-bench replay -i /absolute/path/to/new-evidence-bundle
-```
-
-Replace `RUN_ID` and bundle destination; export is create-new. Export without
-`-I/-B` records resource omissions. Strict replay needs the exact original harness,
-role/generator/tool bytes, regenerates and checks input hashes, preserves settings
-and selection, and writes a new run. Invoke the retained harness if a rebuild changed
-its hash. It does not silently refresh datasets or reuse timings.
-On native macOS, an identical relocated `/bin/cat` was killed during full-resource
-bundle replay; the OS mechanism remains unknown. Keep that complete export, and
-use a separate input-only `export -I` with exact local role/generator/engine overrides
-and hash-checked original pipeline/time tools. The [harness replay instructions](../tools/cli-bench/README.md#portable-bundles-strict-replay-and-local-history)
-show this verified route and its explicit executable omissions.
-The Rust `append_history` API retains compact immutable records and an atomic local
-index for offline inspection; it performs no Git/network publication. CI uploads
-no benchmark artifacts and publishes no remote history. Its one PR comment keeps bounded results for skipped CLIs with their measured commit/run,
-while raw CI evidence is ephemeral. Remote storage is deferred to
-[#12](https://github.com/di-rs/clis/issues/12). Existing local v1 retention/expiry
-fields do not promise hosted retention. See the harness README for storage,
-logical resource limits, failure preservation and known replay/history boundaries.
-
-## Reproducibility record
-
-Attach raw results and a readable summary containing candidate/base commit SHAs;
-reference name, path, version or OS release; `rustc -Vv`; build profile/features and
-flags; CPU, memory, OS/kernel, filesystem/storage; input generator/size/checksum;
-complete commands; locale/timezone; output sink; cache policy; thread count;
-Hyperfine version, warmups, repetitions; correctness outcome; and memory measurement
-method. State any controls that could not be held constant.
-
-Report the chosen time statistic, spread/uncertainty, speedup ratio, and sample
-count for each case, not only the best run. Mark small/noisy differences inconclusive
-and repeat them on a controlled host. Shell overhead matters for tiny commands;
-Hyperfine's shell-free mode is useful when no redirection/pipeline is needed, but
-changing invocation mode must not change the compared work. Wall time alone does
-not measure allocations or peak memory; collect those separately when claiming them.
-
-## Review gate
-
-For behavior or performance-sensitive changes, add/update relevant cases and compare
-before and after under the same setup. A claimed win requires correctness and
-repeatable improvement. Record regressions against both the previous Rust revision
-and references, their impact, and the reviewer's explicit acceptance of the trade-off.
-Documentation of a regression alone is not acceptance. Unmeasured or inconclusive
-cases stay visible, and cannot support a performance-success claim.
-Do not add complicated fast paths for noise-level gains. A parity fix may cost
-more because it now performs required work; disclose that instead of hiding it.
-
-Ordinary shared CI runners are appropriate for correctness and benchmark smoke
-checks, not an unexplained hard timing threshold. Dedicated performance jobs and
-regression budgets can be added after a stable baseline is established. They are
-not configured by this document. When tools/hardware/references are unavailable,
-report what remains unmeasured and provide the reproduction recipe; never fabricate
-numbers or claim performance verification from a successful build.
-Documentation-only standards work does not require running timings or manufacturing
-benchmark results; report unavailable measurement rather than expanding that scope.
-
-## Instrumentation overhead
-
-Stage timings from [observability](observability.md) identify operations to investigate;
-they do not establish a speed improvement. Compare identical work with collection
-off and on, then distinguish redirected stderr costs from terminal costs. The shared
-[overhead harness](../utils/cli-tracing/README.md#verification-and-overhead) checks
-its deterministic result before accepting any timing sample.
+The runner follows hyperfine's [manual](https://github.com/sharkdp/hyperfine/blob/v2.0.0/doc/hyperfine.1)
+for direct commands, preparation, input and exports. See [Testing](testing.md)
+for behavioral regressions.
