@@ -1,5 +1,11 @@
 # Repository rules
 
+## Branches and commits
+
+Use `.agents/skills/dev-new-branch/SKILL.md` when starting development work.
+Use `.agents/skills/gitmoji-commit/SKILL.md` for every commit and PR title.
+Development branches must use `feat/`, `fix/`, `chore/`, `docs/`, or `refactor/`.
+
 ## One crate, one CLI
 
 Every Rust CLI must have its own Cargo package and directory. A CLI package must

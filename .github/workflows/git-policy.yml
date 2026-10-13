@@ -1,0 +1,44 @@
+name: Git Policy
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  git-policy:
+    name: git-policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: prek@0.5.5
+          fallback: none
+      - name: Load trusted Gitmoji policy
+        env:
+          # Pin the policy independently of the PR checkout. Update after review.
+          POLICY_COMMIT: 9da5407f9a30c1b2ed1687ed09435c3936ac51ad
+        run: |
+          git fetch --no-tags origin "$POLICY_COMMIT"
+          mkdir -p "$RUNNER_TEMP/git-policy"
+          git show "$POLICY_COMMIT:prek.toml" > "$RUNNER_TEMP/git-policy/prek.toml"
+      - name: Check commits and squash title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          printf '%s\n' "$PR_TITLE" > "$RUNNER_TEMP/COMMIT_EDITMSG"
+          prek run --config "$RUNNER_TEMP/git-policy/prek.toml" require-pattern --hook-stage commit-msg --commit-msg-filename "$RUNNER_TEMP/COMMIT_EDITMSG"
+          git log --format=%s "$BASE_SHA..$HEAD_SHA" -- > "$RUNNER_TEMP/commit-subjects.txt"
+          while IFS= read -r subject; do
+            printf '%s\n' "$subject" > "$RUNNER_TEMP/COMMIT_EDITMSG"
+            prek run --config "$RUNNER_TEMP/git-policy/prek.toml" require-pattern --hook-stage commit-msg --commit-msg-filename "$RUNNER_TEMP/COMMIT_EDITMSG"
+          done < "$RUNNER_TEMP/commit-subjects.txt"

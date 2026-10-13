@@ -2,9 +2,20 @@
 # See https://prek.j178.dev for more information.
 #:schema https://www.schemastore.org/prek.json
 
+default_install_hook_types = ["pre-commit", "commit-msg"]
+default_stages = ["pre-commit"]
+
 [[repos]]
 repo = "builtin"
 hooks = [
+    {
+      id = "require-pattern",
+      name = "Gitmoji commit subject",
+      # Official emoji and shortcode catalogue: https://gitmoji.dev/
+      args = ["--multiline", '\A(:twisted_rightwards_arrows:|:chart_with_upwards_trend:|:triangular_flag_on_post:|:building_construction:|:closed_lock_with_key:|:globe_with_meridians:|:busts_in_silhouette:|:construction_worker:|:children_crossing:|:adhesive_bandage:|:heavy_minus_sign:|:money_with_wings:|:passport_control:|:white_check_mark:|:heavy_plus_sign:|:page_facing_up:|:rotating_light:|:speech_balloon:|:card_file_box:|:camera_flash:|:construction:|:monocle_face:|:technologist:|:green_heart:|:safety_vest:|:see_no_evil:|:stethoscope:|:wastebasket:|:arrow_down:|:clown_face:|:loud_sound:|:wheelchair:|:ambulance:|:test_tube:|:airplane:|:arrow_up:|:bookmark:|:goal_net:|:lipstick:|:seedling:|:sparkles:|:alembic:|:necktie:|:package:|:pencil2:|:pushpin:|:recycle:|:bricks:|:coffin:|:hammer:|:iphone:|:rewind:|:rocket:|:thread:|:wrench:|:alien:|:beers:|:bento:|:dizzy:|:label:|:t\-rex:|:truck:|:boom:|:bulb:|:fire:|:lock:|:memo:|:mute:|:poop:|:tada:|:art:|:bug:|:egg:|:mag:|:zap:|🧑‍💻|⏪️|♻️|♿️|⚗️|⚡️|⚰️|✈️|✏️|⬆️|⬇️|🏗️|🏷️|👽️|📦️|🔍️|🔒️|🗃️|🗑️|🚑️|⏪|♻|♿|⚗|⚡|⚰|✅|✈|✏|✨|➕|➖|⬆|⬇|🌐|🌱|🍱|🍻|🎉|🎨|🏗|🏷|🐛|👔|👥|👷|👽|💄|💚|💡|💥|💩|💫|💬|💸|📄|📈|📌|📝|📦|📱|📸|🔀|🔇|🔊|🔍|🔐|🔒|🔖|🔥|🔧|🔨|🗃|🗑|🙈|🚀|🚑|🚚|🚧|🚨|🚩|🚸|🛂|🤡|🥅|🥚|🦖|🦺|🧐|🧪|🧱|🧵|🩹|🩺) [^\s]'],
+      stages = ["commit-msg"],
+      always_run = true,
+    },
     {
       id = "check-added-large-files",
       args = ["--enforce-all"],
