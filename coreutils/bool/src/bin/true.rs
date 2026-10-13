@@ -1,3 +1,3 @@
-fn main() {
-    std::process::exit(0);
+fn main() -> std::process::ExitCode {
+    cli_log::init("true").finish(0)
 }

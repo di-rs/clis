@@ -77,14 +77,7 @@ pub fn generate_pair(
 ) -> Result<()> {
     options.validate()?;
     let (left_count, right_count) = options.record_counts()?;
-    let span = tracing::debug_span!(
-        "generate_pair",
-        requested_left = left_count,
-        requested_right = right_count,
-        left_written = tracing::field::Empty,
-        right_written = tracing::field::Empty
-    );
-    let _entered = span.enter();
+    log::debug!(requested_left = left_count, requested_right = right_count; "generating pair");
     let prefix = options.seed.map(|seed| {
         let mut rng = rng_from_seed(Some(seed));
         format!("{:016x}", rng.random::<u64>())
@@ -116,8 +109,7 @@ pub fn generate_pair(
             }
         }
     }
-    span.record("left_written", left_count);
-    span.record("right_written", right_count);
+    log::debug!(left_written = left_count, right_written = right_count; "generation complete");
     Ok(())
 }
 fn write_key(

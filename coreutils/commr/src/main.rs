@@ -1,4 +1,4 @@
-use clap::{CommandFactory, Parser};
+use clap::CommandFactory;
 use std::{
     fs::File,
     io::{BufRead, BufReader, IsTerminal, stdin},
@@ -9,27 +9,23 @@ mod cli;
 use crate::cli::{Cli, CliError};
 use commr::get_lines;
 
-fn main() {
-    let cli = Cli::parse();
-    let result = run(&cli);
-
-    match result {
-        Ok(()) => {
-            std::process::exit(exitcode::OK);
-        }
+fn main() -> std::process::ExitCode {
+    cli_log::run("commr", |cli| match run(&cli) {
+        Ok(()) => exitcode::OK,
         Err(CliError::Config) => {
+            cli_log::record_error(CliError::Config);
             let _ = Cli::command().print_help();
-            std::process::exit(exitcode::CONFIG);
+            exitcode::CONFIG
         }
         Err(CliError::FileOpen(file_name, e)) => {
-            eprintln!("{}: {e}", file_name.display());
-            std::process::exit(exitcode::CONFIG);
+            cli_log::diagnostic!("{}: {e}", file_name.display());
+            exitcode::CONFIG
         }
         Err(e) => {
-            eprintln!("Error: {e}");
-            std::process::exit(exitcode::DATAERR);
+            cli_log::diagnostic!("Error: {e}");
+            exitcode::DATAERR
         }
-    }
+    })
 }
 
 fn run(cli: &Cli) -> Result<(), CliError> {

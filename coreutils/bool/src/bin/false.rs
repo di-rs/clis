@@ -1,3 +1,3 @@
-const fn main() -> std::process::ExitCode {
-    std::process::ExitCode::FAILURE
+fn main() -> std::process::ExitCode {
+    cli_log::init("false").finish(1)
 }

@@ -13,6 +13,7 @@ readme.workspace = true
 include.workspace = true
 
 [dependencies]
+cli-log = { path = "../../utils/cli-log" }
 clap = { workspace = true }
 regex = "1.10.3"
 walkdir = "2.4.0"
@@ -20,7 +21,6 @@ thiserror = "2.0.20"
 clap-verbosity-flag = "3.0.4"
 exitcode = "1.1.2"
 ctrlc = "3.5.2"
-env_logger = "0.11.11"
 human-panic = "2.0.8"
 log = "0.4.33"
 line_prefixer = "0.1.0"

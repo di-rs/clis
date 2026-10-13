@@ -1,4 +1,3 @@
-use clap::Parser;
 use std::{
     fs::File,
     io::{BufReader, BufWriter, Read, Seek, Write},
@@ -9,23 +8,18 @@ mod cli;
 use crate::cli::{Cli, CliError};
 use tailr::{get_total_lines, print_bytes, print_lines, print_stream_bytes, print_stream_lines};
 
-fn main() {
-    let cli = Cli::parse();
-    let result = run(&cli);
-
-    match result {
-        Ok(()) => {
-            std::process::exit(exitcode::OK);
-        }
+fn main() -> std::process::ExitCode {
+    cli_log::run("tailr", |cli| match run(&cli) {
+        Ok(()) => exitcode::OK,
         Err(CliError::FileOpen(_, e)) => {
-            eprintln!("{e}");
-            std::process::exit(exitcode::CONFIG);
+            cli_log::diagnostic!("{e}");
+            exitcode::CONFIG
         }
         Err(e) => {
-            eprintln!("Error: {e}");
-            std::process::exit(exitcode::DATAERR);
+            cli_log::diagnostic!("Error: {e}");
+            exitcode::DATAERR
         }
-    }
+    })
 }
 
 fn run(cli: &Cli) -> Result<(), CliError> {
@@ -65,9 +59,10 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                     print_lines(reader, &mut writer, cli.lines, total_lines)?;
                 }
             }
-            Err(e) => eprintln!("{}: {e}", filename.display()),
+            Err(e) => cli_log::diagnostic!("{}: {e}", filename.display()),
         }
     }
+    writer.flush()?;
     Ok(())
 }
 

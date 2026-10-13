@@ -5,6 +5,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+log.workspace = true
+cli-log = { path = "../../utils/cli-log" }
 chrono = "0.4.45"
 clap = { workspace = true }
 exitcode = { workspace = true }
@@ -13,6 +15,7 @@ thiserror = { workspace = true }
 uzers = "0.12.2"
 
 [dev-dependencies]
+serde_json.workspace = true
 assert_cmd = { workspace = true }
 assert_fs = { workspace = true }
 predicates = { workspace = true }

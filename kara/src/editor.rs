@@ -79,8 +79,9 @@ impl Editor {
         match EditorBuffer::open(file_name) {
             Ok(buffer) => self.buffer = buffer,
             Err(e) => {
-                self.messagebar
-                    .set(format!("ERR: Could not open file `{file_name}` {e}"));
+                let message = format!("ERR: Could not open file `{file_name}` {e}");
+                cli_log::record_error(&message);
+                self.messagebar.set(message);
             }
         }
     }
@@ -182,7 +183,9 @@ impl Editor {
             System(Quit | QuitForce | Resize(_)) => {}
             System(Save) => self.save(),
             System(SaveAs(filename)) => {
-                let _ = self.buffer.save_as(&filename);
+                if let Err(error) = self.buffer.save_as(&filename) {
+                    cli_log::record_error(error);
+                }
             }
             EditorCommand::Move(direction) => self.handle_move_command(&direction),
             EditorCommand::Edit(edit) => self.handle_edit_command(&edit),
@@ -231,7 +234,10 @@ impl Editor {
                     match edit_command {
                         Edit::InsertNewline => {
                             match commandbar.produce_command(self.buffer.filename()) {
-                                Err(e) => self.messagebar.set(e),
+                                Err(e) => {
+                                    cli_log::record_error(&e);
+                                    self.messagebar.set(e);
+                                }
                                 Ok(command) => self.handle_command(command),
                             }
                             self.change_mode(EditorMode::View);
@@ -274,7 +280,11 @@ impl Editor {
         if self.buffer.has_file() {
             match self.buffer.save() {
                 Ok(()) => self.messagebar.set("File saved successfully.".to_owned()),
-                Err(e) => self.messagebar.set(format!("Error writing file! {e}")),
+                Err(e) => {
+                    let message = format!("Error writing file! {e}");
+                    cli_log::record_error(&message);
+                    self.messagebar.set(message);
+                }
             }
         } else {
             self.commandbar = Some(CommandBar::new("w "));
@@ -332,5 +342,80 @@ impl EditorBuilder {
 
     pub fn build(self) -> Result<Editor, std::io::Error> {
         Editor::new(self.file_name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Editor, EditorCommand, editorcommand::System};
+    use std::{io, process::Command};
+
+    #[test]
+    #[ignore = "Runs in a child process with isolated logging configuration"]
+    fn handled_errors_child() {
+        let session = cli_log::init("kara");
+        session.set_stderr_level(log::LevelFilter::Off);
+        let mut editor = Editor::default();
+        editor.open_file("missing-parent/document.txt");
+        editor.handle_command(EditorCommand::System(System::SaveAs(
+            "missing-parent/saved.txt".to_owned(),
+        )));
+        editor.save();
+        let _ = session.finish(0);
+    }
+
+    #[test]
+    #[allow(
+        clippy::panic_in_result_fn,
+        reason = "Assertions verify handled errors remain observable without disrupting the editor."
+    )]
+    fn handled_errors_are_persisted_without_stderr() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = assert_fs::TempDir::new()?;
+        let output = Command::new(std::env::current_exe()?)
+            .current_dir(dir.path())
+            .args([
+                "--exact",
+                "editor::tests::handled_errors_child",
+                "--ignored",
+            ])
+            .env("CLIS_LOG_DIR", dir.path())
+            .env("CLIS_LOG_LEVEL", "info")
+            .env("CLIS_LOG_STDERR", "debug")
+            .output()?;
+        assert!(output.status.success());
+        assert_eq!(output.stderr, b"");
+        let log_file = std::fs::read_dir(dir.path())?
+            .filter_map(std::result::Result::ok)
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| {
+                        name.starts_with("kara_") && name.ends_with("_rCURRENT.jsonl")
+                    })
+            })
+            .ok_or_else(|| io::Error::other("missing Kara invocation log"))?;
+        let records: Vec<serde_json::Value> = std::fs::read_to_string(log_file)?
+            .lines()
+            .map(serde_json::from_str)
+            .collect::<Result<_, _>>()?;
+        let errors: Vec<_> = records
+            .iter()
+            .filter(|record| record["kv"]["event"] == "error")
+            .collect();
+        assert_eq!(errors.len(), 3);
+        let open = errors
+            .first()
+            .ok_or_else(|| io::Error::other("missing open error"))?;
+        assert!(
+            open["text"]
+                .as_str()
+                .is_some_and(|message| message.contains("Could not open file"))
+        );
+        assert_eq!(
+            records.last().map(|record| &record["kv"]["exit_code"]),
+            Some(&serde_json::json!(0))
+        );
+        Ok(())
     }
 }

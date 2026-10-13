@@ -1,0 +1,22 @@
+[package]
+name = "cli-log"
+version = "0.1.0"
+description = "Unified structured file logging for CLI applications"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[dependencies]
+clap = { workspace = true, features = ["env"] }
+log.workspace = true
+flexi_logger = { version = "0.31.10", default-features = false, features = ["json", "kv"] }
+
+[dev-dependencies]
+serde_json.workspace = true
+anyhow.workspace = true
+assert_fs.workspace = true
+
+[lints]
+workspace = true
