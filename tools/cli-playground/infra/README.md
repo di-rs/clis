@@ -298,7 +298,9 @@ Do not recover by changing to an empty bucket or deleting state. Check the
 workflow step that failed, then use the relevant account page:
 
 - **State access:** verify bucket name, account ID, EU endpoint, bucket-scoped
-  S3 credentials and the original passphrase.
+  S3 credentials and the original passphrase. Runtime deployment allows two
+  minutes for the state read, including storage retries. A timeout fails the run
+  and cleans up temporary files; rerun after resolving backend access.
 - **Provider setup:** check the Hetzner project token, available server type/
   location, zone ID, DNS-token scope and hostname conflicts.
 - **Image publication/pull:** check both packages' Actions access and repository/

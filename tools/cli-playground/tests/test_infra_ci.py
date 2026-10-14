@@ -167,6 +167,48 @@ def test_ssh_readiness_retries_with_pinned_identity_and_stops_at_deadline(
     assert all("StrictHostKeyChecking=yes" in command for command in calls)
 
 
+def test_deploy_cli_times_out_state_read_and_cleans_up_without_logging_secrets(
+    ci_environment: None, tmp_path: Path
+) -> None:
+    private_root = tmp_path / "runner-temporary"
+    private_root.mkdir()
+    started = tmp_path / "state-read-started"
+    binary = tmp_path / "pulumi"
+    binary.write_text(
+        f"#!{sys.executable}\nimport pathlib, sys, time\n"
+        f"pathlib.Path({str(started)!r}).touch()\n"
+        "print('private-state-output', flush=True)\n"
+        "print('private-state-diagnostic', file=sys.stderr, flush=True)\n"
+        "time.sleep(2)\n"
+        "sys.exit(1)\n"
+    )
+    binary.chmod(0o755)
+    # Exercise the CLI and a real child-process timeout without a two-minute wait.
+    command = (
+        f"import sys; sys.path.insert(0, {str(Path(ci.__file__).parent.parent)!r}); "
+        "from infra import ci; ci.STACK_OUTPUT_TIMEOUT = 0.5; "
+        "sys.argv = ['ci.py', 'deploy']; ci.main()"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", command],
+        env={
+            **os.environ,
+            "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"],
+            "TMPDIR": str(private_root),
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert started.exists()
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr == (
+        "Playground CI deploy failed (TimeoutExpired). Check configuration and deployment logs.\n"
+    )
+    assert list(private_root.iterdir()) == []
+
+
 @pytest.mark.parametrize("success", [True, False])
 def test_ci_deploy_reads_state_then_deploys_and_cleans_credentials(
     harness: dict[str, Path],

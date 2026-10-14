@@ -20,6 +20,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from infra import deploy  # noqa: E402
 
 INFRA = Path(__file__).resolve().parent
+# Allow two minutes for state reads and storage retries, well inside the
+# 25-minute deployment job deadline so timeout handling can clean up normally.
+STACK_OUTPUT_TIMEOUT = 120
 
 
 def required(name: str) -> str:
@@ -105,13 +108,15 @@ def prepare(directory: Path, outputs: dict[str, Any]) -> str:
 
 
 def stack_outputs() -> dict[str, Any]:
-    # This reads existing state only: no provider login, refresh or update.
+    """Read existing state within its time budget; let subprocess timeouts propagate."""
+    # No provider login, refresh or update.
     result = subprocess.run(
         ["pulumi", "stack", "output", "--json", "--show-secrets", "--stack", "production"],
         cwd=INFRA,
         capture_output=True,
         text=True,
         check=False,
+        timeout=STACK_OUTPUT_TIMEOUT,
     )
     if result.returncode:
         raise RuntimeError("Could not read Pulumi state; run setup first")
