@@ -1,0 +1,9 @@
+config:
+  # The setup workflow supplies domain and cloudflareZoneId from GitHub variables.
+  # Public-key authentication only; GitHub-hosted runners have changing IP addresses.
+  cli-playground:sshCidrs:
+    - 0.0.0.0/0
+  cli-playground:location: nbg1
+  cli-playground:serverType: cx33
+  cli-playground:backups: false
+  cli-playground:protect: true

@@ -65,10 +65,20 @@ browser origin. Otherwise, rebuild the frontend and use port 8000.
 
 ## Hosting and checks
 
-Follow the [hosting guide](infra/README.md) for VPS setup, gVisor, secrets and GitHub
-Actions. Production requires one gateway worker on a dedicated Docker/gVisor host.
-PR links are public; add proxy authentication if needed. PR closure removes the
-preview, and new builds replace it at the same URL while ending old sessions.
+Follow the [browser-only hosting guide](infra/README.md) to create a private
+Cloudflare R2 state bucket, configure the domain and GitHub credentials, and run
+**CLI playground setup** on `master`. Setup provisions Hetzner and one DNS-only A
+record, then builds and deploys the application through GitHub Actions. After
+setup succeeds, enable `PLAYGROUND_AUTO_DEPLOY` for runtime releases on relevant
+pushes to `master`. **CLI playground release** also supports manual runs.
+
+Production requires no local deployment commands. One dedicated Docker/gVisor
+host runs one gateway worker; Traefik handles HTTP-01 certificates for the single
+hostname. Normal runtime releases read the existing SSH identity from R2 and
+deploy immutable images without provisioning infrastructure. Infrastructure
+changes require a manual setup run. PR links use paths on the same hostname and
+are public; add authentication if needed. PR closure removes the preview, and
+new builds replace it at the same URL while ending old sessions.
 
 See [Testing](../../docs/testing.md) for Python, frontend and browser checks,
 and the [Linux smoke workflow](../../.github/workflows/cli-playground-sandbox.yml)

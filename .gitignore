@@ -17,3 +17,4 @@ node_modules/
 !/tools/cli-playground/infra/*.env.example
 /tools/cli-playground/infra/Pulumi.*.yaml
 !/tools/cli-playground/infra/Pulumi.example.yaml
+!/tools/cli-playground/infra/Pulumi.production.yaml

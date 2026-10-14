@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import Literal
 
 import pulumi
+import pulumi_cloudflare as cloudflare
 import pulumi_hcloud as hcloud
+import pulumi_tls as tls
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -17,8 +19,9 @@ class HostConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
 
     domain: str
-    ssh_public_key: str
-    admin_cidrs: list[str]
+    cloudflare_zone_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    ssh_public_key: str | None = None
+    ssh_cidrs: list[str] = Field(default_factory=lambda: ["0.0.0.0/0"])
     location: Literal["nbg1", "fsn1"] = "nbg1"
     server_type: str = Field(default="cx33", pattern=r"^(?:cx|cpx|ccx)[0-9]+$")
     backups: bool = False
@@ -39,29 +42,25 @@ class HostConfig(BaseModel):
             raise ValueError("domain must be a lowercase DNS hostname, e.g. play.example.com")
         return value
 
-    @field_validator("admin_cidrs")
+    @field_validator("ssh_cidrs")
     @classmethod
-    def restricted_ssh_networks(cls, value: list[str]) -> list[str]:
+    def ssh_networks(cls, value: list[str]) -> list[str]:
         if not value:
-            raise ValueError("adminCidrs must contain at least one administrative CIDR")
-        has_ipv4 = False
+            raise ValueError("sshCidrs must include at least one IPv4 network")
         for cidr in value:
             try:
                 network = ipaddress.ip_network(cidr, strict=True)
-                if "/" not in cidr or network.prefixlen == 0:
-                    raise ValueError("unrestricted SSH")
-                has_ipv4 |= network.version == 4
+                if "/" not in cidr or network.version != 4:
+                    raise ValueError("expected an explicit IPv4 network")
             except ValueError as error:
-                raise ValueError(
-                    "adminCidrs must be explicit networks; /0 is not allowed"
-                ) from error
-        if not has_ipv4:
-            raise ValueError("adminCidrs needs an IPv4 network: this host has no public IPv6")
+                raise ValueError("sshCidrs must contain explicit IPv4 networks") from error
         return value
 
     @field_validator("ssh_public_key")
     @classmethod
-    def openssh_public_key(cls, value: str) -> str:
+    def openssh_public_key(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         parts = value.split()
         if (
             any(character in value for character in "\n\r")
@@ -83,12 +82,16 @@ class HostConfig(BaseModel):
         return value
 
 
-def cloud_init() -> str:
-    """JSON is valid YAML; no templating, public input or secret reaches the script."""
+def cloud_init(host_private_key: str, host_public_key: str) -> str:
+    """Install a pinned SSH host identity; no provider or application tokens are used."""
     return "#cloud-config\n" + json.dumps(
         {
             "ssh_pwauth": False,
             "disable_root": False,
+            "ssh_keys": {
+                "ed25519_private": host_private_key,
+                "ed25519_public": host_public_key,
+            },
             "write_files": [
                 {
                     "path": "/usr/local/sbin/cli-playground-bootstrap.sh",
@@ -108,24 +111,48 @@ def cloud_init() -> str:
 
 def provision(config: HostConfig) -> hcloud.Server:
     labels = {"service": "cli-playground", "managed-by": "pulumi"}
-    key = hcloud.SshKey("admin", public_key=config.ssh_public_key, labels=labels)
+    private_outputs = ["privateKeyOpenssh", "privateKeyPem", "privateKeyPemPkcs8"]
+    deployment_key = tls.PrivateKey(
+        "deployment-key",
+        algorithm="ED25519",
+        opts=pulumi.ResourceOptions(additional_secret_outputs=private_outputs),
+    )
+    host_key = tls.PrivateKey(
+        "host-key",
+        algorithm="ED25519",
+        opts=pulumi.ResourceOptions(additional_secret_outputs=private_outputs),
+    )
+    host_public_key = host_key.public_key_openssh.apply(str.strip)
+    deployment = hcloud.SshKey(
+        "deployment",
+        public_key=deployment_key.public_key_openssh.apply(str.strip),
+        labels=labels,
+    )
+    ssh_keys = [deployment.id]
+    if config.ssh_public_key:
+        # Keep the existing resource name for stacks that already have admin access.
+        admin = hcloud.SshKey("admin", public_key=config.ssh_public_key, labels=labels)
+        ssh_keys.append(admin.id)
+
+    rules = [
+        hcloud.FirewallRuleArgs(
+            direction="in", protocol="tcp", port=port, source_ips=["0.0.0.0/0", "::/0"]
+        )
+        for port in ("80", "443")
+    ]
+    rules.append(
+        hcloud.FirewallRuleArgs(direction="in", protocol="icmp", source_ips=["0.0.0.0/0", "::/0"])
+    )
+    rules.insert(
+        0,
+        hcloud.FirewallRuleArgs(
+            direction="in", protocol="tcp", port="22", source_ips=config.ssh_cidrs
+        ),
+    )
     firewall = hcloud.Firewall(
         "playground",
         labels=labels,
-        rules=[
-            hcloud.FirewallRuleArgs(
-                direction="in", protocol="tcp", port="22", source_ips=config.admin_cidrs
-            ),
-            hcloud.FirewallRuleArgs(
-                direction="in", protocol="tcp", port="80", source_ips=["0.0.0.0/0", "::/0"]
-            ),
-            hcloud.FirewallRuleArgs(
-                direction="in", protocol="tcp", port="443", source_ips=["0.0.0.0/0", "::/0"]
-            ),
-            hcloud.FirewallRuleArgs(
-                direction="in", protocol="icmp", source_ips=["0.0.0.0/0", "::/0"]
-            ),
-        ],
+        rules=rules,
     )
     ipv4 = hcloud.PrimaryIp(
         "playground-ipv4",
@@ -137,6 +164,11 @@ def provision(config: HostConfig) -> hcloud.Server:
         labels=labels,
         opts=pulumi.ResourceOptions(protect=config.protect),
     )
+    user_data: pulumi.Output[str] = pulumi.Output.secret(
+        pulumi.Output.all(host_key.private_key_openssh, host_public_key).apply(
+            lambda keys: cloud_init(keys[0], keys[1])
+        )
+    )
     server = hcloud.Server(
         "playground",
         server_type=config.server_type,
@@ -146,7 +178,7 @@ def provision(config: HostConfig) -> hcloud.Server:
         delete_protection=config.protect,
         rebuild_protection=config.protect,
         shutdown_before_deletion=True,
-        ssh_keys=[key.id],
+        ssh_keys=ssh_keys,
         # Attach the firewall before the first boot, not in a later attachment.
         firewall_ids=[firewall.id.apply(int)],
         public_nets=[
@@ -154,20 +186,21 @@ def provision(config: HostConfig) -> hcloud.Server:
                 ipv4=ipv4.id.apply(int), ipv4_enabled=True, ipv6_enabled=False
             )
         ],
-        user_data=cloud_init(),
+        user_data=user_data,
         labels=labels,
-        opts=pulumi.ResourceOptions(protect=config.protect),
+        opts=pulumi.ResourceOptions(protect=config.protect, additional_secret_outputs=["userData"]),
+    )
+    cloudflare.DnsRecord(
+        "playground",
+        zone_id=config.cloudflare_zone_id,
+        name=config.domain,
+        type="A",
+        content=ipv4.ip_address,
+        ttl=300,
+        proxied=False,
     )
     pulumi.export("ipv4", ipv4.ip_address)
+    pulumi.export("sshPrivateKey", pulumi.Output.secret(deployment_key.private_key_openssh))
+    pulumi.export("sshHostPublicKey", host_public_key)
     pulumi.export("publicUrl", f"https://{config.domain}")
-    pulumi.export(
-        "dnsRecords",
-        ipv4.ip_address.apply(
-            lambda address: [
-                {"type": "A", "name": config.domain, "value": address},
-                {"type": "A", "name": f"*.{config.domain}", "value": address},
-            ]
-        ),
-    )
-    pulumi.export("ssh", ipv4.ip_address.apply(lambda address: f"ssh root@{address}"))
     return server

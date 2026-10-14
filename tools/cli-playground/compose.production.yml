@@ -6,8 +6,7 @@ services:
     platform: linux/amd64
     environment:
       PLAYGROUND_DATA_DIR: /var/lib/cli-playground
-      PLAYGROUND_PUBLIC_URL: https://${PLAYGROUND_DOMAIN:?Set the preview domain}
-      PLAYGROUND_PREVIEW_DOMAIN: ${PLAYGROUND_DOMAIN}
+      PLAYGROUND_PUBLIC_URL: https://${PLAYGROUND_DOMAIN:?Set the playground domain}
       PLAYGROUND_DEPLOY_TOKEN: ${PLAYGROUND_DEPLOY_TOKEN:?Set a random deployment token}
       PLAYGROUND_SANDBOX_IMAGE: ${PLAYGROUND_SANDBOX_IMAGE:?Use the approved release via infra/deploy.py}
       PLAYGROUND_SANDBOX_RUNTIME: runsc
@@ -16,7 +15,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /var/lib/cli-playground:/var/lib/cli-playground
     healthcheck:
-      test: ["CMD", "/app/.venv/bin/python", "-c", "import os,urllib.request; r=urllib.request.Request('http://127.0.0.1:8000/healthz',headers={'Host':os.environ['PLAYGROUND_PREVIEW_DOMAIN']}); urllib.request.urlopen(r,timeout=3).close()"]
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import os,urllib.parse,urllib.request; r=urllib.request.Request('http://127.0.0.1:8000/healthz',headers={'Host':urllib.parse.urlsplit(os.environ['PLAYGROUND_PUBLIC_URL']).netloc}); urllib.request.urlopen(r,timeout=3).close()"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -40,12 +39,9 @@ services:
       - --providers.file.filename=/etc/traefik/routes.yml
       - --certificatesresolvers.preview.acme.email=${ACME_EMAIL:?Set the certificate contact email}
       - --certificatesresolvers.preview.acme.storage=/certificates/acme.json
-      - --certificatesresolvers.preview.acme.dnschallenge.provider=${DNS_PROVIDER:?Set the lego DNS provider name}
+      - --certificatesresolvers.preview.acme.httpchallenge.entrypoint=web
     environment:
       PLAYGROUND_DOMAIN: ${PLAYGROUND_DOMAIN}
-    env_file:
-      - path: ${PLAYGROUND_DNS_ENV_FILE:-/etc/cli-playground/dns.env}
-        format: raw
     ports:
       - "80:80"
       - "443:443"

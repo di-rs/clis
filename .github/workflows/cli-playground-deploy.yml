@@ -1,0 +1,71 @@
+name: CLI playground runtime deploy
+
+# Shared by initial setup and subsequent runtime releases. Never provisions resources.
+on:
+  workflow_call:
+    inputs:
+      revision:
+        required: true
+        type: string
+      gateway_image:
+        required: true
+        type: string
+      sandbox_image:
+        required: true
+        type: string
+    secrets:
+      PLAYGROUND_DEPLOY_TOKEN:
+        required: true
+      # Resolved from the playground environment; callers forward the secret names.
+      PULUMI_CONFIG_PASSPHRASE:
+        required: true
+      R2_ACCESS_KEY_ID:
+        required: true
+      R2_SECRET_ACCESS_KEY:
+        required: true
+
+permissions: {}
+
+jobs:
+  deploy:
+    if: ${{ github.ref == 'refs/heads/master' }}
+    environment: playground
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    concurrency:
+      group: cli-playground-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: read
+    env:
+      PULUMI_SKIP_UPDATE_CHECK: 'true'
+      PULUMI_BACKEND_URL: ${{ vars.PULUMI_BACKEND_URL }}
+      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+      # Read the existing SSH identity from R2; no Hetzner or Cloudflare API token.
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_EC2_METADATA_DISABLED: 'true'
+      PLAYGROUND_URL: ${{ vars.PLAYGROUND_URL }}
+      ACME_EMAIL: ${{ vars.ACME_EMAIL }}
+      PLAYGROUND_DEPLOY_TOKEN: ${{ secrets.PLAYGROUND_DEPLOY_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.13.0'
+          enable-cache: false
+      - run: uv sync --locked --all-packages
+      - uses: pulumi/setup-pulumi@b374ceb6168550de27c6eba92e01c1a774040e11 # v2
+        with:
+          pulumi-version: '3.268.0'
+      - name: Deploy immutable images and verify HTTPS
+        env:
+          RELEASE_REVISION: ${{ inputs.revision }}
+          GATEWAY_IMAGE: ${{ inputs.gateway_image }}
+          SANDBOX_IMAGE: ${{ inputs.sandbox_image }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: uv run --locked python tools/cli-playground/infra/ci.py deploy
