@@ -1,0 +1,4 @@
+Hello, playground.
+These are real files in your disposable workspace.
+Try pipes, redirects, and your Rust CLI.
+Reset starts a fresh session.

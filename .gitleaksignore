@@ -1,4 +1,0 @@
-# Gitleaks 8.30.1 false positives in vendored @xterm/xterm 6.0.0:
-# FourKeyMap and SequencerByKey export assignments, including a decoded duplicate.
-# This immutable commit/file/rule/line fingerprint covers only those findings.
-a6443d81319edc1fe6d5f71598b585f3d3f7f7d8:tools/cli-playground/static/vendor/xterm.js:generic-api-key:1

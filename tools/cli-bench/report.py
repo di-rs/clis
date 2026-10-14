@@ -6,39 +6,25 @@ import io
 import json
 import os
 import re
-import selectors
 import subprocess
 import sys
-import tempfile
-import time
 import tomllib
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 from itertools import groupby
 from pathlib import Path, PurePosixPath
-from typing import cast
 
-MAX_JSON = 2 * 1024 * 1024
+# Keep direct script invocation usable from any working directory.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from ci.github import GitHub, array, table  # noqa: E402
+
 MAX_ZIP = 8 * 1024 * 1024
 MAX_MEMBER = 1024 * 1024
-REQUEST_TIMEOUT = 60
 SYSTEMS = ("ubuntu-24.04", "macos-15")
 PLATFORMS = {"ubuntu-24.04": "Linux", "macos-15": "macOS"}
 WORKFLOW = ".github/workflows/cli-bench.yml"
 MARKER = re.compile(r"<!-- cli-bench-report number=(\d+) run=(\d+) attempt=(\d+) -->")
-
-
-def table(value: object) -> dict[str, object]:
-    if not isinstance(value, dict):
-        raise ValueError("expected an object")
-    return cast(dict[str, object], value)
-
-
-def array(value: object) -> list[object]:
-    if not isinstance(value, list):
-        raise ValueError("expected an array")
-    return cast(list[object], value)
 
 
 def integer(value: object, maximum: int = 10**18, minimum: int = 1) -> int:
@@ -51,62 +37,6 @@ def identifier(value: object) -> str:
     if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", value):
         raise ValueError("invalid identifier")
     return value
-
-
-class GitHub:
-    """The only network boundary. gh handles authentication and artifact redirects."""
-
-    def request(
-        self, path: str, *, method: str = "GET", body: object = None, limit: int = MAX_JSON
-    ) -> bytes:
-        command = ["gh", "api", "--hostname", "github.com", "--method", method, path]
-        with tempfile.TemporaryFile() as payload:
-            if body is not None:
-                payload.write(json.dumps(body).encode())
-                payload.seek(0)
-                command += ["--input", "-"]
-            deadline = time.monotonic() + REQUEST_TIMEOUT
-            with subprocess.Popen(
-                command, stdin=payload, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
-            ) as process:
-                assert process.stdout is not None
-                try:
-                    data = bytearray()
-                    with selectors.DefaultSelector() as selector:
-                        selector.register(process.stdout, selectors.EVENT_READ)
-                        while True:
-                            remaining = deadline - time.monotonic()
-                            if remaining <= 0 or not selector.select(remaining):
-                                raise subprocess.TimeoutExpired(command, REQUEST_TIMEOUT)
-                            chunk = os.read(
-                                process.stdout.fileno(), min(65536, limit + 1 - len(data))
-                            )
-                            if not chunk:
-                                break
-                            data.extend(chunk)
-                            if len(data) > limit:
-                                raise ValueError("GitHub response exceeds size limit")
-                    if process.wait(timeout=max(0, deadline - time.monotonic())):
-                        raise ValueError("GitHub API request failed")
-                    return bytes(data)
-                finally:
-                    if process.poll() is None:
-                        process.kill()
-                    process.wait()
-
-    def json(self, path: str) -> object:
-        return cast(object, json.loads(self.request(path)))
-
-    def pages(self, path: str, key: str | None = None) -> list[dict[str, object]]:
-        result: list[dict[str, object]] = []
-        separator = "&" if "?" in path else "?"
-        for page in range(1, 21):
-            response = self.json(f"{path}{separator}per_page=100&page={page}")
-            values = array(table(response)[key] if key else response)
-            result.extend(table(value) for value in values)
-            if len(values) < 100:
-                return result
-        raise ValueError("GitHub pagination limit exceeded")
 
 
 def read_zip(data: bytes) -> dict[str, bytes]:

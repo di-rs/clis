@@ -6,7 +6,10 @@ dependencies = []
 
 [dependency-groups]
 dev = [
+    "httpx",
     "mypy",
+    "pulumi==3.268.0",
+    "pulumi-hcloud==1.43.1",
     "pytest>=9.1.1",
     "ruff",
 ]
@@ -16,7 +19,7 @@ package = false
 required-version = ">=0.13.0"
 
 [tool.uv.workspace]
-members = ["tools/cli-bench", "tools/cli-testing"]
+members = ["tools/cli-bench", "tools/cli-playground", "tools/cli-testing"]
 
 [tool.ruff]
 target-version = "py315"
@@ -27,10 +30,12 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
 
 [tool.mypy]
 python_version = "3.15"
+plugins = ["pydantic.mypy"]
 files = ["tools"]
+mypy_path = "tools"
 strict = true
 
 [tool.pytest]
-testpaths = ["tools/cli-bench/tests", "tools/cli-testing/tests"]
-pythonpath = ["tools/cli-bench"]
+testpaths = ["tools/ci/tests", "tools/cli-bench/tests", "tools/cli-playground/tests", "tools/cli-testing/tests"]
+pythonpath = ["tools", "tools/cli-bench", "tools/cli-playground"]
 addopts = ["--strict-config", "--strict-markers"]

@@ -5,6 +5,9 @@ README describes its usage, API, and current limitations. See [Testing](docs/tes
 for test commands and regression guidance, and [Benchmarking](docs/benchmarking.md)
 for per-CLI TOML suites using Biggie and hyperfine.
 
+The [CLI playground](tools/cli-playground/README.md) provides a deployable Python
+web terminal with real Rust binaries, disposable sample files, and one preview URL per PR.
+
 ## Apps
 
 | Project | Purpose |

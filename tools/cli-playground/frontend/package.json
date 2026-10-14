@@ -1,0 +1,31 @@
+{
+  "name": "@clis/playground",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vp dev",
+    "build": "vp build",
+    "check": "vp check && svelte-check --tsconfig ./tsconfig.json",
+    "test": "vp test",
+    "test:browser": "playwright test"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
+    "svelte": "5.57.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0",
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "@types/node": "26.6.5",
+    "svelte-check": "4.7.6",
+    "typescript": "6.0.3",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.2.0",
+    "vite-plus": "1.2.0"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  },
+  "packageManager": "pnpm@12.9.1"
+}

@@ -9,13 +9,13 @@ import subprocess
 import sys
 import textwrap
 import zipfile
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NotRequired, TypedDict, cast
 
 import pytest
-import report
+from ci.github import GitHub
 from select_suites import Selection
 
 TOOLS = Path(__file__).resolve().parents[1]
@@ -288,23 +288,6 @@ SHA = "a" * 40
 BASE = f"repos/{REPO}"
 
 
-@pytest.fixture
-def gh_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[str], Path]:
-    monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ.get("PATH", ""))
-
-    def create(body: str) -> Path:
-        pid_path = tmp_path / "gh-pid"
-        fixture_executable(
-            tmp_path,
-            "gh",
-            "import pathlib, time\n"
-            f"pathlib.Path({str(pid_path)!r}).write_text(str(os.getpid()))\n" + body,
-        )
-        return pid_path
-
-    return create
-
-
 def archive(files: dict[str, object]) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as target:
@@ -363,7 +346,7 @@ def job(name: str, start: str, end: str) -> dict[str, object]:
     }
 
 
-class FakeGitHub(report.GitHub):
+class FakeGitHub(GitHub):
     def __init__(self) -> None:
         self.run: dict[str, object] = {
             "id": 500,

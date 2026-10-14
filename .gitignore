@@ -5,6 +5,15 @@ __pycache__/
 /.mypy_cache/
 /.pytest_cache/
 /docs/superpowers/plans/
+node_modules/
+/tools/cli-playground/frontend/dist/
+/tools/cli-playground/frontend/test-results/
+/tools/cli-playground/frontend/playwright-report/
 
 /tests/consumers/target/
 /utils/comp_macro/wip/
+.env
+*.env
+!/tools/cli-playground/infra/*.env.example
+/tools/cli-playground/infra/Pulumi.*.yaml
+!/tools/cli-playground/infra/Pulumi.example.yaml
