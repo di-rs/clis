@@ -249,9 +249,13 @@ dev = [
     { name = "httpx" },
     { name = "mypy" },
     { name = "pulumi" },
+    { name = "pulumi-cloudflare" },
     { name = "pulumi-hcloud" },
+    { name = "pulumi-tls" },
     { name = "pytest" },
+    { name = "pyyaml" },
     { name = "ruff" },
+    { name = "types-pyyaml" },
 ]
 
 [package.metadata]
@@ -261,9 +265,13 @@ dev = [
     { name = "httpx" },
     { name = "mypy" },
     { name = "pulumi", specifier = "==3.268.0" },
+    { name = "pulumi-cloudflare", specifier = "==6.22.1" },
     { name = "pulumi-hcloud", specifier = "==1.43.1" },
+    { name = "pulumi-tls", specifier = "==5.6.2" },
     { name = "pytest", specifier = ">=9.1.1" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "ruff" },
+    { name = "types-pyyaml", specifier = ">=6.0.12.20260906" },
 ]
 
 [[package]]
@@ -772,6 +780,20 @@ wheels = [
 ]
 
 [[package]]
+name = "pulumi-cloudflare"
+version = "6.22.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "packaging" },
+    { name = "pulumi" },
+    { name = "semver" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/01/fe/69ff5b24badcd27dd9b4ad874d4da7428e82e85fc378e19d3346a228bcf5/pulumi_cloudflare-6.22.1.tar.gz", hash = "sha256:1706cdd01214ca0e7065fd34649b02ccbaf56904df16c36df026b0ac512b185c", size = 2078213, upload-time = "2026-10-13T20:33:19.84Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2b/6e/bf1ba64a12c742c9bf957d6e0d3a2f2fa7038d6dc5bf0362cb43bc9efcac/pulumi_cloudflare-6.22.1-py3-none-any.whl", hash = "sha256:a45f6bfefc072191fcdfdcbdb147b4852c9b728e1ca0887eda5e47720ab0cb31", size = 3102062, upload-time = "2026-10-13T20:33:17.696Z" },
+]
+
+[[package]]
 name = "pulumi-hcloud"
 version = "1.43.1"
 source = { registry = "https://pypi.org/simple" }
@@ -783,6 +805,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/54/a6/752ce0f43c1a4f07572f86161bad5ea9c91084b54048007644b010233a6b/pulumi_hcloud-1.43.1.tar.gz", hash = "sha256:50dd02700480d2f2288699169c63b1050795df539bd5d963d6c1a9ea65c9bb1e", size = 112185, upload-time = "2026-10-13T16:54:37.945Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/72/f4/72a143791d30c931c200f3cd812ac25f0a66d56b5d5bdf93d17dae96385a/pulumi_hcloud-1.43.1-py3-none-any.whl", hash = "sha256:d305450e08c1307e693e221fe5df590ee7dc1af5a7c88975626e72eddcd29347", size = 206552, upload-time = "2026-10-13T16:54:36.221Z" },
+]
+
+[[package]]
+name = "pulumi-tls"
+version = "5.6.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "packaging" },
+    { name = "pulumi" },
+    { name = "semver" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f4/89/5831139191d91c6fe64369f4c7b803dce67e0e07a3497cd29fe6f1be47a1/pulumi_tls-5.6.2.tar.gz", hash = "sha256:ec322dc4a4a58afcf9dc18ccb558f4f3c544206773cdaf4419f7765f5bc67320", size = 33154, upload-time = "2026-10-13T17:54:18.831Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ca/a5/20f31777bf2903c56aee6ff62c63ef5ebc80428941ec0a3187e5a4cd1909/pulumi_tls-5.6.2-py3-none-any.whl", hash = "sha256:d36f5114f33c07101e6221162f781adc3867e6261f3d8e4a2dfb3d707b33b329", size = 40673, upload-time = "2026-10-13T17:54:17.563Z" },
 ]
 
 [[package]]
@@ -940,6 +976,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e9/0c/6efb252d091ecccd7d62048ae11f0ea35cd75a4fbaeea5e30f9c3bf91d10/starlette-1.8.0.tar.gz", hash = "sha256:1565dc0b35d5737a271ed1e0e04e949f4e81198799f216d2667b0a0fb9cf9522", size = 2730457, upload-time = "2026-10-13T07:54:39.53Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c1/b0/5742e4ac7af5eb58ec3470a537a49d7aa507e5539413e504b3a65ef50ba8/starlette-1.8.0-py3-none-any.whl", hash = "sha256:dfdd6b29c26483288088d990eee59631dedadd66ce20d203402a7ca8e3c4656f", size = 79612, upload-time = "2026-10-13T07:54:38.019Z" },
+]
+
+[[package]]
+name = "types-pyyaml"
+version = "6.0.12.20260906"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/90/6e/abec85b9013db5b934b0280a6dd104904d84f7bcbaab2e2f3def87ac7463/types_pyyaml-6.0.12.20260906.tar.gz", hash = "sha256:f59c1cc05010b833d2d72287bbaa72610106b28d42d89a907313117faba85212", size = 18649, upload-time = "2026-09-06T06:35:35.362Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/15/c0/fc0644b7ddcfb969e95845837143cb5173ddd6e06ee4ba5fc493cd9329b7/types_pyyaml-6.0.12.20260906-py3-none-any.whl", hash = "sha256:bca893ff0d51df5c9053137d5d0e6ccd36e939a196356f1d5c16372422f5137b", size = 21282, upload-time = "2026-09-06T06:35:34.372Z" },
 ]
 
 [[package]]

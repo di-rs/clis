@@ -14,7 +14,7 @@ from playground import app as playground_app
 from playground.app import create_app
 from playground.config import Settings
 
-from .helpers import APP_ENV, DNS_ENV, GATEWAY_IMAGE, SANDBOX_IMAGE, git_commit, protected
+from .helpers import APP_ENV, GATEWAY_IMAGE, SANDBOX_IMAGE, git_commit, protected
 
 
 @pytest.fixture
@@ -102,15 +102,27 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
     bin_directory.mkdir()
     command_log = tmp_path / "commands.jsonl"
     shim = f"""#!{sys.executable}
-import json, os, pathlib, subprocess, sys
+import base64, json, os, pathlib, subprocess, sys
 name = pathlib.Path(sys.argv[0]).name
 args = sys.argv[1:]
 with open(os.environ['DEPLOY_TEST_LOG'], 'a') as log:
     log.write(json.dumps([name, *args]) + '\\n')
 if name == 'ssh':
-    assert args[:7] == ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=15', '--']
-    assert args[7] == 'root@preview.example'
-    raise SystemExit(subprocess.run(['bash', '-c', args[8]]).returncode)
+    assert args[:6] == ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=15']
+    boundary = args.index('--')
+    if boundary > 6:
+        assert args[6:9] == ['-F', '/dev/null', '-i']
+        identity = pathlib.Path(args[9])
+        known_hosts = pathlib.Path(args[13].removeprefix('UserKnownHostsFile='))
+        assert identity.stat().st_mode & 0o777 == 0o600
+        assert known_hosts.stat().st_mode & 0o777 == 0o600
+        assert known_hosts.read_text() == '203.0.113.12 ssh-ed25519 YWJj\\n'
+        assert args[10:13] == ['-o', 'IdentitiesOnly=yes', '-o']
+        assert args[14:16] == ['-o', 'GlobalKnownHostsFile=/dev/null']
+        assert args[boundary + 1] == 'root@203.0.113.12'
+    else:
+        assert args[boundary + 1] == 'root@preview.example'
+    raise SystemExit(subprocess.run(['bash', '-c', args[boundary + 2]]).returncode)
 if name == 'flock':
     assert args[:2] == ['-w', '120']
     raise SystemExit(subprocess.run(args[3:]).returncode)
@@ -119,8 +131,11 @@ if name == 'cloud-init':
     if os.environ.get('DEPLOY_TEST_BOOTSTRAP_FAILED'):
         raise SystemExit(1)
 if name == 'docker':
-    if args[0] == 'compose' and 'up' in args and os.environ.get('DEPLOY_TEST_EXPECT_DNS_PATH'):
-        assert os.environ.get('PLAYGROUND_DNS_ENV_FILE') == os.environ['DEPLOY_TEST_EXPECT_DNS_PATH']
+    if 'pull' in args and os.environ.get('DEPLOY_TEST_EXPECT_REGISTRY'):
+        registry = pathlib.Path(os.environ['DOCKER_CONFIG']) / 'config.json'
+        assert registry.stat().st_mode & 0o777 == 0o600
+        auth = json.loads(registry.read_text())['auths']['ghcr.io']['auth']
+        assert base64.b64decode(auth).decode() == os.environ['DEPLOY_TEST_EXPECT_REGISTRY']
     if args[0] == 'info':
         print('' if os.environ.get('DEPLOY_TEST_NO_RUNSC') else 'runsc')
     if 'pull' in args and os.environ.get('DEPLOY_TEST_FAIL_PULL') in (args[-1], 'any'):
@@ -144,7 +159,6 @@ if name == 'docker':
 
     monkeypatch.setattr(deploy, "wait_for_health", health)
     app = protected(tmp_path / "app.env", APP_ENV)
-    dns = protected(tmp_path / "dns.env", DNS_ENV)
     revision = subprocess.check_output(
         ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
     ).strip()
@@ -160,7 +174,6 @@ if name == 'docker':
         "remote": remote_root,
         "config": remote_config,
         "app": app,
-        "dns": dns,
         "log": command_log,
         "remote_log": tmp_path / "remote-deploy.log",
     }

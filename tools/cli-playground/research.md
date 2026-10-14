@@ -61,23 +61,37 @@ service per CLI is more infrastructure than this first version needs.
 
 One dedicated Linux host runs the gateway and creates short-lived Docker/gVisor
 containers. One stable PR URL selects its current batch of affected CLIs; opening
-it creates a fresh session with all those binaries. Wildcard DNS and one wildcard
-certificate cover all preview subdomains; no per-PR DNS record, registry publication
-or VM provisioning is needed.
+it creates a fresh session with all those binaries. Previews use
+`https://play.thesecret.dev/p/<identifier>` on the gateway's hostname. One DNS
+record and one certificate cover the application; no per-PR DNS record, registry
+publication or VM provisioning is needed.
 
 Infrastructure decision updated 2026-10-14: Python Pulumi provisions a Hetzner
-CX33 in Nuremberg, a retained IPv4 address and an SSH-restricted firewall.
-Cloud-init installs Docker and gVisor. Trusted default-branch CI builds the shared
-gateway and shell images; an operator reviews their immutable digests and deploys
-them with Python over SSH. The VPS pulls images without building them. The
-control domain is `play.thesecret.dev`, with
-opaque preview subdomains under `*.play.thesecret.dev`. Cloudflare manages the
-`thesecret.dev` DNS zone; Traefik renews wildcard HTTPS certificates through its
-DNS API. The `play` and `*.play` A records use DNS-only mode and the VPS IPv4
-address; this IPv4-only host has no AAAA records. Pulumi state can remain
-self-managed. See the
-[hosting guide](infra/README.md) for implementation, configuration and operational
-boundaries. No live host or DNS resources have been provisioned by this change.
+CX33 in Nuremberg, a retained IPv4 address and a firewall. Cloud-init installs
+Docker and gVisor. The default permits public IPv4 SSH with key-only authentication
+so changing GitHub-hosted runner addresses can deploy without firewall changes.
+Pulumi generates deployment and server host keys, encrypts private key material
+in state, and supplies the host identity through cloud-init. CI pins that identity
+when connecting.
+
+Setup is browser-only: create a private Standard R2 bucket manually once
+(EU jurisdiction recommended), store its bucket-scoped S3 credentials and the
+state encryption passphrase in the `master`-restricted GitHub environment, then
+run **CLI playground setup**. R2 state remains outside the VPS lifecycle. The
+setup workflow applies infrastructure and calls the same release/deployment
+workflows used for later updates. After successful setup, the repository variable
+`PLAYGROUND_AUTO_DEPLOY=true` enables releases on relevant pushes to `master`.
+Manual releases remain available. Runtime deployment reads existing state for
+SSH identity and uses no provider administration tokens or Pulumi update.
+
+Trusted default-branch CI builds the shared gateway and shell images and deploys
+their immutable digests over verified SSH. The VPS pulls images without building
+them. Cloudflare manages the `thesecret.dev` zone and a single DNS-only `play` A
+record for the host's IPv4; the host has no IPv6 or AAAA record. Traefik obtains
+and renews the hostname certificate through HTTP-01, so no Cloudflare credential
+is installed on the host. See the [hosting guide](infra/README.md) for exact
+account, token and workflow steps, and for rerun and recovery limits. No live
+host or DNS resources have been provisioned by this change.
 
 GitHub documents that [`workflow_run`](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_run)
 can access secrets and write tokens even when the triggering workflow cannot.
@@ -110,9 +124,10 @@ must be checked by the Linux smoke workflow and on the selected VPS.
 
 ## Agreed defaults and remaining iteration
 
-1. **Hosting:** own Hetzner VPS, Python Pulumi, Docker + gVisor; no managed sandbox
-   dependency. Use `play.thesecret.dev` and its wildcard with Cloudflare DNS;
-   provisioning credentials and the ACME contact email remain setup inputs.
+1. **Hosting:** own Hetzner VPS, Python Pulumi with private R2 state, Docker +
+   gVisor; no managed sandbox dependency. Use `play.thesecret.dev` with one
+   Cloudflare DNS record and HTTP-01 HTTPS. Configure accounts in their websites;
+   GitHub Actions handles setup and runtime releases.
 2. **Access:** public preview links; authentication can be added if usage demands it.
 3. **Retention:** seven days plus PR-close cleanup; files remain disposable.
 4. **Coverage:** affected Rust CLIs; frontend/infrastructure-only changes do not

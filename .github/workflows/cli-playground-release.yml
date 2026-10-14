@@ -1,9 +1,49 @@
 name: CLI playground release
 
-# Application releases are deliberate builds of reviewed default-branch code.
+# Runtime releases use reviewed default-branch code; PR binaries have a separate flow.
 # PR binary previews use the separate playground build/publish workflows.
 on:
+  push:
+    branches: [master]
+    paths:
+      - 'tools/cli-playground/playground/**'
+      - 'tools/cli-playground/frontend/**'
+      - 'tools/cli-playground/fixtures/**'
+      - 'tools/cli-playground/Gateway.Dockerfile*'
+      - 'tools/cli-playground/Sandbox.Dockerfile*'
+      - 'tools/cli-playground/shell.sh'
+      - 'tools/cli-playground/compose.production.yml'
+      - 'tools/cli-playground/pyproject.toml'
+      - 'tools/cli-playground/infra/deploy.py'
+      - 'tools/cli-playground/infra/deploy.sh'
+      - 'tools/cli-playground/infra/ci.py'
+      - 'tools/cli-playground/infra/routes.yml'
+      - '.github/workflows/cli-playground-release.yml'
+      - '.github/workflows/cli-playground-deploy.yml'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.python-version'
   workflow_dispatch:
+  workflow_call:
+    secrets:
+      PLAYGROUND_DEPLOY_TOKEN:
+        required: true
+      PULUMI_CONFIG_PASSPHRASE:
+        required: true
+      R2_ACCESS_KEY_ID:
+        required: true
+      R2_SECRET_ACCESS_KEY:
+        required: true
+    outputs:
+      revision:
+        description: Reviewed source revision
+        value: ${{ jobs.release.outputs.revision }}
+      gateway_image:
+        description: Immutable gateway image
+        value: ${{ jobs.release.outputs.gateway_image }}
+      sandbox_image:
+        description: Immutable sandbox image
+        value: ${{ jobs.release.outputs.sandbox_image }}
 
 permissions: {}
 
@@ -13,12 +53,16 @@ concurrency:
 
 jobs:
   release:
-    if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+    if: ${{ github.ref == 'refs/heads/master' && (github.event_name != 'push' || vars.PLAYGROUND_AUTO_DEPLOY == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
       packages: write
+    outputs:
+      revision: ${{ github.sha }}
+      gateway_image: ${{ steps.images.outputs.gateway }}@${{ steps.gateway.outputs.digest }}
+      sandbox_image: ${{ steps.images.outputs.sandbox }}@${{ steps.sandbox.outputs.digest }}
     env:
       DOCKER_BUILD_RECORD_UPLOAD: 'false'
     steps:
@@ -70,7 +114,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-      - name: Record immutable image references for operator approval
+      - name: Record the immutable runtime release
         env:
           REVISION: ${{ github.sha }}
           GATEWAY_IMAGE: ${{ steps.images.outputs.gateway }}
@@ -97,11 +141,10 @@ jobs:
           payload = json.dumps(release, indent=2) + "\n"
           Path("release.json").write_text(payload, encoding="utf-8")
           with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as summary:
-              summary.write("## Playground release ready for review\n\n")
+              summary.write("## Playground runtime release\n\n")
               summary.write("```json\n" + payload + "```\n\n")
               summary.write(
-                  "Download the release artifact and review these exact digests before "
-                  "deploying over operator SSH. This workflow does not deploy to the VPS.\n"
+                  "The runtime deployment job applies these exact digests to the existing host.\n"
               )
           PY
       - name: Upload the immutable release manifest
@@ -112,3 +155,19 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: 30
+  deploy:
+    needs: release
+    permissions:
+      contents: read
+      packages: read
+    # ./ resolves this caller's commit; actionlint 1.7.12 lacks the newer $/ syntax.
+    uses: ./.github/workflows/cli-playground-deploy.yml # zizmor: ignore[self-repository]
+    with:
+      revision: ${{ needs.release.outputs.revision }}
+      gateway_image: ${{ needs.release.outputs.gateway_image }}
+      sandbox_image: ${{ needs.release.outputs.sandbox_image }}
+    secrets:
+      PLAYGROUND_DEPLOY_TOKEN: ${{ secrets.PLAYGROUND_DEPLOY_TOKEN }}
+      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

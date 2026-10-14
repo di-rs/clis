@@ -1,0 +1,66 @@
+name: CLI playground setup
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  provision:
+    if: ${{ github.ref == 'refs/heads/master' }}
+    environment: playground
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    concurrency:
+      group: cli-playground-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    env:
+      PULUMI_SKIP_UPDATE_CHECK: 'true'
+      PULUMI_BACKEND_URL: ${{ vars.PULUMI_BACKEND_URL }}
+      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+      # The S3 client expects AWS names; these credentials belong to Cloudflare R2.
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_EC2_METADATA_DISABLED: 'true'
+      HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
+      PLAYGROUND_URL: ${{ vars.PLAYGROUND_URL }}
+      ACME_EMAIL: ${{ vars.ACME_EMAIL }}
+      PLAYGROUND_DEPLOY_TOKEN: ${{ secrets.PLAYGROUND_DEPLOY_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.13.0'
+          enable-cache: false
+      - run: uv sync --locked --all-packages
+      - uses: pulumi/setup-pulumi@b374ceb6168550de27c6eba92e01c1a774040e11 # v2
+        with:
+          pulumi-version: '3.268.0'
+      - name: Validate and configure the production stack
+        run: uv run --locked python tools/cli-playground/infra/ci.py configure
+      - name: Provision Hetzner and Cloudflare DNS
+        working-directory: tools/cli-playground/infra
+        run: |
+          pulumi login "$PULUMI_BACKEND_URL" --non-interactive
+          pulumi stack select production --create --secrets-provider passphrase --non-interactive
+          pulumi preview --refresh --non-interactive --diff
+          pulumi up --yes --refresh --non-interactive --suppress-outputs
+  release:
+    needs: provision
+    permissions:
+      contents: read
+      packages: write
+    # ./ resolves this caller's commit; actionlint 1.7.12 lacks the newer $/ syntax.
+    uses: ./.github/workflows/cli-playground-release.yml # zizmor: ignore[self-repository]
+    secrets:
+      PLAYGROUND_DEPLOY_TOKEN: ${{ secrets.PLAYGROUND_DEPLOY_TOKEN }}
+      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

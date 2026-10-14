@@ -2,6 +2,7 @@
 """Deploy a CI-built playground release to a bootstrapped VPS over verified SSH."""
 
 import argparse
+import base64
 import hashlib
 import io
 import ipaddress
@@ -44,7 +45,6 @@ class AppConfig(BaseModel):
         max_length=220,
         pattern=rf"^(?:{DNS_LABEL}\.)+[a-z]{{2,63}}\z",
     )
-    dns_provider: str = Field(alias="DNS_PROVIDER", pattern=r"^[a-z][a-z0-9_]*\z")
     acme_email: str = Field(alias="ACME_EMAIL", pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+\z")
     deploy_token: str = Field(alias="PLAYGROUND_DEPLOY_TOKEN", min_length=1, repr=False)
 
@@ -132,7 +132,7 @@ def environment_file(path: Path) -> tuple[bytes, dict[str, str]]:
     return data, values
 
 
-def committed_revision(paths: tuple[Path, Path]) -> str:
+def committed_revision(paths: tuple[Path, ...]) -> str:
     revision = subprocess.check_output(
         ["git", "rev-parse", "--verify", "HEAD"], cwd=ROOT, stderr=subprocess.DEVNULL, text=True
     ).strip()
@@ -233,19 +233,12 @@ def wait_for_health(domain: str) -> None:
     )
 
 
-def deploy(host: str, env_file: Path, dns_env_file: Path, release_file: Path) -> tuple[str, str]:
+def ssh_command(
+    host: str, identity_file: Path | None = None, known_hosts_file: Path | None = None
+) -> list[str]:
     validate_host(host)
-    app_data, app_values = environment_file(env_file)
-    dns_data, dns_values = environment_file(dns_env_file)
-    if not any(value.strip() for value in dns_values.values()):
-        raise ValueError("dns.env must contain nonempty provider credentials")
-    config = AppConfig.model_validate(app_values)
-    revision = committed_revision((env_file, dns_env_file))
-    manifest = read_release(release_file)
-    if manifest.revision != revision:
-        raise ValueError(
-            "release revision must match committed HEAD; check out the approved CI commit first"
-        )
+    if (identity_file is None) != (known_hosts_file is None):
+        raise ValueError("Provide both the SSH identity and known-hosts files")
     command = [
         "ssh",
         "-o",
@@ -254,10 +247,44 @@ def deploy(host: str, env_file: Path, dns_env_file: Path, release_file: Path) ->
         "StrictHostKeyChecking=yes",
         "-o",
         "ConnectTimeout=15",
-        "--",
-        f"root@{host}",
-        remote_command(manifest),
     ]
+    if identity_file is not None:
+        command.extend(
+            [
+                "-F",
+                "/dev/null",
+                "-i",
+                str(identity_file),
+                "-o",
+                "IdentitiesOnly=yes",
+                "-o",
+                f"UserKnownHostsFile={known_hosts_file}",
+                "-o",
+                "GlobalKnownHostsFile=/dev/null",
+            ]
+        )
+    return [*command, "--", f"root@{host}"]
+
+
+def deploy(
+    host: str,
+    env_file: Path,
+    release_file: Path,
+    *,
+    identity_file: Path | None = None,
+    known_hosts_file: Path | None = None,
+    registry_credentials: tuple[str, str] | None = None,
+) -> tuple[str, str]:
+    validate_host(host)
+    app_data, app_values = environment_file(env_file)
+    config = AppConfig.model_validate(app_values)
+    revision = committed_revision((env_file,))
+    manifest = read_release(release_file)
+    if manifest.revision != revision:
+        raise ValueError(
+            "release revision must match committed HEAD; check out the approved CI commit first"
+        )
+    command = [*ssh_command(host, identity_file, known_hosts_file), remote_command(manifest)]
     # Only the encrypted stdin stream carries secrets; the archive reads committed Git objects.
     with tempfile.TemporaryFile() as payload:
         subprocess.run(
@@ -273,12 +300,20 @@ def deploy(host: str, env_file: Path, dns_env_file: Path, release_file: Path) ->
         ).encode()
         payload.seek(0)
         with tarfile.open(fileobj=payload, mode="a") as archive:
-            for name, data in {
+            files = {
                 "app.env": app_data,
-                "dns.env": dns_data,
                 "source/release.json": manifest.data(),
                 "source/image.env": image_env,
-            }.items():
+            }
+            if registry_credentials is not None:
+                username, token = registry_credentials
+                if not username or not token or ":" in username:
+                    raise ValueError("Invalid registry credentials")
+                auth = base64.b64encode(f"{username}:{token}".encode()).decode()
+                files["registry/config.json"] = json.dumps(
+                    {"auths": {"ghcr.io": {"auth": auth}}}
+                ).encode()
+            for name, data in files.items():
                 entry = tarfile.TarInfo(name)
                 entry.size, entry.mode = len(data), 0o600
                 archive.addfile(entry, io.BytesIO(data))
@@ -310,16 +345,11 @@ def main() -> None:
         "--env-file", required=True, type=Path, help="Private app.env (literal KEY=value)"
     )
     parser.add_argument(
-        "--dns-env-file", required=True, type=Path, help="Private DNS provider credentials"
-    )
-    parser.add_argument(
         "--release-file", required=True, type=Path, help="Approved release.json from trusted CI"
     )
     args = parser.parse_args()
     try:
-        revision, health_url = deploy(
-            args.host, args.env_file, args.dns_env_file, args.release_file
-        )
+        revision, health_url = deploy(args.host, args.env_file, args.release_file)
     except (ValueError, RuntimeError) as error:
         sys.exit(str(error))
     except OSError, subprocess.SubprocessError:

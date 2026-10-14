@@ -7,7 +7,9 @@ release=$2
 config=$3
 source_dir="$staging/source"
 app_env="$staging/app.env"
-export PLAYGROUND_DNS_ENV_FILE="$staging/dns.env"
+if [ -f "$staging/registry/config.json" ]; then
+    export DOCKER_CONFIG="$staging/registry"
+fi
 
 test "$(docker info --format '{{if index .Runtimes "runsc"}}runsc{{end}}')" = runsc
 
@@ -30,8 +32,6 @@ compose pull proxy
 
 if [ ! -d "$release" ]; then mv "$source_dir" "$release"; fi
 install -m 0600 "$staging/app.env" "$config/app.env"
-install -m 0600 "$staging/dns.env" "$config/dns.env"
 source_dir=$release
 app_env="$config/app.env"
-export PLAYGROUND_DNS_ENV_FILE="$config/dns.env"
 compose up --detach --no-build --pull never --wait --wait-timeout 180

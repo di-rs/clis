@@ -2,14 +2,11 @@
 http:
   routers:
     playground:
-      rule: 'Host(`{{ env "PLAYGROUND_DOMAIN" }}`) || HostRegexp(`^[a-f0-9]{32}\.{{ env "PLAYGROUND_DOMAIN" | replace "." "\\." }}$`)'
+      rule: 'Host(`{{ env "PLAYGROUND_DOMAIN" }}`)'
       entryPoints: [websecure]
       service: playground
       tls:
         certResolver: preview
-        domains:
-          - main: '{{ env "PLAYGROUND_DOMAIN" }}'
-            sans: ['*.{{ env "PLAYGROUND_DOMAIN" }}']
   services:
     playground:
       loadBalancer:

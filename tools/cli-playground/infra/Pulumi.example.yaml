@@ -1,8 +1,12 @@
 config:
   cli-playground:domain: play.thesecret.dev
-  cli-playground:sshPublicKey: ssh-ed25519 REPLACE_WITH_YOUR_PUBLIC_KEY
-  cli-playground:adminCidrs:
-    - 203.0.113.10/32 # Replace with your administrative public IP / VPN exit.
+  cli-playground:cloudflareZoneId: REPLACE_WITH_YOUR_CLOUDFLARE_ZONE_ID
+  # Optional administrator key. Pulumi generates a separate deployment identity.
+  # cli-playground:sshPublicKey: ssh-ed25519 REPLACE_WITH_YOUR_PUBLIC_KEY
+  # SSH uses public-key authentication only. Restrict this list if every deployment
+  # runner and administrator has a fixed public IPv4 address.
+  cli-playground:sshCidrs:
+    - 0.0.0.0/0
   cli-playground:location: nbg1
   cli-playground:serverType: cx33
   cli-playground:backups: false

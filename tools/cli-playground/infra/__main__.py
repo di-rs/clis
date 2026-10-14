@@ -13,8 +13,9 @@ config = pulumi.Config()
 provision(
     HostConfig(
         domain=config.require("domain"),
-        ssh_public_key=config.require("sshPublicKey"),
-        admin_cidrs=config.require_object("adminCidrs"),
+        cloudflare_zone_id=config.require("cloudflareZoneId"),
+        ssh_public_key=config.get("sshPublicKey") or None,
+        ssh_cidrs=config.get_object("sshCidrs", default=["0.0.0.0/0"]),
         location=config.get("location") or "nbg1",
         server_type=config.get("serverType") or "cx33",
         backups=config.get_bool("backups") or False,
