@@ -49,10 +49,7 @@ fn run(args: &[&str], expected: &str) {
 }
 
 fn run_stdin(args: &[&str], input_file: &str, expected: &str) -> Result<()> {
-    let input_name = input_file
-        .strip_prefix("tests/inputs/")
-        .unwrap_or(input_file);
-    let input = cli_testing::fixtures!().read_input(input_name)?;
+    let input = fs::read(input_file)?;
     cargo_bin_cmd!()
         .write_stdin(input)
         .args(args)

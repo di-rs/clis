@@ -132,11 +132,7 @@ fn run_count(test: &Test) -> Result<()> {
 
 fn run_stdin(test: &Test) -> Result<()> {
     let fixtures = cli_testing::fixtures!();
-    let input_name = test
-        .input
-        .strip_prefix("tests/inputs/")
-        .unwrap_or(test.input);
-    let input = fixtures.read_input(input_name)?;
+    let input = fs::read(test.input)?;
     let expected = fixtures.read_expected(test.out)?;
     cargo_bin_cmd!()
         .write_stdin(input)
@@ -149,11 +145,7 @@ fn run_stdin(test: &Test) -> Result<()> {
 
 fn run_stdin_count(test: &Test) -> Result<()> {
     let fixtures = cli_testing::fixtures!();
-    let input_name = test
-        .input
-        .strip_prefix("tests/inputs/")
-        .unwrap_or(test.input);
-    let input = fixtures.read_input(input_name)?;
+    let input = fs::read(test.input)?;
     let expected = fixtures.read_expected(test.out_count)?;
     cargo_bin_cmd!()
         .arg("--count")
@@ -196,11 +188,7 @@ fn run_outfile_count(test: &Test) -> Result<()> {
 
 fn run_outfile_stdin_count(test: &Test) -> Result<()> {
     let fixtures = cli_testing::fixtures!();
-    let input_name = test
-        .input
-        .strip_prefix("tests/inputs/")
-        .unwrap_or(test.input);
-    let input = fixtures.read_input(input_name)?;
+    let input = fs::read(test.input)?;
     let expected = fixtures.read_expected(test.out_count)?;
     let outfile = NamedTempFile::new()?;
     cargo_bin_cmd!()

@@ -96,10 +96,7 @@ fn run(args: &[&str], expected_file: &str) -> Result<()> {
 
 fn run_stdin(input_file: &str, args: &[&str], expected_file: &str) -> Result<()> {
     let fixtures = cli_testing::fixtures!();
-    let input_name = input_file
-        .strip_prefix("./tests/inputs/")
-        .unwrap_or(input_file);
-    let input = fixtures.read_input(input_name)?;
+    let input = fs::read(input_file)?;
     let contents = fixtures.read_expected(expected_file)?;
     // Preserve headr's lossy byte mode while asserting exact resulting bytes.
     let expected = String::from_utf8_lossy(&contents).into_owned();

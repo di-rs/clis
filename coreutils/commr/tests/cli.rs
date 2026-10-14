@@ -1,5 +1,6 @@
 use cli_testing::cargo_bin_cmd;
 use predicates::prelude::*;
+use std::fs;
 
 const EMPTY: &str = "tests/inputs/empty.txt";
 const FILE1: &str = "tests/inputs/file1.txt";
@@ -79,10 +80,7 @@ fn run(args: &[&str], expected_file: &str) -> Result<()> {
 
 fn run_stdin(args: &[&str], input_file: &str, expected_file: &str) -> Result<()> {
     let fixtures = cli_testing::fixtures!();
-    let input_name = input_file
-        .strip_prefix("tests/inputs/")
-        .unwrap_or(input_file);
-    let input = fixtures.read_input(input_name)?;
+    let input = fs::read(input_file)?;
     let expected = fixtures.read_expected(expected_file)?;
     cargo_bin_cmd!()
         .args(args)
