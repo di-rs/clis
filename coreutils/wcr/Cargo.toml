@@ -11,10 +11,9 @@ exitcode = "1.1.2"
 thiserror = "2.0.20"
 
 [dev-dependencies]
-assert_cmd = "2.2.2"
+cli-testing.workspace = true
 assert_fs = "1.1.4"
 predicates = "3.1.4"
-pretty_assertions = "1.4.1"
 
 [lints]
 workspace = true

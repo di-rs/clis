@@ -26,4 +26,14 @@ Calendars use proleptic Gregorian dates and fixed English labels; there is no
 historical calendar-reform switch, Monday-first option, or week-number display.
 Today's highlight uses ANSI escapes even when output is redirected.
 
+## Testing
+
+Follow the [CLI testing skill](../.agents/skills/cli-testing/SKILL.md)
+for setup and reference-generation procedure.
+
+Fixed-date fixtures use BSD `cal` layout. No-argument output and `--year`
+depend on the current local date, and today's highlight adds ANSI escapes.
+Keep those assertions date-aware; use explicit months and years for stable
+calendar fixtures.
+
 [Workspace README](../README.md)

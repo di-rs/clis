@@ -1,7 +1,6 @@
-use assert_cmd::cargo::cargo_bin_cmd;
+use cli_testing::cargo_bin_cmd;
 use color_eyre::Result;
 use predicates::prelude::*;
-use pretty_assertions::assert_eq;
 use std::fs;
 
 const SIMPLE: &str = "tests/inputs/simple.xml";
@@ -40,35 +39,33 @@ fn dies_bad_file() {
         .stderr(predicate::str::contains(expected));
 }
 
-fn run(args: &[&str], expected: &str) -> Result<()> {
-    let output = cargo_bin_cmd!().args(args).assert().success().stderr("");
-
-    let stdout = String::from_utf8(output.get_output().stdout.clone())?;
-    assert_eq!(stdout.trim_end(), expected);
-    Ok(())
+fn run(args: &[&str], expected: &str) {
+    cargo_bin_cmd!()
+        .args(args)
+        .assert()
+        .success()
+        .stderr("")
+        .stdout(format!("{expected}\n"));
 }
 
 fn run_stdin(args: &[&str], input_file: &str, expected: &str) -> Result<()> {
-    let input = fs::read_to_string(input_file)?;
-
-    let output = cargo_bin_cmd!()
+    let input = fs::read(input_file)?;
+    cargo_bin_cmd!()
         .write_stdin(input)
         .args(args)
         .assert()
         .success()
-        .stderr("");
-
-    let stdout = String::from_utf8(output.get_output().stdout.clone())?;
-    assert_eq!(stdout.trim_end(), expected);
+        .stderr("")
+        .stdout(format!("{expected}\n"));
     Ok(())
 }
 
 #[test]
-fn simple() -> Result<()> {
+fn simple() {
     run(
         &[SIMPLE],
         r#"Element { name: "top", attributes: [("label", "Top")], children: [Element { name: "semi-bottom", attributes: [("label", "Bottom")], children: [] }, Element { name: "middle", attributes: [], children: [Element { name: "bottom", attributes: [("label", "Another bottom")], children: [] }] }] }"#,
-    )
+    );
 }
 
 #[test]
@@ -82,14 +79,29 @@ fn stdin_simple() -> Result<()> {
 
 #[test]
 fn nested_file_preserves_sibling_and_attribute_order() -> Result<()> {
-    let expected = fs::read_to_string("tests/expected/nested.txt")?;
-    run(&["tests/inputs/nested.xml"], expected.trim_end())
+    let expected = cli_testing::fixtures!().read_expected("nested.txt")?;
+    cargo_bin_cmd!()
+        .arg("tests/inputs/nested.xml")
+        .assert()
+        .code(0)
+        .stdout(expected)
+        .stderr("");
+    Ok(())
 }
 
 #[test]
 fn nested_stdin_preserves_unicode_and_empty_attributes() -> Result<()> {
-    let expected = fs::read_to_string("tests/expected/nested.txt")?;
-    run_stdin(&["-"], "tests/inputs/nested.xml", expected.trim_end())
+    let fixtures = cli_testing::fixtures!();
+    let input = fixtures.read_input("nested.xml")?;
+    let expected = fixtures.read_expected("nested.txt")?;
+    cargo_bin_cmd!()
+        .arg("-")
+        .write_stdin(input)
+        .assert()
+        .code(0)
+        .stdout(expected)
+        .stderr("");
+    Ok(())
 }
 
 #[test]

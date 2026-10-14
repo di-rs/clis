@@ -34,4 +34,13 @@ themselves make the command fail.
 Benchmark suite: [benches/cli-bench.toml](benches/cli-bench.toml).
 See [Benchmarking](../../docs/benchmarking.md) for system and previous-version comparisons.
 
+## Testing
+
+Follow the [CLI testing skill](../../.agents/skills/cli-testing/SKILL.md)
+for setup and reference-generation procedure.
+
+Existing multi-file fixtures use BSD `tail` header and empty-file behavior.
+Keep byte-mode output as raw bytes and review the selected reference's behavior
+before replacing those expectations.
+
 [Workspace README](../../README.md)

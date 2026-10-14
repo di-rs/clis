@@ -25,4 +25,14 @@ returns. Output keeps the first line of each run unchanged. Input must be UTF-8;
 memory before output. Only adjacent matches are collapsed. Output files are
 truncated, so do not use the input path as the output path.
 
+## Testing
+
+Follow the [CLI testing skill](../../.agents/skills/cli-testing/SKILL.md)
+for setup and reference-generation procedure.
+
+Use BSD `uniq` for the existing fixtures: it preserves an unterminated final
+record and formats counts in four columns. GNU `uniq` adds a final newline in
+those cases and uses seven-column counts. Preserve the committed line endings
+and count spacing.
+
 [Workspace README](../../README.md)

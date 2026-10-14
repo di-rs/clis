@@ -1,4 +1,5 @@
 #!/usr/bin/env nu
+# Testing procedure: ../../.agents/skills/cli-testing/SKILL.md
 
 let input_dir = "tests/inputs"
 let output_dir = "tests/expected"

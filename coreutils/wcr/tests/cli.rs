@@ -1,8 +1,7 @@
-use assert_cmd::cargo::cargo_bin_cmd;
 use assert_fs::{NamedTempFile, fixture::FileTouch};
+use cli_testing::cargo_bin_cmd;
 use predicates::prelude::*;
-use pretty_assertions::assert_eq;
-use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
+use std::{fs, os::unix::fs::PermissionsExt};
 
 const EMPTY: &str = "tests/inputs/empty.txt";
 const FOX: &str = "tests/inputs/fox.txt";
@@ -52,14 +51,13 @@ fn dies_chars_and_bytes() {
 }
 
 fn run(args: &[&str], expected_file: &str) -> Result<()> {
-    let outfile: PathBuf = ["tests/expected", expected_file].iter().collect();
-    let expected = fs::read_to_string(&outfile)?;
-
-    let cmd = cargo_bin_cmd!().args(args).assert().success().stderr("");
-    let output = cmd.get_output();
-    let stdout = String::from_utf8(output.stdout.clone())?;
-    assert_eq!(stdout, expected);
-
+    let expected = cli_testing::fixtures!().read_expected(expected_file)?;
+    cargo_bin_cmd!()
+        .args(args)
+        .assert()
+        .code(0)
+        .stdout(expected)
+        .stderr("");
     Ok(())
 }
 
@@ -241,17 +239,14 @@ fn test_all_bytes_lines() -> Result<()> {
 
 #[test]
 fn atlamal_stdin() -> Result<()> {
-    let input = fs::read_to_string(ATLAMAL)?;
-    let expected = fs::read_to_string("tests/expected/atlamal.txt.stdin.out")?;
-
-    let cmd = cargo_bin_cmd!()
+    let fixtures = cli_testing::fixtures!();
+    let input = fixtures.read_input("atlamal.txt")?;
+    let expected = fixtures.read_expected("atlamal.txt.stdin.out")?;
+    cargo_bin_cmd!()
         .write_stdin(input)
         .assert()
-        .success()
+        .code(0)
+        .stdout(expected)
         .stderr("");
-    let output = cmd.get_output();
-
-    let stdout = String::from_utf8(output.stdout.clone())?;
-    assert_eq!(stdout, expected);
     Ok(())
 }

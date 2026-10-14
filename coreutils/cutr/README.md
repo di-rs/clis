@@ -26,4 +26,15 @@ counts. Open-ended ranges and equal-endpoint ranges such as `2-2` are rejected;
 selections retain the requested order and duplicates. Input must be UTF-8;
 byte selections that split a character are decoded with replacement characters.
 
+## Testing
+
+Follow the [CLI testing skill](../../.agents/skills/cli-testing/SKILL.md)
+for setup and reference-generation procedure.
+
+Character fixtures require a multibyte-aware BSD `cut` and a supported UTF-8
+locale. Byte fixtures retain raw reference bytes, including partial UTF-8
+sequences; the relevant assertions explicitly apply replacement decoding to
+match `cutr`. The duplicate-position fixture is a manual expectation because
+upstream `cut` deduplicates positions.
+
 [Workspace README](../../README.md)

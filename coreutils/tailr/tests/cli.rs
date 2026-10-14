@@ -1,7 +1,5 @@
-use assert_cmd::cargo::cargo_bin_cmd;
+use cli_testing::cargo_bin_cmd;
 use predicates::prelude::*;
-use pretty_assertions::assert_eq;
-use std::{fs::File, io::Read, path::PathBuf};
 
 const EMPTY: &str = "tests/inputs/empty.txt";
 const ONE: &str = "tests/inputs/one.txt";
@@ -81,12 +79,13 @@ fn skips_bad_file() -> Result<()> {
 }
 
 fn run(args: &[&str], expected_file: &str) -> Result<()> {
-    let outfile: PathBuf = ["tests/expected", expected_file].iter().collect();
-    let mut file = File::open(outfile)?;
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)?;
-    let cmd = cargo_bin_cmd!().args(args).assert().success().stderr("");
-    assert_eq!(&cmd.get_output().stdout, &buffer);
+    let expected = cli_testing::fixtures!().read_expected(expected_file)?;
+    cargo_bin_cmd!()
+        .args(args)
+        .assert()
+        .code(0)
+        .stdout(expected)
+        .stderr("");
     Ok(())
 }
 

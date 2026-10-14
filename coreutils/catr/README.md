@@ -25,4 +25,13 @@ The advertised `-u`/`--unbuffered` flag actually
 selects a buffered writer; it does not disable buffering. File-open errors are
 printed but do not by themselves make the command fail.
 
+## Testing
+
+Follow the [CLI testing skill](../../.agents/skills/cli-testing/SKILL.md)
+for setup and reference-generation procedure.
+
+Multi-file numbering fixtures use BSD `cat`, which restarts numbering for
+each file. GNU `cat` continues numbering across files and produces different
+expectations for those cases.
+
 [Workspace README](../../README.md)

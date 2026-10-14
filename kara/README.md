@@ -34,4 +34,15 @@ files when experimenting. Kara has no direct GNU Coreutils counterpart.
 
 Tutorial credit: [Philipp Flenker's Hecto guide](https://philippflenker.com/hecto/).
 
+## Testing
+
+Follow the [CLI testing skill](../.agents/skills/cli-testing/SKILL.md)
+for test-writing rules.
+
+The Unix startup test runs only when `/dev/tty` cannot be opened; it skips when
+there is a controlling terminal because Crossterm can use it even with piped
+stdin. It checks startup failure, not editor interaction. For editor changes,
+use a PTY or an interactive terminal with disposable files to check navigation,
+editing, saving, quitting, and restoration of the terminal.
+
 [Workspace README](../README.md)

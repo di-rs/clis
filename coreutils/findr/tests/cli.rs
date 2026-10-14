@@ -1,4 +1,4 @@
-use assert_cmd::cargo::cargo_bin_cmd;
+use cli_testing::cargo_bin_cmd;
 use predicates::prelude::*;
 use pretty_assertions::assert_eq;
 use std::{borrow::Cow, fs};
@@ -50,11 +50,12 @@ fn format_file_name(expected_file: &str) -> Cow<'_, str> {
 
 fn run(args: &[&str], expected_file: &str) -> Result<()> {
     let file = format_file_name(expected_file);
-    let contents = fs::read_to_string(file.as_ref())?;
+    let contents = String::from_utf8(cli_testing::fixtures!().read_expected(file.as_ref())?)?;
     let mut expected: Vec<&str> = contents.split('\n').filter(|s| !s.is_empty()).collect();
     expected.sort_unstable();
 
-    let cmd = cargo_bin_cmd!().args(args).assert().success();
+    // Directory traversal order is unspecified, so compare the explicit line multiset.
+    let cmd = cargo_bin_cmd!().args(args).assert().success().stderr("");
     let out = cmd.get_output();
     let stdout = String::from_utf8(out.stdout.clone())?;
     let mut lines: Vec<&str> = stdout.split('\n').filter(|s| !s.is_empty()).collect();
@@ -67,132 +68,105 @@ fn run(args: &[&str], expected_file: &str) -> Result<()> {
 
 #[test]
 fn path1() -> Result<()> {
-    run(&["tests/inputs"], "tests/expected/path1.txt")
+    run(&["tests/inputs"], "path1.txt")
 }
 
 #[test]
 fn path_a() -> Result<()> {
-    run(&["tests/inputs/a"], "tests/expected/path_a.txt")
+    run(&["tests/inputs/a"], "path_a.txt")
 }
 
 #[test]
 fn path_a_b() -> Result<()> {
-    run(&["tests/inputs/a/b"], "tests/expected/path_a_b.txt")
+    run(&["tests/inputs/a/b"], "path_a_b.txt")
 }
 
 #[test]
 fn path_d() -> Result<()> {
-    run(&["tests/inputs/d"], "tests/expected/path_d.txt")
+    run(&["tests/inputs/d"], "path_d.txt")
 }
 
 #[test]
 fn path_a_b_d() -> Result<()> {
-    run(
-        &["tests/inputs/a/b", "tests/inputs/d"],
-        "tests/expected/path_a_b_d.txt",
-    )
+    run(&["tests/inputs/a/b", "tests/inputs/d"], "path_a_b_d.txt")
 }
 
 #[test]
 fn type_f() -> Result<()> {
-    run(&["tests/inputs", "-t", "f"], "tests/expected/type_f.txt")
+    run(&["tests/inputs", "-t", "f"], "type_f.txt")
 }
 
 #[test]
 fn type_f_path_a() -> Result<()> {
-    run(
-        &["tests/inputs/a", "-t", "f"],
-        "tests/expected/type_f_path_a.txt",
-    )
+    run(&["tests/inputs/a", "-t", "f"], "type_f_path_a.txt")
 }
 
 #[test]
 fn type_f_path_a_b() -> Result<()> {
-    run(
-        &["tests/inputs/a/b", "--type", "f"],
-        "tests/expected/type_f_path_a_b.txt",
-    )
+    run(&["tests/inputs/a/b", "--type", "f"], "type_f_path_a_b.txt")
 }
 
 #[test]
 fn type_f_path_d() -> Result<()> {
-    run(
-        &["tests/inputs/d", "--type", "f"],
-        "tests/expected/type_f_path_d.txt",
-    )
+    run(&["tests/inputs/d", "--type", "f"], "type_f_path_d.txt")
 }
 
 #[test]
 fn type_f_path_a_b_d() -> Result<()> {
     run(
         &["tests/inputs/a/b", "tests/inputs/d", "--type", "f"],
-        "tests/expected/type_f_path_a_b_d.txt",
+        "type_f_path_a_b_d.txt",
     )
 }
 
 #[test]
 fn type_d() -> Result<()> {
-    run(&["tests/inputs", "-t", "d"], "tests/expected/type_d.txt")
+    run(&["tests/inputs", "-t", "d"], "type_d.txt")
 }
 
 #[test]
 fn type_d_path_a() -> Result<()> {
-    run(
-        &["tests/inputs/a", "-t", "d"],
-        "tests/expected/type_d_path_a.txt",
-    )
+    run(&["tests/inputs/a", "-t", "d"], "type_d_path_a.txt")
 }
 
 #[test]
 fn type_d_path_a_b() -> Result<()> {
-    run(
-        &["tests/inputs/a/b", "--type", "d"],
-        "tests/expected/type_d_path_a_b.txt",
-    )
+    run(&["tests/inputs/a/b", "--type", "d"], "type_d_path_a_b.txt")
 }
 
 #[test]
 fn type_d_path_d() -> Result<()> {
-    run(
-        &["tests/inputs/d", "--type", "d"],
-        "tests/expected/type_d_path_d.txt",
-    )
+    run(&["tests/inputs/d", "--type", "d"], "type_d_path_d.txt")
 }
 
 #[test]
 fn type_d_path_a_b_d() -> Result<()> {
     run(
         &["tests/inputs/a/b", "tests/inputs/d", "--type", "d"],
-        "tests/expected/type_d_path_a_b_d.txt",
+        "type_d_path_a_b_d.txt",
     )
 }
 
 #[test]
 fn type_l() -> Result<()> {
-    run(&["tests/inputs", "-t", "l"], "tests/expected/type_l.txt")
+    run(&["tests/inputs", "-t", "l"], "type_l.txt")
 }
 
 #[test]
 fn type_f_l() -> Result<()> {
-    run(
-        &["tests/inputs", "-t", "l", "f"],
-        "tests/expected/type_f_l.txt",
-    )
+    run(&["tests/inputs", "-t", "l", "f"], "type_f_l.txt")
 }
 
 #[test]
 fn name_csv() -> Result<()> {
-    run(
-        &["tests/inputs", "-n", ".*[.]csv"],
-        "tests/expected/name_csv.txt",
-    )
+    run(&["tests/inputs", "-n", ".*[.]csv"], "name_csv.txt")
 }
 
 #[test]
 fn name_csv_mp3() -> Result<()> {
     run(
         &["tests/inputs", "-n", ".*[.]csv", "-n", ".*[.]mp3"],
-        "tests/expected/name_csv_mp3.txt",
+        "name_csv_mp3.txt",
     )
 }
 
@@ -200,34 +174,31 @@ fn name_csv_mp3() -> Result<()> {
 fn name_txt_path_a_d() -> Result<()> {
     run(
         &["tests/inputs/a", "tests/inputs/d", "--name", ".*.txt"],
-        "tests/expected/name_txt_path_a_d.txt",
+        "name_txt_path_a_d.txt",
     )
 }
 
 #[test]
 fn name_a() -> Result<()> {
-    run(&["tests/inputs", "-n", "a"], "tests/expected/name_a.txt")
+    run(&["tests/inputs", "-n", "a"], "name_a.txt")
 }
 
 #[test]
 fn type_f_name_a() -> Result<()> {
-    run(
-        &["tests/inputs", "-t", "f", "-n", "a"],
-        "tests/expected/type_f_name_a.txt",
-    )
+    run(&["tests/inputs", "-t", "f", "-n", "a"], "type_f_name_a.txt")
 }
 
 #[test]
 fn type_d_name_a() -> Result<()> {
     run(
         &["tests/inputs", "--type", "d", "--name", "a"],
-        "tests/expected/type_d_name_a.txt",
+        "type_d_name_a.txt",
     )
 }
 
 #[test]
 fn path_g() -> Result<()> {
-    run(&["tests/inputs/g.csv"], "tests/expected/path_g.txt")
+    run(&["tests/inputs/g.csv"], "path_g.txt")
 }
 
 #[test]

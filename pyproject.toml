@@ -16,7 +16,7 @@ package = false
 required-version = ">=0.13.0"
 
 [tool.uv.workspace]
-members = ["tools/cli-bench"]
+members = ["tools/cli-bench", "tools/cli-testing"]
 
 [tool.ruff]
 target-version = "py315"
@@ -31,6 +31,6 @@ files = ["tools"]
 strict = true
 
 [tool.pytest]
-testpaths = ["tools/cli-bench/tests"]
+testpaths = ["tools/cli-bench/tests", "tools/cli-testing/tests"]
 pythonpath = ["tools/cli-bench"]
 addopts = ["--strict-config", "--strict-markers"]

@@ -1,7 +1,8 @@
 #!/usr/bin/env nu
+# Testing procedure: ../../.agents/skills/cli-testing/SKILL.md
 
 let output = "tests/expected"
-mkdir output
+mkdir $output
 
 def run-echo [args: list<string>, file: string] {
     ^echo ...$args | save --force ($output | path join $file)

@@ -25,4 +25,13 @@ Names are regexes, not GNU `find -name` shell patterns. There is no general
 expression language, `-exec`, or deletion action. Traversal does not follow
 nested symlink directories; traversal errors are printed without causing failure.
 
+## Testing
+
+Follow the [CLI testing skill](../../.agents/skills/cli-testing/SKILL.md)
+for setup and reference-generation procedure.
+
+Directory traversal order is unspecified. The CLI tests compare sorted line
+multisets, preserving duplicate paths, rather than requiring the reference
+filesystem's traversal order. Keep this exception local to traversal assertions.
+
 [Workspace README](../../README.md)

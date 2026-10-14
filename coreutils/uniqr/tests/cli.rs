@@ -1,4 +1,4 @@
-use assert_cmd::cargo::cargo_bin_cmd;
+use cli_testing::cargo_bin_cmd;
 use predicates::prelude::*;
 use pretty_assertions::assert_eq;
 use std::{fs, os::unix::fs::PermissionsExt};
@@ -14,68 +14,68 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 const EMPTY: Test = Test {
     input: "tests/inputs/empty.txt",
-    out: "tests/expected/empty.txt.out",
-    out_count: "tests/expected/empty.txt.c.out",
+    out: "empty.txt.out",
+    out_count: "empty.txt.c.out",
 };
 
 const ONE: Test = Test {
     input: "tests/inputs/one.txt",
-    out: "tests/expected/one.txt.out",
-    out_count: "tests/expected/one.txt.c.out",
+    out: "one.txt.out",
+    out_count: "one.txt.c.out",
 };
 
 const TWO: Test = Test {
     input: "tests/inputs/two.txt",
-    out: "tests/expected/two.txt.out",
-    out_count: "tests/expected/two.txt.c.out",
+    out: "two.txt.out",
+    out_count: "two.txt.c.out",
 };
 
 const THREE: Test = Test {
     input: "tests/inputs/three.txt",
-    out: "tests/expected/three.txt.out",
-    out_count: "tests/expected/three.txt.c.out",
+    out: "three.txt.out",
+    out_count: "three.txt.c.out",
 };
 
 const SKIP: Test = Test {
     input: "tests/inputs/skip.txt",
-    out: "tests/expected/skip.txt.out",
-    out_count: "tests/expected/skip.txt.c.out",
+    out: "skip.txt.out",
+    out_count: "skip.txt.c.out",
 };
 
 const T1: Test = Test {
     input: "tests/inputs/t1.txt",
-    out: "tests/expected/t1.txt.out",
-    out_count: "tests/expected/t1.txt.c.out",
+    out: "t1.txt.out",
+    out_count: "t1.txt.c.out",
 };
 
 const T2: Test = Test {
     input: "tests/inputs/t2.txt",
-    out: "tests/expected/t2.txt.out",
-    out_count: "tests/expected/t2.txt.c.out",
+    out: "t2.txt.out",
+    out_count: "t2.txt.c.out",
 };
 
 const T3: Test = Test {
     input: "tests/inputs/t3.txt",
-    out: "tests/expected/t3.txt.out",
-    out_count: "tests/expected/t3.txt.c.out",
+    out: "t3.txt.out",
+    out_count: "t3.txt.c.out",
 };
 
 const T4: Test = Test {
     input: "tests/inputs/t4.txt",
-    out: "tests/expected/t4.txt.out",
-    out_count: "tests/expected/t4.txt.c.out",
+    out: "t4.txt.out",
+    out_count: "t4.txt.c.out",
 };
 
 const T5: Test = Test {
     input: "tests/inputs/t5.txt",
-    out: "tests/expected/t5.txt.out",
-    out_count: "tests/expected/t5.txt.c.out",
+    out: "t5.txt.out",
+    out_count: "t5.txt.c.out",
 };
 
 const T6: Test = Test {
     input: "tests/inputs/t6.txt",
-    out: "tests/expected/t6.txt.out",
-    out_count: "tests/expected/t6.txt.c.out",
+    out: "t6.txt.out",
+    out_count: "t6.txt.c.out",
 };
 
 #[test]
@@ -109,94 +109,98 @@ fn dies_bad_file() -> Result<()> {
 }
 
 fn run(test: &Test) -> Result<()> {
-    let expected = std::fs::read_to_string(test.out)?;
+    let expected = cli_testing::fixtures!().read_expected(test.out)?;
     cargo_bin_cmd!()
         .arg(test.input)
         .assert()
-        .success()
-        .stdout(expected);
+        .code(0)
+        .stdout(expected)
+        .stderr("");
     Ok(())
 }
 
 fn run_count(test: &Test) -> Result<()> {
-    let expected = std::fs::read_to_string(test.out_count)?;
+    let expected = cli_testing::fixtures!().read_expected(test.out_count)?;
     cargo_bin_cmd!()
         .args([test.input, "-c"])
         .assert()
-        .success()
-        .stdout(expected);
+        .code(0)
+        .stdout(expected)
+        .stderr("");
     Ok(())
 }
 
 fn run_stdin(test: &Test) -> Result<()> {
-    let input = fs::read_to_string(test.input)?;
-    let expected = std::fs::read_to_string(test.out)?;
-
+    let fixtures = cli_testing::fixtures!();
+    let input = fs::read(test.input)?;
+    let expected = fixtures.read_expected(test.out)?;
     cargo_bin_cmd!()
         .write_stdin(input)
         .assert()
-        .success()
-        .stdout(expected);
+        .code(0)
+        .stdout(expected)
+        .stderr("");
     Ok(())
 }
 
 fn run_stdin_count(test: &Test) -> Result<()> {
-    let input = fs::read_to_string(test.input)?;
-    let expected = std::fs::read_to_string(test.out_count)?;
-
+    let fixtures = cli_testing::fixtures!();
+    let input = fs::read(test.input)?;
+    let expected = fixtures.read_expected(test.out_count)?;
     cargo_bin_cmd!()
         .arg("--count")
         .write_stdin(input)
         .assert()
-        .success()
-        .stdout(expected);
+        .code(0)
+        .stdout(expected)
+        .stderr("");
     Ok(())
 }
 
 fn run_outfile(test: &Test) -> Result<()> {
-    let expected = std::fs::read_to_string(test.out)?;
+    let expected = cli_testing::fixtures!().read_expected(test.out)?;
     let outfile = NamedTempFile::new()?;
-    let outpath = outfile.path().to_str().unwrap_or_default();
-
     cargo_bin_cmd!()
-        .args([test.input, outpath])
+        .arg(test.input)
+        .arg(outfile.path())
         .assert()
         .success()
-        .stdout("");
-    let contents = fs::read_to_string(outpath)?;
-    assert_eq!(expected, contents);
+        .stdout("")
+        .stderr("");
+    assert_eq!(fs::read(outfile.path())?, expected);
     Ok(())
 }
 
 fn run_outfile_count(test: &Test) -> Result<()> {
-    let expected = fs::read_to_string(test.out_count)?;
+    let expected = cli_testing::fixtures!().read_expected(test.out_count)?;
     let outfile = NamedTempFile::new()?;
-    let outpath = outfile.path().to_str().unwrap_or_default();
-
     cargo_bin_cmd!()
-        .args([test.input, outpath, "--count"])
+        .arg(test.input)
+        .arg(outfile.path())
+        .arg("--count")
         .assert()
         .success()
-        .stdout("");
-    let contents = fs::read_to_string(outpath)?;
-    assert_eq!(expected, contents);
+        .stdout("")
+        .stderr("");
+    assert_eq!(fs::read(outfile.path())?, expected);
     Ok(())
 }
 
 fn run_outfile_stdin_count(test: &Test) -> Result<()> {
-    let input = std::fs::read_to_string(test.input)?;
-    let expected = fs::read_to_string(test.out_count)?;
+    let fixtures = cli_testing::fixtures!();
+    let input = fs::read(test.input)?;
+    let expected = fixtures.read_expected(test.out_count)?;
     let outfile = NamedTempFile::new()?;
-    let outpath = outfile.path().to_str().unwrap_or_default();
-
     cargo_bin_cmd!()
-        .args(["-", outpath, "--count"])
+        .arg("-")
+        .arg(outfile.path())
+        .arg("--count")
         .write_stdin(input)
         .assert()
         .success()
-        .stdout("");
-    let contents = fs::read_to_string(outpath)?;
-    assert_eq!(expected, contents);
+        .stdout("")
+        .stderr("");
+    assert_eq!(fs::read(outfile.path())?, expected);
     Ok(())
 }
 

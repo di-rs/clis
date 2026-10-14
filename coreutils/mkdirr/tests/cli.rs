@@ -1,5 +1,5 @@
-use assert_cmd::{Command, cargo::cargo_bin_cmd};
 use assert_fs::{TempDir, prelude::*};
+use cli_testing::{Command, cargo_bin_cmd};
 use predicates::prelude::*;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;

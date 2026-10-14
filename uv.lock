@@ -5,6 +5,7 @@ requires-python = ">=3.15"
 [manifest]
 members = [
     "cli-bench",
+    "cli-testing-policy",
     "clis-tools",
 ]
 
@@ -57,6 +58,11 @@ wheels = [
 name = "cli-bench"
 version = "0.1.0"
 source = { virtual = "tools/cli-bench" }
+
+[[package]]
+name = "cli-testing-policy"
+version = "0.1.0"
+source = { virtual = "tools/cli-testing" }
 
 [[package]]
 name = "clis-tools"

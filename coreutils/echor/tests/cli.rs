@@ -1,6 +1,4 @@
-use std::path::PathBuf;
-
-use assert_cmd::cargo::cargo_bin_cmd;
+use cli_testing::cargo_bin_cmd;
 use predicates::prelude::*;
 
 #[test]
@@ -23,12 +21,11 @@ fn runs() {
 }
 
 fn run(args: &[&str], expected_file: &str) -> Result<(), std::io::Error> {
-    let outfile: PathBuf = ["tests/expected", expected_file].iter().collect();
-    let expected = std::fs::read_to_string(outfile)?;
-    let mut cmd = cargo_bin_cmd!();
-    cmd.args(args)
+    let expected = cli_testing::fixtures!().read_expected(expected_file)?;
+    cargo_bin_cmd!()
+        .args(args)
         .assert()
-        .success()
+        .code(0)
         .stdout(expected)
         .stderr("");
     Ok(())

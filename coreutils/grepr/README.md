@@ -28,4 +28,13 @@ This is not a binary-file search tool.
 
 Tutorial credit: [Command Line Applications in Rust](https://rust-cli.github.io/book/tutorial/packaging.html).
 
+## Testing
+
+Follow the [CLI testing skill](../../.agents/skills/cli-testing/SKILL.md)
+for setup and reference-generation procedure.
+
+Reference `grep` exits with status 1 when no lines match, while `grepr`
+returns status 0. The generator borrows stdout for those cases; review exit
+statuses separately and distinguish no matches from reference execution errors.
+
 [Workspace README](../../README.md)

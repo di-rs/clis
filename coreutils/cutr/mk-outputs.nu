@@ -1,4 +1,5 @@
 #!/usr/bin/env nu
+# Testing procedure: ../../.agents/skills/cli-testing/SKILL.md
 
 let csv_path = "tests/inputs/movies1.csv"
 let tsv_path = "tests/inputs/movies1.tsv"
@@ -38,4 +39,5 @@ for position in $chars_positions {
     ^cut -c $position $csv_path | save $"($output_dir)/($csv_name).c($position).out"
 }
 
-^echo -e "AA\nÉÉ\nSS\nJJ" | save $"($output_dir)/books.c1,1.out"
+# Duplicate positions are intentional; upstream cut deduplicates them.
+"AA\nÉÉ\nSS\nJJ\n" | save $"($output_dir)/books.c1,1.out"

@@ -24,4 +24,13 @@ Zero and negative counts and size suffixes are not supported. Line mode requires
 UTF-8; byte mode uses lossy UTF-8 decoding, so it does not preserve arbitrary bytes.
 File-open errors are printed but do not by themselves make the command fail.
 
+## Testing
+
+Follow the [CLI testing skill](../../.agents/skills/cli-testing/SKILL.md)
+for setup and reference-generation procedure.
+
+Reference `head` emits raw bytes, including partial UTF-8 sequences in byte
+mode. Keep those fixture bytes unchanged. The assertions explicitly decode
+expected bytes with replacement to match `headr`'s intentional UTF-8 behavior.
+
 [Workspace README](../../README.md)

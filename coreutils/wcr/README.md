@@ -26,4 +26,14 @@ Words use Rust Unicode whitespace splitting; characters are Unicode scalar value
 not grapheme clusters. Even byte-only counting requires valid UTF-8 input.
 File-open errors are printed but do not by themselves make the command fail.
 
+## Testing
+
+Follow the [CLI testing skill](../../.agents/skills/cli-testing/SKILL.md)
+for setup and reference-generation procedure.
+
+The existing reference fixtures use BSD `wc` column widths. Use a UTF-8
+locale supported by the reference when regenerating `-m` character counts;
+`LC_ALL=C` changes those counts. GNU `wc` formatting is not interchangeable
+with these fixtures.
+
 [Workspace README](../../README.md)

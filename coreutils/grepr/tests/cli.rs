@@ -1,5 +1,5 @@
-use assert_cmd::cargo::cargo_bin_cmd;
 use assert_fs::{NamedTempFile, TempDir, prelude::*};
+use cli_testing::cargo_bin_cmd;
 use predicates::prelude::*;
 use pretty_assertions::assert_eq;
 use std::{fs, path::PathBuf};
@@ -56,13 +56,13 @@ fn warns_bad_file() {
 }
 
 fn run(args: &[&str], expected_file: &str) -> Result<()> {
-    let outfile: PathBuf = ["tests/expected", expected_file].iter().collect();
-    let expected = fs::read_to_string(outfile)?;
+    let expected = cli_testing::fixtures!().read_expected(expected_file)?;
     cargo_bin_cmd!()
         .args(args)
         .assert()
-        .success()
-        .stdout(expected);
+        .code(0)
+        .stdout(expected)
+        .stderr("");
     Ok(())
 }
 
@@ -191,36 +191,34 @@ fn warns_dir_not_recursive() {
 
 #[test]
 fn stdin() -> Result<()> {
-    let input = fs::read_to_string(BUSTLE)?;
-    let expected = fs::read_to_string("tests/expected/bustle.txt.the.capitalized")?;
-
+    let fixtures = cli_testing::fixtures!();
+    let input = fixtures.read_input("bustle.txt")?;
+    let expected = fixtures.read_expected("bustle.txt.the.capitalized")?;
     cargo_bin_cmd!()
-        .write_stdin(input)
         .arg("The")
+        .write_stdin(input)
         .assert()
-        .success()
-        .stdout(expected);
+        .code(0)
+        .stdout(expected)
+        .stderr("");
     Ok(())
 }
 
 #[test]
 fn stdin_insensitive_count() -> Result<()> {
-    let files = &[BUSTLE, EMPTY, FOX, NOBODY];
-
-    let mut input = String::new();
-    for file in files {
-        input += &fs::read_to_string(file)?;
+    let fixtures = cli_testing::fixtures!();
+    let mut input = Vec::new();
+    for name in ["bustle.txt", "empty.txt", "fox.txt", "nobody.txt"] {
+        input.extend(fixtures.read_input(name)?);
     }
-
-    let expected_file = "tests/expected/the.recursive.insensitive.count.stdin";
-    let expected = fs::read_to_string(expected_file)?;
-
+    let expected = fixtures.read_expected("the.recursive.insensitive.count.stdin")?;
     cargo_bin_cmd!()
         .args(["-ci", "the", "-"])
         .write_stdin(input)
         .assert()
-        .success()
-        .stdout(expected);
+        .code(0)
+        .stdout(expected)
+        .stderr("");
     Ok(())
 }
 
