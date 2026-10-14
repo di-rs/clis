@@ -142,11 +142,15 @@ def gateway_request(
     return table(json.loads(payload))
 
 
-def upload(base: str, token: str, sha: str, pr: int, data: bytes) -> dict[str, object]:
+def upload(
+    api: GitHub, repo: str, base: str, token: str, sha: str, pr: int, data: bytes
+) -> dict[str, object] | None:
     query = urllib.parse.urlencode({"sha": sha, "pr": pr})
     # Two minutes of backoff allow for the gateway's 60-second upload plus cleanup.
     delays = iter((2, 4, 8, 16, 30, 30, 30))
     while True:
+        if not current_pull(api, repo, pr, sha):
+            return None
         try:
             return gateway_request(
                 base, token, "/api/environments?" + query, method="POST", data=data
@@ -339,9 +343,10 @@ def publish(api: GitHub, repo: str, run_id: int, base_url: str, token: str) -> s
                     f"{base}/actions/artifacts/{artifact_id}/zip", limit=MAX_ARCHIVE
                 )
                 count = len(binary_archive(bundle))
-                if not current_pull(api, repo, number, sha):
+                response = upload(api, repo, base_url, token, sha, number, bundle)
+                if response is None:
                     return None
-                url = preview_url(base_url, upload(base_url, token, sha, number, bundle))
+                url = preview_url(base_url, response)
                 paragraphs.append(f"[Open playground]({url}) · {count} CLIs in one shared shell.")
             except OSError, ValueError, KeyError, zipfile.BadZipFile, subprocess.SubprocessError:
                 publish_failed = True

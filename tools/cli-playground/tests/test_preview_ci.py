@@ -183,7 +183,9 @@ def test_stale_or_unrelated_run_has_no_writes(change: str) -> None:
 def test_pr_change_during_download_prevents_upload(monkeypatch: pytest.MonkeyPatch) -> None:
     github = FakeGitHub()
     github.stale_after_download = True
-    monkeypatch.setattr(preview_ci, "upload", Mock(side_effect=AssertionError("stale upload")))
+    monkeypatch.setattr(
+        preview_ci, "gateway_request", Mock(side_effect=AssertionError("stale upload"))
+    )
     assert preview_ci.publish(github, REPO, 500, "https://play.example", "token") is None
     assert github.writes == []
 
@@ -214,7 +216,9 @@ def test_batch_uses_one_upload_one_preview_and_constant_github_requests(
     monkeypatch.setattr(github, "request", requests)
     monkeypatch.setattr(preview_ci, "upload", uploaded)
     body = preview_ci.publish(github, REPO, 500, "https://play.example", "token")
-    uploaded.assert_called_once_with("https://play.example", "token", SHA, 7, github.payload)
+    uploaded.assert_called_once_with(
+        github, REPO, "https://play.example", "token", SHA, 7, github.payload
+    )
     assert requests.call_count <= 15
     assert body is not None and body.count(url) == 1 and len(body) < 1000
     assert "| CLI |" not in body
@@ -410,7 +414,7 @@ def test_upload_sends_the_entire_zip_in_one_request() -> None:
     bundle = archive(["echor", "catr"])
     result = {"id": "a" * 32, "url": "https://play.example/p/" + "a" * 32}
     with gateway_server(json.dumps(result).encode()) as (base, received):
-        assert preview_ci.upload(base, "secret", SHA, 7, bundle) == result
+        assert preview_ci.upload(FakeGitHub(), REPO, base, "secret", SHA, 7, bundle) == result
     assert received == [("POST", f"/api/environments?sha={SHA}&pr=7", "Bearer secret", bundle)]
 
 
@@ -424,13 +428,42 @@ def test_upload_recovers_after_the_gateway_is_busy_for_over_a_minute(
     with gateway_server(
         json.dumps(result).encode(), status=lambda: 429 if sum(delays) < 65 else 200
     ) as (base, received):
-        assert preview_ci.upload(base, "secret", SHA, 7, bundle) == result
+        assert preview_ci.upload(FakeGitHub(), REPO, base, "secret", SHA, 7, bundle) == result
     assert 65 <= sum(delays) <= 120
     assert 1 < len(received) <= 8
     assert all(
         request == ("POST", f"/api/environments?sha={SHA}&pr=7", "Bearer secret", bundle)
         for request in received
     )
+
+
+def test_pr_head_change_during_backoff_stops_upload_and_github_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    github = FakeGitHub()
+    waits = 0
+
+    def sleep(seconds: float) -> None:
+        nonlocal waits
+        waits += 1
+        if waits == 2:
+            github.pull["head"] = {"sha": "b" * 40}
+
+    monkeypatch.setattr(preview_ci, "sleep", sleep)
+    result = {"id": "a" * 32, "url": "https://play.example/p/" + "a" * 32}
+    gateway_request = preview_ci.gateway_request
+    with gateway_server(
+        json.dumps(result).encode(), status=lambda: 429 if len(received) <= 2 else 200
+    ) as (base, received):
+        monkeypatch.setattr(
+            preview_ci,
+            "gateway_request",
+            lambda _base, token, path, **kwargs: gateway_request(base, token, path, **kwargs),
+        )
+        assert preview_ci.publish(github, REPO, 500, "https://play.example", "token") is None
+    assert len(received) == 2
+    assert waits == 2
+    assert github.writes == []
 
 
 @pytest.mark.parametrize("status", [429, 401])
@@ -446,7 +479,7 @@ def test_upload_preserves_http_failure_after_its_retry_budget(
     monkeypatch.setattr(preview_ci, "sleep", sleep)
     with gateway_server(b"rejected", status=status) as (base, received):
         with pytest.raises(urllib.error.HTTPError) as error:
-            preview_ci.upload(base, "secret", SHA, 7, archive())
+            preview_ci.upload(FakeGitHub(), REPO, base, "secret", SHA, 7, archive())
         assert error.value.code == status
     assert sum(delays) == (120 if status == 429 else 0)
     assert 1 < len(received) <= 8 if status == 429 else len(received) == 1
