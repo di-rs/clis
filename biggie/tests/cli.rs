@@ -1,23 +1,13 @@
-use assert_cmd::cargo::cargo_bin_cmd;
 use assert_fs::{TempDir, prelude::*};
+use cli_testing::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::{
     fs,
     path::{Path, PathBuf},
 };
 
-fn command() -> assert_cmd::Command {
-    let mut command = cargo_bin_cmd!();
-    for key in [
-        "CLIS_LOG_LEVEL",
-        "CLIS_LOG_DIR",
-        "CLIS_LOG_STDERR",
-        "CLIS_LOG_SESSION",
-    ] {
-        command.env_remove(key);
-    }
-    command.env("CLIS_LOG_LEVEL", "off");
-    command
+fn command() -> cli_testing::Command {
+    cargo_bin_cmd!()
 }
 
 fn log_files(root: &Path) -> Result<Vec<PathBuf>> {

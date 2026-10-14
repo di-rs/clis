@@ -67,6 +67,7 @@ jobs:
       - run: prek run ruff-format --all-files --show-diff-on-failure
       - run: prek run mypy --all-files --show-diff-on-failure
       - run: prek run python-tests --all-files --show-diff-on-failure
+      - run: prek run cli-test-policy --all-files --show-diff-on-failure
       - run: git diff --exit-code
 
   tests:

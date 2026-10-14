@@ -25,6 +25,12 @@ moving a CLI, update its documentation links, workspace lockfiles, and checks.
 
 ## Verification and tooling
 
+Use `.agents/skills/cli-testing/SKILL.md` when adding or changing CLI tests.
+E2E coverage is required; unit tests are optional and must add distinct value.
+Use `cli-testing` for shared test setup and package-owned `tests/inputs/` and
+`tests/expected/` fixtures. Generate compatible expectations from an independent
+reference with `mk-outputs.nu`; never auto-accept candidate output.
+
 Follow [Testing](docs/testing.md) for Rust and Python checks and
 [Benchmarking](docs/benchmarking.md) for TOML suites and hyperfine runs.
 Use the root uv workspace and committed lockfile for Python tooling; keep shared

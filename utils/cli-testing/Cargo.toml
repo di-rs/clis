@@ -1,0 +1,18 @@
+[package]
+name = "cli-testing"
+version = "0.1.0"
+description = "Shared process setup and byte-exact fixtures for CLI integration tests"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[dependencies]
+assert_cmd.workspace = true
+
+[dev-dependencies]
+assert_fs.workspace = true
+
+[lints]
+workspace = true

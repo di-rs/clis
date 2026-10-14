@@ -1,8 +1,7 @@
-use assert_cmd::cargo::cargo_bin_cmd;
 use assert_fs::{NamedTempFile, fixture::FileTouch};
+use cli_testing::cargo_bin_cmd;
 use predicates::prelude::*;
-use pretty_assertions::assert_eq;
-use std::{fs, io::Read, os::unix::fs::PermissionsExt, path::PathBuf};
+use std::{fs, os::unix::fs::PermissionsExt};
 
 const EMPTY: &str = "./tests/inputs/empty.txt";
 const ONE: &str = "./tests/inputs/one.txt";
@@ -83,39 +82,34 @@ fn dies_bytes_and_lines() {
 }
 
 fn run(args: &[&str], expected_file: &str) -> Result<()> {
-    let outfile: PathBuf = ["tests/expected", expected_file].iter().collect();
-
-    let mut file = std::fs::File::open(outfile)?;
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)?;
-    let expected = String::from_utf8_lossy(&buffer);
-
-    let cmd = cargo_bin_cmd!().args(args).assert().success().stderr("");
-    let output = cmd.get_output();
-    assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
-
+    let contents = cli_testing::fixtures!().read_expected(expected_file)?;
+    // headr replaces incomplete UTF-8 sequences; the reference head emits raw bytes.
+    let expected = String::from_utf8_lossy(&contents).into_owned();
+    cargo_bin_cmd!()
+        .args(args)
+        .assert()
+        .success()
+        .stderr("")
+        .stdout(expected);
     Ok(())
 }
 
 fn run_stdin(input_file: &str, args: &[&str], expected_file: &str) -> Result<()> {
-    let outfile: PathBuf = ["tests/expected", expected_file].iter().collect();
-
-    let mut file = std::fs::File::open(outfile)?;
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)?;
-    let expected = String::from_utf8_lossy(&buffer);
-
-    let input = std::fs::read_to_string(input_file)?;
-
-    let cmd = cargo_bin_cmd!()
-        .write_stdin(input)
+    let fixtures = cli_testing::fixtures!();
+    let input_name = input_file
+        .strip_prefix("./tests/inputs/")
+        .unwrap_or(input_file);
+    let input = fixtures.read_input(input_name)?;
+    let contents = fixtures.read_expected(expected_file)?;
+    // Preserve headr's lossy byte mode while asserting exact resulting bytes.
+    let expected = String::from_utf8_lossy(&contents).into_owned();
+    cargo_bin_cmd!()
         .args(args)
+        .write_stdin(input)
         .assert()
         .success()
-        .stderr("");
-    let output = cmd.get_output();
-    assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
-
+        .stderr("")
+        .stdout(expected);
     Ok(())
 }
 

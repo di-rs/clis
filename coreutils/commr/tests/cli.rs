@@ -1,7 +1,5 @@
-use assert_cmd::cargo::cargo_bin_cmd;
+use cli_testing::cargo_bin_cmd;
 use predicates::prelude::*;
-use pretty_assertions::assert_eq;
-use std::{fs, path::PathBuf};
 
 const EMPTY: &str = "tests/inputs/empty.txt";
 const FILE1: &str = "tests/inputs/file1.txt";
@@ -69,27 +67,30 @@ fn dies_both_stdin() {
 }
 
 fn run(args: &[&str], expected_file: &str) -> Result<()> {
-    let outfile: PathBuf = ["tests/expected", expected_file].iter().collect();
-    let expected = fs::read_to_string(outfile)?;
-    let cmd = cargo_bin_cmd!().args(args).assert().success().stderr("");
-    let stdout = String::from_utf8(cmd.get_output().stdout.clone())?;
-    assert_eq!(stdout, expected);
+    let expected = cli_testing::fixtures!().read_expected(expected_file)?;
+    cargo_bin_cmd!()
+        .args(args)
+        .assert()
+        .code(0)
+        .stdout(expected)
+        .stderr("");
     Ok(())
 }
 
 fn run_stdin(args: &[&str], input_file: &str, expected_file: &str) -> Result<()> {
-    let input = fs::read_to_string(input_file)?;
-    let outfile: PathBuf = ["tests/expected", expected_file].iter().collect();
-    let expected = fs::read_to_string(outfile)?;
-
-    let cmd = cargo_bin_cmd!()
-        .write_stdin(input)
+    let fixtures = cli_testing::fixtures!();
+    let input_name = input_file
+        .strip_prefix("tests/inputs/")
+        .unwrap_or(input_file);
+    let input = fixtures.read_input(input_name)?;
+    let expected = fixtures.read_expected(expected_file)?;
+    cargo_bin_cmd!()
         .args(args)
+        .write_stdin(input)
         .assert()
-        .success()
+        .code(0)
+        .stdout(expected)
         .stderr("");
-    let stdout = String::from_utf8(cmd.get_output().stdout.clone())?;
-    assert_eq!(stdout, expected);
     Ok(())
 }
 

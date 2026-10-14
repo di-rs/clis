@@ -1,7 +1,6 @@
-use assert_cmd::cargo::cargo_bin_cmd;
+use cli_testing::cargo_bin_cmd;
 use predicates::prelude::*;
 use pretty_assertions::assert_eq;
-use std::fs;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -145,11 +144,11 @@ fn partial_month() {
 }
 
 fn run(args: &[&str], expected_file: &str) -> Result<()> {
-    let expected = fs::read_to_string(expected_file)?;
+    let expected = cli_testing::fixtures!().read_expected(expected_file)?;
     cargo_bin_cmd!()
         .args(args)
         .assert()
-        .success()
+        .code(0)
         .stdout(expected)
         .stderr("");
     Ok(())
@@ -168,22 +167,22 @@ fn default_one_month() -> Result<()> {
 
 #[test]
 fn test_2_2020_leap_year() -> Result<()> {
-    run(&["-m", "2", "2020"], "tests/expected/2-2020.txt")
+    run(&["-m", "2", "2020"], "2-2020.txt")
 }
 
 #[test]
 fn test_4_2020() -> Result<()> {
-    run(&["-m", "4", "2020"], "tests/expected/4-2020.txt")
+    run(&["-m", "4", "2020"], "4-2020.txt")
 }
 
 #[test]
 fn test_april_2020() -> Result<()> {
-    run(&["2020", "-m", "april"], "tests/expected/4-2020.txt")
+    run(&["2020", "-m", "april"], "4-2020.txt")
 }
 
 #[test]
 fn test_2020() -> Result<()> {
-    run(&["2020"], "tests/expected/2020.txt")
+    run(&["2020"], "2020.txt")
 }
 
 #[test]
@@ -208,32 +207,32 @@ fn usage() {
 
 #[test]
 fn minimum_year_january() -> Result<()> {
-    run(&["1", "-m", "1"], "tests/expected/1-1.txt")
+    run(&["1", "-m", "1"], "1-1.txt")
 }
 
 #[test]
 fn maximum_year_december() -> Result<()> {
-    run(&["9999", "-m", "12"], "tests/expected/12-9999.txt")
+    run(&["9999", "-m", "12"], "12-9999.txt")
 }
 
 #[test]
 fn century_1900_is_not_leap_year() -> Result<()> {
-    run(&["1900", "-m", "2"], "tests/expected/2-1900.txt")
+    run(&["1900", "-m", "2"], "2-1900.txt")
 }
 
 #[test]
 fn century_2000_is_leap_year() -> Result<()> {
-    run(&["2000", "-m", "2"], "tests/expected/2-2000.txt")
+    run(&["2000", "-m", "2"], "2-2000.txt")
 }
 
 #[test]
 fn century_2100_is_not_leap_year() -> Result<()> {
-    run(&["2100", "-m", "2"], "tests/expected/2-2100.txt")
+    run(&["2100", "-m", "2"], "2-2100.txt")
 }
 
 #[test]
 fn mixed_case_month_name() -> Result<()> {
-    run(&["2020", "-m", "aPrIl"], "tests/expected/4-2020.txt")
+    run(&["2020", "-m", "aPrIl"], "4-2020.txt")
 }
 
 #[test]

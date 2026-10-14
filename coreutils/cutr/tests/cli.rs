@@ -1,10 +1,8 @@
-use assert_cmd::cargo::cargo_bin_cmd;
+use cli_testing::cargo_bin_cmd;
 use predicates::prelude::*;
-use pretty_assertions::assert_eq;
 use rand::RngExt;
 use rand::distr::Alphanumeric;
 use std::fs;
-use std::path::PathBuf;
 
 const CSV: &str = "tests/inputs/movies1.csv";
 const TSV: &str = "tests/inputs/movies1.tsv";
@@ -138,21 +136,26 @@ fn dies_chars_bytes() {
 }
 
 fn run(args: &[&str], expected_file: &str) -> Result<()> {
-    let outfile: PathBuf = ["tests/expected", expected_file].iter().collect();
-    let expected = fs::read_to_string(outfile)?;
-    let cmd = cargo_bin_cmd!().args(args).assert().success().stderr("");
-    let stdout = String::from_utf8(cmd.get_output().stdout.clone())?;
-    assert_eq!(stdout, expected);
+    let expected = cli_testing::fixtures!().read_expected(expected_file)?;
+    cargo_bin_cmd!()
+        .args(args)
+        .assert()
+        .code(0)
+        .stdout(expected)
+        .stderr("");
     Ok(())
 }
 
 fn run_lossy(args: &[&str], expected_file: &str) -> Result<()> {
-    let outfile: PathBuf = ["tests/expected", expected_file].iter().collect();
-    let contents = fs::read(outfile)?;
-    let expected = String::from_utf8_lossy(&contents);
-    let cmd = cargo_bin_cmd!().args(args).assert().success().stderr("");
-    let stdout = String::from_utf8(cmd.get_output().stdout.clone())?;
-    assert_eq!(stdout, expected);
+    let contents = cli_testing::fixtures!().read_expected(expected_file)?;
+    // cutr replaces incomplete UTF-8 sequences; the reference cut emits raw bytes.
+    let expected = String::from_utf8_lossy(&contents).into_owned();
+    cargo_bin_cmd!()
+        .args(args)
+        .assert()
+        .success()
+        .stderr("")
+        .stdout(expected);
     Ok(())
 }
 

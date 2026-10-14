@@ -8,9 +8,9 @@ edition = "2024"
 cli-log = { path = "../../utils/cli-log" }
 
 [dev-dependencies]
+cli-testing.workspace = true
 serde_json.workspace = true
 assert_fs.workspace = true
-assert_cmd = { workspace = true }
 predicates = { workspace = true }
 
 [lints]

@@ -38,6 +38,7 @@ All binaries write structured events and errors to local rotating log files. See
 | Project | Purpose |
 | --- | --- |
 | [cli-log](utils/cli-log/README.md) | Shared structured file logging and error reporting |
+| [cli-testing](utils/cli-testing/README.md) | Shared CLI test setup and byte fixture loading |
 
 See [LICENSE](LICENSE) for the MIT license. Retain existing tutorial and other
 attribution in individual packages when extending their implementations.

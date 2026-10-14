@@ -50,6 +50,14 @@ hooks = [
     pass_filenames = false,
   },
   {
+    id = "cli-test-policy",
+    name = "CLI test layout policy",
+    language = "system",
+    entry = "uv run --locked python tools/cli-testing/cli_test_policy.py",
+    files = '\.rs$|(^|/)(Cargo\.toml|mk-outs\.nu|mk-outputs\.nu)$|(^|/)tests/|^tools/cli-testing/|^(pyproject\.toml|uv\.lock|prek\.toml)$',
+    pass_filenames = false,
+  },
+  {
     id = "ruff",
     name = "Python lint",
     language = "system",

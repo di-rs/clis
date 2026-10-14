@@ -24,6 +24,7 @@ thousands = "0.2.0"
 rand = "0.10.3"
 
 [dev-dependencies]
+cli-testing.workspace = true
 serde_json.workspace = true
 assert_cmd = { workspace = true }
 assert_fs = { workspace = true }

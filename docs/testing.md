@@ -1,76 +1,35 @@
 # Testing
 
-Run from the workspace root with the nightly pinned in
-[rust-toolchain.toml](../rust-toolchain.toml). Install cargo-nextest to run tests;
-nextest does not run doctests. CI validates Linux and macOS separately.
+Run checks from the workspace root. Use the pinned [Rust toolchain](../rust-toolchain.toml)
+and [Python version](../.python-version); install cargo-nextest for Rust tests.
+The [PR workflow](../.github/workflows/pull-request-check.yml) defines the full CI
+matrix, and [prek.toml](../prek.toml) defines local hooks. The
+[nextest CI profile](../.config/nextest.toml) supplies timeouts and retry settings.
 
-## Run tests
+## Choose checks by changed area
 
-Start with the affected package. Replace `catr` with its Cargo package name:
+Replace `PACKAGE` below with the affected Cargo package name.
 
-```sh
-cargo nextest run --locked -p catr
-cargo test --locked -p catr --doc
-```
-
-Run doctests only for packages with a library target. For workspace validation,
-use the all-feature commands from CI:
-
-```sh
-cargo nextest run --locked --workspace --all-features --profile ci
-cargo test --locked --workspace --all-features --doc
-```
-
-The [CI profile](../.config/nextest.toml) disables retries and sets test and suite
-timeouts. When changing shared APIs, include affected consumers and run the
-standalone consumer:
-
-```sh
-cargo run --locked --manifest-path tests/consumers/Cargo.toml
-```
-
-## Write regressions
-
-For a behavior fix, establish the baseline, add a failing regression, implement
-the fix, and confirm it passes. Test observable results rather than implementation
-details.
-
-| Test level | What to verify |
+| Changed area | Verification |
 | --- | --- |
-| CLI integration | Arguments, stdin, exact stdout bytes, stderr, exit status, and filesystem effects. |
-| Direct API | Changed library contracts, caller-owned I/O, returned errors, and partial failures. |
-| Unit | Complex logic or boundary cases that are difficult to exercise through the CLI. |
+| Rust implementation | `cargo nextest run --locked -p PACKAGE --profile ci` |
+| Rust library documentation | `cargo test --locked -p PACKAGE --doc` |
+| Shared Rust APIs | Test affected consumers; run `cargo run --locked --manifest-path tests/consumers/Cargo.toml`. |
+| CLI tests or fixtures | Follow the [CLI testing skill](../.agents/skills/cli-testing/SKILL.md). |
+| Python tools | Run the [Python checks](#python-tooling). |
+| Markdown | `prek run lychee --all-files --show-diff-on-failure` and `prek run typos --all-files --show-diff-on-failure` |
+| Workflows | `prek run actionlint --all-files --show-diff-on-failure`; consult CI for security checks. |
+| Benchmark suites | Follow [Benchmarking](benchmarking.md). |
 
-Derive expectations from documented behavior, worked examples, or an independent
-reference. Use deterministic inputs and temporary directories. Cover relevant
-boundaries: empty input, missing final newlines, invalid UTF-8, numeric limits,
-permissions, and multiple files. State platform constraints; Kara changes also
-need interactive terminal checks.
-
-Store reusable inputs in `tests/inputs/` and expected results in `tests/expected/`.
-When regenerating fixtures with `mk-outs.nu`, inspect the package's script first,
-record the reference executable and version, and review the output diff. Ordinary
-tests must run without reference programs or Nushell.
-
-## Check changes
-
-The [PR workflow](../.github/workflows/pull-request-check.yml) owns the exact CI
-commands, including formatting, Clippy, rustdoc, and feature checks. Local hooks
-are defined in [prek.toml](../prek.toml); install prek and run `prek install` once
-per clone to enable them.
-
-Run checks affected by the change. Reuse passing results while their code,
-fixtures, configuration, and environment remain unchanged. Report commands,
-outcomes, and unverified platforms or missing tools; do not weaken checks to
-obtain a pass.
+For workspace-wide Rust changes, use the all-feature nextest and doctest commands
+from CI. Nextest does not run doctests. Formatting, Clippy, rustdoc, feature and
+platform checks are specified in the workflow rather than duplicated here.
 
 ## Python tooling
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.13 or newer
-and run Python tooling from the repository root. The uv workspace shares
-[configuration](../pyproject.toml) and a committed [lockfile](../uv.lock).
-[.python-version](../.python-version) selects Python 3.15 locally and in CI.
-The workspace, Ruff, and mypy all target Python 3.15 or newer.
+Use uv 0.13 or newer and the root workspace. Shared Ruff, strict mypy and pytest
+settings live in [pyproject.toml](../pyproject.toml); dependencies are pinned in
+[uv.lock](../uv.lock).
 
 ```sh
 uv sync --locked --all-packages
@@ -80,39 +39,12 @@ uv run --locked mypy
 uv run --locked pytest
 ```
 
-Ruff checks imports and common errors; mypy checks all Python files under `tools/`
-in strict mode. To apply formatting, run `uv run --locked ruff format .`.
-The `ruff`, `ruff-format`, `mypy`, and `python-tests` prek hooks run the same
-commands locally and in CI. They require uv on PATH; uv manages the interpreter
-and locked development dependencies.
+Keep tests beside their tool under `tools/NAME/tests/`. Register new tools in the
+root uv workspace and pytest test paths; run `uv lock` after dependency changes.
 
-Keep each tool's Python tests in its `tests/` directory. Use pytest functions,
-plain assertions, and parametrized cases; put reusable fixtures in `conftest.py`.
-Prefer pytest's temporary directories and monkeypatching to manual setup and cleanup.
+## Check reporting
 
-Each Python tool gets a `pyproject.toml` under `tools/` and an entry in the root
-`tool.uv.workspace.members` list. The first member is
-[cli-bench](../tools/cli-bench/pyproject.toml), a script project with no runtime
-dependencies. Keep shared lint and type settings at the root. After changing
-dependencies or workspace members, run `uv lock` and commit `uv.lock`; add new
-tools' test directories to the root pytest `testpaths` list as needed.
-
-## Documentation checks
-
-For documentation-only changes, check local links, anchors, spelling, and whitespace:
-
-```sh
-prek run lychee --all-files --show-diff-on-failure
-prek run typos --all-files --show-diff-on-failure
-git diff --check
-```
-
-These system hooks require prek, lychee, and typos on PATH. Use `--files PATH`
-instead of `--all-files` to check a new, untracked document. Rust checks are
-unnecessary when only documentation changes.
-
-For workflow edits, install actionlint and run:
-
-```sh
-prek run actionlint --all-files --show-diff-on-failure
-```
+Run `git diff --check`. For new documentation, pass `--files PATH` to the relevant
+prek hook so untracked files are checked. Report commands, outcomes and any
+unverified platforms or missing tools. Reuse passing checks while the relevant
+files and environment remain unchanged; documentation-only edits need no Rust run.
