@@ -1,0 +1,7 @@
+name: cli-playground
+description: A dedicated Hetzner host for disposable Rust CLI previews
+runtime:
+  name: python
+  options:
+    # Dependencies are installed with uv sync --locked --all-packages at repo root.
+    virtualenv: ../../../.venv

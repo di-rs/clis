@@ -1,0 +1,9 @@
+config:
+  cli-playground:domain: play.thesecret.dev
+  cli-playground:sshPublicKey: ssh-ed25519 REPLACE_WITH_YOUR_PUBLIC_KEY
+  cli-playground:adminCidrs:
+    - 203.0.113.10/32 # Replace with your administrative public IP / VPN exit.
+  cli-playground:location: nbg1
+  cli-playground:serverType: cx33
+  cli-playground:backups: false
+  cli-playground:protect: true

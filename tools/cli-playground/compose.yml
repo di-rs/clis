@@ -1,0 +1,21 @@
+# Run from the repository root: docker compose -f tools/cli-playground/compose.yml up --build -d
+services:
+  gateway:
+    build:
+      context: ../..
+      dockerfile: tools/cli-playground/Gateway.Dockerfile
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      PLAYGROUND_DATA_DIR: /var/lib/cli-playground
+      PLAYGROUND_PUBLIC_URL: ${PLAYGROUND_PUBLIC_URL:-http://localhost:8000}
+      PLAYGROUND_DEPLOY_TOKEN: ${PLAYGROUND_DEPLOY_TOKEN:?Set a random deployment token}
+      PLAYGROUND_SANDBOX_IMAGE: clis-playground-sandbox:local
+      # Docker Desktop has no runsc: explicitly set runc for local testing only.
+      PLAYGROUND_SANDBOX_RUNTIME: ${PLAYGROUND_SANDBOX_RUNTIME:-runsc}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Identical absolute paths: Docker resolves bind sources on its host.
+      - /var/lib/cli-playground:/var/lib/cli-playground
+    restart: unless-stopped
+    init: true

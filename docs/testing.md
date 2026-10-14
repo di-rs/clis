@@ -41,6 +41,26 @@ uv run --locked pytest
 
 Keep tests beside their tool under `tools/NAME/tests/`. Register new tools in the
 root uv workspace and pytest test paths; run `uv lock` after dependency changes.
+Use pytest functions and shared fixtures in `conftest.py`; prefer `tmp_path` and
+`monkeypatch` for temporary files and environment changes.
+
+## Playground frontend
+
+The [CLI playground](../tools/cli-playground/README.md) uses the pinned Node.js
+and pnpm versions for frontend development and builds; production serves static
+assets from Python. Run from the repository root:
+
+```sh
+pnpm --dir tools/cli-playground/frontend install --frozen-lockfile
+pnpm --dir tools/cli-playground/frontend check
+pnpm --dir tools/cli-playground/frontend test
+pnpm --dir tools/cli-playground/frontend build
+pnpm --dir tools/cli-playground/frontend exec playwright install chromium
+pnpm --dir tools/cli-playground/frontend test:browser
+```
+
+Gateway and infrastructure tests run with the shared Python suite. The playground
+README covers Docker and gVisor smoke checks; unit tests need no Docker daemon.
 
 ## Check reporting
 
