@@ -9,10 +9,12 @@ import shutil
 import subprocess
 import sys
 import tomllib
+import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
+from time import sleep
 
 # Keep direct script invocation usable from any working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -142,7 +144,19 @@ def gateway_request(
 
 def upload(base: str, token: str, sha: str, pr: int, data: bytes) -> dict[str, object]:
     query = urllib.parse.urlencode({"sha": sha, "pr": pr})
-    return gateway_request(base, token, "/api/environments?" + query, method="POST", data=data)
+    # Two minutes of backoff allow for the gateway's 60-second upload plus cleanup.
+    delays = iter((2, 4, 8, 16, 30, 30, 30))
+    while True:
+        try:
+            return gateway_request(
+                base, token, "/api/environments?" + query, method="POST", data=data
+            )
+        except urllib.error.HTTPError as error:
+            delay = next(delays, None)
+            if error.code != 429 or delay is None:
+                raise
+            error.close()
+            sleep(delay)
 
 
 def preview_url(base: str, response: dict[str, object]) -> str:

@@ -7,7 +7,7 @@ import sys
 import time
 import urllib.error
 import zipfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -359,7 +359,7 @@ def test_lifecycle_failure_does_not_log_secrets(
 
 @contextmanager
 def gateway_server(
-    response: bytes, *, status: int = 200, delay: float = 0
+    response: bytes, *, status: int | Callable[[], int] = 200, delay: float = 0
 ) -> Iterator[tuple[str, list[tuple[str, str, str | None, bytes]]]]:
     received: list[tuple[str, str, str | None, bytes]] = []
 
@@ -374,7 +374,7 @@ def gateway_server(
                 )
             )
             time.sleep(delay)
-            self.send_response(status)
+            self.send_response(status() if callable(status) else status)
             self.send_header("Location", "/stolen")
             self.end_headers()
             try:
@@ -412,6 +412,44 @@ def test_upload_sends_the_entire_zip_in_one_request() -> None:
     with gateway_server(json.dumps(result).encode()) as (base, received):
         assert preview_ci.upload(base, "secret", SHA, 7, bundle) == result
     assert received == [("POST", f"/api/environments?sha={SHA}&pr=7", "Bearer secret", bundle)]
+
+
+def test_upload_recovers_after_the_gateway_is_busy_for_over_a_minute(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delays: list[float] = []
+    monkeypatch.setattr(preview_ci, "sleep", delays.append)
+    bundle = archive(["echor", "catr"])
+    result = {"id": "a" * 32, "url": "https://play.example/p/" + "a" * 32}
+    with gateway_server(
+        json.dumps(result).encode(), status=lambda: 429 if sum(delays) < 65 else 200
+    ) as (base, received):
+        assert preview_ci.upload(base, "secret", SHA, 7, bundle) == result
+    assert 65 <= sum(delays) <= 120
+    assert 1 < len(received) <= 8
+    assert all(
+        request == ("POST", f"/api/environments?sha={SHA}&pr=7", "Bearer secret", bundle)
+        for request in received
+    )
+
+
+@pytest.mark.parametrize("status", [429, 401])
+def test_upload_preserves_http_failure_after_its_retry_budget(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    delays: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        delays.append(seconds)
+        assert sum(delays) <= 120
+
+    monkeypatch.setattr(preview_ci, "sleep", sleep)
+    with gateway_server(b"rejected", status=status) as (base, received):
+        with pytest.raises(urllib.error.HTTPError) as error:
+            preview_ci.upload(base, "secret", SHA, 7, archive())
+        assert error.value.code == status
+    assert sum(delays) == (120 if status == 429 else 0)
+    assert 1 < len(received) <= 8 if status == 429 else len(received) == 1
 
 
 def test_gateway_redirects_never_forward_credentials() -> None:
