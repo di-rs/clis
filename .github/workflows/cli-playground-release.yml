@@ -19,13 +19,14 @@ on:
       - 'tools/cli-playground/infra/ci.py'
       - 'tools/cli-playground/infra/routes.yml'
       - '.github/workflows/cli-playground-release.yml'
-      - '.github/workflows/cli-playground-deploy.yml'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.python-version'
   workflow_dispatch:
   workflow_call:
     secrets:
+      CLOUDFLARE_DNS_API_TOKEN:
+        required: true
       PLAYGROUND_DEPLOY_TOKEN:
         required: true
       PULUMI_CONFIG_PASSPHRASE:
@@ -157,17 +158,45 @@ jobs:
           retention-days: 30
   deploy:
     needs: release
+    if: ${{ github.ref == 'refs/heads/master' }}
+    environment: playground
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    concurrency:
+      group: cli-playground-production
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: read
-    # ./ resolves this caller's commit; actionlint 1.7.12 lacks the newer $/ syntax.
-    uses: ./.github/workflows/cli-playground-deploy.yml # zizmor: ignore[self-repository]
-    with:
-      revision: ${{ needs.release.outputs.revision }}
-      gateway_image: ${{ needs.release.outputs.gateway_image }}
-      sandbox_image: ${{ needs.release.outputs.sandbox_image }}
-    secrets:
-      PLAYGROUND_DEPLOY_TOKEN: ${{ secrets.PLAYGROUND_DEPLOY_TOKEN }}
+    env:
+      PULUMI_SKIP_UPDATE_CHECK: 'true'
+      PULUMI_BACKEND_URL: ${{ vars.PULUMI_BACKEND_URL }}
       PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
-      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      # Read SSH identity from R2; DNS renewal credentials reach only Traefik.
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_EC2_METADATA_DISABLED: 'true'
+      PLAYGROUND_URL: ${{ vars.PLAYGROUND_URL }}
+      CLOUDFLARE_DNS_API_TOKEN: ${{ secrets.CLOUDFLARE_DNS_API_TOKEN }}
+      ACME_EMAIL: ${{ vars.ACME_EMAIL }}
+      PLAYGROUND_DEPLOY_TOKEN: ${{ secrets.PLAYGROUND_DEPLOY_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.13.0'
+          enable-cache: false
+      - run: uv sync --locked --all-packages
+      - uses: pulumi/setup-pulumi@b374ceb6168550de27c6eba92e01c1a774040e11 # v2
+        with:
+          pulumi-version: '3.268.0'
+      - name: Deploy immutable images and verify HTTPS
+        env:
+          RELEASE_REVISION: ${{ needs.release.outputs.revision }}
+          GATEWAY_IMAGE: ${{ needs.release.outputs.gateway_image }}
+          SANDBOX_IMAGE: ${{ needs.release.outputs.sandbox_image }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: uv run --locked python tools/cli-playground/infra/ci.py deploy

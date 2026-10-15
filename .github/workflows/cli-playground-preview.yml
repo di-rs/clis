@@ -1,0 +1,75 @@
+name: CLI playground previews
+
+# Only the default-branch script runs with credentials. PR artifacts remain opaque data.
+on: # zizmor: ignore[dangerous-triggers]
+  workflow_run:
+    workflows: [CLI playground build]
+    types: [in_progress, completed]
+  pull_request_target:
+    branches: [master]
+    types: [closed, reopened]
+
+permissions: {}
+
+jobs:
+  publish:
+    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' }}
+    concurrency:
+      group: cli-playground-publish-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+      deployments: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.13.0'
+          enable-cache: false
+      - name: Publish previews and PR links
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          PLAYGROUND_URL: ${{ vars.PLAYGROUND_URL }}
+          PLAYGROUND_DEPLOY_TOKEN: ${{ secrets.PLAYGROUND_DEPLOY_TOKEN }}
+        run: uv run --locked --no-dev python tools/cli-playground/preview_ci.py publish --repo "$REPOSITORY" --run-id "$RUN_ID"
+  lifecycle:
+    if: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.repo.full_name == github.repository && github.event.pull_request.base.ref == 'master' }}
+    concurrency:
+      group: cli-playground-lifecycle-${{ github.repository }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+      deployments: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.13.0'
+          enable-cache: false
+      - name: Reconcile hosted PR playgrounds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_ACTION: ${{ github.event.action }}
+          PLAYGROUND_URL: ${{ vars.PLAYGROUND_URL }}
+          PLAYGROUND_DEPLOY_TOKEN: ${{ secrets.PLAYGROUND_DEPLOY_TOKEN }}
+        run: |
+          uv run --locked --no-dev python tools/cli-playground/preview_ci.py lifecycle \
+            --repo "$REPOSITORY" --pr "$PR_NUMBER" --action "$PR_ACTION"

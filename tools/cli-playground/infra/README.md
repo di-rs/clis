@@ -6,9 +6,10 @@ Docker, SSH or deployment commands are required for setup or routine releases.
 The private Cloudflare R2 bucket holds Pulumi state independently of the VPS.
 
 Production runs one Ubuntu 24.04 CX33 in Nuremberg, with a retained IPv4 address,
-Docker, gVisor and Traefik. One hostname, such as `play.thesecret.dev`, serves the
-gateway and PR previews at `/p/<identifier>`. Previews expire after seven days or
-PR closure. There is no permanent preview containing all `master` binaries.
+Docker, gVisor and Traefik. The control hostname, such as `play.thesecret.dev`,
+serves the gateway; PR previews use `pr-N.play.thesecret.dev/p/<identifier>`.
+Control-host `/p/<identifier>` links are also supported. Previews expire after
+seven days or PR closure. There is no permanent preview containing all `master` binaries.
 
 ## 1. Prepare the accounts and domain
 
@@ -29,16 +30,17 @@ running them. Keep `PLAYGROUND_AUTO_DEPLOY` unset or `false` until step 7 succee
    the DNS zone; the account ID belongs in the R2 endpoint. See
    [finding these IDs](https://developers.cloudflare.com/fundamentals/account/find-account-and-zone-ids/).
 4. Choose an unused hostname inside that zone, such as `play.thesecret.dev`.
-   Pulumi will create its **A** record pointing to the host's IPv4, with
+   Pulumi will create its **A** record and `*.play.thesecret.dev`, pointing to the host's IPv4, with
    **DNS only** proxy status and a 300-second TTL. Do not create it by hand.
    Resolve any existing A, AAAA or CNAME record for that hostname before setup;
    an existing service requires an explicit migration or import, not deletion
    without checking its owner.
 
-This deployment uses one A record, no wildcard record and no AAAA record. Traefik
-obtains and renews the hostname's certificate using ACME **HTTP-01** on port 80.
-Keep ports 80 and 443 reachable and the record DNS-only. The Cloudflare DNS token
-is used by infrastructure setup and is never installed on the VPS.
+This deployment uses a control A record and a wildcard A record, with no AAAA
+record. Traefik obtains and renews the control/wildcard certificate using ACME
+**DNS-01** through Cloudflare. Keep ports 80 and 443 reachable and both records
+DNS-only. Infrastructure setup uses its own token; a separate DNS-renewal token
+is installed privately on the VPS and exposed only to the Traefik container.
 
 ## 2. Create the private R2 state bucket once
 
@@ -86,7 +88,7 @@ https://ACCOUNT_ID.eu.r2.cloudflarestorage.com
 Replace `ACCOUNT_ID` with the copied Cloudflare account ID. The default endpoint
 without `.eu` cannot access this EU bucket.
 
-### Cloudflare DNS token
+### Cloudflare DNS tokens
 
 Open **My Profile → API Tokens → Create Token** and use **Edit zone DNS** or a
 custom token. Name it for playground setup. Set permissions to **Zone / DNS /
@@ -94,6 +96,13 @@ Edit** and **Zone / Zone / Read**, with **Zone Resources → Include → Specifi
 zone → thesecret.dev** (or your chosen zone). Review and create the token, then
 save its value. Do not add account-wide or R2 permissions. See
 [Cloudflare token creation](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/).
+
+Create a second token with the same zone-scoped permissions, named for playground
+certificate renewal. Save this as `CLOUDFLARE_DNS_API_TOKEN`; the setup token stays
+`CLOUDFLARE_API_TOKEN`. Separate tokens allow independent rotation and revocation,
+but both can edit DNS within the selected zone. They are not scoped to individual
+challenge records. The renewal token is used as Traefik's `CF_DNS_API_TOKEN`;
+see the [Cloudflare DNS challenge provider](https://go-acme.github.io/lego/dns/cloudflare/).
 
 ### Hetzner token and application secrets
 
@@ -148,19 +157,20 @@ If you deliberately chose another jurisdiction, use its matching endpoint from
 Cloudflare. See [Pulumi S3-compatible backends](https://www.pulumi.com/docs/iac/concepts/state-and-backends/).
 
 In **Settings → Environments → playground → Environment secrets**, use **Add
-secret** for these five entries:
+secret** for these six entries:
 
 | Environment secret | Value and use |
 | --- | --- |
 | `HCLOUD_TOKEN` | Hetzner project Read & Write token; setup only |
 | `CLOUDFLARE_API_TOKEN` | Zone-scoped DNS token; setup only |
+| `CLOUDFLARE_DNS_API_TOKEN` | Separate zone-scoped DNS token; runtime certificate renewal |
 | `R2_ACCESS_KEY_ID` | R2 Access Key ID; state access |
 | `R2_SECRET_ACCESS_KEY` | R2 Secret Access Key; state access |
 | `PULUMI_CONFIG_PASSPHRASE` | Passphrase used to encrypt/decrypt state secrets |
 
 Finally, open **Settings → Secrets and variables → Actions → Secrets → New
 repository secret**, and add `PLAYGROUND_DEPLOY_TOKEN`. It must be a repository
-secret because the PR publisher and cleanup workflows also need it. Do not add
+secret because the trusted PR preview workflow also needs it. Do not add
 an environment secret with the same name: an environment override could give
 the gateway a different token from the publisher. See [GitHub Actions secrets](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets).
 
@@ -238,13 +248,14 @@ changes are not a routine way to update an already running host.
 4. After provisioning, setup calls **CLI playground release**, which builds
    gateway and sandbox images from that same workflow commit. Its summary and
    `cli-playground-release` artifact record the commit and immutable image
-   digests. The release then calls **CLI playground runtime deploy**.
+   digests. Its **deploy** job installs that release on the existing host.
 5. Deployment reads the existing SSH identity from R2, waits for SSH and
    cloud-init, checks for gVisor, pulls images, installs configuration and starts
-   Compose. It must verify the public HTTPS `/healthz` response before success.
+   Compose. It verifies public HTTPS `/healthz` on both the control hostname and
+   `pr-1.<control-host>` before success, including wildcard TLS.
 6. Confirm all jobs succeed, then open `https://play.thesecret.dev/healthz` using
    your chosen hostname. Expect `{"status":"ok"}`. In Cloudflare's DNS page,
-   confirm the managed A record is DNS-only and points to the Hetzner IPv4.
+   confirm both managed A records are DNS-only and point to the Hetzner IPv4.
 7. Edit the repository variable `PLAYGROUND_AUTO_DEPLOY` to exactly `true`.
    Subsequent relevant pushes to `master` now build and deploy the runtime.
 
@@ -256,7 +267,7 @@ and shared dependency inputs. Infrastructure-only changes such as `host.py` or
 Changing a variable or secret alone does not trigger either workflow.
 
 To publish the first PR preview, open or update a PR that changes an eligible
-Rust CLI. Its build/publish workflows create the preview and post a link. Setup
+Rust CLI. Its build/preview workflows create the preview and post a link. Setup
 does not republish old PR artifacts or create a `master` preview. A fresh eligible
 PR build is needed for an older PR without a working preview. PR links are public.
 
@@ -267,20 +278,25 @@ PR build is needed for an older PR without a working preview. PR links are publi
 | Deploy current runtime manually | **Actions → CLI playground release → Run workflow → master**; this works even while auto-deploy is `false` |
 | Pause automatic runtime releases | Set repository variable `PLAYGROUND_AUTO_DEPLOY` to `false`; this does not stop the running service or an already queued/running job |
 | Apply reviewed infrastructure changes | Merge into `master`, then run **CLI playground setup**; it also builds and deploys that commit's runtime |
-| Change certificate email or application token | Update the GitHub value, then run **CLI playground release** on `master` |
+| Change certificate email, renewal token or application token | Update the GitHub value, then run **CLI playground release** on `master` |
 | Change hostname or DNS zone | Plan the DNS migration, update the variables, then run **CLI playground setup**; runtime deployment rejects a URL that differs from state |
 | Undo application code | Revert it in a reviewed PR, merge to `master`, then let auto-deploy run or start **CLI playground release** manually |
 
 Runtime deployment uses Pulumi only to read existing stack outputs from R2. It
-does not refresh state, call `pulumi up`, change the firewall, or use Hetzner or
-Cloudflare DNS API tokens. The R2 credential is still bucket-scoped Object Read
+does not refresh state, call `pulumi up`, change the firewall, or use the Hetzner
+or Cloudflare provisioning token. It installs the separate certificate-renewal
+token for the proxy. The R2 credential is still bucket-scoped Object Read
 & Write because setup uses the same credential. Provisioning and deployment jobs
 share a concurrency group to prevent simultaneous host changes.
 
 A runtime update can restart the gateway and ends active terminal sessions.
 Their files are disposable. Published PR metadata and binaries remain under
-`/var/lib/cli-playground` across normal releases. New PR uploads replace their
-batch at the same URL and end that PR's existing sessions.
+`/var/lib/cli-playground` across normal releases. New PR uploads advance the
+preview's runnable version at the same URL. Existing sessions retain their exact
+version and files until disconnect or expiry; unused versions are then removed.
+The page distinguishes latest-build status from its current terminal revision,
+and an explicit switch/reset starts a new workspace with the latest available
+artifact. Reopening a PR reconciles its latest current-head run when available.
 
 ### Reruns and failures
 
@@ -308,9 +324,10 @@ workflow step that failed, then use the relevant account page:
 - **SSH/bootstrap:** check server status and TCP 22 in the Hetzner Console.
   Host-key verification failure requires investigating the host/state mismatch;
   do not disable host-key verification.
-- **Public HTTPS:** check the active zone, DNS-only A record, absence of an AAAA
-  record for this IPv4-only host, ports 80/443 and any certificate-authority
-  restrictions on the domain. DNS propagation can outlast the health-check window.
+- **Public HTTPS:** check the active zone, both DNS-only A records, absence of an
+  AAAA record for this IPv4-only host, ports 80/443, the renewal token's zone
+  permissions and any certificate-authority restrictions. Check both control and
+  PR-host health URLs; DNS propagation can outlast the health-check window.
 
 Images are pulled before Compose changes the running release. There is no
 automatic rollback after a Compose or public-health failure; the host may already
@@ -357,9 +374,8 @@ compatible location, and Pulumi replacement ordering must be planned. The curren
 workflows do not implement or validate an automated replace-and-restore sequence.
 Do not delete the server or set `protect: false` as a generic troubleshooting step.
 Plan resource protection changes, downtime, state handling, IP reassignment and
-data restoration before a replacement. Existing hosts from an older operator-SSH
-or wildcard-DNS deployment also require an explicit migration because cloud-init
-identity changes are first-boot behavior.
+data restoration before a replacement. Cloud-init identity changes only take
+effect during the host's first boot.
 
 The [Linux sandbox workflow](../../../.github/workflows/cli-playground-sandbox.yml)
 checks real gVisor execution. Missing gVisor fails deployment. The setup and release

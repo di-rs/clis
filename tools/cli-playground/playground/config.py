@@ -1,5 +1,6 @@
 """Validated deployment configuration; one gateway worker owns the session limit."""
 
+import hashlib
 import re
 from pathlib import Path
 from typing import Literal, Self
@@ -80,11 +81,10 @@ class Settings(BaseSettings):
                 raise ValueError("PLAYGROUND_PREVIEW_DOMAIN must match the HTTPS control hostname")
         return self
 
-    def preview_url(self, identifier: str) -> str:
+    def preview_url(self, identifier: str, pr: int | None = None) -> str:
+        label = f"pr-{pr}" if pr is not None else identifier
         origin = (
-            f"https://{identifier}.{self.preview_domain}"
-            if self.preview_domain
-            else self.public_url
+            f"https://{label}.{self.preview_domain}" if self.preview_domain else self.public_url
         )
         return f"{origin}/p/{identifier}"
 
@@ -93,5 +93,9 @@ class Settings(BaseSettings):
             return True
         if self.preview_domain is None:
             return False
+        pr_match = re.fullmatch(r"pr-([1-9][0-9]*)\." + re.escape(self.preview_domain), host)
+        if pr_match is not None:
+            expected = hashlib.sha256(f"pull-request:{pr_match[1]}".encode()).hexdigest()[:32]
+            return identifier is None or identifier == expected
         match = re.fullmatch(r"([0-9a-f]{32})\." + re.escape(self.preview_domain), host)
         return match is not None and (identifier is None or match[1] == identifier)

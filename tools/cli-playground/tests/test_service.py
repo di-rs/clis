@@ -9,9 +9,51 @@ import pytest
 from playground import service as service_module
 from playground.artifacts import stage_archive
 from playground.config import Settings
+from playground.models import BuildIdentity, BuildUpdate
 from playground.service import PlaygroundService
+from playground.storage import ArtifactConflictError
 
 from .helpers import binary_bundle, elf_binary
+
+
+@pytest.mark.usefixtures("configured_environment")
+def test_expiry_cleanup_preserves_build_refreshed_during_session_shutdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        service = PlaygroundService(Settings())
+        now = 1_000_000.0
+        monkeypatch.setattr("playground.storage.time.time", lambda: now)
+        previous = BuildUpdate(
+            sha="a" * 40, run_id=1000, run_number=10, run_attempt=1, state="building"
+        )
+        metadata = service.update_build(123, previous)
+        now += service.settings.preview_seconds + 1
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def delayed_shutdown(identifiers: set[str]) -> None:
+            assert identifiers == {metadata.id}
+            entered.set()
+            await release.wait()
+
+        monkeypatch.setattr(service.sessions, "close_environments", delayed_shutdown)
+        cleaning = asyncio.create_task(service.cleanup_inactive())
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            refreshed = service.update_build(
+                123,
+                BuildUpdate(
+                    sha="b" * 40, run_id=1100, run_number=11, run_attempt=1, state="building"
+                ),
+            )
+        finally:
+            release.set()
+            await cleaning
+        assert await service.metadata(metadata.id) == refreshed
+        with pytest.raises(ArtifactConflictError, match="^stale build$"):
+            service.update_build(123, previous)
+
+    asyncio.run(exercise())
 
 
 @pytest.mark.usefixtures("configured_environment")
@@ -61,62 +103,41 @@ def test_archive_timeout_waits_for_worker_without_blocking_metadata(
 
 
 @pytest.mark.usefixtures("configured_environment")
-def test_replacement_blocks_new_sessions_and_keeps_old_files_until_cleanup_finishes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def body(payload: bytes = b"old") -> AsyncIterator[bytes]:
-        yield binary_bundle({"echor": elf_binary(payload)})
-
+def test_newer_build_event_supersedes_a_streaming_upload() -> None:
     async def exercise() -> None:
         service = PlaygroundService(Settings())
-        previous = await service.deploy(body(), "a" * 40, 123)
-        entered, release = asyncio.Event(), asyncio.Event()
+        started, release = asyncio.Event(), asyncio.Event()
 
-        async def close_environments(identifiers: set[str]) -> None:
-            if previous.id in identifiers:
-                entered.set()
-                await release.wait()
-                assert (previous.binary_dir / "echor").read_bytes() == elf_binary(b"old")
+        async def body() -> AsyncIterator[bytes]:
+            yield binary_bundle({"echor": elf_binary()})
+            started.set()
+            await release.wait()
 
-        monkeypatch.setattr(service.sessions, "close_environments", close_environments)
-        deploying = asyncio.create_task(service.deploy(body(b"new"), "b" * 40, 123))
-        await entered.wait()
-        try:
-            assert previous.id in getattr(service, "updating", set())
-            metadata = await service.metadata(previous.id)
-            assert metadata is not None and metadata.sha == "a" * 40
-        finally:
-            release.set()
-            current = await deploying
-        assert current.id == previous.id
-        assert current.sha == "b" * 40
-        assert previous.id not in service.updating
-        assert not previous.binary_dir.exists()
-
-    asyncio.run(exercise())
-
-
-@pytest.mark.usefixtures("configured_environment")
-def test_failed_session_cleanup_preserves_the_current_revision(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def body() -> AsyncIterator[bytes]:
-        yield binary_bundle({"echor": elf_binary()})
-
-    async def exercise() -> None:
-        service = PlaygroundService(Settings())
-        previous = await service.deploy(body(), "a" * 40, 123)
-
-        async def failed_cleanup(identifiers: set[str]) -> None:
-            if previous.id in identifiers:
-                raise RuntimeError("Docker unavailable")
-
-        monkeypatch.setattr(service.sessions, "close_environments", failed_cleanup)
-        with pytest.raises(RuntimeError, match="Docker unavailable"):
-            await service.deploy(body(), "b" * 40, 123)
-        assert service.store.get(previous.id) == previous
+        deploying = asyncio.create_task(
+            service.deploy(
+                body(),
+                "a" * 40,
+                123,
+                BuildIdentity(sha="a" * 40, run_id=1000, run_number=10, run_attempt=1),
+            )
+        )
+        await started.wait()
+        metadata = service.update_build(
+            123,
+            BuildUpdate(
+                sha="b" * 40,
+                run_id=1100,
+                run_number=11,
+                run_attempt=1,
+                state="building",
+            ),
+        )
+        assert metadata.build is not None and metadata.build.sha == "b" * 40
+        release.set()
+        with pytest.raises(ArtifactConflictError, match="^stale build$"):
+            await deploying
+        assert service.store.get(metadata.id) is None
         assert not list(service.settings.data_dir.glob(".upload-*"))
-        assert previous.id not in getattr(service, "updating", set())
 
     asyncio.run(exercise())
 
@@ -145,31 +166,5 @@ def test_failed_manifest_swap_leaves_the_previous_batch_readable(
         assert (previous.binary_dir / "echor").read_bytes() == elf_binary()
         assert not (previous.binary_dir.parent / ("b" * 40)).exists()
         assert not list(service.settings.data_dir.glob(".upload-*"))
-        assert previous.id not in service.updating
 
     asyncio.run(exercise())
-
-
-@pytest.mark.usefixtures("configured_environment")
-def test_updating_preview_rejects_new_websockets_before_starting_a_sandbox() -> None:
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
-    from playground.routes import create_router
-    from starlette.websockets import WebSocketDisconnect
-
-    service = PlaygroundService(Settings())
-    temporary = service.store.temporary_directory()
-    (temporary / "echor").write_bytes(elf_binary())
-    environment = service.store.publish(temporary, ["echor"], "a" * 40, 123)
-    service.updating.add(environment.id)
-    app = FastAPI()
-    app.include_router(create_router(service, service.settings.data_dir))
-    with TestClient(app, base_url=service.settings.public_url) as client:
-        with pytest.raises(WebSocketDisconnect) as error:
-            with client.websocket_connect(
-                f"wss://play.example/ws/{environment.id}?sha={'a' * 40}",
-                headers={"Origin": service.settings.public_url},
-            ):
-                pytest.fail("updating revision opened a terminal")
-        assert error.value.code == 1013
-    assert not service.sessions.active

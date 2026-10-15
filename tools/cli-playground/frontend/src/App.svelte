@@ -1,25 +1,46 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import {
-    EnvironmentError, environmentIdFromPath, loadEnvironment, type Environment,
+    EnvironmentError, environmentIdFromPath, loadEnvironment, runnable,
+    type Environment, type RunnableEnvironment,
   } from './environment';
   import { examplesFor, files, shellExamples, type Example } from './examples';
   import { createBrowserTerminal, type BrowserTerminal } from './terminal/browser';
   import type { SessionState } from './terminal/session';
 
-  let environment = $state<Environment | null>(null);
+  let environment = $state<RunnableEnvironment | null>(null);
+  let latest = $state<Environment | null>(null);
   let selectedCli = $state('');
   let failure = $state<EnvironmentError | null>(null);
   let loading = $state(true);
   let controller = $state.raw<BrowserTerminal | null>(null);
   let session = $state<SessionState>({ phase: 'connecting', label: 'Connecting', message: null, canReconnect: false });
   let request: AbortController | undefined;
+  let pollRequest: AbortController | undefined;
   const environmentId = environmentIdFromPath(window.location.pathname);
   const connected = $derived(session.phase === 'connected');
   const examples = $derived(selectedCli ? examplesFor(selectedCli) : []);
+  const updateAvailable = $derived(
+    latest !== null && runnable(latest) && environment !== null && latest.revision !== environment.revision,
+  );
+  const buildTitle = $derived.by(() => {
+    switch (latest?.build?.state) {
+      case 'building': return 'This preview is building.';
+      case 'failed': return 'The latest preview failed.';
+      case 'empty': return 'No affected CLIs.';
+      case 'cancelled': return 'The latest build was cancelled.';
+      default: return 'No runnable build is available.';
+    }
+  });
+
+  function selectEnvironment(result: Environment) {
+    environment = runnable(result) ? result : null;
+    if (!result.clis.includes(selectedCli)) selectedCli = result.clis[0] ?? '';
+  }
 
   async function load() {
     request?.abort();
+    pollRequest?.abort();
     const current = new AbortController();
     request = current;
     loading = true;
@@ -27,8 +48,8 @@
     try {
       const result = await loadEnvironment(environmentId, current.signal);
       if (current.signal.aborted) return;
-      environment = result;
-      if (!result.clis.includes(selectedCli)) selectedCli = result.clis[0];
+      latest = result;
+      selectEnvironment(result);
     } catch (error) {
       if (current.signal.aborted) return;
       failure = error instanceof EnvironmentError ? error : new EnvironmentError(
@@ -41,11 +62,28 @@
     }
   }
 
+  async function checkForUpdate() {
+    if (loading || failure || pollRequest || !latest) return;
+    const current = new AbortController();
+    pollRequest = current;
+    try {
+      const result = await loadEnvironment(environmentId, current.signal);
+      if (current.signal.aborted) return;
+      latest = result;
+      // Polling never replaces a terminal that already owns a workspace.
+      if (!environment && runnable(result)) selectEnvironment(result);
+    } catch {
+      // A transient metadata failure must not interrupt a working terminal.
+    } finally {
+      if (pollRequest === current) pollRequest = undefined;
+    }
+  }
+
   function terminalAction(node: HTMLDivElement) {
     if (!environmentId || !environment) return;
     let terminal: BrowserTerminal;
     try {
-      terminal = createBrowserTerminal(node, environmentId, environment.sha, (next) => { session = next; });
+      terminal = createBrowserTerminal(node, environmentId, environment.sha, environment.revision, (next) => { session = next; });
       controller = terminal;
       terminal.connect();
     } catch {
@@ -66,7 +104,12 @@
 
   onMount(() => {
     void load();
-    return () => request?.abort();
+    const interval = window.setInterval(() => void checkForUpdate(), 10_000);
+    return () => {
+      request?.abort();
+      pollRequest?.abort();
+      window.clearInterval(interval);
+    };
   });
 </script>
 
@@ -113,6 +156,19 @@
         </button>
       {/if}
     </section>
+  {:else if latest && !environment}
+    <section id="preview-state" class="state-view" aria-live="polite">
+      <span class="eyebrow">PULL REQUEST #{latest.pr}</span>
+      <h1>{buildTitle}</h1>
+      {#if latest.build}
+        <p>Commit <code>{latest.build.sha.slice(0, 7)}</code>.
+          {#if latest.build.state === 'building'}This page will open a terminal when the build is ready.
+          {:else if latest.build.state === 'empty'}This revision does not include CLI changes to try.
+          {:else}Check the build details on the pull request. This page checks for updates automatically.{/if}
+        </p>
+      {/if}
+      <button type="button" class="button button-primary" onclick={() => void load()}>Refresh status</button>
+    </section>
   {:else if environment}
     <div id="playground-view" class="playground">
       <section class="intro" aria-labelledby="cli-name">
@@ -139,6 +195,38 @@
           <div><dt>Link expires</dt><dd><time id="meta-expiry" datetime={environment.expiresAt.toISOString()} title={environment.expiresAt.toLocaleString()}>{environment.expiresAt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</time></dd></div>
         </dl>
       </section>
+
+      {#if latest?.build && latest.build.state !== 'ready' || updateAvailable}
+        <div id="build-banner" class="build-banner" role="status">
+          <p>
+            {#if latest?.build?.state === 'building'}
+              Building commit <code>{latest.build.sha.slice(0, 7)}</code>.
+              {#if latest.sha}The last successful build is <code>{latest.sha.slice(0, 7)}</code>.{/if}
+              Your terminal remains on <code>{environment.sha.slice(0, 7)}</code>.
+            {:else if latest?.build?.state === 'failed'}
+              Latest preview failed for <code>{latest.build.sha.slice(0, 7)}</code>.
+              {#if latest.sha}The last successful build is <code>{latest.sha.slice(0, 7)}</code>.{/if}
+              Your terminal remains on <code>{environment.sha.slice(0, 7)}</code>.
+            {:else if latest?.build?.state === 'cancelled'}
+              Latest build was cancelled for <code>{latest.build.sha.slice(0, 7)}</code>.
+              {#if latest.sha}The last successful build is <code>{latest.sha.slice(0, 7)}</code>.{/if}
+              Your terminal remains on <code>{environment.sha.slice(0, 7)}</code>.
+            {:else if latest?.build?.state === 'empty'}
+              No affected CLIs in commit <code>{latest.build.sha.slice(0, 7)}</code>.
+              Your existing session remains on <code>{environment.sha.slice(0, 7)}</code>.
+            {:else if updateAvailable && latest?.sha}
+              A new build is ready for <code>{latest.sha.slice(0, 7)}</code>.
+              Your current terminal and files are unchanged.
+            {/if}
+          </p>
+          {#if updateAvailable}
+            <button type="button" class="banner-button" onclick={() => void load()}
+              title="Discard this workspace and start a new terminal with the latest runnable build">
+              Switch to latest build
+            </button>
+          {/if}
+        </div>
+      {/if}
 
       <div class="workbench">
         <aside class="sidebar" aria-label="Workspace and command examples">

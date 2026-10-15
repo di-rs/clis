@@ -28,8 +28,6 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
       PLAYGROUND_URL: ${{ vars.PLAYGROUND_URL }}
-      ACME_EMAIL: ${{ vars.ACME_EMAIL }}
-      PLAYGROUND_DEPLOY_TOKEN: ${{ secrets.PLAYGROUND_DEPLOY_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -60,6 +58,7 @@ jobs:
     # ./ resolves this caller's commit; actionlint 1.7.12 lacks the newer $/ syntax.
     uses: ./.github/workflows/cli-playground-release.yml # zizmor: ignore[self-repository]
     secrets:
+      CLOUDFLARE_DNS_API_TOKEN: ${{ secrets.CLOUDFLARE_DNS_API_TOKEN }}
       PLAYGROUND_DEPLOY_TOKEN: ${{ secrets.PLAYGROUND_DEPLOY_TOKEN }}
       PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}

@@ -7,6 +7,7 @@ services:
     environment:
       PLAYGROUND_DATA_DIR: /var/lib/cli-playground
       PLAYGROUND_PUBLIC_URL: https://${PLAYGROUND_DOMAIN:?Set the playground domain}
+      PLAYGROUND_PREVIEW_DOMAIN: ${PLAYGROUND_DOMAIN}
       PLAYGROUND_DEPLOY_TOKEN: ${PLAYGROUND_DEPLOY_TOKEN:?Set a random deployment token}
       PLAYGROUND_SANDBOX_IMAGE: ${PLAYGROUND_SANDBOX_IMAGE:?Use the approved release via infra/deploy.py}
       PLAYGROUND_SANDBOX_RUNTIME: runsc
@@ -39,9 +40,10 @@ services:
       - --providers.file.filename=/etc/traefik/routes.yml
       - --certificatesresolvers.preview.acme.email=${ACME_EMAIL:?Set the certificate contact email}
       - --certificatesresolvers.preview.acme.storage=/certificates/acme.json
-      - --certificatesresolvers.preview.acme.httpchallenge.entrypoint=web
+      - --certificatesresolvers.preview.acme.dnschallenge.provider=cloudflare
     environment:
       PLAYGROUND_DOMAIN: ${PLAYGROUND_DOMAIN}
+      CF_DNS_API_TOKEN: ${CLOUDFLARE_DNS_API_TOKEN:?Set the certificate DNS token}
     ports:
       - "80:80"
       - "443:443"

@@ -126,6 +126,7 @@ class FakeGitHub(GitHub):
         self.payload = archive()
         self.stale_after_download = False
         self.deployments: list[dict[str, object]] = []
+        self.workflow_runs: list[dict[str, object]] = []
 
     def request(
         self, path: str, *, method: str = "GET", body: object = None, limit: int = 2 * 1024 * 1024
@@ -146,6 +147,10 @@ class FakeGitHub(GitHub):
             response = []
         elif path.startswith(f"repos/{REPO}/deployments?"):
             response = self.deployments
+        elif path.startswith(f"repos/{REPO}/actions/workflows/cli-playground.yml/runs?"):
+            assert f"head_sha={SHA}" in path
+            assert "event=pull_request" in path
+            response = {"workflow_runs": self.workflow_runs}
         elif path == f"repos/{REPO}/actions/artifacts/81/zip":
             if self.stale_after_download:
                 self.pull["head"] = {"sha": "b" * 40}
@@ -195,7 +200,7 @@ def test_pr_closure_during_batch_upload_stops_github_writes(
 ) -> None:
     github = FakeGitHub()
 
-    def uploaded(*args: object) -> dict[str, str]:
+    def uploaded(*args: object, **kwargs: object) -> dict[str, str]:
         github.pull["state"] = "closed"
         return {"id": "a" * 32, "url": "https://play.example/p/" + "a" * 32}
 
@@ -217,7 +222,16 @@ def test_batch_uses_one_upload_one_preview_and_constant_github_requests(
     monkeypatch.setattr(preview_ci, "upload", uploaded)
     body = preview_ci.publish(github, REPO, 500, "https://play.example", "token")
     uploaded.assert_called_once_with(
-        github, REPO, "https://play.example", "token", SHA, 7, github.payload
+        github,
+        REPO,
+        "https://play.example",
+        "token",
+        SHA,
+        7,
+        github.payload,
+        run_id=500,
+        run_number=2,
+        run_attempt=1,
     )
     assert requests.call_count <= 15
     assert body is not None and body.count(url) == 1 and len(body) < 1000
@@ -243,6 +257,11 @@ def test_failed_batch_never_records_success_or_an_untrusted_link(
         Mock(side_effect=failure) if isinstance(failure, Exception) else Mock(return_value=failure)
     )
     monkeypatch.setattr(preview_ci, "upload", uploaded)
+    monkeypatch.setattr(
+        preview_ci,
+        "gateway_request",
+        lambda *args, **kwargs: {"id": "a" * 32, "url": "https://play.example/p/" + "a" * 32},
+    )
     with pytest.raises(ValueError, match="Failed to publish"):
         preview_ci.publish(github, REPO, 500, "https://play.example", "token")
     assert uploaded.call_count == 1
@@ -305,6 +324,40 @@ def test_reopened_pull_clears_tombstone_without_reactivating_old_deployments(
     assert github.writes == []
 
 
+@pytest.mark.parametrize("status", ["in_progress", "completed"])
+def test_reopen_replays_only_latest_current_head_build_after_clearing_tombstone(
+    monkeypatch: pytest.MonkeyPatch,
+    status: str,
+) -> None:
+    github = FakeGitHub()
+    github.run["status"] = status
+    github.workflow_runs = [
+        {**github.run, "id": 499, "run_number": 1},
+        github.run,
+        {**github.run, "id": 501, "run_number": 3, "head_sha": "b" * 40},
+        {**github.run, "id": 502, "run_number": 4, "path": ".github/workflows/other.yml"},
+    ]
+    requests: list[tuple[str, str]] = []
+
+    def gateway(
+        base: str, token: str, path: str, *, method: str, **kwargs: object
+    ) -> dict[str, object]:
+        requests.append((method, path))
+        if path.endswith("/reopen"):
+            return {"reopened": 7}
+        return {"id": "a" * 32, "url": "https://pr-7.play.example/p/" + "a" * 32}
+
+    monkeypatch.setattr(preview_ci, "gateway_request", gateway)
+    preview_ci.lifecycle(github, REPO, 7, "reopened", "https://play.example", "secret")
+    assert len(requests) == 2
+    assert requests[0] == ("POST", "/api/pull-requests/7/reopen")
+    if status == "in_progress":
+        assert requests[1] == ("PUT", "/api/pull-requests/7/build")
+    else:
+        assert requests[1][0] == "POST" and requests[1][1].startswith("/api/environments?")
+    assert github.writes[-1][0] == f"repos/{REPO}/issues/7/comments"
+
+
 def test_large_deployment_history_does_not_fail_successful_hosted_cleanup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -335,7 +388,11 @@ def test_missing_cleanup_acknowledgement_prevents_github_updates(
 ) -> None:
     github = FakeGitHub()
     github.pull["state"] = "closed"
-    monkeypatch.setattr(preview_ci, "gateway_request", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        preview_ci,
+        "gateway_request",
+        lambda *args, **kwargs: {"id": "a" * 32, "url": "https://play.example/p/" + "a" * 32},
+    )
     with pytest.raises(ValueError):
         preview_ci.lifecycle(github, REPO, 7, "closed", "https://play.example", "token")
     assert github.writes == []
@@ -387,6 +444,7 @@ def gateway_server(
                 pass
 
         do_DELETE = do_POST
+        do_PUT = do_POST
         do_GET = do_POST
 
         def log_message(self, format: str, *args: object) -> None:
@@ -414,8 +472,136 @@ def test_upload_sends_the_entire_zip_in_one_request() -> None:
     bundle = archive(["echor", "catr"])
     result = {"id": "a" * 32, "url": "https://play.example/p/" + "a" * 32}
     with gateway_server(json.dumps(result).encode()) as (base, received):
-        assert preview_ci.upload(FakeGitHub(), REPO, base, "secret", SHA, 7, bundle) == result
-    assert received == [("POST", f"/api/environments?sha={SHA}&pr=7", "Bearer secret", bundle)]
+        assert (
+            preview_ci.upload(
+                FakeGitHub(),
+                REPO,
+                base,
+                "secret",
+                SHA,
+                7,
+                bundle,
+                run_id=500,
+                run_number=2,
+                run_attempt=1,
+            )
+            == result
+        )
+    assert received == [
+        (
+            "POST",
+            f"/api/environments?sha={SHA}&pr=7&run_id=500&run_number=2&run_attempt=1",
+            "Bearer secret",
+            bundle,
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("status", "conclusion", "artifacts_present", "expected"),
+    [
+        ("queued", None, False, "building"),
+        ("in_progress", None, False, "building"),
+        ("completed", "failure", True, "failed"),
+        ("completed", "cancelled", True, "cancelled"),
+        ("completed", "success", False, "empty"),
+    ],
+)
+def test_publish_records_current_build_state_without_allocating_a_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+    status: str,
+    conclusion: str | None,
+    artifacts_present: bool,
+    expected: str,
+) -> None:
+    github = FakeGitHub()
+    github.run.update(status=status, conclusion=conclusion)
+    if not artifacts_present:
+        github.artifacts.clear()
+    gateway_request = preview_ci.gateway_request
+    url = "https://pr-7.play.example/p/" + "a" * 32
+    response = {"id": "a" * 32, "url": url}
+    with gateway_server(json.dumps(response).encode()) as (base, received):
+        monkeypatch.setattr(
+            preview_ci,
+            "gateway_request",
+            lambda _base, token, path, **kwargs: gateway_request(base, token, path, **kwargs),
+        )
+        body = preview_ci.publish(github, REPO, 500, "https://play.example", "secret")
+    assert body is not None
+    assert url in body
+    assert len(received) == 1
+    method, path, authorization, payload = received[0]
+    assert (method, path, authorization) == ("PUT", "/api/pull-requests/7/build", "Bearer secret")
+    assert json.loads(payload) == {
+        "sha": SHA,
+        "run_id": 500,
+        "run_number": 2,
+        "run_attempt": 1,
+        "state": expected,
+    }
+
+
+def test_reopened_successful_build_with_expired_artifact_is_unavailable_not_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    github = FakeGitHub()
+    github.artifacts[0]["expired"] = True
+    github.workflow_runs = [github.run]
+    gateway_request = preview_ci.gateway_request
+    response = {
+        "reopened": 7,
+        "id": "a" * 32,
+        "url": "https://pr-7.play.example/p/" + "a" * 32,
+    }
+    with gateway_server(json.dumps(response).encode()) as (base, received):
+        monkeypatch.setattr(
+            preview_ci,
+            "gateway_request",
+            lambda _base, token, path, **kwargs: gateway_request(base, token, path, **kwargs),
+        )
+        preview_ci.lifecycle(github, REPO, 7, "reopened", "https://play.example", "secret")
+    assert [(method, path) for method, path, _, _ in received] == [
+        ("POST", "/api/pull-requests/7/reopen"),
+        ("PUT", "/api/pull-requests/7/build"),
+    ]
+    assert json.loads(received[1][3])["state"] == "failed"
+    assert len(github.writes) == 1
+    comment = str(github.writes[0][1])
+    assert "artifacts expired; rerun build" in comment.lower()
+    assert "No CLI binary artifacts were produced" not in comment
+
+
+def test_preview_url_accepts_only_its_pr_subdomain() -> None:
+    identifier = "a" * 32
+    url = f"https://pr-7.play.example/p/{identifier}"
+    assert preview_ci.preview_url("https://play.example", {"id": identifier, "url": url}, 7) == url
+    with pytest.raises(ValueError, match="invalid preview URL"):
+        preview_ci.preview_url("https://play.example", {"id": identifier, "url": url}, 70)
+
+
+def test_ready_preview_is_not_relabelled_by_a_late_building_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    github = FakeGitHub()
+    github.run.update(status="in_progress", conclusion=None)
+    monkeypatch.setattr(
+        preview_ci,
+        "gateway_request",
+        lambda *args, **kwargs: {
+            "id": "a" * 32,
+            "url": "https://pr-7.play.example/p/" + "a" * 32,
+            "build": {
+                "sha": SHA,
+                "run_id": 500,
+                "run_number": 2,
+                "run_attempt": 1,
+                "state": "ready",
+            },
+        },
+    )
+    assert preview_ci.publish(github, REPO, 500, "https://play.example", "token") is None
+    assert github.writes == []
 
 
 def test_upload_recovers_after_the_gateway_is_busy_for_over_a_minute(
@@ -428,11 +614,31 @@ def test_upload_recovers_after_the_gateway_is_busy_for_over_a_minute(
     with gateway_server(
         json.dumps(result).encode(), status=lambda: 429 if sum(delays) < 65 else 200
     ) as (base, received):
-        assert preview_ci.upload(FakeGitHub(), REPO, base, "secret", SHA, 7, bundle) == result
+        assert (
+            preview_ci.upload(
+                FakeGitHub(),
+                REPO,
+                base,
+                "secret",
+                SHA,
+                7,
+                bundle,
+                run_id=500,
+                run_number=2,
+                run_attempt=1,
+            )
+            == result
+        )
     assert 65 <= sum(delays) <= 120
     assert 1 < len(received) <= 8
     assert all(
-        request == ("POST", f"/api/environments?sha={SHA}&pr=7", "Bearer secret", bundle)
+        request
+        == (
+            "POST",
+            f"/api/environments?sha={SHA}&pr=7&run_id=500&run_number=2&run_attempt=1",
+            "Bearer secret",
+            bundle,
+        )
         for request in received
     )
 
@@ -479,7 +685,18 @@ def test_upload_preserves_http_failure_after_its_retry_budget(
     monkeypatch.setattr(preview_ci, "sleep", sleep)
     with gateway_server(b"rejected", status=status) as (base, received):
         with pytest.raises(urllib.error.HTTPError) as error:
-            preview_ci.upload(FakeGitHub(), REPO, base, "secret", SHA, 7, archive())
+            preview_ci.upload(
+                FakeGitHub(),
+                REPO,
+                base,
+                "secret",
+                SHA,
+                7,
+                archive(),
+                run_id=500,
+                run_number=2,
+                run_attempt=1,
+            )
         assert error.value.code == status
     assert sum(delays) == (120 if status == 429 else 0)
     assert 1 < len(received) <= 8 if status == 429 else len(received) == 1
@@ -490,6 +707,47 @@ def test_gateway_redirects_never_forward_credentials() -> None:
         with pytest.raises((ValueError, urllib.error.HTTPError)):
             preview_ci.gateway_request(base, "secret", "/api/pull-requests/7", method="POST")
     assert received == [("POST", "/api/pull-requests/7", "Bearer secret", b"")]
+
+
+@pytest.mark.parametrize("status", ["in_progress", "completed"])
+def test_server_rejecting_a_stale_run_prevents_comments_and_deployment_updates(
+    monkeypatch: pytest.MonkeyPatch,
+    status: str,
+) -> None:
+    github = FakeGitHub()
+    github.run["status"] = status
+    gateway_request = preview_ci.gateway_request
+    with gateway_server(b'{"detail":"stale build"}', status=409) as (base, received):
+        monkeypatch.setattr(
+            preview_ci,
+            "gateway_request",
+            lambda _base, token, path, **kwargs: gateway_request(base, token, path, **kwargs),
+        )
+        assert preview_ci.publish(github, REPO, 500, "https://play.example", "token") is None
+    assert len(received) == 1
+    assert github.writes == []
+
+
+@pytest.mark.parametrize(
+    "detail", ["build identity conflict", "this revision already has a different binary"]
+)
+def test_upload_does_not_hide_genuine_server_conflicts(detail: str) -> None:
+    with gateway_server(json.dumps({"detail": detail}).encode(), status=409) as (base, received):
+        with pytest.raises(urllib.error.HTTPError) as error:
+            preview_ci.upload(
+                FakeGitHub(),
+                REPO,
+                base,
+                "secret",
+                SHA,
+                7,
+                archive(),
+                run_id=500,
+                run_number=2,
+                run_attempt=1,
+            )
+        assert error.value.code == 409
+    assert len(received) == 1
 
 
 def test_gateway_response_size_is_bounded() -> None:
@@ -535,6 +793,11 @@ def test_invalid_artifacts_are_never_uploaded(
     else:
         github.payload = archive(payload=b"not ELF" * 10)
     monkeypatch.setattr(preview_ci, "upload", Mock(side_effect=AssertionError("invalid upload")))
+    monkeypatch.setattr(
+        preview_ci,
+        "gateway_request",
+        lambda *args, **kwargs: {"id": "a" * 32, "url": "https://play.example/p/" + "a" * 32},
+    )
     with pytest.raises(ValueError, match="Failed to publish"):
         preview_ci.publish(github, REPO, 500, "https://play.example", "token")
     assert "Publish failed" in str(github.writes[-1][1])
@@ -547,6 +810,11 @@ def test_only_the_exact_bundle_artifact_name_reaches_upload(
     github = FakeGitHub()
     github.artifacts[0]["name"] = "cli-playground-binaries-extra"
     monkeypatch.setattr(preview_ci, "upload", Mock(side_effect=AssertionError("unexpected upload")))
+    monkeypatch.setattr(
+        preview_ci,
+        "gateway_request",
+        lambda *args, **kwargs: {"id": "a" * 32, "url": "https://play.example/p/" + "a" * 32},
+    )
     body = preview_ci.publish(github, REPO, 500, "https://play.example", "token")
     assert body is not None and "No CLI binary artifacts" in body
 

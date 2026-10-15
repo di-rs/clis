@@ -19,6 +19,178 @@ from playground.sessions import SessionLimitError, SessionManager
 from starlette.websockets import WebSocketDisconnect
 
 from .helpers import upload
+from .test_api import build_event, build_upload
+
+
+def test_same_sha_publication_preserves_pinned_session_and_collects_after_disconnect(
+    docker_settings: Settings,
+    docker_daemon: DockerDaemon,
+) -> None:
+    from .helpers import elf_binary
+
+    app = create_app(docker_settings)
+    with TestClient(app, base_url=docker_settings.public_url) as client:
+        deployed = build_upload(client)
+        assert deployed.status_code == 201
+        identifier = deployed.json()["id"]
+        metadata = client.get(f"/api/environments/{identifier}").json()
+        old_dir = docker_settings.data_dir / identifier / metadata["revision"]
+        with client.websocket_connect(
+            f"wss://play.example/ws/{identifier}?sha={'a' * 40}&revision={metadata['revision']}",
+            headers={"Origin": docker_settings.public_url},
+        ) as websocket:
+            assert websocket.receive_bytes() == b"ready\n"
+            assert build_upload(client, attempt=2, payload=b"new").status_code == 201
+            assert (old_dir / "echor").read_bytes() == elf_binary()
+            websocket.send_json({"type": "input", "data": "still alive"})
+            assert websocket.receive_bytes() == b"still alive"
+            with pytest.raises(WebSocketDisconnect):
+                with client.websocket_connect(
+                    f"wss://play.example/ws/{identifier}?sha={'a' * 40}&revision={metadata['revision']}",
+                    headers={"Origin": docker_settings.public_url},
+                ):
+                    pytest.fail("a superseded build admitted a new session")
+            assert not docker_daemon.removed
+        # The WebSocket context waits for the handler's cleanup to finish.
+        assert not old_dir.exists()
+        current = client.get(f"/api/environments/{identifier}").json()
+        assert (docker_settings.data_dir / identifier / current["revision"] / "echor").is_file()
+
+
+def test_empty_build_stops_new_admission_without_stopping_existing_shell(
+    docker_settings: Settings,
+) -> None:
+    with TestClient(create_app(docker_settings), base_url=docker_settings.public_url) as client:
+        deployed = build_upload(client)
+        assert deployed.status_code == 201
+        identifier = deployed.json()["id"]
+        metadata = client.get(f"/api/environments/{identifier}").json()
+        with client.websocket_connect(
+            f"wss://play.example/ws/{identifier}?sha={'a' * 40}&revision={metadata['revision']}",
+            headers={"Origin": docker_settings.public_url},
+        ) as websocket:
+            assert websocket.receive_bytes() == b"ready\n"
+            assert build_event(client, "empty", run=11).status_code == 200
+            websocket.send_json({"type": "input", "data": "retained"})
+            assert websocket.receive_bytes() == b"retained"
+            assert client.get(f"/api/environments/{identifier}").json()["sha"] is None
+
+
+def test_revision_is_rechecked_after_accept_even_when_source_sha_is_unchanged(
+    docker_settings: Settings,
+    docker_daemon: DockerDaemon,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from playground.models import BuildIdentity
+
+    from .helpers import elf_binary
+
+    app = create_app(docker_settings)
+    original_accept = WebSocket.accept
+
+    async def accept_then_replace(websocket: WebSocket) -> None:
+        await original_accept(websocket)
+        staged = app.state.store.temporary_directory()
+        (staged / "echor").write_bytes(elf_binary(b"new"))
+        app.state.store.publish(
+            staged,
+            ["echor"],
+            "a" * 40,
+            123,
+            BuildIdentity(sha="a" * 40, run_id=1000, run_number=10, run_attempt=2),
+        )
+
+    with TestClient(app, base_url=docker_settings.public_url) as client:
+        deployed = build_upload(client)
+        assert deployed.status_code == 201
+        identifier = deployed.json()["id"]
+        metadata = client.get(f"/api/environments/{identifier}").json()
+        monkeypatch.setattr(WebSocket, "accept", accept_then_replace)
+        with client.websocket_connect(
+            f"wss://play.example/ws/{identifier}?sha={'a' * 40}&revision={metadata['revision']}",
+            headers={"Origin": docker_settings.public_url},
+        ) as websocket:
+            assert websocket.receive() == {"type": "websocket.close", "code": 1008, "reason": ""}
+    assert not docker_daemon.configs
+
+
+def test_ci_revision_cannot_be_opened_without_its_artifact_version(
+    docker_settings: Settings,
+) -> None:
+    with TestClient(create_app(docker_settings), base_url=docker_settings.public_url) as client:
+        deployed = build_upload(client)
+        assert deployed.status_code == 201
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect(
+                f"wss://play.example/ws/{deployed.json()['id']}?sha={'a' * 40}",
+                headers={"Origin": docker_settings.public_url},
+            ):
+                pytest.fail("a SHA-only connection silently selected a CI build attempt")
+
+
+def test_failed_cleanup_retains_superseded_artifact_until_container_is_removed(
+    docker_settings: Settings,
+    docker_daemon: DockerDaemon,
+) -> None:
+    from collections.abc import AsyncIterator
+
+    from playground.service import PlaygroundService
+
+    from .helpers import binary_bundle, elf_binary
+
+    async def body() -> AsyncIterator[bytes]:
+        yield binary_bundle({"echor": elf_binary()})
+
+    async def exercise() -> None:
+        service = PlaygroundService(docker_settings)
+        original = await service.deploy(body(), "a" * 40, 123)
+        with pytest.raises(RuntimeError, match="Docker could not"):
+            async with service.sessions.open(original) as session:
+                assert await session.read() == b"ready\n"
+                await service.deploy(body(), "b" * 40, 123)
+                docker_daemon.failures["delete"] = DockerError(500, "unavailable")
+        service.collect_artifacts()
+        assert original.binary_dir.exists()
+        docker_daemon.failures.clear()
+        await service.cleanup_inactive()
+        assert not original.binary_dir.exists()
+        assert not service.sessions.active
+
+    asyncio.run(exercise())
+
+
+def test_failed_manual_republication_does_not_remove_a_retained_revision(
+    docker_settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from collections.abc import AsyncIterator
+
+    from playground.service import PlaygroundService
+
+    from .helpers import binary_bundle, elf_binary
+
+    async def body() -> AsyncIterator[bytes]:
+        yield binary_bundle({"echor": elf_binary()})
+
+    async def exercise() -> None:
+        service = PlaygroundService(docker_settings)
+        original = await service.deploy(body(), "a" * 40, 123)
+        async with service.sessions.open(original) as session:
+            assert await session.read() == b"ready\n"
+            await service.deploy(body(), "b" * 40, 123)
+            replace = Path.replace
+
+            def failed_swap(path: Path, target: str | Path) -> Path:
+                if path.name == ".metadata-upload":
+                    raise OSError("disk unavailable")
+                return replace(path, target)
+
+            monkeypatch.setattr(Path, "replace", failed_swap)
+            with pytest.raises(OSError, match="disk unavailable"):
+                await service.deploy(body(), "a" * 40, 123)
+            assert (original.binary_dir / "echor").read_bytes() == elf_binary()
+
+    asyncio.run(exercise())
 
 
 class DockerDaemon:

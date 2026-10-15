@@ -127,12 +127,18 @@ def public_origin(value: str) -> str:
 
 
 def gateway_request(
-    base: str, token: str, path: str, *, method: str, data: bytes | None = None
+    base: str,
+    token: str,
+    path: str,
+    *,
+    method: str,
+    data: bytes | None = None,
+    content_type: str = "application/zip",
 ) -> dict[str, object]:
     request = urllib.request.Request(
         base + path,
         data=data,
-        headers={"Authorization": "Bearer " + token, "Content-Type": "application/zip"},
+        headers={"Authorization": "Bearer " + token, "Content-Type": content_type},
         method=method,
     )
     with urllib.request.build_opener(NoRedirect).open(request, timeout=TIMEOUT) as response:
@@ -143,9 +149,27 @@ def gateway_request(
 
 
 def upload(
-    api: GitHub, repo: str, base: str, token: str, sha: str, pr: int, data: bytes
+    api: GitHub,
+    repo: str,
+    base: str,
+    token: str,
+    sha: str,
+    pr: int,
+    data: bytes,
+    *,
+    run_id: int,
+    run_number: int,
+    run_attempt: int,
 ) -> dict[str, object] | None:
-    query = urllib.parse.urlencode({"sha": sha, "pr": pr})
+    query = urllib.parse.urlencode(
+        {
+            "sha": sha,
+            "pr": pr,
+            "run_id": run_id,
+            "run_number": run_number,
+            "run_attempt": run_attempt,
+        }
+    )
     # Two minutes of backoff allow for the gateway's 60-second upload plus cleanup.
     delays = iter((2, 4, 8, 16, 30, 30, 30))
     while True:
@@ -156,6 +180,8 @@ def upload(
                 base, token, "/api/environments?" + query, method="POST", data=data
             )
         except urllib.error.HTTPError as error:
+            if error.code == 409 and (stale_build(error) or not current_pull(api, repo, pr, sha)):
+                return None
             delay = next(delays, None)
             if error.code != 429 or delay is None:
                 raise
@@ -163,7 +189,53 @@ def upload(
             sleep(delay)
 
 
-def preview_url(base: str, response: dict[str, object]) -> str:
+def stale_build(error: urllib.error.HTTPError) -> bool:
+    try:
+        payload = error.read(16385)
+        return len(payload) <= 16384 and table(json.loads(payload)).get("detail") == "stale build"
+    except ValueError:
+        return False
+    finally:
+        error.close()
+
+
+def update_build(
+    api: GitHub,
+    repo: str,
+    base: str,
+    token: str,
+    sha: str,
+    pr: int,
+    run_id: int,
+    revision: tuple[int, int],
+    state: str,
+) -> dict[str, object] | None:
+    if not current_pull(api, repo, pr, sha):
+        return None
+    try:
+        return gateway_request(
+            base,
+            token,
+            f"/api/pull-requests/{pr}/build",
+            method="PUT",
+            content_type="application/json",
+            data=json.dumps(
+                {
+                    "sha": sha,
+                    "run_id": run_id,
+                    "run_number": revision[0],
+                    "run_attempt": revision[1],
+                    "state": state,
+                }
+            ).encode(),
+        )
+    except urllib.error.HTTPError as error:
+        if error.code == 409 and (stale_build(error) or not current_pull(api, repo, pr, sha)):
+            return None
+        raise
+
+
+def preview_url(base: str, response: dict[str, object], pr: int) -> str:
     identifier = response.get("id")
     if not isinstance(identifier, str) or not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", identifier):
         raise ValueError("invalid preview identifier")
@@ -171,6 +243,9 @@ def preview_url(base: str, response: dict[str, object]) -> str:
     if response.get("url") == expected:
         return expected
     origin = urllib.parse.urlsplit(public_origin(base))
+    expected = f"https://pr-{pr}.{origin.netloc}/p/{identifier}"
+    if response.get("url") == expected:
+        return expected
     if re.fullmatch(r"[0-9a-f]{32}", identifier):
         expected = f"https://{identifier}.{origin.netloc}/p/{identifier}"
         if response.get("url") == expected:
@@ -215,7 +290,30 @@ def lifecycle(
         response = gateway_request(base_url, token, path + "/reopen", method="POST")
         if positive(response.get("reopened")) != number:
             raise ValueError("invalid reopen acknowledgement")
-        return f"PR #{number} can publish new playgrounds; expired previews remain unavailable."
+        # A build can finish before the lifecycle job clears the closed tombstone.
+        # Replay its current state through the same trusted publisher after reopening.
+        pull = table(api.json(f"repos/{repo}/pulls/{number}"))
+        sha = table(pull.get("head")).get("sha")
+        if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
+            raise ValueError("invalid commit SHA")
+        query = urllib.parse.urlencode({"event": "pull_request", "head_sha": sha})
+        runs = api.pages(
+            f"repos/{repo}/actions/workflows/cli-playground.yml/runs?{query}", "workflow_runs"
+        )
+        latest = max(
+            (
+                run
+                for run in runs
+                if run.get("head_sha") == sha
+                and run.get("path") == WORKFLOW
+                and run.get("event") == "pull_request"
+            ),
+            key=lambda run: (positive(run.get("run_number")), positive(run.get("run_attempt"))),
+            default=None,
+        )
+        if latest is not None:
+            publish(api, repo, positive(latest.get("id")), base_url, token)
+        return f"PR #{number} reopened; reconciled the latest available build for its current head."
     response = gateway_request(base_url, token, path, method="DELETE")
     deleted = response.get("deleted")
     if type(deleted) is not int or deleted < 0:
@@ -255,8 +353,8 @@ def publish(api: GitHub, repo: str, run_id: int, base_url: str, token: str) -> s
     if (
         run.get("id") != run_id
         or run.get("event") != "pull_request"
-        or run.get("status") != "completed"
-        or run.get("conclusion") in ("cancelled", "skipped")
+        or run.get("status")
+        not in {"queued", "in_progress", "completed", "waiting", "pending", "requested"}
         or run.get("path") != WORKFLOW
         or run.get("name") != "CLI playground build"
         or table(run.get("repository")).get("full_name") != repo
@@ -306,11 +404,25 @@ def publish(api: GitHub, repo: str, run_id: int, base_url: str, token: str) -> s
             "`PLAYGROUND_DEPLOY_TOKEN` after deploying the gateway. "
             "Live previews are unavailable; binaries can be downloaded below."
         )
-    if run.get("conclusion") != "success":
+    completed = run.get("status") == "completed"
+    state = (
+        "building"
+        if not completed
+        else "cancelled"
+        if run.get("conclusion") == "cancelled"
+        else "failed"
+    )
+    if not completed:
+        paragraphs.append("**Building:** this revision is not ready yet.")
+    elif state == "cancelled":
+        paragraphs.append("**Build cancelled:** no new live preview was published.")
+    elif run.get("conclusion") != "success":
         paragraphs.append(
             "**Build failed:** no new live previews were published. Check the build logs."
         )
-    artifacts = api.pages(f"{base}/actions/runs/{run_id}/artifacts", "artifacts")
+    artifacts = (
+        api.pages(f"{base}/actions/runs/{run_id}/artifacts", "artifacts") if completed else []
+    )
     artifact = max(
         (
             item
@@ -323,7 +435,15 @@ def publish(api: GitHub, repo: str, run_id: int, base_url: str, token: str) -> s
     publish_failed = False
     url: str | None = None
     if artifact is None:
-        paragraphs.append("No CLI binary artifacts were produced for this run.")
+        expired = any(
+            item.get("name") == ARTIFACT_NAME and item.get("expired") for item in artifacts
+        )
+        if expired:
+            paragraphs.append("**Artifacts expired; rerun build** to restore this preview.")
+        elif completed:
+            paragraphs.append("No CLI binary artifacts were produced for this run.")
+        if completed and run.get("conclusion") == "success":
+            state = "failed" if expired else "empty"
     else:
         artifact_id = positive(artifact.get("id"))
         paragraphs.append(f"[Download binaries]({run_url}/artifacts/{artifact_id})")
@@ -343,16 +463,41 @@ def publish(api: GitHub, repo: str, run_id: int, base_url: str, token: str) -> s
                     f"{base}/actions/artifacts/{artifact_id}/zip", limit=MAX_ARCHIVE
                 )
                 count = len(binary_archive(bundle))
-                response = upload(api, repo, base_url, token, sha, number, bundle)
+                response = upload(
+                    api,
+                    repo,
+                    base_url,
+                    token,
+                    sha,
+                    number,
+                    bundle,
+                    run_id=run_id,
+                    run_number=revision[0],
+                    run_attempt=revision[1],
+                )
                 if response is None:
                     return None
-                url = preview_url(base_url, response)
+                url = preview_url(base_url, response, number)
                 paragraphs.append(f"[Open playground]({url}) · {count} CLIs in one shared shell.")
             except OSError, ValueError, KeyError, zipfile.BadZipFile, subprocess.SubprocessError:
                 publish_failed = True
                 paragraphs.append(
                     "Publish failed: check the binary bundle and gateway configuration."
                 )
+    if configured and not url:
+        status_response = update_build(
+            api, repo, base_url, token, sha, number, run_id, revision, state
+        )
+        if status_response is None:
+            return None
+        if (
+            status_response.get("build") is not None
+            and table(status_response["build"]).get("state") != state
+        ):
+            # Another publisher may have completed the same run while this event waited.
+            return None
+        status_url = preview_url(base_url, status_response, number)
+        paragraphs.append(f"[View preview status]({status_url})")
     if not current_pull(api, repo, number, sha):
         return None
     if url:

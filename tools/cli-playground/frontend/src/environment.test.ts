@@ -22,9 +22,76 @@ describe("environment metadata", () => {
       id: identifier,
       clis: ["catr", "echor"],
       sha: "a".repeat(40),
+      revision: "a".repeat(40),
+      build: null,
       pr: 42,
       expiresAt: new Date("2030-01-02T03:04:05Z"),
     });
+  });
+
+  it("loads a first build before any runnable artifact exists", () => {
+    const result = parseEnvironment(
+      {
+        ...metadata,
+        sha: null,
+        revision: null,
+        clis: [],
+        build: {
+          sha: "b".repeat(40),
+          run_id: 501,
+          run_number: 12,
+          run_attempt: 1,
+          state: "building",
+        },
+      },
+      now,
+    );
+    expect(result.sha).toBeNull();
+    expect(result.revision).toBeNull();
+    expect(result.clis).toEqual([]);
+    expect(result.build).toEqual({
+      sha: "b".repeat(40),
+      runId: 501,
+      runNumber: 12,
+      runAttempt: 1,
+      state: "building",
+    });
+  });
+
+  it("keeps the last runnable version separate from a failed newer head", () => {
+    const result = parseEnvironment(
+      {
+        ...metadata,
+        revision: `${metadata.sha}-11-1`,
+        build: {
+          sha: "b".repeat(40),
+          run_id: 501,
+          run_number: 12,
+          run_attempt: 2,
+          state: "failed",
+        },
+      },
+      now,
+    );
+    expect(result.sha).toBe("a".repeat(40));
+    expect(result.revision).toBe(`${"a".repeat(40)}-11-1`);
+    expect(result.build?.sha).toBe("b".repeat(40));
+    expect(result.build?.state).toBe("failed");
+  });
+
+  it.each([
+    { sha: null, revision: null, clis: [] },
+    { revision: "../../other" },
+    { revision: `${"b".repeat(40)}-12-1` },
+    {
+      build: { sha: "b".repeat(40), run_id: 501, run_number: 0, run_attempt: 1, state: "building" },
+    },
+    {
+      build: { sha: "b".repeat(40), run_id: 501, run_number: 12, run_attempt: 1, state: "unknown" },
+    },
+    { build: { sha: "b".repeat(40), run_id: 501, run_number: 12, run_attempt: 1, state: "ready" } },
+  ])("rejects inconsistent build or artifact metadata: %j", (value) => {
+    expect(() => parseEnvironment({ ...metadata, ...value }, now)).toThrow(EnvironmentError);
   });
 
   it.each(

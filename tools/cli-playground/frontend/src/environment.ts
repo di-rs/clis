@@ -1,9 +1,25 @@
+export interface Build {
+  sha: string;
+  runId: number;
+  runNumber: number;
+  runAttempt: number;
+  state: "building" | "ready" | "failed" | "empty" | "cancelled";
+}
+
 export interface Environment {
   id: string;
   clis: string[];
-  sha: string;
+  sha: string | null;
+  revision: string | null;
+  build: Build | null;
   pr: number;
   expiresAt: Date;
+}
+
+export type RunnableEnvironment = Environment & { sha: string; revision: string };
+
+export function runnable(environment: Environment): environment is RunnableEnvironment {
+  return environment.sha !== null && environment.revision !== null && environment.clis.length > 0;
 }
 
 export class EnvironmentError extends Error {
@@ -29,6 +45,38 @@ function invalid(): EnvironmentError {
   );
 }
 
+function parseBuild(value: unknown): Build | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "object" || Array.isArray(value)) throw invalid();
+  const data = value as Record<string, unknown>;
+  if (
+    typeof data.sha !== "string" ||
+    !/^[a-f0-9]{40}$/.test(data.sha) ||
+    typeof data.run_id !== "number" ||
+    !Number.isSafeInteger(data.run_id) ||
+    data.run_id < 1 ||
+    typeof data.run_number !== "number" ||
+    !Number.isSafeInteger(data.run_number) ||
+    data.run_number < 1 ||
+    typeof data.run_attempt !== "number" ||
+    !Number.isSafeInteger(data.run_attempt) ||
+    data.run_attempt < 1 ||
+    (data.state !== "building" &&
+      data.state !== "ready" &&
+      data.state !== "failed" &&
+      data.state !== "empty" &&
+      data.state !== "cancelled")
+  )
+    throw invalid();
+  return {
+    sha: data.sha,
+    runId: data.run_id,
+    runNumber: data.run_number,
+    runAttempt: data.run_attempt,
+    state: data.state,
+  };
+}
+
 export function parseEnvironment(value: unknown, now = Date.now()): Environment {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw invalid();
   const data = value as Record<string, unknown>;
@@ -36,18 +84,30 @@ export function parseEnvironment(value: unknown, now = Date.now()): Environment 
     typeof data.id !== "string" ||
     !/^[a-f0-9]{32}$/.test(data.id) ||
     !Array.isArray(data.clis) ||
-    data.clis.length === 0 ||
     !data.clis.every(
       (cli: unknown): cli is string =>
         typeof cli === "string" && /^[a-z][a-z0-9_-]{0,63}$/.test(cli),
     ) ||
     new Set(data.clis).size !== data.clis.length ||
-    typeof data.sha !== "string" ||
-    !/^[a-f0-9]{40}$/.test(data.sha) ||
+    (data.sha !== null && (typeof data.sha !== "string" || !/^[a-f0-9]{40}$/.test(data.sha))) ||
     typeof data.pr !== "number" ||
     !Number.isSafeInteger(data.pr) ||
     data.pr < 1 ||
     typeof data.expires_at !== "string"
+  )
+    throw invalid();
+  const build = parseBuild(data.build);
+  const revision = data.revision === undefined ? data.sha : data.revision;
+  if (data.sha === null) {
+    if (revision !== null || data.clis.length !== 0 || build === null || build.state === "ready")
+      throw invalid();
+  } else if (
+    data.clis.length === 0 ||
+    typeof revision !== "string" ||
+    !/^[a-f0-9]{40}(?:-[1-9][0-9]*-[1-9][0-9]*)?$/.test(revision) ||
+    revision.slice(0, 40) !== data.sha ||
+    build?.state === "empty" ||
+    (build?.state === "ready" && build.sha !== data.sha)
   )
     throw invalid();
   const expiresAt = new Date(data.expires_at);
@@ -59,7 +119,7 @@ export function parseEnvironment(value: unknown, now = Date.now()): Environment 
       false,
     );
   }
-  return { id: data.id, clis: data.clis, sha: data.sha, pr: data.pr, expiresAt };
+  return { id: data.id, clis: data.clis, sha: data.sha, revision, build, pr: data.pr, expiresAt };
 }
 
 export async function loadEnvironment(
