@@ -304,8 +304,13 @@ and release ordering. PostgreSQL visibility avoids another search cluster; see
 Persistent volumes are managed independently from application releases and are
 never removed by a routine Compose update/down command.
 
-Temporal services remain private. Configure client authentication/authorization
-rather than assuming default authorization protects a reachable server; consult
+Temporal services remain private. Use dedicated-CA mutual TLS to admit only
+trusted Boxie, Temporal internal/UI, and operator clients, with server hostname
+verification. The initial upstream server's no-op API authorizer means every
+admitted client is a fully trusted cluster administrator; do not claim per-user
+or namespace RBAC. The namespace is organizational. This explicit transport
+admission boundary protects the initial single trust domain; private networking
+alone and default authorization do not. Consult
 [Temporal security guidance](https://docs.temporal.io/self-hosted-guide/security).
 Expose only its operator UI through the protected dashboard ingress. Use a
 shared task queue for the initial single-host worker pool, with explicit host
