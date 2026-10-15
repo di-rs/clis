@@ -12,7 +12,6 @@ from fastapi import FastAPI, Header, Query, Request, Response, WebSocket
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import RequestResponseEndpoint
-from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import ExpiryRequest, SandboxRef
@@ -27,10 +26,10 @@ from boxie.sandbox.protocol import (
     ExecutionControlWire,
     ExecutionExpiryWire,
     ObservationWire,
-    ResizeWire,
     SnapshotWire,
 )
 from boxie.sandbox.reporting import ObservationReporter
+from boxie.sandbox.terminal_session import serve_terminal
 
 
 def create_durable_agent_app(
@@ -206,60 +205,17 @@ def create_durable_agent_app(
                 JSONResponse({"detail": "invalid agent credential"}, status_code=401)
             )
             return
-        tasks: list[asyncio.Task[None]] = []
-        epoch: int | None = None
-        ref: SandboxRef | None = None
-        try:
-            record = agent.records.get(identifier)
-            if record is None or record.consumer_id != consumer_id:
-                raise BoxieError(404, "execution not found")
-            ref = record.ref
-            session = agent.terminals.get(identifier)
-            if record.state != SandboxState.READY or record.attached or session is None:
-                raise BoxieError(409, "terminal unavailable")
-            await websocket.accept()
-            # Failed acceptance cannot clear the original READY disconnect grace.
-            epoch = await agent.attach(ref)
-
-            async def send() -> None:
-                while (data := await session.output.get()) is not None:
-                    for offset in range(0, len(data), 65536):
-                        await websocket.send_bytes(data[offset : offset + 65536])
-                await websocket.send_json({"type": "status", "reason": record.reason})
-                await websocket.close()
-
-            async def receive() -> None:
-                assert ref is not None and epoch is not None
-                while True:
-                    message = await websocket.receive()
-                    if message["type"] == "websocket.disconnect":
-                        return
-                    if (data := message.get("bytes")) is not None:
-                        await agent.write(ref, epoch, data)
-                    elif (text := message.get("text")) is not None:
-                        if len(text) > 1024:
-                            raise BoxieError(422, "invalid terminal frame")
-                        size = ResizeWire.model_validate_json(text)
-                        await agent.resize(ref, epoch, size.columns, size.rows)
-
-            tasks = [asyncio.create_task(send()), asyncio.create_task(receive())]
-            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-            for task in done:
-                await task
-        except BoxieError as error:
-            if websocket.application_state == WebSocketState.CONNECTING:
-                await websocket.send_denial_response(
-                    JSONResponse({"detail": "terminal unavailable"}, status_code=error.status)
-                )
-            elif websocket.application_state == WebSocketState.CONNECTED:
-                await websocket.close(code=1008)
-        except WebSocketDisconnect, RuntimeError, TimeoutError, ValueError:
-            pass
-        finally:
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-            if epoch is not None and ref is not None:
-                await agent.detach(ref, epoch)
+        record = agent.records.get(identifier)
+        if record is None or record.consumer_id != consumer_id:
+            await websocket.send_denial_response(
+                JSONResponse({"detail": "execution not found"}, status_code=404)
+            )
+            return
+        if record.state != SandboxState.READY or identifier not in agent.terminals:
+            await websocket.send_denial_response(
+                JSONResponse({"detail": "terminal unavailable"}, status_code=409)
+            )
+            return
+        await serve_terminal(websocket, agent, record.ref)
 
     return app

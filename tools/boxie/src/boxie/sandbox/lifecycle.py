@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Literal
 from uuid import UUID, uuid4
 
 from boxie.bootstrap.config import AgentConfig
@@ -330,18 +331,28 @@ class DurableAgent:
         ):
             raise BoxieError(409, "terminal attachment is unavailable")
 
-    async def attach(self, ref: SandboxRef) -> int:
+    async def attach(self, ref: SandboxRef, *, resume_after: int | None = None) -> int:
         # Transport calls this only AFTER websocket.accept succeeds.
         async with self._lock(ref):
             record = self._record(ref)
             self._attachment(record)
-            if record.attached:
-                raise BoxieError(409, "terminal already attached")
+            if resume_after is not None:
+                self.terminals[ref.id].replay.after(resume_after)
             record.attachment_epoch += 1
             record.attached, record.disconnected_at = True, None
             self.deadlines[ref.id].disconnect = None
             self._changed(record)
             return record.attachment_epoch
+
+    async def check_attachment(
+        self, ref: SandboxRef, epoch: int, *, allow_ended: bool = False
+    ) -> None:
+        async with self._lock(ref):
+            record = self._record(ref)
+            if epoch != record.attachment_epoch:
+                raise BoxieError(409, "terminal attachment superseded")
+            if not allow_ended or record.state == SandboxState.READY:
+                self._attachment(record, epoch)
 
     async def detach(self, ref: SandboxRef, epoch: int) -> None:
         async with self._lock(ref):
@@ -358,7 +369,14 @@ class DurableAgent:
                 )
                 self._changed(record)
 
-    async def write(self, ref: SandboxRef, epoch: int, data: bytes) -> None:
+    async def write(
+        self,
+        ref: SandboxRef,
+        epoch: int,
+        data: bytes,
+        *,
+        source: Literal["user", "terminal"] = "user",
+    ) -> None:
         if not data or len(data) > 65536:
             raise BoxieError(422, "invalid terminal input")
         async with self._lock(ref):
@@ -366,7 +384,7 @@ class DurableAgent:
             self._attachment(record, epoch)
             async with asyncio.timeout(self.config.docker_timeout):
                 await self.terminals[ref.id].stream.write(data)
-            if self._live(record):
+            if source == "user" and self._live(record):
                 self.deadlines[ref.id].idle = self.monotonic() + record.spec.policy.idle_seconds
                 record.last_input_at = self.clock()
                 self._changed(record)
@@ -377,7 +395,7 @@ class DurableAgent:
         async with self._lock(ref):
             self._attachment(self._record(ref), epoch)
             async with asyncio.timeout(self.config.docker_timeout):
-                await self.terminals[ref.id].stream.resize(columns, rows)
+                await self.terminals[ref.id].resize(columns, rows)
 
     async def _reconcile_one(self, record: ExecutionRecord) -> None:
         async with self._lock(record.ref):

@@ -9,6 +9,7 @@ from typing import cast
 from uuid import UUID
 
 import pytest
+from boxie_test_support.terminal_network import attach
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from playground.boxie_client import TerminalPort
@@ -21,8 +22,21 @@ from .helpers import upload
 
 
 @pytest.mark.parametrize("limit", [16777216, 10], ids=["default-cap", "lower-agent-cap"])
-def test_agent_output_limit_reaches_browser_at_exact_cap(tmp_path: Path, limit: int) -> None:
+def test_agent_output_limit_reaches_browser_at_exact_cap(
+    tmp_path: Path, limit: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
     async def exercise() -> None:
+        if limit == 10:
+            from fastapi import WebSocket
+
+            original_send = WebSocket.send_bytes
+
+            async def delayed_send(self: WebSocket, data: bytes) -> None:
+                await original_send(self, data)
+                # Let the browser ACK the final payload before the sender queues status.
+                await asyncio.sleep(0.03)
+
+            monkeypatch.setattr(WebSocket, "send_bytes", delayed_send)
         async with boxie_network(tmp_path / "agent") as network:
             profiles = json.loads(network.config.profiles_file.read_text())
             if limit != 16777216:
@@ -38,15 +52,22 @@ def test_agent_output_limit_reaches_browser_at_exact_cap(tmp_path: Path, limit: 
                 ) as ws:
                     await ws.send(json.dumps({"type": "auth", "credential": binding["credential"]}))
                     assert json.loads(await ws.recv())["type"] == "authenticated"
-                    assert await ws.recv() == b"ready\n"
-                    next(iter(network.daemon.terminals.values())).queue.put_nowait(
-                        b"x" * (limit - 6)
-                    )
-                    forwarded = 6
-                    async with asyncio.timeout(5):
-                        while isinstance(frame := await ws.recv(), bytes):
-                            forwarded += len(frame)
-                            assert forwarded <= limit
+                    epoch, initial = await attach(ws)
+                    assert initial == b"ready\n"
+                    forwarded = len(initial)
+                    sequence = 1
+                    while forwarded < limit:
+                        chunk = b"x" * min(16384, limit - forwarded)
+                        next(iter(network.daemon.terminals.values())).queue.put_nowait(chunk)
+                        frame = await asyncio.wait_for(ws.recv(), 2)
+                        assert isinstance(frame, bytes)
+                        sequence += 1
+                        assert int.from_bytes(frame[:8], "big") == sequence
+                        forwarded += len(frame) - 8
+                        await ws.send(
+                            json.dumps({"type": "ack", "epoch": epoch, "sequence": sequence})
+                        )
+                    frame = await ws.recv()
                     assert forwarded == limit
                     assert json.loads(frame) == {
                         "type": "status",
@@ -63,7 +84,11 @@ def test_product_defensive_cap_reports_limit_for_misbehaving_peer(
 ) -> None:
     class Peer:
         def __init__(self) -> None:
-            self.frames = iter([b"x" * 16777216, b"!"] if split else [b"x" * 16777217])
+            self.frames = iter(
+                [(1).to_bytes(8, "big") + b"x" * 16777216, (2).to_bytes(8, "big") + b"!"]
+                if split
+                else [(1).to_bytes(8, "big") + b"x" * 16777217]
+            )
 
         async def receive(self) -> bytes | str | None:
             return next(self.frames, None)
@@ -88,7 +113,7 @@ def test_product_defensive_cap_reports_limit_for_misbehaving_peer(
     ) as ws:
         ws.send_json({"type": "auth", "credential": binding["credential"]})
         assert ws.receive_json()["type"] == "authenticated"
-        assert ws.receive_bytes() == b"x" * 16777216
+        assert ws.receive_bytes() == (1).to_bytes(8, "big") + b"x" * 16777216
         assert ws.receive_json() == {
             "type": "status",
             "reason": "output_limit",

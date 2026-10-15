@@ -12,71 +12,8 @@ import pytest
 from boxie.domain.errors import BoxieError
 from boxie.domain.models import Principal, SandboxSpec, SandboxState, TerminationReason
 from boxie_test_support.agent import Clock, FakeTerminal, configuration
-
-
-class Daemon:
-    def __init__(self) -> None:
-        self.resources: dict[str, Any] = {}
-        self.streams: dict[str, FakeTerminal] = {}
-        self.deleted_ids: list[str] = []
-        self.started: list[str] = []
-        self.creates = 0
-        self.unreachable = False
-        self.lost_ack = False
-        self.create_entered = asyncio.Event()
-        self.create_gate: asyncio.Event | None = None
-
-    async def inspect(self, name: str) -> Any:
-        if self.unreachable:
-            raise OSError("daemon unreachable")
-        return self.resources.get(name) or next(
-            (r for r in self.resources.values() if r.id == name), None
-        )
-
-    async def create(self, name: str, config: dict[str, Any]) -> None:
-        from boxie.sandbox.docker import ContainerInfo
-
-        self.creates += 1
-        self.create_entered.set()
-        if self.create_gate:
-            await self.create_gate.wait()  # Materialize only AFTER a prior absence check.
-        self.resources[name] = ContainerInfo(str(uuid4()), config["Labels"], False)
-        if self.lost_ack:
-            raise OSError("lost acknowledgement")
-
-    async def attach(self, identifier: str) -> FakeTerminal:
-        stream = FakeTerminal()
-        self.streams[identifier] = stream
-        return stream
-
-    async def start(self, identifier: str) -> None:
-        assert identifier in self.streams
-        self.started.append(identifier)
-
-    async def delete(self, identifier: str) -> None:
-        if self.unreachable:
-            raise OSError("daemon unreachable")
-        self.deleted_ids.append(identifier)
-        self.resources = {k: v for k, v in self.resources.items() if v.id != identifier}
-
-    async def ready(self) -> bool:
-        return not self.unreachable
-
-    async def close(self) -> None:
-        pass
-
-
-class Guard:
-    stopped = False
-
-    async def run_start_if_allowed(self, request: Any, boot: Any, start: Any) -> bool:
-        if self.stopped:
-            return False
-        await start()
-        return True
-
-    async def start_allowed(self, request: Any, boot: Any) -> bool:
-        return not self.stopped
+from boxie_test_support.durable import Daemon as Daemon
+from boxie_test_support.durable import Guard as Guard
 
 
 async def setup(root: Path, **changes: Any) -> tuple[Any, Any, Daemon, Clock, Guard]:
@@ -534,8 +471,8 @@ def test_output_drain_is_active_before_start_acknowledgement(tmp_path: Path) -> 
         await started.wait()
         terminal = agent.terminals[request.ref.id]
         try:
-            output = await asyncio.wait_for(terminal.output.get(), 0.05)
-            assert output == b"early output"
+            await asyncio.wait_for(terminal.replay.changed.wait(), 0.05)
+            assert terminal.replay.after(0)[0].data == b"early output"
         finally:
             acknowledged.set()
             await agent.close()

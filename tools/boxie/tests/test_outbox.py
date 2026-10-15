@@ -2,11 +2,13 @@
 
 import asyncio
 import importlib
+import json
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import pytest
+from boxie_test_support.terminal_network import attach
 from integration.conftest import postgres_dsn as postgres_dsn
 from integration.conftest import postgres_server as postgres_server
 from integration.conftest import temporal_stack as temporal_stack
@@ -137,14 +139,36 @@ def test_runnable_stack_preserves_accounting_and_worker_replacement(
                             terminal_url(http, identifier),
                             additional_headers={"Authorization": "Bearer consumer-one-secret"},
                         )
-                        await ws.send('{"type":"input","data":"SECRET-PTY-INPUT"}')
-                        assert await asyncio.wait_for(ws.recv(), 3) == b"SECRET-PTY-INPUT"
+                        epoch, _ = await attach(ws)
+                        await ws.send(
+                            json.dumps(
+                                {
+                                    "type": "input",
+                                    "epoch": epoch,
+                                    "source": "user",
+                                    "data": "SECRET-PTY-INPUT",
+                                }
+                            )
+                        )
+                        assert (
+                            await asyncio.wait_for(ws.recv(), 3)
+                            == (1).to_bytes(8, "big") + b"SECRET-PTY-INPUT"
+                        )
                     else:
                         await ready(http, identifier, "terminated")
                 # Worker replacement must not close an agent-owned live terminal.
                 if not stop_first:
                     assert len(daemon.resources) == 1
-                    await ws.send('{"type":"input","data":"SECRET-PTY-INPUT-REPLACEMENT"}')
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "type": "input",
+                                "epoch": epoch,
+                                "source": "user",
+                                "data": "SECRET-PTY-INPUT-REPLACEMENT",
+                            }
+                        )
+                    )
                     daemon.unreachable = True
                     await life.terminate(OWNER, sid, TerminationReason.REQUESTED)
                 async with lifecycle_worker(client, activities, task_queue=queue):
@@ -302,15 +326,37 @@ def test_actual_api_worker_processes_recover_worker_loss(
                     async with connect(
                         terminal_url(http, identifier), additional_headers=CONSUMER_AUTH
                     ) as ws:
-                        await ws.send('{"type":"input","data":"PROCESS-PTY-SENTINEL"}')
-                        assert await asyncio.wait_for(ws.recv(), 3) == b"PROCESS-PTY-SENTINEL"
+                        epoch, _ = await attach(ws)
+                        await ws.send(
+                            json.dumps(
+                                {
+                                    "type": "input",
+                                    "epoch": epoch,
+                                    "source": "user",
+                                    "data": "PROCESS-PTY-SENTINEL",
+                                }
+                            )
+                        )
+                        assert (
+                            await asyncio.wait_for(ws.recv(), 3)
+                            == (1).to_bytes(8, "big") + b"PROCESS-PTY-SENTINEL"
+                        )
                         worker.kill()
                         await asyncio.wait_for(worker.wait(), 5)
                         assert len(daemon.resources) == 1
-                        await ws.send('{"type":"input","data":"PROCESS-PTY-SENTINEL-after-crash"}')
+                        await ws.send(
+                            json.dumps(
+                                {
+                                    "type": "input",
+                                    "epoch": epoch,
+                                    "source": "user",
+                                    "data": "PROCESS-PTY-SENTINEL-after-crash",
+                                }
+                            )
+                        )
                         assert (
                             await asyncio.wait_for(ws.recv(), 3)
-                            == b"PROCESS-PTY-SENTINEL-after-crash"
+                            == (2).to_bytes(8, "big") + b"PROCESS-PTY-SENTINEL-after-crash"
                         )
                         await start("boxie.bootstrap.worker", worker_path)
                         assert (await http.delete(f"/v1/sandboxes/{identifier}")).status_code == 200

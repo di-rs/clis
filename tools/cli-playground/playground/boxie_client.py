@@ -1,7 +1,6 @@
 """Product-owned adapter for Boxie's private consumer HTTP/WebSocket API."""
 
 import asyncio
-import json
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
@@ -12,6 +11,8 @@ import aiohttp
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosedOK, WebSocketException
+
+from playground.terminal_protocol import response as terminal_response
 
 
 class BoxieUnavailable(RuntimeError):
@@ -29,6 +30,7 @@ TerminationReason = Literal[
     "provisioning_failed",
     "agent_restart",
     "agent_shutdown",
+    "control_plane_lost",
 ]
 
 
@@ -92,29 +94,9 @@ class HttpTerminal:
         if isinstance(message, bytes):
             return message
         try:
-            value = json.loads(message)
+            return terminal_response.validate_json(message).model_dump_json()
         except ValueError as error:
-            raise BoxieUnavailable("invalid terminal status") from error
-        if not isinstance(value, dict) or set(value) != {"type", "reason"}:
-            raise BoxieUnavailable("invalid terminal status")
-        reasons = {
-            "requested",
-            "idle",
-            "disconnected",
-            "output_limit",
-            "exited",
-            "provisioning_failed",
-            "agent_restart",
-            "agent_shutdown",
-            "expired",
-        }
-        if (
-            value["type"] != "status"
-            or not isinstance(value["reason"], str)
-            or value["reason"] not in reasons
-        ):
-            raise BoxieUnavailable("invalid terminal status")
-        return str(value["reason"])
+            raise BoxieUnavailable("invalid terminal response") from error
 
     async def send(self, message: str) -> None:
         async with asyncio.timeout(10):
@@ -215,6 +197,9 @@ class HttpBoxieClient:
                 additional_headers=self.headers,
                 proxy=None,
                 max_size=65536,
+                max_queue=4,
+                write_limit=65536,
+                compression=None,
                 open_timeout=10,
                 close_timeout=2,
             ) as socket:

@@ -98,14 +98,38 @@ rejected. Invalid bodies return 422, conflicting retries 409, capacity exhaustio
 429 and unavailable agent calls 503. API restarts retain agent-owned IDs,
 idempotency records, capacity and terminal draining.
 
-Consumer terminal output is binary. Input is a JSON text frame
-`{"type":"input","data":"echo hello\n"}`; resize uses
-`{"type":"resize","columns":80,"rows":24}`. Control frames are at most 16 KiB
-of UTF-8 including JSON, columns are 1–500 and rows 1–300. Unicode survives
-fragmented WebSocket messages and output chunk boundaries. JSON status frames
-contain `type: status` and a termination `reason`. A disconnect keeps the agent
-draining during its two-minute grace. A consumer should offer a fresh session;
-reattachment and output replay arrive in the next increment.
+Terminal attachments start with a JSON text frame
+`{"type":"attach","resume_after":0,"cols":80,"rows":24}`. The response
+`{"type":"attached","epoch":1}` fences subsequent controls. Input carries
+`{"type":"input","epoch":1,"source":"user","data":"echo hello\n"}`;
+parser-generated replies use `source: terminal` and do not renew idle time.
+ACK, resize, heartbeat and detach also carry the current epoch. Controls are at
+most 16 KiB of UTF-8 including JSON, columns are 1–500 and rows 1–300.
+
+Each binary output frame contains an eight-byte unsigned big-endian sequence
+followed by at most 16 KiB of raw PTY bytes. Sequences start at one and continue
+across attachments. ACK only after applying bytes; reconnect with the last applied
+sequence. The agent retains at most 1 MiB of payload and 4096 frames while draining
+independently of readers. An evicted cursor returns `stream_gap`; a future cursor
+is invalid. Replayed bytes and control metadata do not count toward the 16 MiB
+cumulative PTY output limit. JSON status frames contain `type: status` and a
+termination `reason`.
+
+Geometry controls identify the preceding sequence. Drain writes to that boundary
+before applying dimensions; repeated dimensions are idempotent. After
+`replay_complete`, drain writes and request resize, then wait for `resized` before
+enabling user input. Parser replies remain allowed during replay. Geometry is
+retained per output frame plus one current tail value, including when a resize
+acknowledgment is lost. This defines observable frame-assignment/resize-success
+order, not exact kernel-time causality for bytes already queued in Docker.
+
+Send browser-origin heartbeat controls every ten seconds; the agent disconnects
+a path after thirty seconds without one. Relay-local WebSocket pings do not renew
+that deadline. A detected disconnect retains the terminal for its two-minute
+grace, subject to the earlier absolute or idle deadline. A successful replacement
+attachment receives a new epoch; stale controls cannot affect it. Credentials and
+cursors stay in page memory. Page reload starts fresh; restart continuity and
+screen snapshots are not supported.
 
 `GET /healthz` is unauthenticated liveness. Authenticated `GET /readyz` returns
 the API release and required agent dependency result, with 503 when unavailable.
@@ -169,17 +193,15 @@ persisted record.** It cannot admit a new resource or bypass admission ownership
 policy, capacity, or idempotency. The future database authority will supply a
 complete trusted provisioning request instead.
 
-Terminal input and output use binary WebSocket frames without Unicode decoding.
-Handshake denials use bounded HTTP JSON responses: 401 for invalid agent
-credentials, 404 for unavailable ownership, and 409 for attachment conflicts.
-The API maps failed internal authentication or unsupported denial codes to 503;
-consumer authentication is resolved before any agent request.
-Input frames are at most 64 KiB. Resize messages are JSON text frames:
-`{"type":"resize","columns":80,"rows":24}`; columns are 1–500 and rows 1–300.
-Termination status is a JSON text frame with `type: status` and a `reason`, distinct
-from terminal bytes. One terminal attachment is allowed; page reload recovery and
-output replay are outside this increment. The agent attaches to Docker before
-starting the container so initial output is retained even without Docker logs.
+The private terminal uses the same sequenced output and strict JSON controls
+as the consumer terminal above. Handshake denials use bounded HTTP JSON responses:
+401 for invalid agent credentials, 404 for unavailable ownership, and 409 for an
+unavailable lifecycle state. Consumer authentication is resolved before any agent
+request. The API maps failed internal authentication or unsupported denial codes
+to 503. Only a browser-origin attach after downstream WebSocket acceptance acquires
+an attachment epoch. Opening a private relay alone does not renew disconnect grace.
+The agent attaches to Docker before starting the container so initial output is
+retained even without Docker logs.
 
 ## Isolation and lifetime
 
@@ -191,7 +213,7 @@ and 16 MiB `/tmp` tmpfs, and 16 MiB total terminal output. The tmpfs mounts use
 replaces the image entrypoint.
 
 Absolute lifetime begins at accepted creation, including provisioning. Idle time
-begins when ready and resets only after nonempty input is accepted by Docker.
+begins when ready and resets only after nonempty user-origin input is accepted by Docker.
 Resize, output, reads, and reconnect attempts do not reset it. Disconnection
 starts a separate two-minute deadline. Cleanup operations are bounded and run
 independently so an unresponsive container does not block other deadlines.

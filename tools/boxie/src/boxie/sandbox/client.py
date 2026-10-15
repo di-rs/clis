@@ -31,11 +31,11 @@ from boxie.sandbox.protocol import (
     IdentityWire,
     ReadyWire,
     SnapshotWire,
-    StatusWire,
     SubmitRequest,
     ViewWire,
     spec_wire,
 )
+from boxie.sandbox.terminal_protocol import response
 
 ERRORS = {
     404: "resource not found",
@@ -63,7 +63,7 @@ class AgentTerminal:
         try:
             message = await self._connection.recv()
             if isinstance(message, str):
-                return StatusWire.model_validate_json(message).model_dump_json()
+                return response.validate_json(message).model_dump_json()
             return message
         except ConnectionClosed:
             raise dependency_error() from None
@@ -290,7 +290,7 @@ class AgentClient:
                 url,
                 additional_headers={"Authorization": self._authorization},
                 open_timeout=self._timeout,
-                close_timeout=self._timeout,
+                close_timeout=2,
                 ping_timeout=self._timeout,
                 max_size=65536,
                 max_queue=4,

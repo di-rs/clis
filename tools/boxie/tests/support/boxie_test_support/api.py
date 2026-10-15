@@ -36,6 +36,19 @@ async def api_server(
             agent,
             agent,
         )
+        # Temporary direct-lifecycle fixture only. Production API is strict sequenced protocol.
+        from boxie.api.auth import ConsumerAuth
+        from boxie.application.service import Service
+
+        from boxie_test_support.legacy_terminal import terminal_routes
+
+        app.include_router(
+            terminal_routes(
+                Service(DirectLifecycle(agent), agent, agent),
+                ConsumerAuth({"one": b"consumer-one-secret", "two": b"consumer-two-secret"}),
+            )
+        )
+        app.router.routes.insert(0, app.router.routes.pop())
         async with serve(app) as url:
             async with httpx.AsyncClient(base_url=url, headers=CONSUMER_AUTH) as client:
                 yield client

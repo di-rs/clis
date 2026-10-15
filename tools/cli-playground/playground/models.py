@@ -10,7 +10,6 @@ from pydantic import (
     Field,
     FiniteFloat,
     StringConstraints,
-    TypeAdapter,
     field_validator,
 )
 
@@ -107,23 +106,3 @@ class DeploymentResult(BaseModel):
 
 class BuildUpdateResult(EnvironmentMetadata):
     url: str
-
-
-class TerminalInput(BaseModel):
-    model_config = ConfigDict(strict=True, extra="forbid")
-
-    type: Literal["input"]
-    data: str
-
-
-class TerminalResize(BaseModel):
-    model_config = ConfigDict(strict=True, extra="forbid")
-
-    type: Literal["resize"]
-    cols: Annotated[int, Field(ge=1, le=500)]
-    rows: Annotated[int, Field(ge=1, le=300)]
-
-
-terminal_message = TypeAdapter(
-    Annotated[TerminalInput | TerminalResize, Field(discriminator="type")]
-)

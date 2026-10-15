@@ -85,7 +85,7 @@
     try {
       terminal = createBrowserTerminal(node, environmentId, environment.revision, (next) => { session = next; });
       controller = terminal;
-      terminal.connect();
+      terminal.startFresh();
     } catch {
       failure = new EnvironmentError(
         "The terminal couldn't load.",
@@ -277,7 +277,9 @@
             <div id="session-banner" class="session-banner" role="status">
               <p id="session-message">{session.message}</p>
               {#if session.canReconnect}
-                <button id="reconnect-button" type="button" class="banner-button" onclick={() => void load()}>Start new session <span aria-hidden="true">↗</span></button>
+                <button id="reconnect-button" type="button" class="banner-button" onclick={() => controller?.resumeExisting()}>Reconnect <span aria-hidden="true">↗</span></button>
+              {:else if session.phase === 'disconnected'}
+                <button type="button" class="banner-button" onclick={() => void load()}>Start new session</button>
               {/if}
             </div>
           {/if}

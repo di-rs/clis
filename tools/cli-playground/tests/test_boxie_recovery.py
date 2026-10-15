@@ -8,6 +8,7 @@ from uuid import UUID
 
 import aiohttp
 import pytest
+from boxie_test_support.terminal_network import attach
 from playground import boxie_client as client_module
 from playground.boxie_client import BoxieUnavailable
 from websockets.asyncio.client import connect
@@ -60,7 +61,7 @@ def test_failed_publication_preserves_ready_revision_and_recovers_exact_upload(
                         json.dumps({"type": "auth", "credential": old_page["credential"]})
                     )
                     assert json.loads(await ws.recv())["type"] == "authenticated"
-                    assert await ws.recv() == b"ready\n"
+                    assert (await attach(ws))[1] == b"ready\n"
                 (pending,) = product.service.sessions.uploads()
                 artifact_id = pending.artifact.artifact_id
                 # Both failures occur after the real agent has accepted these bytes.
@@ -118,11 +119,11 @@ def test_capability_failures_and_restart_preserve_claimed_session_while_cleaning
                 ) as ws:
                     await ws.send(json.dumps({"type": "auth", "credential": healthy["credential"]}))
                     assert json.loads(await ws.recv())["type"] == "authenticated"
-                    assert await ws.recv() == b"ready\n"
+                    assert (await attach(ws))[1] == b"ready\n"
                 saved = product.service.sessions.get(UUID(healthy["id"]))
                 assert saved is not None and saved.attached
                 healthy_view = saved.sandbox
-                network.daemon.fail_delete = True
+                network.daemon.unreachable = True
                 closed_pr = await product.http.delete(
                     "/api/pull-requests/123",
                     headers={"Authorization": "Bearer test-deployment-token"},
@@ -133,7 +134,7 @@ def test_capability_failures_and_restart_preserve_claimed_session_while_cleaning
                 assert pending is not None and pending.pending_stop
                 assert orphan is not None
                 assert product.service.store.record(identifier) is None
-            network.daemon.fail_delete = False
+            network.daemon.unreachable = False
             async with product_server(tmp_path / "product", str(network.api.base_url)) as restarted:
                 for sandbox_id in (pending.sandbox.id, orphan.sandbox.id):
                     response = await network.api.get(f"/v1/sandboxes/{sandbox_id}")
@@ -143,7 +144,13 @@ def test_capability_failures_and_restart_preserve_claimed_session_while_cleaning
                 assert response.json()["absolute_deadline"] == healthy["absolute_deadline"]
                 retained = restarted.service.sessions.get(UUID(healthy["id"]))
                 assert retained is not None and retained.attached and not retained.pending_stop
-                assert network.agent.reserved_count == 1
+                assert (
+                    sum(
+                        r.state.value not in {"terminated", "failed"}
+                        for r in network.agent.records.values()
+                    )
+                    == 1
+                )
 
     asyncio.run(exercise())
 
@@ -167,7 +174,7 @@ def test_malformed_stop_reply_keeps_the_original_durable_binding_for_restart(
                         json.dumps({"type": "auth", "credential": admitted["credential"]})
                     )
                     assert json.loads(await ws.recv())["type"] == "authenticated"
-                    assert await ws.recv() == b"ready\n"
+                    assert (await attach(ws))[1] == b"ready\n"
             # A fresh HTTP adapter has no in-memory response history. The saved binding
             # must still reject a different but otherwise valid lifetime.
             async with product_server(tmp_path / "product", str(network.api.base_url)) as product:

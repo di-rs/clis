@@ -1,10 +1,10 @@
 """HTTP and WebSocket adapters for the playground service."""
 
 import asyncio
-import json
 import logging
 import re
 import secrets
+from collections.abc import Callable
 from contextlib import AsyncExitStack, suppress
 from pathlib import Path
 from typing import Annotated, Literal
@@ -43,11 +43,10 @@ from playground.models import (
     BuildUpdateResult,
     DeploymentResult,
     EnvironmentMetadata,
-    TerminalInput,
-    terminal_message,
 )
 from playground.service import PlaygroundService, UploadBusyError, UploadTooLargeError
 from playground.storage import ArtifactConflictError
+from playground.terminal_protocol import Attached, TerminalStatus, control, response
 
 logger = logging.getLogger(__name__)
 MAX_TERMINAL_OUTPUT_BYTES = 16 * 1024 * 1024
@@ -100,43 +99,64 @@ class RequestHostBoundary:
         await self.app(scope, receive, send)
 
 
-async def bridge_terminal(websocket: WebSocket, session: TerminalPort) -> None:
+TERMINAL_SEND_TIMEOUT = 10.0
+TERMINAL_CLOSE_TIMEOUT = 2.0
+
+
+async def close_terminal(websocket: WebSocket, code: int = 1000) -> None:
+    with suppress(WebSocketDisconnect, RuntimeError, TimeoutError):
+        async with asyncio.timeout(TERMINAL_CLOSE_TIMEOUT):
+            await websocket.close(code=code)
+
+
+async def bridge_terminal(
+    websocket: WebSocket, session: TerminalPort, attached: Callable[[], None] | None = None
+) -> None:
     async def output() -> None:
         forwarded = 0
+        highest = 0
         while (data := await session.receive()) is not None:
-            if isinstance(data, str):
-                await websocket.send_json(
-                    {"type": "status", "reason": data, "message": f"Session ended: {data}."}
-                )
-                return
-            chunk = data[: MAX_TERMINAL_OUTPUT_BYTES - forwarded]
-            if chunk:
-                await websocket.send_bytes(chunk)
-                forwarded += len(chunk)
-            if len(data) > len(chunk):
-                await websocket.send_json(
-                    {
-                        "type": "status",
-                        "reason": "output_limit",
-                        "message": "Session ended: output_limit.",
-                    }
-                )
-                return
-            # At exact equality, read the agent's authoritative status next.
-            # Any further binary bytes take the bounded defensive close above.
+            async with asyncio.timeout(TERMINAL_SEND_TIMEOUT):
+                if isinstance(data, str):
+                    message = response.validate_json(data)
+                    if isinstance(message, Attached) and attached is not None:
+                        attached()
+                    value = message.model_dump()
+                    if isinstance(message, TerminalStatus):
+                        value["message"] = f"Session ended: {message.reason}."
+                    await websocket.send_json(value)
+                    if isinstance(message, TerminalStatus):
+                        return
+                    continue
+                if len(data) < 9:
+                    raise ValueError("invalid terminal output")
+                sequence = int.from_bytes(data[:8], "big")
+                payload = data[8:]
+                if sequence <= highest:
+                    continue
+                highest = sequence
+                chunk = payload[: MAX_TERMINAL_OUTPUT_BYTES - forwarded]
+                if chunk:
+                    await websocket.send_bytes(data[:8] + chunk)
+                    forwarded += len(chunk)
+                if len(chunk) < len(payload):
+                    await websocket.send_json(
+                        {
+                            "type": "status",
+                            "reason": "output_limit",
+                            "message": "Session ended: output_limit.",
+                        }
+                    )
+                    return
 
     async def inputs() -> None:
         while True:
             message = await websocket.receive_text()
             if len(message.encode("utf-8")) > 16384:
                 raise ValueError("terminal message exceeds 16 KiB")
-            data = terminal_message.validate_json(message)
-            if isinstance(data, TerminalInput):
+            data = control.validate_json(message)
+            async with asyncio.timeout(TERMINAL_SEND_TIMEOUT):
                 await session.send(data.model_dump_json())
-            else:
-                await session.send(
-                    json.dumps({"type": "resize", "columns": data.cols, "rows": data.rows})
-                )
 
     tasks = [asyncio.create_task(output()), asyncio.create_task(inputs())]
     try:
@@ -146,7 +166,8 @@ async def bridge_terminal(websocket: WebSocket, session: TerminalPort) -> None:
     finally:
         for task in tasks:
             task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        async with asyncio.timeout(TERMINAL_CLOSE_TIMEOUT):
+            await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def create_router(service: PlaygroundService, static_dir: Path) -> APIRouter:
@@ -298,11 +319,11 @@ def create_router(service: PlaygroundService, static_dir: Path) -> APIRouter:
     ) -> None:
         expected_origin = f"{urlsplit(settings.public_url).scheme}://{websocket.headers['host']}"
         if websocket.headers.getlist("origin") != [expected_origin]:
-            await websocket.close(code=1008)
+            await close_terminal(websocket, 1008)
             return
         binding = service.sessions.get(session_id)
         if binding is None or binding.preview_id != identifier or binding.revision != revision:
-            await websocket.close(code=1008)
+            await close_terminal(websocket, 1008)
             return
         await websocket.accept()
         claimed = False
@@ -340,27 +361,37 @@ def create_router(service: PlaygroundService, static_dir: Path) -> APIRouter:
                             "reason": binding.sandbox.reason,
                         }
                     )
+
+                def complete() -> None:
+                    nonlocal attached
                     service.complete_attachment(
-                        identifier, session_id, revision, auth.credential, binding.sandbox
+                        identifier,
+                        session_id,
+                        revision,
+                        auth.credential,
+                        binding.sandbox,
+                        claim=binding.attachment_claim,
                     )
                     attached = True
-                await bridge_terminal(websocket, upstream)
+
+                await bridge_terminal(websocket, upstream, complete)
+
         except WebSocketDisconnect, asyncio.CancelledError:
             return
         except ValueError, LookupError, KeyError, TimeoutError:
             with suppress(WebSocketDisconnect, RuntimeError):
-                await websocket.close(code=1008)
+                await close_terminal(websocket, 1008)
             return
         except BoxieUnavailable:
             with suppress(WebSocketDisconnect, RuntimeError):
-                await websocket.close(code=1011)
+                await close_terminal(websocket, 1011)
             return
         finally:
             if claimed and not attached:
                 # Synchronous durable compensation also survives task cancellation.
-                service.cancel_attachment(session_id)
+                service.cancel_attachment(session_id, claim=binding.attachment_claim)
         with suppress(WebSocketDisconnect, RuntimeError):
-            await websocket.close(code=1000)
+            await close_terminal(websocket)
 
     return router
 

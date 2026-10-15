@@ -206,27 +206,37 @@ class PlaygroundService:
         self, preview_id: str, identifier: UUID, revision: str, credential: str
     ) -> SessionBinding:
         binding = self.binding(preview_id, identifier, revision, credential)
-        if binding.attached or binding.attachment_deadline is not None:
-            raise LookupError("session already claimed")
+        binding.attachment_claim += 1
         binding.attachment_deadline = time.time() + 40
         self.sessions.save(binding)
         self.sessions.claimed(identifier)
         return binding
 
     def complete_attachment(
-        self, preview_id: str, identifier: UUID, revision: str, credential: str, view: SandboxView
+        self,
+        preview_id: str,
+        identifier: UUID,
+        revision: str,
+        credential: str,
+        view: SandboxView,
+        *,
+        claim: int | None = None,
     ) -> None:
         binding = self.binding(preview_id, identifier, revision, credential)
+        if claim is not None and claim != binding.attachment_claim:
+            raise LookupError("attachment superseded")
         validate_sandbox(view, binding.sandbox)
         binding.sandbox = view
         binding.attachment_deadline = None
         binding.attached = True
         self.sessions.save(binding)
 
-    def cancel_attachment(self, identifier: UUID) -> None:
+    def cancel_attachment(self, identifier: UUID, *, claim: int | None = None) -> None:
         binding = self.sessions.get(identifier)
         if binding is not None and binding.attachment_deadline is not None:
-            binding.pending_stop = True
+            if claim is not None and claim != binding.attachment_claim:
+                return
+            binding.pending_stop = not binding.attached
             binding.attachment_deadline = None
             self.sessions.save(binding)
 

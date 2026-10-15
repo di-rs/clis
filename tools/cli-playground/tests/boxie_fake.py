@@ -12,10 +12,10 @@ from playground.boxie_client import SandboxRequest, SandboxView, TerminalPort
 
 class EchoTerminal:
     def __init__(self) -> None:
-        self.queue: asyncio.Queue[bytes] = asyncio.Queue()
-        self.queue.put_nowait(b"ready\n")
+        self.queue: asyncio.Queue[bytes | str] = asyncio.Queue()
+        self.sequence = 1
 
-    async def receive(self) -> bytes:
+    async def receive(self) -> bytes | str:
         return await self.queue.get()
 
     async def send(self, message: str) -> None:
@@ -23,8 +23,23 @@ class EchoTerminal:
 
         data = json.loads(message)
         await asyncio.sleep(0)
-        if data["type"] == "input":
-            self.queue.put_nowait(data["data"].encode())
+        if data["type"] == "attach":
+            self.queue.put_nowait(json.dumps({"type": "attached", "epoch": 1}))
+            self.queue.put_nowait((1).to_bytes(8, "big") + b"ready\n")
+            self.queue.put_nowait(
+                json.dumps({"type": "replay_complete", "epoch": 1, "sequence": 1})
+            )
+        elif data["type"] == "resize":
+            self.queue.put_nowait(
+                json.dumps(
+                    {"type": "resized", "epoch": 1, "cols": data["cols"], "rows": data["rows"]}
+                )
+            )
+        elif data["type"] == "input":
+            self.sequence += 1
+            self.queue.put_nowait(self.sequence.to_bytes(8, "big") + data["data"].encode())
+        elif data["type"] == "heartbeat":
+            self.queue.put_nowait(message)
 
 
 class FakeBoxie:

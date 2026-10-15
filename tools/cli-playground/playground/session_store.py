@@ -45,6 +45,7 @@ class SessionBinding(BaseModel):
     pending_stop: bool = False
     attachment_deadline: float | None = None
     attached: bool = False
+    attachment_claim: int = 0
 
     def authenticates(self, credential: str) -> bool:
         return secrets.compare_digest(

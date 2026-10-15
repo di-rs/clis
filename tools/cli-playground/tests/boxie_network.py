@@ -1,12 +1,10 @@
 """Loopback product/API/agent harness; only the Docker daemon is substituted."""
 
 import asyncio
-import json
 import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -37,23 +35,17 @@ class Product:
 
 @asynccontextmanager
 async def boxie_network(root: Path) -> AsyncIterator[Network]:
-    from boxie_test_support.agent import Clock, DockerDaemon, configuration, live
-    from boxie_test_support.api import api_server
+    from boxie_test_support.terminal_network import network
 
-    config, daemon, clock = configuration(root), DockerDaemon(), Clock()
-    clock.now = datetime.now(UTC)
-    profiles = json.loads(config.profiles_file.read_text())
-    profiles["shell"]["commands"] = [["/opt/playground/shell.sh"]]
-    config.profiles_file.write_text(json.dumps(profiles))
-    async with live(config, daemon, clock) as (agent_http, agent):
-        async with api_server(str(agent_http.base_url)) as api:
-            yield Network(api, daemon, agent, config, clock)
+    async with network(root, shell="/opt/playground/shell.sh") as result:
+        yield Network(result.api, result.daemon, result.agent, result.config, result.clock)
 
 
 @asynccontextmanager
-async def product_server(root: Path, api_url: str) -> AsyncIterator[Product]:
+async def product_server(root: Path, api_url: str, *, port: int = 0) -> AsyncIterator[Product]:
     sock = socket.socket()
-    sock.bind(("127.0.0.1", 0))
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("127.0.0.1", port))
     url = f"http://127.0.0.1:{sock.getsockname()[1]}"
     settings = Settings(
         data_dir=root,

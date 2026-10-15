@@ -17,6 +17,19 @@ from .boxie_fake import FakeBoxie
 from .helpers import upload
 from .test_api import build_event, build_upload
 
+
+def attach_terminal(ws: object) -> None:
+    from typing import Any, cast
+
+    socket = cast(Any, ws)
+    socket.send_json({"type": "attach", "resume_after": 0, "cols": 80, "rows": 24})
+    assert socket.receive_json() == {"type": "attached", "epoch": 1}
+    assert socket.receive_bytes() == (1).to_bytes(8, "big") + b"ready\n"
+    assert socket.receive_json()["type"] == "replay_complete"
+    socket.send_json({"type": "resize", "epoch": 1, "cols": 80, "rows": 24})
+    assert socket.receive_json()["type"] == "resized"
+
+
 ORIGIN = {"Origin": "https://play.example"}
 
 
@@ -48,10 +61,10 @@ def test_bound_session_survives_new_revision_and_empty_build(api_client: TestCli
     with api_client.websocket_connect(socket_url(binding), headers=ORIGIN) as ws:
         ws.send_json({"type": "auth", "credential": binding["credential"]})
         assert ws.receive_json()["type"] == "authenticated"
-        assert ws.receive_bytes() == b"ready\n"
+        attach_terminal(ws)
         assert build_event(api_client, "empty", run=11).status_code == 200
-        ws.send_json({"type": "input", "data": "é漢🙂"})
-        assert ws.receive_bytes() == "é漢🙂".encode()
+        ws.send_json({"type": "input", "epoch": 1, "source": "user", "data": "é漢🙂"})
+        assert ws.receive_bytes() == (2).to_bytes(8, "big") + "é漢🙂".encode()
     assert api_client.get(f"/api/environments/{deployed['id']}").json()["sha"] is None
 
 
@@ -125,7 +138,7 @@ def test_page_reload_gets_a_fresh_binding_and_backend_shutdown_keeps_claimed_san
     with api_client.websocket_connect(socket_url(first), headers=ORIGIN) as ws:
         ws.send_json({"type": "auth", "credential": first["credential"]})
         assert ws.receive_json()["absolute_deadline"] == first["absolute_deadline"]
-        assert ws.receive_bytes() == b"ready\n"
+        attach_terminal(ws)
     service = cast(FastAPI, api_client.app).state.service
     asyncio.run(service.boxie.close())
     assert service.sessions.get(UUID(first["id"])).sandbox.state == "ready"
@@ -225,7 +238,7 @@ def test_terminal_rejects_invalid_dimensions_and_encoded_byte_overflow(
     with api_client.websocket_connect(socket_url(binding), headers=ORIGIN) as ws:
         ws.send_json({"type": "auth", "credential": binding["credential"]})
         assert ws.receive_json()["type"] == "authenticated"
-        assert ws.receive_bytes() == b"ready\n"
+        attach_terminal(ws)
         ws.send_json(frame)
         with pytest.raises(WebSocketDisconnect) as error:
             ws.receive_bytes()

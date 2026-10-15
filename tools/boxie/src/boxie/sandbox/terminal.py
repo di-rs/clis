@@ -13,6 +13,7 @@ from boxie.domain.lifecycle import AgentObservation
 from boxie.domain.models import SandboxState, TerminationReason
 from boxie.sandbox.docker import TerminalPort
 from boxie.sandbox.protocol import ResizeWire
+from boxie.sandbox.replay import ReplayBuffer
 
 if TYPE_CHECKING:
     from boxie.sandbox.registry import Agent, Record
@@ -131,7 +132,8 @@ class ExecutionTerminal:
         terminate: Callable[[TerminationReason], Awaitable[AgentObservation]],
     ) -> None:
         self.stream, self.remaining, self.terminate = stream, output_limit, terminate
-        self.output: asyncio.Queue[bytes | None] = asyncio.Queue()
+        self.replay = ReplayBuffer()
+        self.output_order = asyncio.Lock()
         self.reader: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -143,7 +145,8 @@ class ExecutionTerminal:
             while data := await self.stream.read():
                 accepted = data[: self.remaining]
                 if accepted:
-                    self.output.put_nowait(accepted)
+                    async with self.output_order:
+                        self.replay.append(accepted)
                 self.remaining -= len(accepted)
                 if self.remaining == 0:
                     reason = TerminationReason.OUTPUT_LIMIT
@@ -154,6 +157,13 @@ class ExecutionTerminal:
             pass
         await self.terminate(reason)
 
+    async def resize(self, cols: int, rows: int) -> None:
+        # This serializes observed frame assignment with resize success, not the
+        # kernel-time production of bytes already queued inside Docker.
+        async with self.output_order:
+            await self.stream.resize(cols, rows)
+            self.replay.resize(cols, rows)
+
     async def close(self) -> None:
         if self.reader and self.reader is not asyncio.current_task():
             self.reader.cancel()
@@ -161,4 +171,4 @@ class ExecutionTerminal:
         try:
             await self.stream.close()
         finally:
-            self.output.put_nowait(None)
+            self.replay.close()
