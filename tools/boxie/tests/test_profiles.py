@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from boxie.domain.errors import BoxieError
 from boxie.sandbox.profiles import ProfileRegistry
-from boxie_test_support import IMAGE, configuration
+from boxie_test_support.agent import IMAGE, configuration
 
 
 def test_reload_is_atomic_and_retains_approved_snapshot(tmp_path: Path) -> None:
@@ -66,7 +66,7 @@ def test_service_sighup_reload_is_atomic(tmp_path: Path) -> None:
     import sys
 
     import httpx
-    from boxie_test_support import AUTH
+    from boxie_test_support.agent import AUTH
 
     async def exercise() -> None:
         config = configuration(tmp_path)

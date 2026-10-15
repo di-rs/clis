@@ -1,0 +1,268 @@
+"""Independent service packaging and operator-owned topology contracts."""
+
+import json
+import tomllib
+from pathlib import Path
+
+import pytest
+import yaml
+
+ROOT = Path(__file__).resolve().parents[3]
+
+
+@pytest.mark.parametrize(
+    "relative,module",
+    [
+        ("tools/boxie", "boxie"),
+        ("tools/cli-playground", "playground"),
+        ("tools/boxie/infra", "boxie_infra"),
+        ("tools/cli-playground/infra", "playground_infra"),
+    ],
+)
+def test_distributions_have_explicit_isolated_modules(relative: str, module: str) -> None:
+    config = tomllib.loads((ROOT / relative / "pyproject.toml").read_text())
+    assert config["build-system"] == {"requires": ["uv_build==0.13.0"], "build-backend": "uv_build"}
+    assert config["tool"]["uv"]["build-backend"]["module-name"] == module
+
+
+def test_private_compose_units_do_not_share_privileges() -> None:
+    boxie = yaml.safe_load((ROOT / "tools/boxie/infra/compose.yml").read_text())
+    product = yaml.safe_load((ROOT / "tools/cli-playground/infra/compose.yml").read_text())
+    assert set(boxie["services"]) == {"api", "agent"}
+    for name, service in boxie["services"].items():
+        assert not service.get("ports")
+        assert ("docker.sock" in json.dumps(service)) == (name == "agent")
+    assert "docker.sock" not in json.dumps(product)
+    assert not product["services"]["gateway"].get("depends_on")
+    assert "PLAYGROUND_BOXIE_URL" in product["services"]["gateway"]["environment"]
+    assert boxie["networks"]["consumer"]["external"] is True
+    assert product["networks"]["consumer"]["external"] is True
+
+
+def test_production_activation_is_guarded_before_release_side_effects() -> None:
+    release = yaml.safe_load((ROOT / ".github/workflows/cli-playground-release.yml").read_text())
+    first = release["jobs"]["release"]["steps"][0]
+    assert "Production activation is unavailable" in first.get("run", "")
+    assert "exit 1" in first["run"]
+    setup = yaml.safe_load((ROOT / ".github/workflows/cli-playground-setup.yml").read_text())
+    assert set(setup["jobs"]) == {"provision"}
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "package,module,forbidden",
+    [("boxie", "boxie", "playground"), ("cli-playground", "playground", "boxie")],
+)
+def test_real_isolated_installation(
+    tmp_path: Path, package: str, module: str, forbidden: str
+) -> None:
+    import os
+    import subprocess
+    import sys
+
+    service = ROOT / "tools" / package
+    if package == "cli-playground":
+        assert (service / "playground/static/index.html").is_file(), "Build the real frontend first"
+    wheels = tmp_path / "wheels"
+    environment = {
+        key: value for key, value in os.environ.items() if key not in {"PYTHONPATH", "VIRTUAL_ENV"}
+    }
+    subprocess.run(
+        ["uv", "build", "--package", package, "--out-dir", str(wheels)],
+        cwd=ROOT,
+        env=environment,
+        check=True,
+    )
+    python = tmp_path / "venv/bin/python"
+    subprocess.run(
+        ["uv", "venv", "--python", sys.executable, str(python.parent.parent)],
+        env=environment,
+        check=True,
+    )
+    (wheel,) = wheels.glob("*.whl")
+    constraints = tmp_path / "constraints.txt"
+    subprocess.run(
+        [
+            "uv",
+            "export",
+            "--locked",
+            "--package",
+            package,
+            "--no-dev",
+            "--no-emit-workspace",
+            "--no-hashes",
+            "--output-file",
+            str(constraints),
+        ],
+        cwd=ROOT,
+        env=environment,
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
+    subprocess.run(
+        [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            str(python),
+            "--constraint",
+            str(constraints),
+            str(wheel),
+        ],
+        env=environment,
+        check=True,
+    )
+    probe = f"""
+import importlib, importlib.util, pathlib
+module = importlib.import_module({module!r})
+assert pathlib.Path(module.__file__).is_relative_to({str(python.parent.parent)!r})
+for name in ({forbidden!r}, 'boxie_infra', 'playground_infra', 'boxie_test_support', 'pulumi', 'pytest'):
+    assert importlib.util.find_spec(name) is None, name
+"""
+    if module == "boxie":
+        probe += "import boxie.bootstrap.api, boxie.bootstrap.agent\n"
+    else:
+        # Real installed assets via ASGI HTTP, without pytest/httpx or source imports.
+        probe += """
+import asyncio, json, re
+from playground.app import create_app, STATIC_DIR
+from playground.config import Settings
+secret = pathlib.Path('consumer.secret'); secret.write_text('isolated-consumer-secret'); secret.chmod(0o600)
+app = create_app(Settings(data_dir=pathlib.Path.cwd()/'data', public_url='http://localhost', deploy_token='local-token', boxie_url='http://127.0.0.1:1', boxie_credential_file=secret.absolute()))
+async def request(path):
+    sent = []
+    received = False
+    async def receive():
+        nonlocal received
+        if not received:
+            received = True
+            return {'type':'http.request', 'body':b'', 'more_body':False}
+        await asyncio.Event().wait()
+        raise AssertionError('unreachable')
+    async def send(message): sent.append(message)
+    await app({'type':'http','asgi':{'version':'3.0'},'http_version':'1.1','method':'GET','scheme':'http','path':path,'raw_path':path.encode(),'query_string':b'','headers':[(b'host',b'localhost')],'server':('localhost',80),'client':('127.0.0.1',123)}, receive, send)
+    assert sent[0]['status'] == 200, sent
+    return b''.join(m.get('body',b'') for m in sent)
+async def run():
+    html = await request('/p/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+    assert html == (STATIC_DIR/'index.html').read_bytes()
+    paths = re.findall(rb'(?:src|href)="(/static/[^\"]+)"', html)
+    assert paths
+    for path in paths:
+        body = await request(path.decode())
+        assert len(body) > 1000
+    assert (STATIC_DIR/'licenses.md').stat().st_size > 1000
+    await app.state.service.boxie.close()
+asyncio.run(run())
+"""
+    subprocess.run([str(python), "-I", "-c", probe], cwd=tmp_path, env=environment, check=True)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("service", ["boxie", "cli-playground"])
+@pytest.mark.parametrize("manifest", ["compose.yml", "compose.production.yml"])
+def test_resolved_compose_isolated_topology(tmp_path: Path, service: str, manifest: str) -> None:
+    import os
+    import subprocess
+
+    values = {
+        "BOXIE_RUNTIME_IMAGE": "boxie:test",
+        "BOXIE_API_CONFIG": str(tmp_path / "api.json"),
+        "BOXIE_AGENT_CONFIG": str(tmp_path / "agent.json"),
+        "BOXIE_PROFILES_FILE": str(tmp_path / "profiles.json"),
+        "BOXIE_AGENT_CREDENTIAL_FILE": str(tmp_path / "agent.secret"),
+        "BOXIE_CONSUMER_CREDENTIAL_FILE": str(tmp_path / "consumer.secret"),
+        "BOXIE_DATA_DIR": str(tmp_path / "data"),
+        "BOXIE_CONSUMER_NETWORK": "test-consumers",
+        "BOXIE_CONTROL_NETWORK": "test-control",
+        "PLAYGROUND_IMAGE": "playground:test",
+        "PLAYGROUND_BOXIE_URL": "http://independent-boxie:8090",
+        "PLAYGROUND_BOXIE_CREDENTIAL_FILE": str(tmp_path / "consumer.secret"),
+        "PLAYGROUND_CONSUMER_NETWORK": "test-consumers",
+        "PLAYGROUND_PROXY_NETWORK": "test-proxy",
+        "PLAYGROUND_DATA_VOLUME": "test-product-data",
+        "PLAYGROUND_CERTIFICATES_VOLUME": "test-certificates",
+        "PLAYGROUND_DEPLOY_TOKEN": "test-token",
+        "PLAYGROUND_DOMAIN": "play.example.com",
+        "ACME_EMAIL": "test@example.com",
+        "CLOUDFLARE_DNS_API_TOKEN": "test-dns-token",
+    }
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(ROOT / "tools" / service / "infra" / manifest),
+            "config",
+            "--format",
+            "json",
+        ],
+        env={**os.environ, **values},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    config = json.loads(result.stdout)
+    for name, entry in config["services"].items():
+        sockets = [v for v in entry.get("volumes", []) if v["target"] == "/var/run/docker.sock"]
+        assert bool(sockets) == (service == "boxie" and name == "agent")
+        if service == "boxie":
+            assert not entry.get("ports")
+        if name == "agent":
+            mount = next(v for v in entry["volumes"] if v["target"] == values["BOXIE_DATA_DIR"])
+            assert mount["source"] == mount["target"]
+            assert set(entry["networks"]) == {"control"}
+        if name == "api":
+            assert not any(v["target"] == values["BOXIE_DATA_DIR"] for v in entry["volumes"])
+        if name == "gateway":
+            assert not entry.get("depends_on")
+            assert entry["environment"]["PLAYGROUND_BOXIE_URL"] == values["PLAYGROUND_BOXIE_URL"]
+            assert not any("BOXIE_DATA" in v["source"] for v in entry["volumes"])
+    assert all(net["external"] for net in config["networks"].values())
+    assert all(volume["external"] for volume in config.get("volumes", {}).values())
+
+
+def test_boxie_configuration_cli_is_product_independent(tmp_path: Path) -> None:
+    import subprocess
+    import sys
+
+    from boxie.bootstrap.api import load_configuration
+    from boxie.bootstrap.config import AgentConfig
+
+    agent_secret = tmp_path / "agent.secret"
+    consumer_secret = tmp_path / "consumer.secret"
+    for path, value in [
+        (agent_secret, "test-agent-credential"),
+        (consumer_secret, "test-consumer-credential"),
+    ]:
+        path.write_text(value)
+        path.chmod(0o600)
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "boxie_infra.config",
+            "--output",
+            str(tmp_path),
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--installation-id",
+            "00000000-0000-0000-0000-000000000001",
+            "--host-id",
+            "generic-host",
+            "--consumer-id",
+            "generic-consumer",
+            "--agent-credential",
+            str(agent_secret),
+            "--consumer-credential",
+            str(consumer_secret),
+        ],
+        check=True,
+    )
+    agent = AgentConfig.from_file(tmp_path / "agent.json")
+    api = load_configuration(tmp_path / "api.json")
+    assert agent.max_sandboxes == 8
+    assert api.agent_url == "http://agent:8091"
+    assert "playground" not in (tmp_path / "api.json").read_text().lower()
+    assert "playground" not in (tmp_path / "agent.json").read_text().lower()

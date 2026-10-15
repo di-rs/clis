@@ -2,9 +2,7 @@
 """Deploy a CI-built playground release to a bootstrapped VPS over verified SSH."""
 
 import argparse
-import base64
 import hashlib
-import io
 import ipaddress
 import json
 import os
@@ -13,15 +11,16 @@ import shlex
 import stat
 import subprocess
 import sys
-import tarfile
-import tempfile
 import time
 import urllib.request
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-ROOT = Path(__file__).resolve().parents[3]
+from playground_infra.config import ActivationUnavailable
+
+# Transitional source helpers are checkout-only; invoke from the repository root.
+ROOT = Path.cwd()
 REMOTE_ROOT = "/opt/cli-playground"
 REMOTE_CONFIG = "/etc/cli-playground"
 REMOTE_LOG = "/var/log/cli-playground-deploy.log"
@@ -29,7 +28,7 @@ HEALTH_TIMEOUT = 180
 MAX_ENV_BYTES = 64 * 1024
 MAX_RELEASE_BYTES = 4096
 DEPLOY_FILES = (
-    "tools/cli-playground/compose.production.yml",
+    "tools/cli-playground/infra/compose.production.yml",
     "tools/cli-playground/infra/routes.yml",
     "tools/cli-playground/infra/deploy.sh",
 )
@@ -279,67 +278,7 @@ def deploy(
     known_hosts_file: Path | None = None,
     registry_credentials: tuple[str, str] | None = None,
 ) -> tuple[str, str]:
-    validate_host(host)
-    app_data, app_values = environment_file(env_file)
-    config = AppConfig.model_validate(app_values)
-    revision = committed_revision((env_file,))
-    manifest = read_release(release_file)
-    if manifest.revision != revision:
-        raise ValueError(
-            "release revision must match committed HEAD; check out the approved CI commit first"
-        )
-    command = [*ssh_command(host, identity_file, known_hosts_file), remote_command(manifest)]
-    # Only the encrypted stdin stream carries secrets; the archive reads committed Git objects.
-    with tempfile.TemporaryFile() as payload:
-        subprocess.run(
-            ["git", "archive", "--format=tar", "--prefix=source/", revision, "--", *DEPLOY_FILES],
-            cwd=ROOT,
-            stdout=payload,
-            stderr=subprocess.DEVNULL,
-            check=True,
-        )
-        image_env = (
-            f"PLAYGROUND_GATEWAY_IMAGE={manifest.gateway_image}\n"
-            f"PLAYGROUND_SANDBOX_IMAGE={manifest.sandbox_image}\n"
-        ).encode()
-        payload.seek(0)
-        with tarfile.open(fileobj=payload, mode="a") as archive:
-            files = {
-                "app.env": app_data,
-                "source/release.json": manifest.data(),
-                "source/image.env": image_env,
-            }
-            if registry_credentials is not None:
-                username, token = registry_credentials
-                if not username or not token or ":" in username:
-                    raise ValueError("Invalid registry credentials")
-                auth = base64.b64encode(f"{username}:{token}".encode()).decode()
-                files["registry/config.json"] = json.dumps(
-                    {"auths": {"ghcr.io": {"auth": auth}}}
-                ).encode()
-            for name, data in files.items():
-                entry = tarfile.TarInfo(name)
-                entry.size, entry.mode = len(data), 0o600
-                archive.addfile(entry, io.BytesIO(data))
-        payload.seek(0)
-        try:
-            subprocess.run(
-                command,
-                stdin=payload,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=True,
-                timeout=3600,
-            )
-        except subprocess.SubprocessError:
-            raise RuntimeError(
-                f"Deployment failed; inspect cloud-init status and {REMOTE_LOG} over SSH."
-            ) from None
-    wait_for_health(config.domain)
-    # The control hostname can still have a valid certificate from an older release.
-    # Probe a PR hostname as well to verify wildcard DNS, TLS and gateway routing.
-    wait_for_health(f"pr-1.{config.domain}")
-    return revision, f"https://{config.domain}/healthz"
+    raise ActivationUnavailable()
 
 
 def main() -> None:

@@ -5,7 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from boxie_test_support import (
+from boxie_test_support.agent import (
     AUTH,
     IMAGE,
     Clock,

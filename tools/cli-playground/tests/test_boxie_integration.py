@@ -30,22 +30,20 @@ def test_separate_product_api_agent_publish_terminal_reset_and_pr_close(tmp_path
     import asyncio
     import json
     import socket
-    import sys
     from datetime import UTC, datetime
     from uuid import UUID
 
     import httpx
     import uvicorn
+    from boxie_test_support.agent import Clock, DockerDaemon, configuration, live
+
+    # Reuse Boxie's daemon-boundary fixture; every application hop uses loopback HTTP/WS.
+    from boxie_test_support.api import api_server
     from playground.app import create_app
     from playground.boxie_client import HttpBoxieClient
     from playground.config import Settings
     from websockets.asyncio.client import connect
     from websockets.typing import Origin
-
-    # Reuse Boxie's daemon-boundary fixture; every application hop uses loopback HTTP/WS.
-    sys.path.insert(0, str(Path(__file__).parents[2] / "boxie" / "tests"))
-    from api_test_support import api_server
-    from boxie_test_support import Clock, DockerDaemon, configuration, live
 
     from .helpers import binary_bundle, elf_binary
 

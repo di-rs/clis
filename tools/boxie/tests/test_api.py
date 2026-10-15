@@ -3,8 +3,8 @@ import hashlib
 from pathlib import Path
 from uuid import uuid4
 
-from api_test_support import FOREIGN_AUTH, artifact, create, ready, stack
-from boxie_test_support import bundle, request
+from boxie_test_support.agent import bundle, request
+from boxie_test_support.api import FOREIGN_AUTH, artifact, create, ready, stack
 
 
 def test_api_auth_ownership_idempotency_and_validation(tmp_path: Path) -> None:

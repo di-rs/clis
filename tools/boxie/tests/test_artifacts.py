@@ -14,7 +14,7 @@ import pytest
 from boxie.domain.errors import BoxieError
 from boxie.domain.models import Principal
 from boxie.persistence.artifacts import ArtifactLimits, ArtifactStore
-from boxie_test_support import bundle
+from boxie_test_support.agent import bundle
 
 
 async def chunks(data: bytes) -> AsyncIterator[bytes]:

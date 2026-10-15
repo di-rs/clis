@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 import pytest
-from api_test_support import (
+from boxie_test_support.api import (
     CONSUMER_AUTH,
     FOREIGN_AUTH,
     artifact,
@@ -57,11 +57,11 @@ def test_agent_handshake_denials_are_typed_and_invalid_secret_is_dependency_fail
     from boxie.domain.errors import BoxieError
     from boxie.domain.models import Principal
     from boxie.sandbox.client import AgentClient
-    from boxie_test_support import Clock, DockerDaemon, configuration, live
+    from boxie_test_support.agent import Clock, DockerDaemon, configuration, live
 
     async def exercise() -> None:
         async with live(configuration(tmp_path), DockerDaemon(), Clock()) as (control, _agent):
-            from api_test_support import api_server
+            from boxie_test_support.api import api_server
 
             async with api_server(str(control.base_url)) as api:
                 identifier = UUID(await create(api, await artifact(api)))

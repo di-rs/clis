@@ -3,7 +3,6 @@
 import asyncio
 import json
 import socket
-import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -18,8 +17,6 @@ from playground.app import create_app
 from playground.boxie_client import HttpBoxieClient
 from playground.config import Settings
 from playground.service import PlaygroundService
-
-sys.path.insert(0, str(Path(__file__).parents[2] / "boxie" / "tests"))
 
 
 @dataclass
@@ -40,8 +37,8 @@ class Product:
 
 @asynccontextmanager
 async def boxie_network(root: Path) -> AsyncIterator[Network]:
-    from api_test_support import api_server
-    from boxie_test_support import Clock, DockerDaemon, configuration, live
+    from boxie_test_support.agent import Clock, DockerDaemon, configuration, live
+    from boxie_test_support.api import api_server
 
     config, daemon, clock = configuration(root), DockerDaemon(), Clock()
     clock.now = datetime.now(UTC)
@@ -117,7 +114,7 @@ def socket_url(product: Product, identifier: str, binding: dict[str, str]) -> st
 
 @asynccontextmanager
 async def serve(app: FastAPI) -> AsyncIterator[str]:
-    from api_test_support import serve as serve_peer
+    from boxie_test_support.api import serve as serve_peer
 
     async with serve_peer(app) as url:
         yield str(url)

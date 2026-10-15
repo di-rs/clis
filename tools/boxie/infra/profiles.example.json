@@ -1,0 +1,12 @@
+{
+  "smoke": {
+    "image_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "commands": [
+      [
+        "/bin/sh"
+      ]
+    ],
+    "env": {},
+    "artifact_target": "/opt/artifact"
+  }
+}

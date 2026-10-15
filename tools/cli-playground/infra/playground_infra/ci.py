@@ -8,7 +8,6 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -16,10 +15,10 @@ from urllib.parse import urlsplit
 
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from infra import deploy  # noqa: E402
+from playground_infra import deploy
+from playground_infra.config import ActivationUnavailable
 
-INFRA = Path(__file__).resolve().parent
+INFRA = Path.cwd() / "tools/cli-playground/infra"
 # Allow two minutes for state reads and storage retries, well inside the
 # 25-minute deployment job deadline so timeout handling can clean up normally.
 STACK_OUTPUT_TIMEOUT = 120
@@ -157,20 +156,7 @@ def wait_for_ssh(host: str, directory: Path, timeout: float = 600) -> None:
 
 
 def deploy_runtime() -> tuple[str, str]:
-    required("PULUMI_CONFIG_PASSPHRASE")
-    required("PULUMI_BACKEND_URL")
-    with tempfile.TemporaryDirectory(prefix="playground-") as temporary:
-        directory = Path(temporary) / "deployment"
-        host = prepare(directory, stack_outputs())
-        wait_for_ssh(host, directory)
-        return deploy.deploy(
-            host,
-            directory / "app.env",
-            directory / "release.json",
-            identity_file=directory / "identity",
-            known_hosts_file=directory / "known_hosts",
-            registry_credentials=(required("GITHUB_ACTOR"), required("GHCR_TOKEN")),
-        )
+    raise ActivationUnavailable()
 
 
 def main() -> None:
@@ -184,6 +170,9 @@ def main() -> None:
         else:
             revision, health = deploy_runtime()
             print(f"Deployed {revision}; verified {health}")
+    except ActivationUnavailable as error:
+        print(str(error), file=sys.stderr)
+        sys.exit(1)
     except (ValueError, KeyError, OSError, RuntimeError, subprocess.SubprocessError) as error:
         print(
             f"Playground CI {args.command} failed ({type(error).__name__}). Check configuration and deployment logs.",

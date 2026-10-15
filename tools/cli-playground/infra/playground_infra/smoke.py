@@ -15,6 +15,7 @@ import uuid
 import zipfile
 from pathlib import Path
 
+from boxie_infra.smoke import inspect_sandbox, verify_deleted
 from playground.boxie_client import HttpBoxieClient, SandboxRequest, TerminalPort
 from playground.storage import validate_elf
 
@@ -109,6 +110,7 @@ async def exercise(binary: Path, url: str, credential_file: Path, profile: str) 
                     view = await client.get(sandbox_id)
             if view.state != "ready":
                 raise RuntimeError(f"Sandbox did not become ready: {view.state}")
+            inspect_sandbox(str(sandbox_id))
             async with client.terminal(sandbox_id) as terminal:
                 session = Session(terminal)
                 shell = Shell(session)
@@ -148,6 +150,7 @@ async def exercise(binary: Path, url: str, credential_file: Path, profile: str) 
                 while view.cleanup_pending or view.state not in {"terminated", "failed"}:
                     await asyncio.sleep(0.1)
                     view = await client.get(sandbox_id)
+            verify_deleted(str(sandbox_id))
         await client.retire(artifact_id)
         await client.close()
     print(

@@ -255,3 +255,11 @@ cancellation, graceful worker replacement, and replay of four exported histories
 passed on each platform. That gate did not exercise PostgreSQL transactions or
 process-crash recovery. These dependencies are reserved for the later persistence
 and orchestration increment and are not installed by this package yet.
+
+## Independent distribution and topology
+
+[Local infrastructure](infra/README.md) owns the private two-process Compose unit,
+Docker build, trusted generic profile and installed operator smoke commands.
+`boxie` and `cli-playground` are independent runtime distributions; neither image
+installs an infrastructure package. The root lockfile pins both builds. Production
+activation remains unavailable until PR4.

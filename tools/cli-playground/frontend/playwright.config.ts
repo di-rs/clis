@@ -27,7 +27,7 @@ export default defineConfig({
   ],
   webServer: {
     command:
-      "uv run --locked --all-packages uvicorn playground.app:create_app --factory --app-dir tools/cli-playground --host 127.0.0.1 --port 8765",
+      "uv run --locked --package cli-playground uvicorn playground.app:create_app --factory --host 127.0.0.1 --port 8765",
     cwd: fileURLToPath(new URL("../../../", import.meta.url)),
     env: {
       PLAYGROUND_DATA_DIR: fileURLToPath(

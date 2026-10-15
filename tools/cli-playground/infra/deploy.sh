@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Invoked by deploy.py under the deployment lock; stdin has already been unpacked.
 set -euo pipefail
+printf '%s\n' "Production activation is unavailable after the Boxie split; split-service release/deployment support lands in PR4. Use the documented local Compose units for validation." >&2
+exit 1
 
 staging=$1
 release=$2
@@ -21,7 +23,7 @@ set +a
 compose() {
     docker compose --project-name cli-playground \
         --env-file "$app_env" --env-file "$source_dir/image.env" \
-        --file "$source_dir/tools/cli-playground/compose.production.yml" "$@"
+        --file "$source_dir/tools/cli-playground/infra/compose.production.yml" "$@"
 }
 
 # Resolve configuration and pull every image before changing the running release.

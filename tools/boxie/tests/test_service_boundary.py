@@ -10,8 +10,8 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from api_test_support import CONSUMER_AUTH, api_server, artifact, create, ready, terminal_url
-from boxie_test_support import Clock, DockerDaemon, bundle, configuration, live, request
+from boxie_test_support.agent import Clock, DockerDaemon, bundle, configuration, live, request
+from boxie_test_support.api import CONSUMER_AUTH, api_server, artifact, create, ready, terminal_url
 from websockets.asyncio.client import connect
 
 
@@ -137,7 +137,7 @@ def test_standalone_api_reads_distinct_private_credentials(tmp_path: Path) -> No
                 str(path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
-                env={**os.environ, "PYTHONPATH": str(Path(__file__).parents[1] / "src")},
+                env={key: value for key, value in os.environ.items() if key != "PYTHONPATH"},
             )
             try:
                 async with httpx.AsyncClient(
@@ -270,10 +270,10 @@ def test_agent_client_control_protocol_and_bounded_readiness(
     ],
 )
 def test_agent_client_rejects_malformed_status_without_leaking_payload(frame: str) -> None:
-    from api_test_support import serve
     from boxie.domain.errors import BoxieError
     from boxie.domain.models import Principal
     from boxie.sandbox.client import AgentClient
+    from boxie_test_support.api import serve
     from fastapi import FastAPI, WebSocket
 
     async def exercise() -> None:

@@ -1,22 +1,69 @@
-# Playground hosting
+# Playground infrastructure
 
-Set up the playground entirely in the Cloudflare, Hetzner and GitHub websites.
-GitHub Actions provisions the host and deploys the application; no local Pulumi,
-Docker, SSH or deployment commands are required for setup or routine releases.
-The private Cloudflare R2 bucket holds Pulumi state independently of the VPS.
+Production activation is unavailable during PR1–PR3. Setup provisions the protected
+host and DNS only; it no longer chains a release. Release, Python deploy, CI deploy
+and the remote deployment shell fail before side effects with an explicit PR4
+diagnostic. There is no bypass. The retained release helpers and tests do not
+establish working split-service production deployment.
 
-Production runs one Ubuntu 24.04 CX33 in Nuremberg, with a retained IPv4 address,
-Docker, gVisor and Traefik. The control hostname, such as `play.thesecret.dev`,
-serves the gateway; PR previews use `pr-N.play.thesecret.dev/p/<identifier>`.
-Control-host `/p/<identifier>` links are also supported. Previews expire after
-seven days or PR closure. There is no permanent preview containing all `master` binaries.
+## Independent local unit
+
+First obtain a private Boxie URL and consumer credential from its operator; see
+[Boxie infrastructure](../../boxie/infra/README.md). Boxie's approved `playground`
+profile must use the immutable product sandbox image, command
+`["/opt/playground/shell.sh"]`, environment allowlist `TERM=["xterm-256color"]`, and
+artifact mount `/opt/artifact`. The declaration is in
+[profiles/playground.json](profiles/playground.json); replace the placeholder digest
+and merge it into the **operator-owned Boxie profiles file**. The product cannot
+upload or change its profile. Build the product sandbox separately:
+
+```sh
+docker build -f tools/cli-playground/Sandbox.Dockerfile -t clis-playground-sandbox:local .
+docker build -f tools/cli-playground/infra/Playground.Dockerfile -t cli-playground:local .
+```
+
+From the repository root, create an external product-data volume and set the
+consumer connection. The network must already exist; it can belong to a separate
+Boxie installation. There is no cross-project `depends_on`.
+
+```sh
+docker volume create playground-data
+export PLAYGROUND_DATA_VOLUME=playground-data
+export PLAYGROUND_CONSUMER_NETWORK=boxie-consumers
+export PLAYGROUND_BOXIE_URL=http://boxie-api:8090
+export PLAYGROUND_BOXIE_CREDENTIAL_FILE=/private/path/consumer.secret
+export PLAYGROUND_DEPLOY_TOKEN=local-deploy-token
+export PLAYGROUND_PUBLIC_URL=http://localhost:8000
+docker compose -f tools/cli-playground/infra/compose.yml up --build -d
+```
+
+The credential must be a regular non-symlink file, mode `0600`, containing a
+16–4096-character printable token. The local unit publishes only localhost:8000.
+The independently resolvable production manifest uses an explicit immutable
+`PLAYGROUND_IMAGE`, external `PLAYGROUND_PROXY_NETWORK` and
+`PLAYGROUND_CERTIFICATES_VOLUME`; only Traefik publishes 80/443 and receives the
+Cloudflare certificate-renewal credential. Boxie's artifact data and agent
+credential never enter Playground. Runtime images contain only their own installed
+package/dependencies and, for Playground, its real built frontend assets.
+
+Operator modules are installed as `playground_infra`, separately from the runtime.
+Run `uv sync --locked --all-packages` first. Transitional provisioning commands
+require this source checkout: run `python -m playground_infra.ci configure` from
+the repository root, and Pulumi from this `infra` directory. The Pulumi resource
+names, state ownership and bootstrap script remain unchanged. Installed runtime
+images contain no Pulumi/provider SDKs.
+
+## Provisioning reference (no application activation)
+
+The account/state setup below remains available for reviewed manual provisioning.
+It does not activate a runtime, upload artifacts, or establish production readiness.
 
 ## 1. Prepare the accounts and domain
 
 You need access to the domain's registrar, a Cloudflare account with R2 enabled,
 a Hetzner Cloud project, and administrator access to the GitHub repository.
 Merge these workflows into the repository's `master` default branch before
-running them. Keep `PLAYGROUND_AUTO_DEPLOY` unset or `false` until step 7 succeeds.
+running them. Keep `PLAYGROUND_AUTO_DEPLOY` unset or `false` through PR1–PR3.
 
 Prefer a dedicated registered domain and Cloudflare zone containing only playground
 records. The runtime's certificate-renewal token can edit DNS throughout its
@@ -246,151 +293,25 @@ SSH client's allowed IPv4 networks. Narrowing it without a runner with a stable,
 allowed egress address blocks GitHub-hosted deployment. Host-key and cloud-init
 changes are not a routine way to update an already running host.
 
-## 7. Run setup, verify it, then enable releases
+## 7. Provision only
 
-1. In GitHub, open **Actions → CLI playground setup → Run workflow**.
-2. Select **Branch: master** and choose **Run workflow**. This workflow has no
-   inputs. If the button is missing, confirm the workflow is merged into the
-   default branch and you have write access. See
-   [running a workflow manually](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
-3. Open the run and approve any configured environment review. The **provision**
-   job validates configuration, logs into the existing R2 bucket, selects or
-   creates the `production` stack, runs a refreshed Pulumi preview, and applies
-   the infrastructure. The preview is logged; there is no separate approval
-   pause between preview and apply.
-4. After provisioning, setup calls **CLI playground release**, which builds
-   gateway and sandbox images from that same workflow commit. Its summary and
-   `cli-playground-release` artifact record the commit and immutable image
-   digests. Its **deploy** job installs that release on the existing host.
-5. Deployment reads the existing SSH identity from R2, waits for SSH and
-   cloud-init, checks for gVisor, pulls images, installs configuration and starts
-   Compose. It verifies public HTTPS `/healthz` on both the control hostname and
-   `pr-1.<control-host>` before success, including wildcard TLS.
-6. Confirm all jobs succeed, then open `https://play.thesecret.dev/healthz` using
-   your chosen hostname. Expect `{"status":"ok"}`. In Cloudflare's DNS page,
-   confirm both managed A records are DNS-only and point to the Hetzner IPv4.
-7. Edit the repository variable `PLAYGROUND_AUTO_DEPLOY` to exactly `true`.
-   Subsequent relevant pushes to `master` now build and deploy the runtime.
+Run **Actions → CLI playground setup → master** for explicitly authorized host
+provisioning. Its protected `provision` job configures the existing R2-backed stack,
+previews and applies infrastructure, then finishes. Keep `PLAYGROUND_AUTO_DEPLOY`
+unset or false. Running the release workflow deliberately fails at its first step;
+it does not publish images or deploy the coupled legacy runtime. PR4 replaces
+this boundary with split-service release tooling and production E2E validation.
 
-A push only triggers a runtime release for the paths listed in
-[cli-playground-release.yml](../../../.github/workflows/cli-playground-release.yml):
-application/frontend, fixtures, container and deployment files, workflow files,
-and shared dependency inputs. Infrastructure-only changes such as `host.py` or
-`Pulumi.production.yaml` require another manual **CLI playground setup** run.
-Changing a variable or secret alone does not trigger either workflow.
+Keep the original state bucket and passphrase; do not replace state or disable
+resource protection to recover an error. Setup retains protected host/IP resources,
+pinned SSH identity, separate provisioning credentials and DNS-renewal credentials.
+Backup/restore automation and cloud activation are outside this increment.
 
-To publish the first PR preview, open or update a PR that changes an eligible
-Rust CLI. Its build/preview workflows create the preview and post a link. Setup
-does not republish old PR artifacts or create a `master` preview. A fresh eligible
-PR build is needed for an older PR without a working preview. PR links are public.
+## Local checks
 
-## Routine operations
-
-| Task | Browser action |
-| --- | --- |
-| Deploy current runtime manually | **Actions → CLI playground release → Run workflow → master**; this works even while auto-deploy is `false` |
-| Pause automatic runtime releases | Set repository variable `PLAYGROUND_AUTO_DEPLOY` to `false`; this does not stop the running service or an already queued/running job |
-| Apply reviewed infrastructure changes | Merge into `master`, then run **CLI playground setup**; it also builds and deploys that commit's runtime |
-| Change certificate email, renewal token or application token | Update the GitHub value, then run **CLI playground release** on `master` |
-| Change hostname or DNS zone | Plan the DNS migration, update the variables, then run **CLI playground setup**; runtime deployment rejects a URL that differs from state |
-| Undo application code | Revert it in a reviewed PR, merge to `master`, then let auto-deploy run or start **CLI playground release** manually |
-
-Runtime deployment uses Pulumi only to read existing stack outputs from R2. It
-does not refresh state, call `pulumi up`, change the firewall, or use the Hetzner
-or Cloudflare provisioning token. It installs the separate certificate-renewal
-token for the proxy. The R2 credential is still bucket-scoped Object Read
-& Write because setup uses the same credential. Provisioning and deployment jobs
-share a concurrency group to prevent simultaneous host changes.
-
-A runtime update can restart the gateway and ends active terminal sessions.
-Their files are disposable. Published PR metadata and binaries remain under
-`/var/lib/cli-playground` across normal releases. New PR uploads advance the
-preview's runnable version at the same URL. Existing sessions retain their exact
-version and files until disconnect or expiry; unused versions are then removed.
-The page distinguishes latest-build status from its current terminal revision,
-and an explicit switch/reset starts a new workspace with the latest available
-artifact. Reopening a PR reconciles its latest current-head run when available.
-
-### Reruns and failures
-
-After correcting a credential or setting, open the failed run and use GitHub's
-rerun controls, or start a new manual run of the appropriate workflow. A rerun
-uses the original commit/ref; a new **Run workflow → master** uses the current
-branch revision. See [GitHub reruns](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs).
-Rerunning the release build makes a new run-attempt tag and can produce new
-digests; it is not a promise to reproduce the previous images byte-for-byte.
-The reusable runtime-deploy workflow has no standalone **Run workflow** button.
-
-Setup reruns use existing R2 state and keys. A partial provisioning failure can
-leave billable resources, so correct the issue and reconcile the same stack.
-Do not recover by changing to an empty bucket or deleting state. Check the
-workflow step that failed, then use the relevant account page:
-
-- **State access:** verify bucket name, account ID, EU endpoint, bucket-scoped
-  S3 credentials and the original passphrase. Runtime deployment allows two
-  minutes for the state read, including storage retries. A timeout fails the run
-  and cleans up temporary files; rerun after resolving backend access.
-- **Provider setup:** check the Hetzner project token, available server type/
-  location, zone ID, DNS-token scope and hostname conflicts.
-- **Image publication/pull:** check both packages' Actions access and repository/
-  organization policies.
-- **SSH/bootstrap:** check server status and TCP 22 in the Hetzner Console.
-  Host-key verification failure requires investigating the host/state mismatch;
-  do not disable host-key verification.
-- **Public HTTPS:** check the active zone, both DNS-only A records, absence of an
-  AAAA record for this IPv4-only host, ports 80/443, the renewal token's zone
-  permissions and any certificate-authority restrictions. Check both control and
-  PR-host health URLs; DNS propagation can outlast the health-check window.
-
-Images are pulled before Compose changes the running release. There is no
-automatic rollback after a Compose or public-health failure; the host may already
-be running the new release. Correct the cause and rerun, or deploy a reviewed
-revert. Rerunning an old successful workflow can deploy old code and is not the
-documented rollback path. Existing release directories are not an automatic
-rollback service, and neither a revert nor a rerun restores lost session files
-or reverses application-data changes.
-
-Host diagnostics are in `/var/log/cli-playground-deploy.log`, cloud-init logs and
-Docker logs. These private host logs are not uploaded by the workflows; detailed
-host repair may require a separately planned administrator recovery procedure.
-
-### State, data and host recovery
-
-Keep an independently controlled backup of the entire R2 `.pulumi` prefix and a
-separate copy of the passphrase. Pulumi checkpoint history in the same bucket is
-not an independent backup. R2 does not implement S3 object versioning; see its
-[S3 compatibility table](https://developers.cloudflare.com/r2/api/s3/api/).
-Backup and restore automation is not included. Do not apply a retention lock to
-active state or locks; protect backup copies separately. Never upload decrypted
-state, private keys or application environment files as GitHub artifacts.
-
-R2 state records infrastructure and encrypted keys, not the VPS's application
-data. A host replacement does not restore these directories:
-
-| Host path | Contents |
-| --- | --- |
-| `/var/lib/cli-playground` | Published PR metadata and binary batches |
-| `/var/lib/cli-playground-proxy` | ACME account and certificates |
-| `/etc/cli-playground` | Private application configuration |
-| `/opt/cli-playground/releases` | Deployed manifests and Compose files |
-
-Back up application data and certificates separately if they must survive host
-loss. Fresh publication can recreate PR previews from a new eligible build;
-temporary session workspaces cannot be recovered. Hetzner backups are disabled
-by default. Loss of the passphrase prevents decrypting the managed SSH identities.
-Restoring state or rotating its encryption provider requires a reviewed recovery
-procedure; there is no recovery button in these workflows.
-
-Server deletion/rebuild and IPv4 deletion are protected by default. A retained IP
-does not make replacement automatic: it must be detached and reassigned in a
-compatible location, and Pulumi replacement ordering must be planned. The current
-workflows do not implement or validate an automated replace-and-restore sequence.
-Do not delete the server or set `protect: false` as a generic troubleshooting step.
-Plan resource protection changes, downtime, state handling, IP reassignment and
-data restoration before a replacement. Cloud-init identity changes only take
-effect during the host's first boot.
-
-The [Linux sandbox workflow](../../../.github/workflows/cli-playground-sandbox.yml)
-checks real gVisor execution. Missing gVisor fails deployment. The setup and release
-workflows verify real provider access and public HTTPS when an operator runs them;
-documentation and local checks alone do not establish a successful live deployment.
+Build the real frontend before `uv run --locked pytest
+tools/boxie/tests/test_packaging.py -m integration`. The required PR frontend job
+runs that isolated-wheel/static-response/Compose check. The separate
+[Linux sandbox workflow](../../../.github/workflows/cli-playground-sandbox.yml)
+checks native runsc security and both generic and product terminals through the
+private API. Missing runsc is a failure, never a successful runc substitute.

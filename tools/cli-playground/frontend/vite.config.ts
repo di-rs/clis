@@ -4,7 +4,11 @@ import { defineConfig } from "vite-plus";
 export default defineConfig(({ command }) => ({
   plugins: [svelte()],
   base: command === "build" ? "/static/" : "/",
-  build: { license: { fileName: "licenses.md" } },
+  build: {
+    outDir: "../playground/static",
+    emptyOutDir: true,
+    license: { fileName: "licenses.md" },
+  },
   server: {
     host: "127.0.0.1",
     port: 5173,

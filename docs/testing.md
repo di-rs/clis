@@ -68,3 +68,19 @@ Run `git diff --check`. For new documentation, pass `--files PATH` to the releva
 prek hook so untracked files are checked. Report commands, outcomes and any
 unverified platforms or missing tools. Reuse passing checks while the relevant
 files and environment remain unchanged; documentation-only edits need no Rust run.
+
+## Independent service packaging
+
+Ordinary pytest excludes the `integration` marker and requires no built frontend
+or Docker. After a real frontend build, explicitly run:
+
+```sh
+pnpm --dir tools/cli-playground/frontend build
+uv run --locked pytest tools/boxie/tests/test_packaging.py -m integration
+```
+
+These checks build each service sdist/wheel, install it with only locked runtime
+dependencies into a fresh environment, import outside the checkout, serve actual
+installed UI assets, and resolve all four Compose manifests. Missing prerequisites
+fail. The PR frontend job runs this gate. Image builds and native Linux/gVisor
+smoke are separate checks; ordinary Docker/runc is not gVisor evidence.

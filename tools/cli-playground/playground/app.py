@@ -17,7 +17,7 @@ from playground.service import PlaygroundService
 from playground.session_store import SessionStore
 from playground.storage import EnvironmentStore
 
-STATIC_DIR = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 def create_app(settings: Settings | None = None, *, boxie: BoxieClient | None = None) -> FastAPI:

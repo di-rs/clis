@@ -84,6 +84,9 @@ class HostConfig(BaseModel):
 
 def cloud_init(host_private_key: str, host_public_key: str) -> str:
     """Install a pinned SSH host identity; no provider or application tokens are used."""
+    source = Path(__file__).resolve().parent.parent
+    if source.name != "infra" or not (source / "Pulumi.yaml").is_file():
+        raise RuntimeError("Provisioning requires the infrastructure source checkout")
     return "#cloud-config\n" + json.dumps(
         {
             "ssh_pwauth": False,
@@ -96,7 +99,9 @@ def cloud_init(host_private_key: str, host_public_key: str) -> str:
                 {
                     "path": "/usr/local/sbin/cli-playground-bootstrap.sh",
                     "permissions": "0700",
-                    "content": Path(__file__).with_name("bootstrap.sh").read_text(),
+                    "content": (
+                        Path(__file__).resolve().parent.parent / "bootstrap.sh"
+                    ).read_text(),
                 },
                 {
                     "path": "/etc/ssh/sshd_config.d/00-cli-playground.conf",

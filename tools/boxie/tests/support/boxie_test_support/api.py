@@ -11,8 +11,9 @@ from uuid import uuid4
 
 import httpx
 import uvicorn
-from boxie_test_support import Clock, DockerDaemon, bundle, configuration, live, request
 from fastapi import FastAPI
+
+from boxie_test_support.agent import Clock, DockerDaemon, bundle, configuration, live, request
 
 CONSUMER_AUTH = {"Authorization": "Bearer consumer-one-secret"}
 FOREIGN_AUTH = {"Authorization": "Bearer consumer-two-secret"}

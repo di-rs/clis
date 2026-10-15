@@ -9,10 +9,10 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from infra import deploy
 from playground import app as playground_app
 from playground.app import create_app
 from playground.config import Settings
+from playground_infra import deploy
 
 from .boxie_fake import FakeBoxie
 from .helpers import APP_ENV, GATEWAY_IMAGE, SANDBOX_IMAGE, git_commit, protected
@@ -85,15 +85,15 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
     source.mkdir(parents=True)
     (source / "infra").mkdir()
     for name in (
-        "compose.production.yml",
+        "infra/compose.production.yml",
         "infra/routes.yml",
-        "Gateway.Dockerfile",
+        "infra/Playground.Dockerfile",
         "Sandbox.Dockerfile",
     ):
         (source / name).write_text("committed source\n")
     assert deploy.__file__ is not None
     (source / "infra/deploy.sh").write_text(
-        (Path(deploy.__file__).parent / "deploy.sh").read_text()
+        (Path(deploy.__file__).parent.parent / "deploy.sh").read_text()
     )
     subprocess.run(["git", "init", "-q", str(root)], check=True)
     subprocess.run(["git", "-C", str(root), "add", "."], check=True)
