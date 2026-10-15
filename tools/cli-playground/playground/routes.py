@@ -5,7 +5,7 @@ import json
 import logging
 import re
 import secrets
-from contextlib import suppress
+from contextlib import AsyncExitStack, suppress
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
@@ -26,7 +26,13 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from playground.boxie_client import BoxieUnavailable, SandboxState, TerminalPort, TerminationReason
+from playground.boxie_client import (
+    BoxieUnavailable,
+    SandboxState,
+    TerminalPort,
+    TerminationReason,
+    validate_sandbox,
+)
 from playground.config import Settings
 from playground.models import (
     ID_PATTERN,
@@ -293,38 +299,45 @@ def create_router(service: PlaygroundService, static_dir: Path) -> APIRouter:
             await websocket.close(code=1008)
             return
         await websocket.accept()
+        claimed = False
+        attached = False
         try:
             async with asyncio.timeout(5):
                 message = await websocket.receive_text()
                 if len(message.encode("utf-8")) > 1024:
                     raise ValueError("authentication frame too large")
                 auth = SessionAuth.model_validate_json(message)
-            binding = service.binding(identifier, session_id, revision, auth.credential)
-            # Provisioning can be asynchronous. Polling does not change agent deadlines.
-            async with asyncio.timeout(30):
-                while binding.sandbox.state in {"accepted", "provisioning"}:
-                    binding.sandbox = await service.boxie.get(binding.sandbox.id)
+            binding = service.claim_attachment(identifier, session_id, revision, auth.credential)
+            claimed = True
+            async with AsyncExitStack() as connections:
+                # One bounded transition includes readiness, connection, and acknowledgement.
+                async with asyncio.timeout(40):
+                    while binding.sandbox.state in {"accepted", "provisioning"}:
+                        view = await service.boxie.get(binding.sandbox.id, binding.sandbox)
+                        validate_sandbox(view, binding.sandbox)
+                        binding.sandbox = view
+                        service.binding(identifier, session_id, revision, auth.credential)
+                        if view.state in {"terminating", "terminated", "failed"}:
+                            raise LookupError("session ended")
+                        await asyncio.sleep(0.02)
+                    upstream = await connections.enter_async_context(
+                        service.boxie.terminal(binding.sandbox.id)
+                    )
                     service.binding(identifier, session_id, revision, auth.credential)
-                    if binding.sandbox.state in {"terminating", "terminated", "failed"}:
-                        raise LookupError("session ended")
-                    await asyncio.sleep(0.02)
-            async with service.boxie.terminal(binding.sandbox.id) as upstream:
-                service.binding(identifier, session_id, revision, auth.credential)
-                self_binding = service.sessions.get(session_id)
-                assert self_binding is not None
-                self_binding.sandbox = binding.sandbox
-                service.sessions.save(self_binding)
-                service.sessions.claimed(session_id)
-                await websocket.send_json(
-                    {
-                        "type": "authenticated",
-                        "state": "ready",
-                        "absolute_deadline": binding.sandbox.absolute_deadline.isoformat().replace(
-                            "+00:00", "Z"
-                        ),
-                        "reason": binding.sandbox.reason,
-                    }
-                )
+                    await websocket.send_json(
+                        {
+                            "type": "authenticated",
+                            "state": "ready",
+                            "absolute_deadline": binding.sandbox.absolute_deadline.isoformat().replace(
+                                "+00:00", "Z"
+                            ),
+                            "reason": binding.sandbox.reason,
+                        }
+                    )
+                    service.complete_attachment(
+                        identifier, session_id, revision, auth.credential, binding.sandbox
+                    )
+                    attached = True
                 await bridge_terminal(websocket, upstream)
         except WebSocketDisconnect, asyncio.CancelledError:
             return
@@ -336,6 +349,10 @@ def create_router(service: PlaygroundService, static_dir: Path) -> APIRouter:
             with suppress(WebSocketDisconnect, RuntimeError):
                 await websocket.close(code=1011)
             return
+        finally:
+            if claimed and not attached:
+                # Synchronous durable compensation also survives task cancellation.
+                service.cancel_attachment(session_id)
         with suppress(WebSocketDisconnect, RuntimeError):
             await websocket.close(code=1000)
 

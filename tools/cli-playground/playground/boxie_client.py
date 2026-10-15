@@ -9,7 +9,7 @@ from typing import Literal, Protocol
 from uuid import UUID
 
 import aiohttp
-from pydantic import AwareDatetime, BaseModel, ConfigDict, ValidationError
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosedOK, WebSocketException
 
@@ -42,6 +42,13 @@ class SandboxView(BaseModel):
     cleanup_pending: bool
 
 
+class ArtifactReply(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    id: UUID
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    retired: bool
+
+
 class SandboxRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     artifact_id: UUID
@@ -60,8 +67,10 @@ class BoxieClient(Protocol):
     async def upload(self, identifier: UUID, digest: str, archive: Path) -> None: ...
     async def retire(self, identifier: UUID) -> None: ...
     async def create(self, key: str, spec: SandboxRequest) -> SandboxView: ...
-    async def get(self, identifier: UUID) -> SandboxView: ...
-    async def terminate(self, identifier: UUID) -> SandboxView: ...
+    async def get(self, identifier: UUID, previous: SandboxView | None = None) -> SandboxView: ...
+    async def terminate(
+        self, identifier: UUID, previous: SandboxView | None = None
+    ) -> SandboxView: ...
     def terminal(self, identifier: UUID) -> AbstractAsyncContextManager[TerminalPort]: ...
     async def close(self) -> None: ...
 
@@ -160,7 +169,12 @@ class HttpBoxieClient:
             ) as response:
                 if response.status not in {200, 201}:
                     raise BoxieUnavailable("artifact service unavailable")
-                await bounded_response(response)
+                try:
+                    reply = ArtifactReply.model_validate_json(await bounded_response(response))
+                except ValidationError as error:
+                    raise BoxieUnavailable("invalid artifact response") from error
+                if reply.id != identifier or reply.sha256 != digest or reply.retired:
+                    raise BoxieUnavailable("invalid artifact response")
         except (aiohttp.ClientError, TimeoutError) as error:
             raise BoxieUnavailable("artifact service unavailable") from error
 
@@ -168,7 +182,7 @@ class HttpBoxieClient:
         await self._request("DELETE", f"/v1/artifacts/{identifier}")
 
     async def create(self, key: str, spec: SandboxRequest) -> SandboxView:
-        return parse_sandbox(
+        view = parse_sandbox(
             await self._request(
                 "POST",
                 "/v1/sandboxes",
@@ -176,12 +190,21 @@ class HttpBoxieClient:
                 headers={"Idempotency-Key": key, "Content-Type": "application/json"},
             )
         )
+        validate_sandbox(view, max_seconds=spec.policy["max_seconds"])
+        return view
 
-    async def get(self, identifier: UUID) -> SandboxView:
-        return parse_sandbox(await self._request("GET", f"/v1/sandboxes/{identifier}"))
+    async def _sandbox(
+        self, method: str, identifier: UUID, previous: SandboxView | None
+    ) -> SandboxView:
+        view = parse_sandbox(await self._request(method, f"/v1/sandboxes/{identifier}"))
+        validate_sandbox(view, previous, identifier=identifier)
+        return view
 
-    async def terminate(self, identifier: UUID) -> SandboxView:
-        return parse_sandbox(await self._request("DELETE", f"/v1/sandboxes/{identifier}"))
+    async def get(self, identifier: UUID, previous: SandboxView | None = None) -> SandboxView:
+        return await self._sandbox("GET", identifier, previous)
+
+    async def terminate(self, identifier: UUID, previous: SandboxView | None = None) -> SandboxView:
+        return await self._sandbox("DELETE", identifier, previous)
 
     @asynccontextmanager
     async def terminal(self, identifier: UUID) -> AsyncIterator[TerminalPort]:
@@ -216,6 +239,31 @@ async def bounded_response(response: aiohttp.ClientResponse) -> bytes:
 
 def parse_sandbox(data: bytes) -> SandboxView:
     try:
-        return SandboxView.model_validate_json(data)
+        view = SandboxView.model_validate_json(data)
+        validate_sandbox(view)
+        return view
     except ValidationError as error:
         raise BoxieUnavailable("invalid sandbox response") from error
+
+
+def validate_sandbox(
+    view: SandboxView,
+    previous: SandboxView | None = None,
+    *,
+    identifier: UUID | None = None,
+    max_seconds: int = 3600,
+) -> None:
+    lifetime = (view.absolute_deadline - view.created_at).total_seconds()
+    if (
+        not 0 < lifetime <= max_seconds
+        or (identifier is not None and view.id != identifier)
+        or (
+            previous is not None
+            and (
+                view.id != previous.id
+                or view.created_at != previous.created_at
+                or view.absolute_deadline != previous.absolute_deadline
+            )
+        )
+    ):
+        raise BoxieUnavailable("invalid sandbox response")

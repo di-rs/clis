@@ -16,7 +16,13 @@ from uuid import UUID, uuid4
 from anyio import CancelScope
 
 from playground.artifacts import canonical_archive, stage_archive
-from playground.boxie_client import BoxieClient, BoxieUnavailable, SandboxRequest
+from playground.boxie_client import (
+    BoxieClient,
+    BoxieUnavailable,
+    SandboxRequest,
+    SandboxView,
+    validate_sandbox,
+)
 from playground.config import Settings
 from playground.models import (
     ArtifactIdentity,
@@ -56,7 +62,10 @@ class PlaygroundService:
         for binding in self.sessions.bindings():
             if binding.pending_stop:
                 try:
-                    binding.sandbox = await self.boxie.terminate(binding.sandbox.id)
+                    view = await self.boxie.terminate(binding.sandbox.id, binding.sandbox)
+                    validate_sandbox(view, binding.sandbox)
+                    binding.sandbox = view
+                    binding.attachment_deadline = None
                     binding.pending_stop = (
                         binding.sandbox.cleanup_pending
                         or binding.sandbox.state not in {"terminated", "failed"}
@@ -109,6 +118,14 @@ class PlaygroundService:
             await self.boxie.upload(
                 artifact.artifact_id, artifact.sha256, self.sessions.archive(artifact.artifact_id)
             )
+            # Closure cancellation is irreversible even if the PR has since reopened.
+            stored = next(
+                item
+                for item in self.sessions.uploads()
+                if item.artifact.artifact_id == artifact.artifact_id
+            )
+            if stored.cancelled:
+                raise ArtifactConflictError("publication was cancelled by PR closure")
             current = self.store.get(self.store.identifier(artifact.pr))
             if intent.build is None and (current.revision if current else None) not in {
                 intent.previous_revision,
@@ -126,14 +143,27 @@ class PlaygroundService:
         return environment
 
     async def recover(self, *, startup: bool = True) -> None:
+        # A restarted process cannot finish an in-flight terminal attachment.
+        for binding in self.sessions.bindings():
+            if binding.attachment_deadline is not None and (
+                startup or binding.attachment_deadline <= time.time()
+            ):
+                self.cancel_attachment(binding.id)
         # A restarted process cannot return an old page's one-time credential.
         for intent in self.sessions.creates():
+            saved = self.sessions.get(intent.id)
+            if saved is not None and (
+                saved.attached or saved.attachment_deadline is not None or saved.pending_stop
+            ):
+                continue
             if intent.id in self.active_creates or (
                 not startup and not intent.abandoned and intent.claim_until > time.time()
             ):
                 continue
             try:
                 sandbox = await self.boxie.create(str(intent.id), intent.spec)
+                if saved is not None:
+                    validate_sandbox(sandbox, saved.sandbox)
                 if not any(current.id == intent.id for current in self.sessions.creates()):
                     continue  # Authentication claimed the binding while recovery yielded.
                 self.sessions.save(
@@ -171,6 +201,34 @@ class PlaygroundService:
         ):
             raise LookupError("session not found")
         return binding
+
+    def claim_attachment(
+        self, preview_id: str, identifier: UUID, revision: str, credential: str
+    ) -> SessionBinding:
+        binding = self.binding(preview_id, identifier, revision, credential)
+        if binding.attached or binding.attachment_deadline is not None:
+            raise LookupError("session already claimed")
+        binding.attachment_deadline = time.time() + 40
+        self.sessions.save(binding)
+        self.sessions.claimed(identifier)
+        return binding
+
+    def complete_attachment(
+        self, preview_id: str, identifier: UUID, revision: str, credential: str, view: SandboxView
+    ) -> None:
+        binding = self.binding(preview_id, identifier, revision, credential)
+        validate_sandbox(view, binding.sandbox)
+        binding.sandbox = view
+        binding.attachment_deadline = None
+        binding.attached = True
+        self.sessions.save(binding)
+
+    def cancel_attachment(self, identifier: UUID) -> None:
+        binding = self.sessions.get(identifier)
+        if binding is not None and binding.attachment_deadline is not None:
+            binding.pending_stop = True
+            binding.attachment_deadline = None
+            self.sessions.save(binding)
 
     async def create_session(self, preview_id: str, revision: str) -> tuple[SessionBinding, str]:
         environment = self.store.get(preview_id)
@@ -341,6 +399,7 @@ class PlaygroundService:
     async def close_pull_request(self, pr: int) -> int:
         # Publish must see the tombstone even while we wait for its upload lock.
         self.store.close_pull_request(pr)
+        self.sessions.cancel_uploads(pr)
         async with self.uploads:
             identifiers = self.store.for_pull_request(pr)
             identifiers.add(self.store.identifier(pr))
@@ -353,6 +412,9 @@ class PlaygroundService:
 
     async def reopen_pull_request(self, pr: int) -> None:
         async with self.uploads:
+            if self.store.is_closed(pr):
+                # Also completes invalidation if close was interrupted after its tombstone.
+                self.sessions.cancel_uploads(pr)
             self.store.reopen_pull_request(pr)
 
     async def metadata(self, identifier: str) -> EnvironmentMetadata | None:

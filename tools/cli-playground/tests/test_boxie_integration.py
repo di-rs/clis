@@ -1,7 +1,10 @@
 """Product admission contract, exercised through the public HTTP boundary."""
 
+import time
 from pathlib import Path
 
+import aiohttp
+import pytest
 from fastapi.testclient import TestClient
 
 from .helpers import upload
@@ -154,5 +157,91 @@ def test_separate_product_api_agent_publish_terminal_reset_and_pr_close(tmp_path
                     await asyncio.wait_for(task, 5)
                     sock.close()
                     assert agent.reserved_count == 1
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("finish", [True, False])
+def test_authenticated_readiness_wait_is_not_an_abandoned_page_response(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, finish: bool
+) -> None:
+    import asyncio
+    import json
+    from types import SimpleNamespace
+    from uuid import UUID
+
+    from playground import boxie_client as client_module
+    from playground import service as service_module
+    from websockets.asyncio.client import connect
+    from websockets.typing import Origin
+
+    from .boxie_network import boxie_network, product_server
+    from .helpers import binary_bundle, elf_binary
+
+    async def exercise() -> None:
+        async with boxie_network(tmp_path / "agent") as network:
+            gate = asyncio.Event()
+            network.daemon.create_gate = gate
+            async with product_server(tmp_path / "product", str(network.api.base_url)) as product:
+                now = time.time()
+                monkeypatch.setattr(service_module, "time", SimpleNamespace(time=lambda: now))
+                response = await product.http.post(
+                    "/api/environments",
+                    params={"sha": "a" * 40, "pr": 123},
+                    headers={"Authorization": "Bearer test-deployment-token"},
+                    content=binary_bundle({"echor": elf_binary()}),
+                )
+                identifier = response.json()["id"]
+                origin = str(product.http.base_url).rstrip("/")
+                response = await product.http.post(
+                    f"/api/environments/{identifier}/sessions",
+                    headers={"Origin": origin},
+                    json={"revision": "a" * 40},
+                )
+                binding = response.json()
+                polled = asyncio.Event()
+                read = client_module.bounded_response
+
+                async def observe(response: aiohttp.ClientResponse) -> bytes:
+                    data = await read(response)
+                    if response.method == "GET" and "/sandboxes/" in response.url.path:
+                        polled.set()
+                    return data
+
+                monkeypatch.setattr(client_module, "bounded_response", observe)
+                try:
+                    url = (
+                        origin.replace("http:", "ws:")
+                        + f"/ws/{identifier}?session_id={binding['id']}&revision={binding['revision']}"
+                    )
+                    async with connect(url, origin=Origin(origin)) as ws:
+                        await ws.send(
+                            json.dumps({"type": "auth", "credential": binding["credential"]})
+                        )
+                        await asyncio.wait_for(polled.wait(), 1)
+                        now += 31
+                        await product.service.recover(startup=False)
+                        saved = product.service.sessions.get(UUID(binding["id"]))
+                        assert (
+                            saved is not None
+                            and not saved.pending_stop
+                            and saved.sandbox.state not in {"terminating", "terminated", "failed"}
+                        )
+                        if finish:
+                            gate.set()
+                            assert json.loads(await ws.recv())["type"] == "authenticated"
+                            assert await ws.recv() == b"ready\n"
+                        else:
+                            from websockets.exceptions import ConnectionClosedError
+
+                            now += 10
+                            await product.service.recover(startup=False)
+                            with pytest.raises(ConnectionClosedError):
+                                await ws.recv()
+                            saved = product.service.sessions.get(UUID(binding["id"]))
+                            assert saved is not None and saved.attachment_deadline is None
+                            assert saved.pending_stop or saved.sandbox.state == "terminated"
+                finally:
+                    gate.set()
 
     asyncio.run(exercise())

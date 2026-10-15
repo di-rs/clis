@@ -145,7 +145,7 @@ def test_stop_failure_survives_preview_removal_and_restart_without_touching_othe
     service.sessions.claimed(UUID(second["id"]))
     original = client.terminate
 
-    async def unavailable(identifier: UUID) -> None:
+    async def unavailable(identifier: UUID, previous: object = None) -> None:
         raise BoxieUnavailable()
 
     monkeypatch.setattr(client, "terminate", unavailable)

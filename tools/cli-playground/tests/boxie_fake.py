@@ -63,10 +63,10 @@ class FakeBoxie:
         self.sandboxes[result.id] = result
         return result
 
-    async def get(self, identifier: UUID) -> SandboxView:
+    async def get(self, identifier: UUID, previous: SandboxView | None = None) -> SandboxView:
         return self.sandboxes[identifier]
 
-    async def terminate(self, identifier: UUID) -> SandboxView:
+    async def terminate(self, identifier: UUID, previous: SandboxView | None = None) -> SandboxView:
         result = self.sandboxes[identifier].model_copy(
             update={"state": "terminated", "reason": "requested"}
         )

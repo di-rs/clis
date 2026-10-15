@@ -380,3 +380,50 @@ def test_rerun_during_remote_admission_compensates_the_created_sandbox(
         assert next(iter(boxie(service).sandboxes.values())).state == "terminated"
 
     asyncio.run(exercise())
+
+
+@pytest.mark.usefixtures("configured_environment")
+@pytest.mark.parametrize("ci", [False, True])
+@pytest.mark.parametrize("failure", ["upload", "commit"])
+def test_close_reopen_never_recovers_a_previous_generation_upload(
+    monkeypatch: pytest.MonkeyPatch,
+    ci: bool,
+    failure: str,
+) -> None:
+    from playground.boxie_client import BoxieUnavailable
+
+    async def body() -> AsyncIterator[bytes]:
+        yield binary_bundle({"echor": elf_binary()})
+
+    async def exercise() -> None:
+        service = make_service(Settings())
+        build = (
+            BuildIdentity(sha="a" * 40, run_id=1000, run_number=10, run_attempt=1) if ci else None
+        )
+        with monkeypatch.context() as fault:
+            if failure == "upload":
+
+                async def interrupted(*args: object) -> None:
+                    raise BoxieUnavailable("interrupted upload")
+
+                fault.setattr(boxie(service), "upload", interrupted)
+                expected: type[Exception] = BoxieUnavailable
+            else:
+
+                def failed_commit(*args: object) -> None:
+                    raise OSError("interrupted commit")
+
+                fault.setattr(service.store, "_write_record", failed_commit)
+                expected = OSError
+            with pytest.raises(expected):
+                await service.deploy(body(), "a" * 40, 123, build)
+        (intent,) = service.sessions.uploads()
+        await service.close_pull_request(123)
+        await service.reopen_pull_request(123)
+        restarted = make_service(service.settings, boxie(service))
+        await restarted.recover()
+        assert restarted.store.get(restarted.store.identifier(123)) is None
+        assert intent.artifact.artifact_id in boxie(service).retired
+        assert not restarted.sessions.uploads()
+
+    asyncio.run(exercise())

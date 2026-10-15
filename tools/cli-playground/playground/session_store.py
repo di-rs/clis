@@ -43,6 +43,8 @@ class SessionBinding(BaseModel):
     sandbox: SandboxView
     credential_hash: str
     pending_stop: bool = False
+    attachment_deadline: float | None = None
+    attached: bool = False
 
     def authenticates(self, credential: str) -> bool:
         return secrets.compare_digest(
@@ -64,6 +66,7 @@ class UploadIntent(BaseModel):
     artifact: ArtifactMetadata
     build: BuildIdentity | None
     previous_revision: str | None
+    cancelled: bool = False
 
 
 class SessionStore:
@@ -109,9 +112,19 @@ class SessionStore:
             shutil.copyfileobj(source, destination)
             destination.flush()
             os.fsync(destination.fileno())
+        self.save_upload(intent)
+
+    def save_upload(self, intent: UploadIntent) -> None:
         atomic_write(
-            self.root / "uploads" / f"{identifier}.json", intent.model_dump_json().encode()
+            self.root / "uploads" / f"{intent.artifact.artifact_id}.json",
+            intent.model_dump_json().encode(),
         )
+
+    def cancel_uploads(self, pr: int) -> None:
+        for intent in self.uploads():
+            if intent.artifact.pr == pr and not intent.cancelled:
+                intent.cancelled = True
+                self.save_upload(intent)
 
     def uploads(self) -> list[UploadIntent]:
         return [
