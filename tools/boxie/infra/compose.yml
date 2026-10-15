@@ -1,4 +1,5 @@
 # Private consumer API and separately networked Docker agent. No host ports.
+name: ${BOXIE_PROJECT_NAME:-boxie}
 services:
   api:
     image: ${BOXIE_RUNTIME_IMAGE:-boxie:local}

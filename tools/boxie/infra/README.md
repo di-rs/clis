@@ -1,8 +1,13 @@
 # Boxie local infrastructure
 
 Boxie owns its runtime image, private API, privileged agent, artifact data and
-trusted profile configuration. The consumer API has no host port. Only the agent
-mounts the Docker socket; it joins a separate control network. Playground is an
+trusted profile configuration. Both manifests default to Compose project `boxie`;
+set `BOXIE_PROJECT_NAME` in the operator environment file for another installation.
+Playground uses its own project identity, so either unit can perform orphan cleanup
+without owning the other unit's containers. Keep project names distinct, and avoid
+a shared `COMPOSE_PROJECT_NAME` or shared `--project-name` override.
+
+The consumer API has no host port. Only the agent mounts the Docker socket; it joins a separate control network. Playground is an
 optional consumer and is not required to configure or start Boxie.
 
 Production activation is unavailable during PR1–PR3. The independently targetable

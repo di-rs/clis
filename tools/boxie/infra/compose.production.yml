@@ -1,4 +1,5 @@
 # Independently resolvable; automated production activation unavailable until PR4.
+name: ${BOXIE_PROJECT_NAME:-boxie}
 services:
   api:
     image: ${BOXIE_RUNTIME_IMAGE:?Set approved immutable Boxie image}

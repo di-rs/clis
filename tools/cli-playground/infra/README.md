@@ -28,6 +28,7 @@ Boxie installation. There is no cross-project `depends_on`.
 
 ```sh
 docker volume create playground-data
+export PLAYGROUND_PROJECT_NAME=cli-playground
 export PLAYGROUND_DATA_VOLUME=playground-data
 export PLAYGROUND_CONSUMER_NETWORK=boxie-consumers
 export PLAYGROUND_BOXIE_URL=http://boxie-api:8090
@@ -36,6 +37,12 @@ export PLAYGROUND_DEPLOY_TOKEN=local-deploy-token
 export PLAYGROUND_PUBLIC_URL=http://localhost:8000
 docker compose -f tools/cli-playground/infra/compose.yml up --build -d
 ```
+
+Both local and production manifests default to project `cli-playground`. Override
+`PLAYGROUND_PROJECT_NAME` for another installation; keep it distinct from Boxie's
+`BOXIE_PROJECT_NAME` (default `boxie`). Do not give the two units a shared
+`COMPOSE_PROJECT_NAME` or `--project-name`, which overrides the manifest identity.
+Their external network and volume identifiers remain independently configured.
 
 The credential must be a regular non-symlink file, mode `0600`, containing a
 16–4096-character printable token. The local unit publishes only localhost:8000.

@@ -162,7 +162,10 @@ asyncio.run(run())
 @pytest.mark.integration
 @pytest.mark.parametrize("service", ["boxie", "cli-playground"])
 @pytest.mark.parametrize("manifest", ["compose.yml", "compose.production.yml"])
-def test_resolved_compose_isolated_topology(tmp_path: Path, service: str, manifest: str) -> None:
+@pytest.mark.parametrize("project_override", [False, True])
+def test_resolved_compose_isolated_topology(
+    tmp_path: Path, service: str, manifest: str, project_override: bool
+) -> None:
     import os
     import subprocess
 
@@ -188,6 +191,17 @@ def test_resolved_compose_isolated_topology(tmp_path: Path, service: str, manife
         "ACME_EMAIL": "test@example.com",
         "CLOUDFLARE_DNS_API_TOKEN": "test-dns-token",
     }
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("COMPOSE_")
+        and key not in {"BOXIE_PROJECT_NAME", "PLAYGROUND_PROJECT_NAME"}
+    }
+    if project_override:
+        values.update(
+            BOXIE_PROJECT_NAME="operator-boxie",
+            PLAYGROUND_PROJECT_NAME="operator-playground",
+        )
     result = subprocess.run(
         [
             "docker",
@@ -198,12 +212,18 @@ def test_resolved_compose_isolated_topology(tmp_path: Path, service: str, manife
             "--format",
             "json",
         ],
-        env={**os.environ, **values},
+        env={**environment, **values},
         capture_output=True,
         text=True,
         check=True,
     )
     config = json.loads(result.stdout)
+    expected_project = (
+        {"boxie": "operator-boxie", "cli-playground": "operator-playground"}[service]
+        if project_override
+        else service
+    )
+    assert config["name"] == expected_project
     for name, entry in config["services"].items():
         sockets = [v for v in entry.get("volumes", []) if v["target"] == "/var/run/docker.sock"]
         assert bool(sockets) == (service == "boxie" and name == "agent")

@@ -1,3 +1,4 @@
+name: ${PLAYGROUND_PROJECT_NAME:-cli-playground}
 services:
   gateway:
     image: ${PLAYGROUND_IMAGE:-cli-playground:local}

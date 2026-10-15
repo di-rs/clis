@@ -1,4 +1,5 @@
 # Independently resolvable; automated production activation unavailable until PR4.
+name: ${PLAYGROUND_PROJECT_NAME:-cli-playground}
 services:
   gateway:
     image: ${PLAYGROUND_IMAGE:?Set approved immutable Playground image}
