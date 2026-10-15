@@ -140,7 +140,10 @@ and removed. This conservative uncertainty can require operator investigation.
 ZIP staging hashes streamed compressed bytes, checks the supplied SHA-256, and
 extracts in bounded chunks into an unpublished directory. Limits are 512 MiB
 compressed, 512 MiB actual expanded bytes, 64 MiB per member, and 1024 regular
-files. Directory entries are additionally bounded. Absolute paths, traversal,
+files. Before constructing the ZIP parser, a bounded preflight caps the central
+directory at 4 MiB and scans its actual entries (including directories), with a
+ceiling of 2048. Advertised counts cannot bypass this scan. Classic ZIP and bounded
+ZIP64 metadata are accepted. Absolute paths, traversal,
 backslashes, duplicate normalized names, links/devices, encrypted entries, and
 unsupported compression are rejected. ZIP stored and deflate compression are
 accepted. Files are ordinary generic data; nested text and executable files are

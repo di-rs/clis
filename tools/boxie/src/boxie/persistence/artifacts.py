@@ -17,6 +17,7 @@ from uuid import UUID
 from boxie.domain.errors import BoxieError
 from boxie.domain.models import ArtifactView, Principal
 from boxie.persistence.atomic import atomic_write, sync_directory
+from boxie.persistence.zip_metadata import validate_directory
 
 
 @dataclass(frozen=True)
@@ -50,14 +51,14 @@ class ArtifactStore:
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self._lock = asyncio.Lock()
         self._metadata: dict[UUID, Metadata] = {}
+        # Staging directories never carry runnable metadata and cannot be mounted.
+        for path in root.glob(".upload-*"):
+            shutil.rmtree(path)
         for path in root.glob("*/metadata.json"):
             data = json.loads(path.read_text())
             self._metadata[UUID(path.parent.name)] = Metadata(
                 data["consumer_id"], data["sha256"], data["retired"], set(data["references"])
             )
-        # Staging directories never carry runnable metadata and cannot be mounted.
-        for path in root.glob(".upload-*"):
-            shutil.rmtree(path)
         for identifier, meta in self._metadata.items():
             if meta.retired and not meta.references:
                 self._collect(identifier)
@@ -155,10 +156,8 @@ class ArtifactStore:
         target.mkdir(mode=0o755)
         names: set[str] = set()
         expanded, files = 0, 0
+        await validate_directory(staged / "archive.zip", self.limits.files * 2)
         with zipfile.ZipFile(staged / "archive.zip") as archive:
-            # Bound metadata as well as regular file count; directory floods are invalid.
-            if len(archive.infolist()) > self.limits.files * 2:
-                raise BoxieError(413, "too many archive members")
             for member in archive.infolist():
                 name = member.orig_filename
                 path = PurePosixPath(name)
