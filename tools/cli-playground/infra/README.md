@@ -18,6 +18,11 @@ a Hetzner Cloud project, and administrator access to the GitHub repository.
 Merge these workflows into the repository's `master` default branch before
 running them. Keep `PLAYGROUND_AUTO_DEPLOY` unset or `false` until step 7 succeeds.
 
+Prefer a dedicated registered domain and Cloudflare zone containing only playground
+records. The runtime's certificate-renewal token can edit DNS throughout its
+selected zone. A hostname such as `play.thesecret.dev` does not isolate permissions
+from other records in `thesecret.dev`, including website and email records.
+
 1. In Cloudflare, select your account, open **Domains**, and select the existing
    domain, such as `thesecret.dev`. If it is new to Cloudflare, choose **Onboard a
    domain**, enter the apex domain, choose a plan and review imported DNS records.
@@ -103,6 +108,12 @@ certificate renewal. Save this as `CLOUDFLARE_DNS_API_TOKEN`; the setup token st
 but both can edit DNS within the selected zone. They are not scoped to individual
 challenge records. The renewal token is used as Traefik's `CF_DNS_API_TOKEN`;
 see the [Cloudflare DNS challenge provider](https://go-acme.github.io/lego/dns/cloudflare/).
+
+Compromise of the proxy or host could expose the renewal token and allow changes
+to every DNS record in its zone. Before initial setup, verify the actual token
+summary contains only the required permissions and selected zone, and review
+which other services use that zone. Keep the token's identifier and scope with
+its password-manager entry so it can be rotated or revoked independently.
 
 ### Hetzner token and application secrets
 
@@ -223,7 +234,9 @@ and the derived cloud-init data are encrypted in R2 with the passphrase. The
 runner creates private temporary identity files and pins the server's public
 host key from state. No manual first connection or trust-on-first-use step is
 needed. The host private key is supplied to Hetzner through cloud-init user-data;
-the deployment private key and provider API tokens are not installed there.
+the deployment private key and provisioning API tokens are not installed there.
+Runtime deployment separately installs the Cloudflare certificate-renewal token
+in private host configuration and exposes it only to the Traefik container.
 Treat state access plus the passphrase, Hetzner project access, and trusted
 deployment code as administrative access.
 
