@@ -24,7 +24,7 @@ from boxie_test_support.agent import Clock, DockerDaemon, bundle, configuration,
 from integration.conftest import postgres_dsn as postgres_dsn
 from integration.conftest import postgres_server as postgres_server
 from psycopg.rows import dict_row
-from psycopg_pool import AsyncConnectionPool
+from psycopg_pool import AsyncConnectionPool, PoolClosed, TooManyRequests
 
 pytestmark = pytest.mark.integration
 MIGRATIONS = Path(__file__).parents[1] / "src/boxie/persistence/migrations"
@@ -405,5 +405,114 @@ def test_published_orphan_and_retirement_deletion_retry(
             assert await artifacts.collect_orphans() == 1
             assert not orphans[0].exists()
             assert real_remove is shutil.rmtree
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("operation", ["submit", "get", "terminate"])
+def test_exhausted_pool_is_503_without_lifecycle_writes(
+    postgres_dsn: str, tmp_path: Path, operation: str
+) -> None:
+    async def exercise() -> None:
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, original_pool, _):
+            spec = await upload(artifacts)
+            original = await life.submit(OWNER, "original", spec)
+            async with AsyncConnectionPool(
+                postgres_dsn,
+                min_size=1,
+                max_size=1,
+                timeout=0.05,
+                kwargs={"row_factory": dict_row},
+            ) as limited_pool:
+                await limited_pool.wait()
+                life.pool = limited_pool
+                async with limited_pool.connection():
+                    with pytest.raises(BoxieError) as unavailable:
+                        if operation == "submit":
+                            await asyncio.wait_for(life.submit(OWNER, "new", spec), 1)
+                        elif operation == "get":
+                            await asyncio.wait_for(life.get(OWNER, original.id), 1)
+                        else:
+                            await asyncio.wait_for(
+                                life.terminate(OWNER, original.id, TerminationReason.REQUESTED), 1
+                            )
+                    assert unavailable.value.status == 503
+                assert await counts(original_pool) == (1, 1, 1, 1)
+                assert await life.get(OWNER, original.id) == original
+                assert await life.submit(OWNER, "original", spec) == original
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("operation", ["submit", "get", "terminate"])
+@pytest.mark.parametrize(
+    "error_type, unavailable",
+    [
+        (psycopg.OperationalError, True),
+        (psycopg.errors.ConnectionFailure, True),
+        (psycopg.errors.AdminShutdown, True),
+        (psycopg.errors.LockNotAvailable, True),
+        (psycopg.errors.SerializationFailure, True),
+        (TooManyRequests, True),
+        (psycopg.errors.CheckViolation, False),
+        (psycopg.errors.UndefinedTable, False),
+        (psycopg.errors.InvalidPassword, False),
+        (PoolClosed, False),
+    ],
+)
+def test_consumer_database_error_boundary_never_retries(
+    postgres_dsn: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    error_type: type[psycopg.Error],
+    unavailable: bool,
+) -> None:
+    async def exercise() -> None:
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, _):
+            spec = await upload(artifacts)
+            original = await life.submit(OWNER, "original", spec)
+            calls = 0
+            real_connection = pool.connection
+
+            @asynccontextmanager
+            async def failed_connection() -> AsyncIterator[Any]:
+                nonlocal calls
+                calls += 1
+                # Failure on context exit models loss of acknowledgement after
+                # a committed operation, where replay must be left to the caller.
+                async with real_connection() as conn:
+                    yield conn
+                raise error_type("injected database boundary failure")
+
+            with monkeypatch.context() as patch:
+                patch.setattr(pool, "connection", failed_connection)
+                if unavailable:
+                    expected: type[Exception] = BoxieError
+                else:
+                    expected = error_type
+                with pytest.raises(expected) as failure:
+                    if operation == "submit":
+                        await life.submit(OWNER, "new", spec)
+                    elif operation == "get":
+                        await life.get(OWNER, original.id)
+                    else:
+                        await life.terminate(OWNER, original.id, TerminationReason.REQUESTED)
+                if isinstance(failure.value, BoxieError):
+                    assert failure.value.status == 503
+            assert calls == 1
+            expected_counts = (
+                (2, 2, 2, 2)
+                if operation == "submit"
+                else (1, 1, 1, 2)
+                if operation == "terminate"
+                else (1, 1, 1, 1)
+            )
+            assert await counts(pool) == expected_counts
+            if operation == "submit":
+                # A caller can safely retry the key after the ambiguous response.
+                retry = await life.submit(OWNER, "new", spec)
+                assert retry.id != original.id
+                assert await counts(pool) == expected_counts
 
     asyncio.run(exercise())

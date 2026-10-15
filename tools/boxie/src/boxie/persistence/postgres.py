@@ -3,13 +3,15 @@
 import asyncio
 import hashlib
 import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
 import psycopg
 from psycopg.types.json import Jsonb
-from psycopg_pool import AsyncConnectionPool
+from psycopg_pool import AsyncConnectionPool, PoolTimeout, TooManyRequests
 
 from boxie.application.durable_lifecycle import (
     AdmissionProfileResolver,
@@ -29,6 +31,33 @@ from boxie.sandbox.protocol import SnapshotWire, SpecWire, ViewWire, spec_wire
 
 Row = dict[str, Any]
 Pool = AsyncConnectionPool[psycopg.AsyncConnection[Row]]
+
+
+@asynccontextmanager
+async def _consumer_connection(pool: Pool) -> AsyncIterator[psycopg.AsyncConnection[Row]]:
+    """Translate availability failures only at directly exposed consumer operations.
+
+    This covers acquisition through commit acknowledgement, but never retries:
+    the caller must reuse its idempotency key after an uncertain submit outcome.
+    Pool lifecycle mistakes, SQL integrity/programming errors, and unclassified
+    operational errors remain visible to the owning composition/operator.
+    """
+    try:
+        async with pool.connection() as conn:
+            yield conn
+    except psycopg.OperationalError as error:
+        state = error.sqlstate
+        if (
+            isinstance(error, (PoolTimeout, TooManyRequests))
+            or (type(error) is psycopg.OperationalError and state is None)
+            or (state is not None and state.startswith(("08", "53")))
+            or state in {"40001", "40P01", "55P03", "57014", "57P01", "57P02", "57P03"}
+        ):
+            # Base OperationalError without SQLSTATE is libpq connection/IO failure.
+            # SQLSTATE classes 08/53 are connection/resource failures; the named
+            # states are serialization/deadlock, lock/query timeout, and shutdown.
+            raise BoxieError(503, "persistence unavailable") from None
+        raise
 
 
 def view(row: Row) -> SandboxView:
@@ -97,7 +126,7 @@ class PostgresLifecycle:
             json.dumps(normalized, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
         try:
-            async with self.pool.connection() as conn, conn.transaction():
+            async with _consumer_connection(self.pool) as conn, conn.transaction():
                 await keyed_lock(conn, json.dumps([principal.consumer_id, idempotency_key]))
                 old = await (
                     await conn.execute(
@@ -163,7 +192,7 @@ class PostgresLifecycle:
                 await self._enqueue(conn, identifier, "start")
                 assert row is not None
                 return view(row)
-        except TimeoutError, psycopg.errors.LockNotAvailable:
+        except TimeoutError:
             raise BoxieError(503, "admission dependency timeout") from None
 
     @staticmethod
@@ -175,7 +204,7 @@ class PostgresLifecycle:
         )
 
     async def get(self, principal: Principal, sandbox_id: UUID) -> SandboxView:
-        async with self.pool.connection() as conn:
+        async with _consumer_connection(self.pool) as conn:
             row = await (
                 await conn.execute(
                     "SELECT * FROM sandboxes WHERE id=%s AND consumer_id=%s",
@@ -189,7 +218,7 @@ class PostgresLifecycle:
     async def terminate(
         self, principal: Principal, sandbox_id: UUID, reason: TerminationReason
     ) -> SandboxView:
-        async with self.pool.connection() as conn, conn.transaction():
+        async with _consumer_connection(self.pool) as conn, conn.transaction():
             row = await (
                 await conn.execute(
                     "SELECT * FROM sandboxes WHERE id=%s AND consumer_id=%s FOR UPDATE",
