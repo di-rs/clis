@@ -340,6 +340,171 @@ def test_actual_api_worker_processes_recover_worker_loss(
     asyncio.run(exercise())
 
 
+def test_api_starts_during_temporal_outage_and_recovers(
+    postgres_dsn: str, temporal_stack: Any, tmp_path: Path
+) -> None:
+    async def exercise() -> None:
+        import json
+        import socket
+        import sys
+        from contextlib import AsyncExitStack
+
+        import httpx
+        from boxie.bootstrap.worker import lifecycle_worker
+        from boxie_test_support.agent import request
+        from boxie_test_support.api import CONSUMER_AUTH, artifact, create, ready
+        from temporal_support import durable_stack
+
+        client = await Client.connect(
+            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-worker")
+        )
+        available = asyncio.Event()
+        connections: set[asyncio.Task[None]] = set()
+
+        async def proxy(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+            # TCP transport gate preserves the actual end-to-end mTLS handshake.
+            current = asyncio.current_task()
+            assert current is not None
+            connections.add(current)
+            remote: asyncio.StreamWriter | None = None
+            pumps: list[asyncio.Task[None]] = []
+            try:
+                if not available.is_set():
+                    return
+                host, port = temporal_stack.address.rsplit(":", 1)
+                upstream, remote = await asyncio.open_connection(host, int(port))
+
+                async def copy(source: asyncio.StreamReader, target: asyncio.StreamWriter) -> None:
+                    while data := await source.read(65536):
+                        target.write(data)
+                        await target.drain()
+
+                pumps = [
+                    asyncio.create_task(copy(reader, remote)),
+                    asyncio.create_task(copy(upstream, writer)),
+                ]
+                await asyncio.wait(pumps, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                for pump in pumps:
+                    pump.cancel()
+                await asyncio.gather(*pumps, return_exceptions=True)
+                writer.close()
+                if remote:
+                    remote.close()
+                connections.remove(current)
+
+        async with (
+            await asyncio.start_server(proxy, "127.0.0.1", 0) as frontend,
+            durable_stack(postgres_dsn, tmp_path, client, "boxie-lifecycle") as stack,
+        ):
+            fixture_http, _, agent, daemon, _, activities, dispatcher = stack
+            artifact_id = await artifact(fixture_http)
+            existing = await create(fixture_http, artifact_id, "outage-retry")
+            for name, value in (("postgres", postgres_dsn), ("consumer", "consumer-one-secret")):
+                path = tmp_path / f"{name}.secret"
+                path.write_text(value)
+                path.chmod(0o600)
+            with socket.socket() as sock:
+                sock.bind(("127.0.0.1", 0))
+                api_port = sock.getsockname()[1]
+            config = tmp_path / "outage-api.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "release": "outage-test",
+                        "bind_port": api_port,
+                        "consumer_credential_files": {"one": str(tmp_path / "consumer.secret")},
+                        "identity": {
+                            "installation_id": str(agent.config.identity.installation_id),
+                            "host_id": agent.config.identity.host_id,
+                        },
+                        "agent_url": activities.agent._base_url,
+                        "agent_credential_file": str(agent.config.credential_file),
+                        "durable": {
+                            "postgres_dsn_file": str(tmp_path / "postgres.secret"),
+                            "temporal_address": f"127.0.0.1:{frontend.sockets[0].getsockname()[1]}",
+                            "temporal_server_name": "temporal",
+                            "temporal_ca_file": str(
+                                temporal_stack.root / "clients/frontend-ca.pem"
+                            ),
+                            "temporal_cert_file": str(
+                                temporal_stack.root / "clients/boxie-api.pem"
+                            ),
+                            "temporal_key_file": str(temporal_stack.root / "clients/boxie-api.key"),
+                        },
+                    }
+                )
+            )
+            process = await asyncio.create_subprocess_exec(
+                sys.executable,
+                "-m",
+                "boxie.bootstrap.api",
+                "--config",
+                str(config),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            delivery: asyncio.Task[None] | None = None
+            try:
+                async with (
+                    httpx.AsyncClient(
+                        base_url=f"http://127.0.0.1:{api_port}", headers=CONSUMER_AUTH, timeout=10
+                    ) as http,
+                    AsyncExitStack() as running,
+                ):
+                    for _ in range(100):
+                        try:
+                            if (await http.get("/healthz")).status_code == 200:
+                                break
+                        except httpx.ConnectError:
+                            pass
+                        assert process.returncode is None, "API exited before serving during outage"
+                        await asyncio.sleep(0.05)
+                    else:
+                        raise AssertionError("API did not start during Temporal outage")
+                    assert (await http.get(f"/v1/sandboxes/{existing}")).status_code == 200
+                    assert await create(http, artifact_id, "outage-retry") == existing
+                    assert (await http.get("/readyz")).status_code == 503
+                    assert (
+                        await http.post(
+                            "/v1/sandboxes",
+                            json=request(artifact_id)["spec"],
+                            headers={"Idempotency-Key": "outage-new"},
+                        )
+                    ).status_code == 503
+                    assert (await http.delete(f"/v1/sandboxes/{existing}")).status_code == 200
+                    assert (await http.get(f"/v1/sandboxes/{existing}")).json()[
+                        "state"
+                    ] == "terminating"
+                    available.set()
+                    await running.enter_async_context(lifecycle_worker(client, activities))
+                    delivery = asyncio.create_task(dispatcher.run())
+                    for _ in range(100):
+                        if (await http.get("/readyz")).status_code == 200:
+                            break
+                        await asyncio.sleep(0.05)
+                    else:
+                        raise AssertionError("API readiness did not recover")
+                    admitted = await create(http, artifact_id, "outage-new")
+                    assert (await http.delete(f"/v1/sandboxes/{admitted}")).status_code == 200
+                    await ready(http, existing, "terminated")
+                    await ready(http, admitted, "terminated")
+                    assert not daemon.resources
+            finally:
+                if delivery:
+                    delivery.cancel()
+                    await asyncio.gather(delivery, return_exceptions=True)
+                if process.returncode is None:
+                    process.terminate()
+                output, _ = await asyncio.wait_for(process.communicate(), 10)
+                assert b"consumer-one-secret" not in output and b"agent-test-secret" not in output
+                for connection in list(connections):
+                    connection.cancel()
+                await asyncio.gather(*connections, return_exceptions=True)
+
+    asyncio.run(exercise())
+
+
 def test_authenticated_observations_are_atomic_and_fenced(
     postgres_dsn: str, temporal_stack: Any, tmp_path: Path
 ) -> None:

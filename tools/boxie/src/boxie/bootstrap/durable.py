@@ -43,11 +43,12 @@ def pool_for(path: Path) -> Pool:
     )
 
 
-async def temporal_client(config: DurableConfig) -> Client:
+async def temporal_client(config: DurableConfig, *, lazy: bool = False) -> Client:
     # No plaintext/test-server alternative is accepted by this composition root.
     return await Client.connect(
         config.temporal_address,
         namespace=config.temporal_namespace,
+        lazy=lazy,
         tls=TLSConfig(
             server_root_ca_cert=config.temporal_ca_file.read_bytes(),
             domain=config.temporal_server_name,

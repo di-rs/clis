@@ -61,7 +61,12 @@ class OutboxDispatcher:
         async with self._poll_lock:
             events = await self.store.claim(self.owner)
             semaphore = asyncio.Semaphore(8)
-            await asyncio.gather(*(self._one(event, semaphore) for event in events))
+            # Retry persistence can fail too. Cancel and settle the whole batch
+            # before another poll can claim work with a fresh concurrency budget.
+            # Unacknowledged events remain eligible after their SQL lease expires.
+            async with asyncio.TaskGroup() as batch:
+                for event in events:
+                    batch.create_task(self._one(event, semaphore))
 
     async def run(self) -> None:
         while True:

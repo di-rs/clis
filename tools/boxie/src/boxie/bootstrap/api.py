@@ -70,7 +70,10 @@ def main() -> None:
     config = load_configuration(args.config)
 
     async def run() -> None:
-        temporal = await temporal_client(config.durable)
+        # SQL-backed retry/status/stop and observations must remain reachable
+        # during Temporal outages. Readiness connects with a bounded timeout;
+        # only new admission depends on that probe. Worker startup stays eager.
+        temporal = await temporal_client(config.durable, lazy=True)
         async with (
             pool_for(config.durable.postgres_dsn_file) as pool,
             DurableAgentClient(
