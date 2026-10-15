@@ -1,3 +1,4 @@
+import { createFreshBinding, stopBinding } from "../environment";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { createSession, type SessionState } from "./session";
@@ -7,7 +8,6 @@ export type BrowserTerminal = ReturnType<typeof createBrowserTerminal>;
 export function createBrowserTerminal(
   host: HTMLDivElement,
   environmentId: string,
-  sha: string,
   revision: string,
   onState: (state: SessionState) => void,
 ) {
@@ -99,11 +99,18 @@ export function createBrowserTerminal(
     session = createSession({
       terminal,
       fit,
-      createSocket: () => {
-        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        return new WebSocket(
-          `${protocol}//${window.location.host}/ws/${encodeURIComponent(environmentId)}?sha=${encodeURIComponent(sha)}&revision=${encodeURIComponent(revision)}`,
-        );
+      prepare: async () => {
+        const binding = await createFreshBinding(environmentId, revision);
+        return {
+          credential: binding.credential,
+          stop: () => stopBinding(binding),
+          createSocket: () => {
+            const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+            return new WebSocket(
+              `${protocol}//${window.location.host}/ws/${encodeURIComponent(environmentId)}?session_id=${encodeURIComponent(binding.id)}&revision=${encodeURIComponent(revision)}`,
+            );
+          },
+        };
       },
       onState,
     });

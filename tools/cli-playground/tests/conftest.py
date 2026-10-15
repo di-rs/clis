@@ -14,6 +14,7 @@ from playground import app as playground_app
 from playground.app import create_app
 from playground.config import Settings
 
+from .boxie_fake import FakeBoxie
 from .helpers import APP_ENV, GATEWAY_IMAGE, SANDBOX_IMAGE, git_commit, protected
 
 
@@ -30,10 +31,13 @@ def api_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
         data_dir=tmp_path / "data",
         public_url="https://play.example",
         deploy_token="test-deployment-token",
-        sandbox_image="clis-sandbox:test",
+        boxie_url="http://boxie.internal",
+        boxie_credential_file=tmp_path / "boxie.secret",
         max_binary_bytes=128,
     )
-    with TestClient(create_app(settings), base_url=settings.public_url) as client:
+    with TestClient(
+        create_app(settings, boxie=FakeBoxie()), base_url=settings.public_url
+    ) as client:
         yield client
 
 
@@ -43,9 +47,8 @@ def docker_settings(tmp_path: Path) -> Settings:
         data_dir=tmp_path / "data",
         public_url="https://play.example",
         deploy_token="test-deployment-token",
-        sandbox_image="clis-sandbox:test",
-        max_sessions=1,
-        session_seconds=5,
+        boxie_url="http://boxie.internal",
+        boxie_credential_file=tmp_path / "boxie.secret",
     )
 
 
@@ -62,7 +65,8 @@ def configured_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
         "PLAYGROUND_DATA_DIR": str(tmp_path / "data"),
         "PLAYGROUND_PUBLIC_URL": "https://play.example/",
         "PLAYGROUND_DEPLOY_TOKEN": "private-deployment-token",
-        "PLAYGROUND_SANDBOX_IMAGE": "sandbox:test",
+        "PLAYGROUND_BOXIE_URL": "http://boxie.internal",
+        "PLAYGROUND_BOXIE_CREDENTIAL_FILE": str(tmp_path / "boxie.secret"),
     }.items():
         monkeypatch.setenv(name, value)
 

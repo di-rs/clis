@@ -11,8 +11,10 @@ from playground.artifacts import stage_archive
 from playground.config import Settings
 from playground.models import BuildIdentity, BuildUpdate
 from playground.service import PlaygroundService
-from playground.storage import ArtifactConflictError
+from playground.session_store import SessionStore
+from playground.storage import ArtifactConflictError, EnvironmentStore
 
+from .boxie_fake import FakeBoxie
 from .helpers import binary_bundle, elf_binary
 
 
@@ -21,7 +23,7 @@ def test_expiry_cleanup_preserves_build_refreshed_during_session_shutdown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def exercise() -> None:
-        service = PlaygroundService(Settings())
+        service = make_service(Settings())
         now = 1_000_000.0
         monkeypatch.setattr("playground.storage.time.time", lambda: now)
         previous = BuildUpdate(
@@ -31,12 +33,11 @@ def test_expiry_cleanup_preserves_build_refreshed_during_session_shutdown(
         now += service.settings.preview_seconds + 1
         entered, release = asyncio.Event(), asyncio.Event()
 
-        async def delayed_shutdown(identifiers: set[str]) -> None:
-            assert identifiers == {metadata.id}
+        async def delayed_shutdown() -> None:
             entered.set()
             await release.wait()
 
-        monkeypatch.setattr(service.sessions, "close_environments", delayed_shutdown)
+        monkeypatch.setattr(service, "retry_stops", delayed_shutdown)
         cleaning = asyncio.create_task(service.cleanup_inactive())
         try:
             await asyncio.wait_for(entered.wait(), timeout=1)
@@ -64,7 +65,7 @@ def test_archive_timeout_waits_for_worker_without_blocking_metadata(
         yield binary_bundle({"echor": elf_binary()})
 
     async def exercise() -> None:
-        service = PlaygroundService(Settings())
+        service = make_service(Settings())
         environment = await service.deploy(body(), "a" * 40, 123)
         loop = asyncio.get_running_loop()
         entered, release = asyncio.Event(), threading.Event()
@@ -105,7 +106,7 @@ def test_archive_timeout_waits_for_worker_without_blocking_metadata(
 @pytest.mark.usefixtures("configured_environment")
 def test_newer_build_event_supersedes_a_streaming_upload() -> None:
     async def exercise() -> None:
-        service = PlaygroundService(Settings())
+        service = make_service(Settings())
         started, release = asyncio.Event(), asyncio.Event()
 
         async def body() -> AsyncIterator[bytes]:
@@ -150,7 +151,7 @@ def test_failed_manifest_swap_leaves_the_previous_batch_readable(
         yield binary_bundle({"echor": elf_binary()})
 
     async def exercise() -> None:
-        service = PlaygroundService(Settings())
+        service = make_service(Settings())
         previous = await service.deploy(body(), "a" * 40, 123)
         replace = Path.replace
 
@@ -163,8 +164,219 @@ def test_failed_manifest_swap_leaves_the_previous_batch_readable(
         with pytest.raises(OSError, match="disk unavailable"):
             await service.deploy(body(), "b" * 40, 123)
         assert service.store.get(previous.id) == previous
-        assert (previous.binary_dir / "echor").read_bytes() == elf_binary()
-        assert not (previous.binary_dir.parent / ("b" * 40)).exists()
+        assert previous.artifact_id in boxie(service).artifacts
+        assert len(service.sessions.uploads()) == 1
         assert not list(service.settings.data_dir.glob(".upload-*"))
+
+    asyncio.run(exercise())
+
+
+def make_service(settings: Settings, client: FakeBoxie | None = None) -> PlaygroundService:
+    return PlaygroundService(
+        settings, EnvironmentStore(settings), SessionStore(settings.data_dir), client or FakeBoxie()
+    )
+
+
+def boxie(service: PlaygroundService) -> FakeBoxie:
+    assert isinstance(service.boxie, FakeBoxie)
+    return service.boxie
+
+
+@pytest.mark.usefixtures("configured_environment")
+def test_failed_remote_upload_preserves_ready_and_retries_the_same_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from playground.boxie_client import BoxieUnavailable
+
+    async def body() -> AsyncIterator[bytes]:
+        yield binary_bundle({"echor": elf_binary()})
+
+    async def exercise() -> None:
+        service = make_service(Settings())
+        previous = await service.deploy(body(), "a" * 40, 123)
+        remote = boxie(service)
+        upload = remote.upload
+
+        async def failed(*args: object) -> None:
+            raise BoxieUnavailable()
+
+        monkeypatch.setattr(remote, "upload", failed)
+        with pytest.raises(BoxieUnavailable):
+            await service.deploy(body(), "b" * 40, 123)
+        assert service.store.get(previous.id) == previous
+        (intent,) = service.sessions.uploads()
+        monkeypatch.setattr(remote, "upload", upload)
+        restarted = make_service(service.settings, remote)
+        await restarted.recover()
+        current = restarted.store.get(previous.id)
+        assert current is not None and current.sha == "b" * 40
+        assert current.artifact_id == intent.artifact.artifact_id
+        assert not restarted.sessions.uploads()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.usefixtures("configured_environment")
+def test_interrupted_product_commit_recovers_the_uploaded_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def body() -> AsyncIterator[bytes]:
+        yield binary_bundle({"echor": elf_binary()})
+
+    async def exercise() -> None:
+        service = make_service(Settings())
+        previous = await service.deploy(body(), "a" * 40, 123)
+        original = service.store._write_record
+
+        def failed(*args: object) -> None:
+            raise OSError("interrupted commit")
+
+        monkeypatch.setattr(service.store, "_write_record", failed)
+        with pytest.raises(OSError, match="interrupted"):
+            await service.deploy(body(), "b" * 40, 123)
+        (intent,) = service.sessions.uploads()
+        assert intent.artifact.artifact_id in boxie(service).artifacts
+        assert service.store.get(previous.id) == previous
+        monkeypatch.setattr(service.store, "_write_record", original)
+        await service.recover()
+        current = service.store.get(previous.id)
+        assert current is not None and current.artifact_id == intent.artifact.artifact_id
+        assert len(boxie(service).artifacts) == 2
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.usefixtures("configured_environment")
+@pytest.mark.parametrize("close", [False, True])
+def test_build_or_closure_during_remote_upload_retires_the_abandoned_artifact(
+    monkeypatch: pytest.MonkeyPatch, close: bool
+) -> None:
+    async def body() -> AsyncIterator[bytes]:
+        yield binary_bundle({"echor": elf_binary()})
+
+    async def exercise() -> None:
+        service = make_service(Settings())
+        original = boxie(service).upload
+
+        async def racing(*args: object) -> None:
+            await original(*args)  # type: ignore[arg-type]
+            if close:
+                service.store.close_pull_request(123)
+            else:
+                service.update_build(
+                    123,
+                    BuildUpdate(
+                        sha="b" * 40, run_id=1100, run_number=11, run_attempt=1, state="building"
+                    ),
+                )
+
+        monkeypatch.setattr(boxie(service), "upload", racing)
+        with pytest.raises(ArtifactConflictError):
+            await service.deploy(
+                body(),
+                "a" * 40,
+                123,
+                BuildIdentity(sha="a" * 40, run_id=1000, run_number=10, run_attempt=1),
+            )
+        assert not service.sessions.uploads()
+        assert service.store.get(service.store.identifier(123)) is None
+        await service.cleanup_inactive()
+        assert set(boxie(service).artifacts) == boxie(service).retired
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.usefixtures("configured_environment")
+def test_cancelled_create_recovers_same_id_and_stops_abandoned_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def body() -> AsyncIterator[bytes]:
+        yield binary_bundle({"echor": elf_binary()})
+
+    async def exercise() -> None:
+        service = make_service(Settings())
+        environment = await service.deploy(body(), "a" * 40, 123)
+        remote = boxie(service)
+        create = remote.create
+        created = asyncio.Event()
+
+        async def ambiguous(*args: object) -> object:
+            result = await create(*args)  # type: ignore[arg-type]
+            created.set()
+            await asyncio.Event().wait()
+            return result
+
+        monkeypatch.setattr(remote, "create", ambiguous)
+        task = asyncio.create_task(service.create_session(environment.id, environment.revision))
+        await created.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        monkeypatch.setattr(remote, "create", create)
+        await make_service(service.settings, remote).recover()
+        assert len(remote.sandboxes) == 1
+        assert next(iter(remote.sandboxes.values())).state == "terminated"
+        assert not service.sessions.creates()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.usefixtures("configured_environment")
+def test_abandoned_create_and_upload_retry_without_a_backend_restart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from playground.boxie_client import BoxieUnavailable
+
+    async def body() -> AsyncIterator[bytes]:
+        yield binary_bundle({"echor": elf_binary()})
+
+    async def exercise() -> None:
+        service = make_service(Settings(cleanup_interval_seconds=0.01))
+        env = await service.deploy(body(), "a" * 40, 123)
+        remote = boxie(service)
+        original = remote.create
+
+        async def lost(*args: object) -> object:
+            await original(*args)  # type: ignore[arg-type]
+            raise BoxieUnavailable()
+
+        monkeypatch.setattr(remote, "create", lost)
+        with pytest.raises(BoxieUnavailable):
+            await service.create_session(env.id, env.revision)
+        monkeypatch.setattr(remote, "create", original)
+        cleaning = asyncio.create_task(service.cleanup_periodically())
+        try:
+            async with asyncio.timeout(0.5):
+                while next(iter(remote.sandboxes.values())).state != "terminated":
+                    await asyncio.sleep(0.01)
+        finally:
+            cleaning.cancel()
+            await asyncio.gather(cleaning, return_exceptions=True)
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.usefixtures("configured_environment")
+def test_rerun_during_remote_admission_compensates_the_created_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def body() -> AsyncIterator[bytes]:
+        yield binary_bundle({"echor": elf_binary()})
+
+    async def exercise() -> None:
+        service = make_service(Settings())
+        original = await service.deploy(body(), "a" * 40, 123)
+        create = boxie(service).create
+
+        async def racing(*args: object) -> object:
+            sandbox = await create(*args)  # type: ignore[arg-type]
+            await service.deploy(body(), "b" * 40, 123)
+            return sandbox
+
+        monkeypatch.setattr(boxie(service), "create", racing)
+        with pytest.raises(ArtifactConflictError, match="revision changed"):
+            await service.create_session(original.id, original.revision)
+        assert len(boxie(service).sandboxes) == 1
+        assert next(iter(boxie(service).sandboxes.values())).state == "terminated"
 
     asyncio.run(exercise())

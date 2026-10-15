@@ -1,7 +1,6 @@
 """Exercise the public preview and authenticated deployment contract."""
 
 import asyncio
-import json
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -12,6 +11,7 @@ from playground.app import create_app
 from playground.config import Settings
 from starlette.websockets import WebSocketDisconnect
 
+from .boxie_fake import FakeBoxie
 from .helpers import binary_bundle, elf_binary, upload
 
 AUTH = {"Authorization": "Bearer test-deployment-token"}
@@ -150,28 +150,28 @@ def test_run_identity_queries_are_all_or_none(api_client: TestClient) -> None:
     assert response.status_code == 422
 
 
-def test_legacy_manifest_and_build_order_survive_restart(
+def test_supported_manifest_and_build_order_survive_restart(
     api_client: TestClient,
     tmp_path: Path,
 ) -> None:
     deployed = upload(api_client)
     path = f"/api/environments/{deployed['id']}"
     original = api_client.get(path).json()
-    manifest = tmp_path / "data" / deployed["id"] / "metadata.json"
-    record = json.loads(manifest.read_text())
-    legacy = record["artifact"]
-    legacy.pop("revision")
-    manifest.write_text(json.dumps(legacy))
     settings = Settings(
         data_dir=tmp_path / "data",
         public_url="https://play.example",
         deploy_token="test-deployment-token",
-        sandbox_image="sandbox",
+        boxie_url="http://boxie.internal",
+        boxie_credential_file=tmp_path / "boxie.secret",
     )
-    with TestClient(create_app(settings), base_url=settings.public_url) as client:
+    with TestClient(
+        create_app(settings, boxie=FakeBoxie()), base_url=settings.public_url
+    ) as client:
         assert client.get(path).json() == original
         assert build_event(client, "failed", run=11, sha="b" * 40).status_code == 200
-    with TestClient(create_app(settings), base_url=settings.public_url) as client:
+    with TestClient(
+        create_app(settings, boxie=FakeBoxie()), base_url=settings.public_url
+    ) as client:
         current = client.get(path).json()
         assert current["sha"] == "a" * 40
         assert current["build"]["state"] == "failed"
@@ -293,9 +293,12 @@ def test_subdomain_urls_bind_http_and_websocket_to_the_same_preview(
         public_url="https://play.example",
         preview_domain="play.example",
         deploy_token="test-deployment-token",
-        sandbox_image="clis-sandbox:test",
+        boxie_url="http://boxie.internal",
+        boxie_credential_file=tmp_path / "boxie.secret",
     )
-    with TestClient(create_app(settings), base_url=settings.public_url) as client:
+    with TestClient(
+        create_app(settings, boxie=FakeBoxie()), base_url=settings.public_url
+    ) as client:
         current, sibling = upload(client), upload(client, cli="catr", pr=456)
         authority = "pr-123.play.example"
         assert current["url"] == f"https://{authority}/p/{current['id']}"
@@ -304,7 +307,7 @@ def test_subdomain_urls_bind_http_and_websocket_to_the_same_preview(
         assert metadata.json()["clis"] == ["echor"]
         assert client.get(current["url"]).status_code == 200
         assert (
-            client.get(f"https://{current['id']}.play.example/p/{current['id']}").status_code == 200
+            client.get(f"https://{current['id']}.play.example/p/{current['id']}").status_code == 400
         )
         assert (
             client.put(
@@ -358,8 +361,10 @@ def test_pr_close_removes_all_revisions_and_survives_restart(
             data_dir=tmp_path / "data",
             public_url="https://play.example",
             deploy_token="test-deployment-token",
-            sandbox_image="sandbox",
-        )
+            boxie_url="http://boxie.internal",
+            boxie_credential_file=tmp_path / "boxie.secret",
+        ),
+        boxie=FakeBoxie(),
     )
     with TestClient(restarted, base_url="https://play.example") as client:
         response = client.post(
@@ -383,8 +388,10 @@ def test_pr_close_rejects_an_upload_that_started_before_closure(tmp_path: Path) 
             data_dir=tmp_path,
             public_url="https://play.example",
             deploy_token="test-deployment-token",
-            sandbox_image="sandbox",
-        )
+            boxie_url="http://boxie.internal",
+            boxie_credential_file=tmp_path / "boxie.secret",
+        ),
+        boxie=FakeBoxie(),
     )
 
     async def exercise() -> None:
@@ -444,8 +451,29 @@ def test_startup_removes_abandoned_uploads_but_keeps_published_batches(
         data_dir=data_dir,
         public_url="https://play.example",
         deploy_token="secret",
-        sandbox_image="sandbox",
+        boxie_url="http://boxie.internal",
+        boxie_credential_file=tmp_path / "boxie.secret",
     )
-    with TestClient(create_app(settings), base_url=settings.public_url) as restarted:
+    with TestClient(
+        create_app(settings, boxie=FakeBoxie()), base_url=settings.public_url
+    ) as restarted:
         assert not abandoned.exists()
         assert restarted.get(f"/api/environments/{deployed['id']}").status_code == 200
+
+
+def test_identical_binary_retry_ignores_original_zip_timestamps(api_client: TestClient) -> None:
+    import io
+    import zipfile
+
+    first = upload(api_client)
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr(zipfile.ZipInfo("echor", date_time=(2001, 2, 3, 4, 5, 6)), elf_binary())
+    response = api_client.post(
+        "/api/environments",
+        params={"sha": "a" * 40, "pr": 123},
+        headers=AUTH,
+        content=archive.getvalue(),
+    )
+    assert response.status_code == 201
+    assert response.json() == first

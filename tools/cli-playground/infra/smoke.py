@@ -1,37 +1,44 @@
-r"""Exercise the production PTY/session code against an installed Docker + gVisor host.
+"""Exercise an approved Playground shell profile through Boxie's private API.
 
-From the repository root, provide an existing Linux x86_64 echor binary:
-  uv run --locked --all-packages --no-dev --directory tools/cli-playground \
-    python -m infra.smoke --image clis-playground-sandbox:local --binary /absolute/path/echor
-
-This creates one disposable session. It never changes Docker runtime configuration,
-uses gateway credentials, or stops other containers.
+Run against a disposable local Boxie stack with an existing Linux x86_64 echor
+binary, --boxie-url, and --credential-file. This does not configure Docker.
 """
 
 import argparse
 import asyncio
+import hashlib
 import json
 import re
-import shutil
 import sys
 import tempfile
-import time
 import uuid
+import zipfile
 from pathlib import Path
 
-from aiodocker import Docker
-from aiohttp import ClientTimeout
-from playground.config import Settings
-from playground.models import Environment
-from playground.sessions import DockerSession, SessionManager
+from playground.boxie_client import HttpBoxieClient, SandboxRequest, TerminalPort
 from playground.storage import validate_elf
 
 PROMPT = b"__PLAYGROUND_SMOKE_PROMPT__ "
 ANSI = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
+class Session:
+    def __init__(self, terminal: TerminalPort) -> None:
+        self.terminal = terminal
+
+    async def read(self) -> bytes:
+        data = await self.terminal.receive()
+        return data if isinstance(data, bytes) else b""
+
+    async def write(self, data: bytes) -> None:
+        await self.terminal.send(json.dumps({"type": "input", "data": data.decode()}))
+
+    async def resize(self, columns: int, rows: int) -> None:
+        await self.terminal.send(json.dumps({"type": "resize", "columns": columns, "rows": rows}))
+
+
 class Shell:
-    def __init__(self, session: DockerSession) -> None:
+    def __init__(self, session: Session) -> None:
         self.session = session
         self.pending = b""
 
@@ -79,45 +86,33 @@ class Shell:
         return output
 
 
-async def exercise(binary: Path, image: str, runtime: str) -> None:
+async def exercise(binary: Path, url: str, credential_file: Path, profile: str) -> None:
     binary = binary.resolve(strict=True)
     validate_elf(binary)
-    with tempfile.TemporaryDirectory(prefix="clis-playground-smoke-") as temporary:
-        directory = Path(temporary)
-        binary_dir = directory / "bin"
-        binary_dir.mkdir(mode=0o755)
-        executable = binary_dir / "echor"
-        shutil.copyfile(binary, executable)
-        executable.chmod(0o555)
-        settings = Settings(
-            data_dir=directory,
-            public_url="http://localhost",
-            deploy_token="unused-smoke-test",
-            sandbox_image=image,
-            sandbox_runtime=runtime,
-            session_seconds=90,
-        )
-        environment = Environment(
-            id=uuid.uuid4().hex,
-            clis=["echor"],
-            sha="0" * 40,
-            pr=1,
-            expires_at=time.time() + 90,
-            binary_dir=binary_dir,
-        )
-        manager = SessionManager(settings)
-        name: str | None = None
-        try:
-            async with manager.open(environment) as session:
-                name = session.name
+    client = HttpBoxieClient(url, credential_file.read_text().strip())
+    artifact_id = uuid.uuid4()
+    sandbox_id = None
+    try:
+        with tempfile.TemporaryDirectory(prefix="clis-playground-smoke-") as temporary:
+            archive = Path(temporary) / "bundle.zip"
+            with zipfile.ZipFile(archive, "w") as bundle:
+                bundle.write(binary, "echor")
+            digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+            await client.upload(artifact_id, digest, archive)
+            view = await client.create(
+                str(uuid.uuid4()), SandboxRequest(artifact_id=artifact_id, profile_id=profile)
+            )
+            sandbox_id = view.id
+            async with asyncio.timeout(30):
+                while view.state in {"accepted", "provisioning"}:
+                    await asyncio.sleep(0.1)
+                    view = await client.get(sandbox_id)
+            if view.state != "ready":
+                raise RuntimeError(f"Sandbox did not become ready: {view.state}")
+            async with client.terminal(sandbox_id) as terminal:
+                session = Session(terminal)
                 shell = Shell(session)
                 await shell.start()
-                async with Docker(timeout=ClientTimeout(total=20)) as docker:
-                    details = await docker.containers.container(name).show()
-                actual_runtime = details["HostConfig"]["Runtime"]
-                if actual_runtime != runtime:
-                    raise RuntimeError(f"Expected {runtime}, got {actual_runtime!r}")
-
                 output = await shell.run("echor 'native-cli-ok'")
                 if output.strip() != b"native-cli-ok":
                     raise RuntimeError(f"Unexpected Rust CLI output: {output!r}")
@@ -146,19 +141,17 @@ async def exercise(binary: Path, image: str, runtime: str) -> None:
                 await session.write(b"\x03")
                 await shell.until(PROMPT)
                 await shell.run('test "$?" -eq 130')
-        finally:
-            # SessionManager performs its production cancellation-safe Docker removal.
-            # Retrying here also covers failures during container creation/attachment.
-            await manager.close()
-        if name is not None:
-            async with Docker(timeout=ClientTimeout(total=20)) as docker:
-                remaining = await docker.containers.list(
-                    all=True, filters=json.dumps({"name": [name]})
-                )
-            if remaining or manager.active:
-                raise RuntimeError(f"Smoke session was not removed: {name}")
+    finally:
+        if sandbox_id is not None:
+            view = await client.terminate(sandbox_id)
+            async with asyncio.timeout(30):
+                while view.cleanup_pending or view.state not in {"terminated", "failed"}:
+                    await asyncio.sleep(0.1)
+                    view = await client.get(sandbox_id)
+        await client.retire(artifact_id)
+        await client.close()
     print(
-        f"PASS: {runtime}, native CLI, sample files, pipes/redirection, read-only root, resize, Ctrl-C, cleanup"
+        "PASS: private API, native CLI, sample files, pipes/redirection, read-only root, resize, Ctrl-C, cleanup"
     )
 
 
@@ -167,18 +160,16 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--binary", type=Path, required=True, help="Linux x86_64 echor executable")
-    parser.add_argument(
-        "--image", default="clis-playground-sandbox:local", help="existing sandbox image"
-    )
-    parser.add_argument(
-        "--runtime",
-        choices=("runsc", "runc"),
-        default="runsc",
-        help="runsc in production; runc is an explicit local Docker Desktop override",
-    )
+    parser.add_argument("--boxie-url", required=True)
+    parser.add_argument("--credential-file", type=Path, required=True)
+    parser.add_argument("--profile", default="playground")
     arguments = parser.parse_args()
     try:
-        asyncio.run(exercise(arguments.binary, arguments.image, arguments.runtime))
+        asyncio.run(
+            exercise(
+                arguments.binary, arguments.boxie_url, arguments.credential_file, arguments.profile
+            )
+        )
     except (OSError, RuntimeError, ValueError, TimeoutError) as error:
         print(f"Sandbox smoke failed: {error}", file=sys.stderr)
         return 1

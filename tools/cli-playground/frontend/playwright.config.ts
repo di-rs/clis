@@ -1,5 +1,13 @@
+import { mkdirSync, writeFileSync, chmodSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig, devices } from "@playwright/test";
+
+const credentialFile = fileURLToPath(
+  new URL("../../../target/playground-browser.secret", import.meta.url),
+);
+mkdirSync(fileURLToPath(new URL("../../../target", import.meta.url)), { recursive: true });
+writeFileSync(credentialFile, "unused-browser-boxie-secret", { mode: 0o600 });
+chmodSync(credentialFile, 0o600);
 
 const origin = "http://127.0.0.1:8765";
 
@@ -27,7 +35,8 @@ export default defineConfig({
       ),
       PLAYGROUND_PUBLIC_URL: origin,
       PLAYGROUND_DEPLOY_TOKEN: "local-browser-test",
-      PLAYGROUND_SANDBOX_IMAGE: "unused-in-browser-tests",
+      PLAYGROUND_BOXIE_URL: "http://127.0.0.1:1",
+      PLAYGROUND_BOXIE_CREDENTIAL_FILE: credentialFile,
     },
     url: `${origin}/healthz`,
     reuseExistingServer: false,

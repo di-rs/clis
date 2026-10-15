@@ -1,7 +1,7 @@
 """Atomic PR build state and immutable batches, retained while sessions reference them."""
 
 import hashlib
-import json
+import os
 import re
 import shutil
 import tempfile
@@ -55,25 +55,21 @@ class EnvironmentStore:
         return (self.closed / str(pr)).exists()
 
     def close_pull_request(self, pr: int) -> None:
-        (self.closed / str(pr)).touch(mode=0o600)
+        from playground.session_store import atomic_write
+
+        atomic_write(self.closed / str(pr), b"")
 
     def reopen_pull_request(self, pr: int) -> None:
-        (self.closed / str(pr)).unlink(missing_ok=True)
+        from playground.session_store import durable_unlink
+
+        durable_unlink(self.closed / str(pr))
 
     def record(self, identifier: str, *, include_inactive: bool = False) -> PreviewRecord | None:
         if re.fullmatch(ID_PATTERN, identifier) is None:
             return None
         try:
             data = (self.root / identifier / "metadata.json").read_text(encoding="utf-8")
-            # Old flat manifests remain readable without changing their executable paths.
-            payload = json.loads(data)
-            if "artifact" in payload:
-                record = PreviewRecord.model_validate_json(data)
-            else:
-                artifact = ArtifactMetadata.model_validate_json(data)
-                record = PreviewRecord(
-                    pr=artifact.pr, expires_at=artifact.expires_at, artifact=artifact
-                )
+            record = PreviewRecord.model_validate_json(data)
             if self.identifier(record.pr) != identifier:
                 return None
             if record.artifact is not None and record.artifact.pr != record.pr:
@@ -93,11 +89,7 @@ class EnvironmentStore:
         artifact = record.artifact
         if not include_inactive and artifact.expires_at <= time.time():
             return None
-        assert artifact.revision is not None
-        binary_dir = self.root / identifier / artifact.revision
-        if not all((binary_dir / cli).is_file() for cli in artifact.clis):
-            return None
-        return Environment(id=identifier, binary_dir=binary_dir, **artifact.model_dump())
+        return Environment(id=identifier, **artifact.model_dump())
 
     def metadata(self, identifier: str) -> EnvironmentMetadata | None:
         record = self.record(identifier)
@@ -159,8 +151,16 @@ class EnvironmentStore:
         directory.mkdir(exist_ok=True)
         manifest = directory / ".metadata-upload"
         try:
-            manifest.write_text(record.model_dump_json(), encoding="utf-8")
+            with manifest.open("w", encoding="utf-8") as stream:
+                stream.write(record.model_dump_json())
+                stream.flush()
+                os.fsync(stream.fileno())
             manifest.replace(directory / "metadata.json")
+            descriptor = os.open(directory, os.O_RDONLY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
         finally:
             manifest.unlink(missing_ok=True)
 
@@ -185,75 +185,39 @@ class EnvironmentStore:
         assert result is not None
         return result
 
-    def collect_revisions(self, retained: set[Path]) -> None:
-        for directory in self.root.iterdir():
-            if not directory.is_dir() or re.fullmatch(ID_PATTERN, directory.name) is None:
-                continue
-            current = self.get(directory.name)
-            keep = retained | ({current.binary_dir} if current is not None else set())
-            for revision in directory.iterdir():
-                if revision.is_dir() and revision not in keep:
-                    shutil.rmtree(revision)
+    def revisions(self) -> list[ArtifactMetadata]:
+        return [
+            ArtifactMetadata.model_validate_json(path.read_bytes())
+            for path in self.root.glob("*/revisions/*.json")
+        ]
 
-    def publish(
-        self,
-        temporary: Path,
-        clis: list[str],
-        sha: str,
-        pr: int,
-        build: BuildIdentity | None = None,
-    ) -> Environment:
-        self.check_build(pr, build)
-        if build is not None and build.sha != sha:
+    def revision(self, pr: int, revision: str) -> ArtifactMetadata | None:
+        path = self.root / self.identifier(pr) / "revisions" / f"{revision}.json"
+        return ArtifactMetadata.model_validate_json(path.read_bytes()) if path.exists() else None
+
+    def publish(self, artifact: ArtifactMetadata, build: BuildIdentity | None) -> Environment:
+        from playground.session_store import atomic_write
+
+        self.check_build(artifact.pr, build)
+        if build is not None and build.sha != artifact.sha:
             raise ArtifactConflictError("build identity conflict")
-        # A source SHA is not a build identity: reruns can produce different executable bytes.
-        revision = sha if build is None else f"{sha}-{build.run_number}-{build.run_attempt}"
-        artifact = ArtifactMetadata(
-            clis=clis,
-            sha=sha,
-            pr=pr,
-            revision=revision,
-            expires_at=time.time() + self.settings.preview_seconds,
+        previous = self.revision(artifact.pr, artifact.revision)
+        if previous is not None and (
+            previous.sha256 != artifact.sha256 or previous.clis != artifact.clis
+        ):
+            raise ArtifactConflictError("this revision already has different binaries or CLI set")
+        existing = self.get(self.identifier(artifact.pr))
+        if existing is not None and existing.revision == artifact.revision:
+            return existing
+        directory = self.root / self.identifier(artifact.pr) / "revisions"
+        directory.mkdir(parents=True, exist_ok=True)
+        atomic_write(directory / f"{artifact.revision}.json", artifact.model_dump_json().encode())
+        self._write_record(
+            PreviewRecord(
+                pr=artifact.pr,
+                expires_at=artifact.expires_at,
+                artifact=artifact,
+                build=BuildStatus(**build.model_dump(), state="ready") if build else None,
+            )
         )
-        for cli in artifact.clis:
-            validate_elf(temporary / cli)
-        identifier = self.identifier(pr)
-        directory = self.root / identifier
-        destination = directory / revision
-        created = not destination.exists()
-        if not created:
-            if sorted(path.name for path in destination.iterdir()) != artifact.clis:
-                raise ArtifactConflictError("this revision already has a different CLI set")
-            for cli in artifact.clis:
-                with (
-                    (destination / cli).open("rb") as previous,
-                    (temporary / cli).open("rb") as incoming,
-                ):
-                    if (
-                        hashlib.file_digest(previous, "sha256").digest()
-                        != hashlib.file_digest(incoming, "sha256").digest()
-                    ):
-                        raise ArtifactConflictError("this revision already has a different binary")
-            existing = self.get(identifier)
-            if existing is not None and existing.revision == revision:
-                return existing
-        else:
-            directory.mkdir(exist_ok=True)
-            for cli in artifact.clis:
-                (temporary / cli).chmod(0o555)
-            temporary.chmod(0o755)
-            temporary.rename(destination)
-        next_record = PreviewRecord(
-            pr=pr,
-            expires_at=artifact.expires_at,
-            artifact=artifact,
-            build=BuildStatus(**build.model_dump(), state="ready") if build else None,
-        )
-        try:
-            self._write_record(next_record)
-        except OSError:
-            # An existing batch may still be mounted by a pinned session.
-            if created:
-                shutil.rmtree(destination, ignore_errors=True)
-            raise
-        return Environment(id=identifier, binary_dir=destination, **artifact.model_dump())
+        return Environment(id=self.identifier(artifact.pr), **artifact.model_dump())

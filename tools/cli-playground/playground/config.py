@@ -3,10 +3,10 @@
 import hashlib
 import re
 from pathlib import Path
-from typing import Literal, Self
+from typing import Self
 from urllib.parse import urlsplit
 
-from pydantic import Field, PositiveInt, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from playground.artifacts import MAX_ARCHIVE, MAX_BINARY
@@ -20,17 +20,13 @@ class Settings(BaseSettings):
     data_dir: Path
     public_url: str
     deploy_token: str = Field(min_length=1, repr=False)
-    sandbox_image: str = Field(min_length=1, pattern=r"^[^-]")
-    sandbox_runtime: Literal["runsc", "runc"] = "runsc"
+    boxie_url: str
+    boxie_credential_file: Path
+    boxie_profile: str = "playground"
     preview_domain: str | None = None
-    reconcile_sessions_on_start: bool = Field(
-        default=False, validation_alias="PLAYGROUND_RECONCILE_SESSIONS"
-    )
     cleanup_interval_seconds: float = Field(default=60, gt=0, allow_inf_nan=False)
     max_binary_bytes: int = Field(default=MAX_BINARY, gt=0, le=MAX_BINARY)
     max_archive_bytes: int = Field(default=MAX_ARCHIVE, gt=0, le=MAX_ARCHIVE)
-    max_sessions: PositiveInt = 8
-    session_seconds: float = Field(default=15 * 60, gt=0, allow_inf_nan=False)
     preview_seconds: float = Field(default=7 * 24 * 60 * 60, gt=0, allow_inf_nan=False)
 
     @field_validator("preview_domain")
@@ -45,7 +41,7 @@ class Settings(BaseSettings):
             raise ValueError("must be an absolute path without commas/newlines")
         return value
 
-    @field_validator("public_url")
+    @field_validator("public_url", "boxie_url")
     @classmethod
     def http_origin(cls, value: str) -> str:
         parsed = urlsplit(value)
@@ -82,9 +78,11 @@ class Settings(BaseSettings):
         return self
 
     def preview_url(self, identifier: str, pr: int | None = None) -> str:
-        label = f"pr-{pr}" if pr is not None else identifier
+        label = f"pr-{pr}"
         origin = (
-            f"https://{label}.{self.preview_domain}" if self.preview_domain else self.public_url
+            f"https://{label}.{self.preview_domain}"
+            if self.preview_domain and pr is not None
+            else self.public_url
         )
         return f"{origin}/p/{identifier}"
 
@@ -97,5 +95,4 @@ class Settings(BaseSettings):
         if pr_match is not None:
             expected = hashlib.sha256(f"pull-request:{pr_match[1]}".encode()).hexdigest()[:32]
             return identifier is None or identifier == expected
-        match = re.fullmatch(r"([0-9a-f]{32})\." + re.escape(self.preview_domain), host)
-        return match is not None and (identifier is None or match[1] == identifier)
+        return False

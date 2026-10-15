@@ -83,7 +83,7 @@
     if (!environmentId || !environment) return;
     let terminal: BrowserTerminal;
     try {
-      terminal = createBrowserTerminal(node, environmentId, environment.sha, environment.revision, (next) => { session = next; });
+      terminal = createBrowserTerminal(node, environmentId, environment.revision, (next) => { session = next; });
       controller = terminal;
       terminal.connect();
     } catch {
@@ -193,6 +193,7 @@
           <div><dt>Pull request</dt><dd id="meta-pr">#{environment.pr}</dd></div>
           <div><dt>Commit</dt><dd><abbr id="meta-sha" title={environment.sha}>{environment.sha.slice(0, 7)}</abbr></dd></div>
           <div><dt>Link expires</dt><dd><time id="meta-expiry" datetime={environment.expiresAt.toISOString()} title={environment.expiresAt.toLocaleString()}>{environment.expiresAt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</time></dd></div>
+          {#if session.absoluteDeadline}<div><dt>Session expires</dt><dd><time id="session-expiry" datetime={session.absoluteDeadline}>{new Date(session.absoluteDeadline).toLocaleString()}</time></dd></div>{/if}
         </dl>
       </section>
 
@@ -291,7 +292,7 @@
           </div>
         </section>
       </div>
-      <footer class="page-footer"><p><span aria-hidden="true">◇</span> Your session is temporary. Reset restores the sample files.</p><span>15 MIN / SESSION</span></footer>
+      <footer class="page-footer"><p><span aria-hidden="true">◇</span> Your session is temporary. Reset restores the sample files.</p><span>60 MIN / SESSION</span></footer>
     </div>
   {/if}
 </main>

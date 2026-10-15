@@ -3,6 +3,8 @@ export interface SessionState {
   label: string;
   message: string | null;
   canReconnect: boolean;
+  absoluteDeadline?: string;
+  reason?: string | null;
 }
 
 export interface TerminalPort {
@@ -17,15 +19,22 @@ export interface TerminalPort {
   onResize(listener: (size: { cols: number; rows: number }) => void): { dispose(): void };
 }
 
+export interface PreparedConnection {
+  createSocket: () => WebSocket;
+  credential: string;
+  stop: () => Promise<void>;
+}
+
 interface SessionOptions {
   terminal: TerminalPort;
   fit: () => void;
-  createSocket: () => WebSocket;
+  prepare: () => Promise<PreparedConnection>;
   onState: (state: SessionState) => void;
 }
 
-export function createSession({ terminal, fit, createSocket, onState }: SessionOptions) {
+export function createSession({ terminal, fit, prepare, onState }: SessionOptions) {
   let socket: WebSocket | null = null;
+  let binding: PreparedConnection | null = null;
   let detachSocket: (() => void) | undefined;
   let disposed = false;
   let suspended = false;
@@ -66,17 +75,22 @@ export function createSession({ terminal, fit, createSocket, onState }: SessionO
   });
   const resize = terminal.onResize(({ cols, rows }) => send({ type: "resize", cols, rows }));
 
-  function releaseSocket(reason: string, close = true) {
+  function releaseSocket(reason: string, close = true, stop = true) {
     connection++;
     const previous = socket;
     socket = null;
     detachSocket?.();
     detachSocket = undefined;
     if (close) previous?.close(1000, reason);
+    if (stop) {
+      const oldBinding = binding;
+      binding = null;
+      void oldBinding?.stop().catch(() => {});
+    }
   }
 
   function disconnected(message: string, label = "Disconnected") {
-    update({ phase: "disconnected", label, message, canReconnect: true });
+    update({ ...state, phase: "disconnected", label, message, canReconnect: true });
   }
 
   function connect() {
@@ -90,17 +104,25 @@ export function createSession({ terminal, fit, createSocket, onState }: SessionO
     terminal.write(new Uint8Array(), () => {
       if (disposed || suspended || connection !== pending) return;
       terminal.reset();
-      openSocket();
+      void openSocket(pending);
     });
   }
 
-  function openSocket() {
+  async function openSocket(pending: number) {
     let next: WebSocket;
     try {
-      next = createSocket();
+      const prepared = await prepare();
+      if (disposed || suspended || connection !== pending) {
+        await prepared.stop().catch(() => {});
+        return;
+      }
+      binding = prepared;
+      next = prepared.createSocket();
       next.binaryType = "arraybuffer";
       socket = next;
     } catch {
+      if (disposed || suspended || connection !== pending) return;
+      releaseSocket("Connection failed");
       disconnected(
         "Could not connect to the terminal. Try starting a new session.",
         "Connection failed",
@@ -112,15 +134,12 @@ export function createSession({ terminal, fit, createSocket, onState }: SessionO
     const current = () => !disposed && !suspended && socket === next;
     const open = () => {
       if (!current()) return;
-      update({ phase: "connected", label: "Connected", message: null, canReconnect: false });
-      fit();
-      send({ type: "resize", cols: terminal.cols, rows: terminal.rows });
-      terminal.focus();
+      next.send(JSON.stringify({ type: "auth", credential: binding!.credential }));
     };
     const message = (event: MessageEvent<unknown>) => {
       if (!current()) return;
       if (event.data instanceof ArrayBuffer) {
-        terminal.write(new Uint8Array(event.data));
+        if (state.phase === "connected") terminal.write(new Uint8Array(event.data));
         return;
       }
       if (typeof event.data !== "string") return;
@@ -128,9 +147,32 @@ export function createSession({ terminal, fit, createSocket, onState }: SessionO
         const data: unknown = JSON.parse(event.data);
         if (typeof data !== "object" || data === null) return;
         const status = data as Record<string, unknown>;
+        if (
+          status.type === "authenticated" &&
+          status.state === "ready" &&
+          typeof status.absolute_deadline === "string" &&
+          Number.isFinite(Date.parse(status.absolute_deadline))
+        ) {
+          update({
+            phase: "connected",
+            label: "Connected",
+            message: null,
+            canReconnect: false,
+            absoluteDeadline: status.absolute_deadline,
+            reason: null,
+          });
+          fit();
+          send({ type: "resize", cols: terminal.cols, rows: terminal.rows });
+          terminal.focus();
+        }
         if (status.type === "status" && typeof status.message === "string") {
           serverMessage = status.message;
-          update({ ...state, message: serverMessage, canReconnect: false });
+          update({
+            ...state,
+            message: serverMessage,
+            reason: typeof status.reason === "string" ? status.reason : null,
+            canReconnect: false,
+          });
         }
       } catch {
         // The gateway sends binary PTY output or a structured terminal status.
@@ -146,7 +188,7 @@ export function createSession({ terminal, fit, createSocket, onState }: SessionO
     };
     const close = (event: CloseEvent) => {
       if (!current()) return;
-      releaseSocket("Session ended", false);
+      releaseSocket("Session ended", false, false);
       disconnected(
         serverMessage ||
           (event.code === 1000
@@ -168,7 +210,7 @@ export function createSession({ terminal, fit, createSocket, onState }: SessionO
 
   function disconnect() {
     if (disposed) return;
-    releaseSocket("Visitor disconnected");
+    releaseSocket("Visitor disconnected", true, false);
     disconnected(
       "Disconnected. Your terminal output stays here; a new session starts with fresh files.",
     );
@@ -187,7 +229,7 @@ export function createSession({ terminal, fit, createSocket, onState }: SessionO
     suspend() {
       if (disposed) return;
       suspended = true;
-      releaseSocket("Page closed");
+      releaseSocket("Page closed", true, false);
       disconnected("Disconnected. Start a new session to continue with fresh files.");
     },
     resume() {
