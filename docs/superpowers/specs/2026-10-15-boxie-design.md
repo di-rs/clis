@@ -92,20 +92,31 @@ tools/boxie/
     persistence/     # concrete PostgreSQL and local artifact implementation
     observability/   # event schema, contextual logging, metrics
     bootstrap/       # configuration and process composition roots
+  infra/             # Boxie components, configuration, manifests and smoke checks
   tests/
 tools/cli-playground/
   playground/        # product application, Boxie HTTP client, preview adapters
   frontend/
-  deploy/            # product manifests, public domains and Traefik routes
+  infra/             # product components, manifests, domains, routes and checks
 tools/deploy/        # shared release/configuration/transport commands
-infra/platform/     # Pulumi project and reusable components
-deploy/
-  platform/          # shared networks, volumes and persistence service
-  temporal/
-  observability/
-  boxie/
+infra/
+  platform/          # shared host, networks, storage and persistence service
+  temporal/          # independent Temporal deployment package
+  observability/     # independent telemetry deployment package
   ingress/           # shared proxy/tunnel process configuration
+  environments/
+    single-host/     # thin Pulumi project and deployment composition
 ```
+
+Each service owns its infrastructure beside its code from PR1. Its `infra/`
+directory contains provisioning components, validated configuration, Compose
+manifests, deployment documentation, and smoke checks. Infrastructure dependencies
+stay out of runtime images. The environment composition chooses which components
+to deploy and connects their inputs/outputs; it does not define service internals.
+There is no second central copy of Boxie or Playground deployment configuration.
+Use distinct infrastructure import namespaces, such as `boxie_infra` and
+`playground_infra`, so the two directories cannot collide as a generic `infra`
+module. Use normal declared dependencies rather than `sys.path` manipulation.
 
 These directories describe ownership, not a mandate for a class or package per
 file. Use ordinary constructor injection and typed protocols for meaningful
@@ -373,21 +384,49 @@ and [VictoriaLogs Grafana integration](https://docs.victoriametrics.com/victoria
 
 ## Pulumi, releases, and CI
 
-Keep one Pulumi project under `infra/platform`, with an environment per stack.
-Use components for host, networking, storage, and optional product ingress;
-components provide code boundaries without a stack per container. Pulumi owns
-cloud resources, host/bootstrap identity, firewall rules, persistent disks, and
-optional DNS. It never provisions individual sandboxes. The existing remote
-Pulumi state-backend approach remains separate from application backups. See
+Keep the initial Pulumi project under `infra/environments/single-host`, with an
+environment per stack. It is a thin composition root over service-owned
+infrastructure and the independently owned shared components. Boxie's provisioning
+components live in `tools/boxie/infra`; Playground's live in
+`tools/cli-playground/infra`. Shared host, networking, storage, and persistence
+definitions live in `infra/platform`. Pulumi owns cloud resources,
+host/bootstrap identity, firewall rules, persistent disks, and configured DNS.
+It never provisions individual sandboxes. The existing remote Pulumi
+state-backend approach remains separate from application backups. See
 [Pulumi components](https://www.pulumi.com/docs/iac/concepts/components/) and
 [project/stack organization](https://www.pulumi.com/docs/iac/guides/basics/organizing-projects-stacks/).
+
+Keep resource declaration separate from workload activation. Service-owned
+Pulumi components declare service-specific cloud resources and configuration;
+Compose manifests describe workloads activated by the release tool. Pulumi must
+not manage the same containers that the release tool reconciles.
+
+Infrastructure follows the same dependency direction as the services. The
+environment passes explicit host/network/storage handles, private service
+endpoints, approved image identities, and secret references. Boxie infrastructure
+does not import Playground infrastructure or create Temporal implicitly.
+Playground infrastructure receives Boxie's private endpoint and consumer
+credential reference without importing Boxie's resource implementation. Temporal
+and observability remain independent infrastructure packages that the environment
+selects and wires. Shared component contracts stay small and typed.
+
+One host and one Pulumi state boundary are initial deployment choices, not code
+ownership boundaries. Separate application releases already operate independently.
+A future environment can compose Boxie without Playground or place them on
+different hosts using the same components. Splitting Pulumi projects/state later
+still requires an explicit resource-ownership transfer; directory separation alone
+does not perform that transfer or solve remote artifact/storage access.
 
 Application releases use explicit manifests and separate Compose units for
 platform persistence, Temporal, observability, Boxie, shared ingress, and
 Playground.
 Assign shared networks, volumes, and proxy process configuration one owner.
-Product routes remain in the Playground deployment package; core services must
-start without a Playground domain or Traefik configuration.
+Service manifests and product routes remain in their owning `infra/` directories;
+core services must start without a Playground domain or Traefik configuration.
+The environment layer only selects components, supplies configuration, and orders
+startup. It must not turn a targeted application release into a global Compose
+update. Shared release tooling must not grow Boxie/Playground-specific branches
+or become a second home for their deployment logic.
 
 Platform ingress owns the dashboard tunnel, Access configuration, and operator
 DNS. Playground owns its product hostname and public routes. One release manifest
@@ -407,7 +446,9 @@ and pinned SSH host key. Store its deployment SSH credential separately in the
 deployment environment's secret store. Component releases consume this profile
 without Pulumi state-decryption or cloud-provisioning credentials. The initial
 host deployment credential is still administrative access; targeting one Compose
-unit does not make that SSH credential unprivileged.
+unit does not make that SSH credential unprivileged. Generated connection
+manifests contain only nonsecret values and secret references; credentials are
+resolved or injected at their consuming process.
 
 Split deployment code into configuration/manifest parsing, release preparation,
 SSH transport, activation, health verification, and cleanup. CI remains thin
@@ -445,16 +486,18 @@ PR. Each stage updates its documentation and runs affected checks.
 
 | PR | Title | Reviewable result and acceptance |
 | --- | --- | --- |
-| 1 | ♻️ Separate Boxie from CLI Playground | Extract independently runnable Boxie API/agent and generic contracts; inject adapters; keep product policy in Playground; replace direct imports with HTTP/WebSocket client. A generic consumer can create/attach/stop without PR/SHA/domain fields. Existing Playground E2E behavior works across the service boundary. |
+| 1 | ♻️ Separate Boxie from CLI Playground | Extract independently runnable Boxie API/agent and generic contracts; inject adapters; keep product policy in Playground; replace direct imports with HTTP/WebSocket client. Establish each service's own `infra/` directory and deployment contract now. A generic consumer can create/attach/stop without PR/SHA/domain fields. Existing Playground E2E behavior works across the service boundary. |
 | 2 | ✨ Add durable Boxie lifecycle with Temporal | Add independent Temporal/PostgreSQL deployment, workflow worker, outbox, reservations, idempotent agent operations, deadlines, cleanup/reconciliation, and same-page reconnect. Retries and worker restarts do not duplicate resources; timeout/disconnect/stop behavior is verified. |
 | 3 | ✨ Add Boxie operational visibility | Add JSON event/correlation schema, collector, VictoriaLogs, Prometheus, Grafana, Access-protected operator routes, dashboards and alert rules. A deliberately failed lifecycle can be diagnosed without terminal contents entering logs. |
-| 4 | ♻️ Separate deployment and harden operations | Componentize Pulumi and releases, split CI responsibilities, validate release identity/deadlines, verify fresh installation and independent updates/failure handling, finish operator runbooks and security/resource checks. No migration or full backup system. |
+| 4 | ♻️ Compose deployment and harden operations | Wire the service-owned infrastructure into the thin single-host Pulumi environment, finish shared platform components and split CI responsibilities, validate release identity/deadlines, verify fresh installation and independent updates/failure handling, finish operator runbooks and security/resource checks. No migration or full backup system. |
 
 PR1 may retain a minimal direct lifecycle implementation behind the new service
 boundary to keep the extraction runnable. PR2 replaces it; the final system does
-not maintain a second production mode without Temporal. Local component manifests
-arrive with their owning PR; PR4 integrates and hardens deployment rather than
-postponing all runnable infrastructure until the end.
+not maintain a second production mode without Temporal. Infrastructure ownership
+and service-local deployment contracts are established in PR1; Temporal and
+observability arrive with their own infrastructure packages in PR2 and PR3.
+PR4 integrates and hardens the production environment rather than postponing
+separation or all runnable infrastructure until the end.
 
 ## Verification and completion criteria
 
@@ -486,6 +529,9 @@ to their owning component; do not rewrite everything to mirror new classes.
 - Deployment: Pulumi component tests/preview, manifest/config validation, failed
   activation, independent component updates, fresh installation, and Linux/gVisor
   smoke covering resource isolation. Local tests do not prove real DNS/Access.
+- Infrastructure isolation: validate Boxie's deployment without Playground
+  configuration, validate Playground against supplied Boxie connection outputs,
+  and test environment wiring separately from each component's implementation.
 
 Run the root Ruff, strict mypy, and pytest checks for changed Python tools; include
 new service and infrastructure paths in the shared configuration. Run frontend
