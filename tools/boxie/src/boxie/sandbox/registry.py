@@ -404,14 +404,17 @@ class Agent:
             return TerminationReason.IDLE
         return None
 
-    def attach(self, record: Record) -> None:
-        # This synchronous check-and-clear cannot interleave with conditional expiry.
+    def validate_attachment(self, record: Record) -> None:
         if (
             record.state != SandboxState.READY
             or record.disconnected_at is not None
             or self._expiry_reason(record, self.monotonic()) is not None
         ):
             raise BoxieError(409, "terminal is unavailable")
+
+    def attach(self, record: Record) -> None:
+        # Acceptance may yield across expiry. Revalidate and clear without yielding.
+        self.validate_attachment(record)
         self._deadlines[record.id].disconnect = None
 
     def accepted_input(self, record: Record) -> None:

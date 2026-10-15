@@ -62,9 +62,8 @@ class Terminal:
     async def serve(self, websocket: WebSocket) -> None:
         if self.attached:
             raise BoxieError(409, "terminal is unavailable")
-        self.agent.attach(self.record)
+        self.agent.validate_attachment(self.record)
         self.attached = True
-        await websocket.accept()
 
         async def send() -> None:
             while (data := await self.output.get()) is not None:
@@ -98,8 +97,15 @@ class Terminal:
                     async with asyncio.timeout(self.agent.config.docker_timeout):
                         await self.stream.resize(size.columns, size.rows)
 
-        tasks = [asyncio.create_task(send()), asyncio.create_task(receive())]
+        tasks: list[asyncio.Task[None]] = []
+        accepted = False
         try:
+            # Keep the original READY grace active during the handshake. Failed or
+            # cancelled acceptance must neither erase nor renew that deadline.
+            await websocket.accept()
+            self.agent.attach(self.record)
+            accepted = True
+            tasks = [asyncio.create_task(send()), asyncio.create_task(receive())]
             done, _pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for task in done:
                 await task
@@ -109,4 +115,5 @@ class Terminal:
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
-            self.agent.disconnected(self.record)
+            if accepted:
+                self.agent.disconnected(self.record)
