@@ -9,6 +9,8 @@ const metadata = {
   clis: ["catr"],
   pr: 42,
   sha: "0123456789abcdef0123456789abcdef01234567",
+  revision: "0123456789abcdef0123456789abcdef01234567",
+  build: null,
   expires_at: "2099-01-01T00:00:00Z",
 };
 
@@ -168,7 +170,12 @@ for (const action of ["Reset session", "Start new session"]) {
     const sessions = await openPlayground(page);
     await page.route(`**${metadataPath}`, (route) =>
       route.fulfill({
-        json: { ...metadata, sha: "b".repeat(40), clis: ["echor", "wcr"] },
+        json: {
+          ...metadata,
+          sha: "b".repeat(40),
+          revision: "b".repeat(40),
+          clis: ["echor", "wcr"],
+        },
       }),
     );
     if (action === "Start new session") {
@@ -193,7 +200,7 @@ test("a rejected stale revision can reload metadata and reconnect at the same UR
   const sessions = await openPlayground(page);
   await page.route(`**${metadataPath}`, (route) =>
     route.fulfill({
-      json: { ...metadata, sha: "b".repeat(40) },
+      json: { ...metadata, sha: "b".repeat(40), revision: "b".repeat(40) },
     }),
   );
   await sessions[0].socket.close({ code: 1008, reason: "Revision changed" });
@@ -402,14 +409,26 @@ test("shows operator status as text and preserves its reason after a server disc
   await expect(page.getByRole("button", { name: "Start new session" })).toBeEnabled();
 });
 
-for (const status of [200, 410]) {
-  test(`expired metadata (${status}) never opens a terminal connection`, async ({ page }) => {
+test("server-approved metadata opens a terminal even when the browser clock is ahead of expiry", async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date("2100-01-01T00:00:00Z"));
+  const sessions = await openPlayground(page);
+  expect(sessions).toHaveLength(1);
+  expect(new URL(sessions[0].socket.url()).searchParams.get("revision")).toBe(metadata.revision);
+});
+
+for (const [status, title] of [
+  [404, "This playground wasn't found."],
+  [410, "This playground has expired."],
+] as const) {
+  test(`unavailable metadata (${status}) never opens a terminal connection`, async ({ page }) => {
     await page.route(`**${metadataPath}`, (route) =>
       route.fulfill({ status, json: { ...metadata, expires_at: "2000-01-01T00:00:00Z" } }),
     );
     const sessions = await mockTerminal(page);
     await page.goto(previewPath);
-    await expect(page.getByRole("heading", { name: "This playground has expired." })).toBeVisible();
+    await expect(page.getByRole("heading", { name: title })).toBeVisible();
     await expect(page.getByRole("button", { name: "Try again" })).toBeHidden();
     await expect(page.locator(".xterm")).toHaveCount(0);
     expect(sessions).toHaveLength(0);
