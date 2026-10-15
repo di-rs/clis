@@ -1,0 +1,248 @@
+"""Isolated production-image deployment harness. No dev server and no silent skips.
+
+Run with ``uv run --locked python tools/boxie/tests/run_integration.py``.
+Only this harness's randomly named projects and volumes are removed.
+"""
+
+import argparse
+import json
+import os
+import secrets
+import shutil
+import subprocess
+import time
+from pathlib import Path
+from typing import Any
+from uuid import uuid4
+
+import yaml
+
+ROOT = Path(__file__).parents[3]
+
+
+def command(args: list[str], *, env: dict[str, str] | None = None) -> str:
+    result = subprocess.run(
+        args, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=240
+    )
+    if result.returncode:
+        raise RuntimeError(f"command failed: {args[:4]}\n{result.stdout}")
+    return result.stdout.strip()
+
+
+class ProductionStack:
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.name = "boxie-integration-" + uuid4().hex[:12]
+        self.platform = self.name + "-platform"
+        self.temporal = self.name + "-temporal"
+        self.env = dict(os.environ)
+        self.env.update(
+            {
+                key: secrets.token_hex(24)
+                for key in (
+                    "POSTGRES_PASSWORD",
+                    "BOXIE_DB_PASSWORD",
+                    "TEMPORAL_DB_PASSWORD",
+                    "VISIBILITY_DB_PASSWORD",
+                )
+            }
+        )
+        self.env.update(
+            BOXIE_CONTROL_NETWORK=self.name,
+            TEMPORAL_CERTS_DIR=str(root / "server"),
+            TEMPORAL_OPERATOR_CERTS_DIR=str(root / "operator"),
+            TEMPORAL_UI_CERTS_DIR=str(root / "ui"),
+        )
+        self.address = ""
+        self.ui_address = ""
+        self.pg_port = ""
+        self.evidence: dict[str, Any] = {}
+
+    def compose(self, package: str, *args: str) -> str:
+        return command(
+            [
+                "docker",
+                "compose",
+                "--project-name",
+                getattr(self, package),
+                "--file",
+                str(ROOT / "infra" / package / "compose.yml"),
+                "--file",
+                str(self.root / f"{package}-override.yml"),
+                *args,
+            ],
+            env=self.env,
+        )
+
+    def certificates(self) -> None:
+        ca = self.root / "ca"
+        ca.mkdir()
+        for directory in ("server", "operator", "ui", "clients"):
+            (self.root / directory).mkdir()
+        for name in ("frontend", "internode", "client", "untrusted"):
+            command(
+                [
+                    "openssl",
+                    "req",
+                    "-x509",
+                    "-newkey",
+                    "rsa:2048",
+                    "-nodes",
+                    "-days",
+                    "2",
+                    "-subj",
+                    f"/CN=Boxie test {name} CA",
+                    "-keyout",
+                    str(ca / f"{name}.key"),
+                    "-out",
+                    str(ca / f"{name}.pem"),
+                ]
+            )
+        for name, issuer, san, usage, directory in (
+            ("frontend", "frontend", "temporal", "serverAuth", "server"),
+            ("internode", "internode", "temporal-internode", "serverAuth,clientAuth", "server"),
+            ("operator", "client", "operator", "clientAuth", "operator"),
+            ("ui-client", "client", "ui", "clientAuth", "ui"),
+            ("boxie-api", "client", "boxie-api", "clientAuth", "clients"),
+            ("boxie-worker", "client", "boxie-worker", "clientAuth", "clients"),
+            ("untrusted", "untrusted", "untrusted", "clientAuth", "clients"),
+        ):
+            target = self.root / directory
+            key, cert = target / f"{name}.key", target / f"{name}.pem"
+            csr, ext = ca / f"{name}.csr", ca / f"{name}.ext"
+            command(
+                [
+                    "openssl",
+                    "req",
+                    "-newkey",
+                    "rsa:2048",
+                    "-nodes",
+                    "-subj",
+                    f"/CN={name}",
+                    "-keyout",
+                    str(key),
+                    "-out",
+                    str(csr),
+                ]
+            )
+            ext.write_text(
+                f"subjectAltName=DNS:{san}\nextendedKeyUsage={usage}\nbasicConstraints=CA:FALSE\n"
+            )
+            command(
+                [
+                    "openssl",
+                    "x509",
+                    "-req",
+                    "-in",
+                    str(csr),
+                    "-CA",
+                    str(ca / f"{issuer}.pem"),
+                    "-CAkey",
+                    str(ca / f"{issuer}.key"),
+                    "-CAcreateserial",
+                    "-days",
+                    "2",
+                    "-extfile",
+                    str(ext),
+                    "-out",
+                    str(cert),
+                ]
+            )
+            # Disposable fixture keys only: container UID 1000 needs bind-mount read.
+            key.chmod(0o644)
+        for directory in ("server", "operator", "ui", "clients"):
+            shutil.copy(ca / "frontend.pem", self.root / directory / "frontend-ca.pem")
+        for name in ("internode", "client"):
+            shutil.copy(ca / f"{name}.pem", self.root / "server" / f"{name}-ca.pem")
+
+    def start(self) -> None:
+        self.certificates()
+        (self.root / "platform-override.yml").write_text(
+            yaml.safe_dump(
+                {
+                    "services": {"postgres": {"ports": ["127.0.0.1::5432"]}},
+                    "networks": {"control": {"internal": False}},
+                }
+            )
+        )
+        (self.root / "temporal-override.yml").write_text(
+            yaml.safe_dump(
+                {
+                    "services": {
+                        "temporal": {"ports": ["127.0.0.1::7233"]},
+                        "ui": {"ports": ["127.0.0.1::8080"]},
+                    }
+                }
+            )
+        )
+        self.compose("platform", "up", "--detach", "--wait", "--wait-timeout", "90")
+        self.pg_port = self.compose("platform", "port", "postgres", "5432").rsplit(":", 1)[1]
+        self.compose("temporal", "build", "bootstrap")
+        self.compose(
+            "temporal", "run", "--rm", "--entrypoint", "/usr/local/bin/jq", "bootstrap", "--version"
+        )
+        self.compose("temporal", "run", "--rm", "schema", "setup")
+        # Exercise upgrade path independently from first-install setup.
+        self.compose("temporal", "run", "--rm", "schema", "update")
+        self.compose("temporal", "up", "--detach", "temporal", "ui")
+        self.address = self.compose("temporal", "port", "temporal", "7233")
+        self.ui_address = "http://" + self.compose("temporal", "port", "ui", "8080")
+        last_error = ""
+        for _ in range(10):
+            try:
+                self.compose("temporal", "run", "--rm", "bootstrap")
+                break
+            except RuntimeError as error:
+                last_error = str(error)
+                (self.root / "bootstrap-error.log").write_text(last_error)
+                time.sleep(1)
+        else:
+            raise RuntimeError(
+                "Temporal bootstrap failed\n"
+                + last_error
+                + "\n"
+                + self.compose("temporal", "logs", "--tail", "100")
+            )
+        self.compose("temporal", "run", "--rm", "bootstrap")
+        self.evidence = {
+            "server": command(
+                ["docker", "version", "--format", "{{.Server.Version}} {{.Server.Arch}}"]
+            ),
+            "bootstrap_local_image_id": command(
+                ["docker", "image", "inspect", self.temporal + "-bootstrap", "--format", "{{.Id}}"]
+            ),
+            "images": json.loads((ROOT / "infra/temporal/versions.json").read_text()),
+            "schema": "fresh setup and explicit update succeeded for distinct databases",
+            "namespace": "bootstrap succeeded twice and checked seven-day retention",
+        }
+        (self.root / "evidence.json").write_text(json.dumps(self.evidence, indent=2))
+
+    def close(self) -> None:
+        for package in ("temporal", "platform"):
+            if (self.root / f"{package}-override.yml").exists():
+                self.compose(package, "down", "--volumes", "--remove-orphans")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("pytest_args", nargs="*")
+    args = parser.parse_args()
+    raise SystemExit(
+        subprocess.call(
+            [
+                "uv",
+                "run",
+                "--locked",
+                "pytest",
+                "-m",
+                "integration",
+                "tools/boxie/tests/test_postgres.py",
+                "tools/boxie/tests/test_temporal_deployment.py",
+                *args.pytest_args,
+            ]
+        )
+    )
+
+
+if __name__ == "__main__":
+    main()

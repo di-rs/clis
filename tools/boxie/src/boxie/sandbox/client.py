@@ -215,6 +215,14 @@ class AgentClient:
         except ValidationError:
             raise dependency_error() from None
 
+    async def resolve_admission(self, spec: SandboxSpec) -> ProfileSnapshot:
+        body = spec_wire(spec).model_dump(mode="json", exclude={"artifact_id"})
+        _status, response = await self._request("POST", "/v1/profiles/resolve", json=body)
+        try:
+            return SnapshotWire.model_validate_json(response).domain()
+        except ValidationError:
+            raise dependency_error() from None
+
     def _control(
         self, principal: Principal, identity: AgentIdentity, generation: int
     ) -> dict[str, Any]:

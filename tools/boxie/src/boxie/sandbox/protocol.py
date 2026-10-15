@@ -55,6 +55,10 @@ class ProfileRequest(WireModel):
     env: dict[str, str] = Field(default_factory=dict)
 
 
+class AdmissionProfileRequest(ProfileRequest):
+    policy: PolicyWire = Field(default_factory=PolicyWire)
+
+
 class SpecWire(ProfileRequest):
     artifact_id: UUID
     policy: PolicyWire = Field(default_factory=PolicyWire)

@@ -58,3 +58,28 @@ class AgentConfig:
         if "policy_maximum" in data:
             data["policy_maximum"] = LifetimePolicy(**data["policy_maximum"])
         return cls(**data)
+
+
+@dataclass(frozen=True)
+class DurableConfig:
+    """Explicit inputs for the coordinated durable composition; no migration hook.
+
+    API and worker use separate client certificate/key files. Agent receives only
+    its PostgreSQL connection and remains the sole artifact filesystem owner.
+    """
+
+    postgres_dsn_file: Path
+    temporal_address: str
+    temporal_server_name: str
+    temporal_ca_file: Path
+    temporal_cert_file: Path
+    temporal_key_file: Path
+    temporal_namespace: str = "boxie"
+
+    def __post_init__(self) -> None:
+        if (
+            not self.temporal_address
+            or not self.temporal_server_name
+            or not self.temporal_namespace
+        ):
+            raise ValueError("Temporal address, verified server name and namespace are required")

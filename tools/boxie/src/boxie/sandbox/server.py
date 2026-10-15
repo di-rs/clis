@@ -17,13 +17,14 @@ from starlette.websockets import WebSocketState
 from boxie.bootstrap.config import AgentConfig
 from boxie.domain.errors import BoxieError
 from boxie.domain.models import Principal, TerminationReason
+from boxie.domain.policy import validate_policy
 from boxie.persistence.artifacts import ArtifactStore
 from boxie.sandbox.docker import DockerPort
 from boxie.sandbox.protocol import (
+    AdmissionProfileRequest,
     ConsumerId,
     ControlRequest,
     EnsureRequest,
-    ProfileRequest,
     RemoveRequest,
     SnapshotWire,
     SubmitRequest,
@@ -121,7 +122,8 @@ def create_agent_app(
         return Response(status_code=204)
 
     @app.post("/v1/profiles/resolve")
-    async def profile(body: ProfileRequest) -> SnapshotWire:
+    async def profile(body: AdmissionProfileRequest) -> SnapshotWire:
+        validate_policy(body.policy.domain(), config.policy_maximum)
         return SnapshotWire.from_domain(
             agent.resolve_profile(body.profile_id, body.command, body.env)
         )
