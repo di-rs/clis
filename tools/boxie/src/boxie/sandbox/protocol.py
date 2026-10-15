@@ -279,3 +279,17 @@ class ExpiryWire(WireModel):
         return ExpiryRequest(
             self.ref.domain(), self.reason, self.observed_event_version, self.boot_id
         )
+
+
+class BootWire(WireModel):
+    identity: IdentityWire
+    boot_id: UUID
+
+
+class ExecutionControlWire(ControlRequest):
+    boot_id: UUID
+    reason: TerminationReason = TerminationReason.REQUESTED
+
+
+class ExecutionExpiryWire(ExecutionControlWire):
+    observed_event_version: Positive

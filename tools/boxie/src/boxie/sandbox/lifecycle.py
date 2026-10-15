@@ -70,6 +70,8 @@ class DurableAgent:
         self.reconciliations: dict[UUID, asyncio.Task[None]] = {}
         self.sweeper: asyncio.Task[None] | None = None
         self.stopping = False
+        self.observer: Callable[[AgentObservation], None] | None = None
+        self._reported: dict[UUID, int] = {}
         self._journal_healthy = True
         self._failed_reconciliations: set[UUID] = set()
 
@@ -97,12 +99,17 @@ class DurableAgent:
             self.journal.save()
         except Exception:
             if self._journal_healthy:
-                logger.exception("execution journal persistence failed; new execution disabled")
+                logger.error("execution journal persistence failed; new execution disabled")
             self._journal_healthy = False
             raise
         if not self._journal_healthy:
             logger.info("execution journal persistence recovered")
         self._journal_healthy = True
+        if self.observer:
+            for record in self.records.values():
+                if self._reported.get(record.id) != record.event_version:
+                    self.observer(self._observation(record))
+                    self._reported[record.id] = record.event_version
 
     def _changed(self, record: ExecutionRecord) -> None:
         record.event_version += 1
@@ -328,6 +335,8 @@ class DurableAgent:
         async with self._lock(ref):
             record = self._record(ref)
             self._attachment(record)
+            if record.attached:
+                raise BoxieError(409, "terminal already attached")
             record.attachment_epoch += 1
             record.attached, record.disconnected_at = True, None
             self.deadlines[ref.id].disconnect = None
@@ -385,7 +394,7 @@ class DurableAgent:
             await self._reconcile_one(record)
         except Exception:
             if record.id not in self._failed_reconciliations:
-                logger.exception("sandbox reconciliation failed; retry pending: %s", record.id)
+                logger.error("sandbox reconciliation failed; retry pending: %s", record.id)
             self._failed_reconciliations.add(record.id)
         else:
             self._failed_reconciliations.discard(record.id)

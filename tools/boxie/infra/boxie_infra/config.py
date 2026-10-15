@@ -1,4 +1,4 @@
-"""Write explicit operator configuration for the two private Boxie processes."""
+"""Write explicit operator configuration for the three private Boxie processes."""
 
 import argparse
 import json
@@ -18,13 +18,30 @@ def main() -> None:
     parser.add_argument("--agent-credential", default="/run/secrets/agent")
     parser.add_argument("--consumer-credential", default="/run/secrets/consumer")
     parser.add_argument("--profiles", default="/etc/boxie/profiles.json")
+    parser.add_argument("--api-url", default="http://api:8090")
+    parser.add_argument("--postgres-dsn", default="/run/secrets/postgres-dsn")
+    parser.add_argument("--temporal-address", default="temporal:7233")
+    parser.add_argument("--temporal-server-name", default="temporal")
+    parser.add_argument("--temporal-namespace", default="boxie")
     args = parser.parse_args()
     if not args.data_dir.is_absolute():
         parser.error("--data-dir must be an absolute daemon-host path")
     args.output.mkdir(parents=True, exist_ok=True)
+    identity = {"installation_id": str(args.installation_id), "host_id": args.host_id}
+    durable = {
+        "postgres_dsn_file": args.postgres_dsn,
+        "temporal_address": args.temporal_address,
+        "temporal_server_name": args.temporal_server_name,
+        "temporal_namespace": args.temporal_namespace,
+        "temporal_ca_file": "/run/secrets/temporal-ca.pem",
+        "temporal_cert_file": "/run/secrets/temporal-client.pem",
+        "temporal_key_file": "/run/secrets/temporal-client.key",
+    }
     configurations = {
         "agent.json": {
             "data_dir": str(args.data_dir),
+            "postgres_dsn_file": args.postgres_dsn,
+            "api_url": args.api_url,
             "profiles_file": args.profiles,
             "credential_file": args.agent_credential,
             "identity": {"installation_id": str(args.installation_id), "host_id": args.host_id},
@@ -33,11 +50,19 @@ def main() -> None:
         },
         "api.json": {
             "release": "local",
+            "identity": identity,
+            "durable": durable,
             "agent_url": args.agent_url,
             "agent_credential_file": args.agent_credential,
             "consumer_credential_files": {args.consumer_id: args.consumer_credential},
             "bind_host": args.bind_host,
         },
+    }
+    configurations["worker.json"] = {
+        "identity": identity,
+        "durable": durable,
+        "agent_url": args.agent_url,
+        "agent_credential_file": args.agent_credential,
     }
     for name, value in configurations.items():
         (args.output / name).write_text(json.dumps(value, indent=2) + "\n")

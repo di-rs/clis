@@ -74,13 +74,14 @@ async def upload(artifacts: Any) -> SandboxSpec:
 
 
 async def counts(pool: Any) -> tuple[int, int, int, int]:
+    """Admission/slot/reference/command counts; observation notifications tested separately."""
     async with pool.connection() as conn:
         result = []
         for query in (
             "SELECT count(*) AS n FROM sandboxes",
             "SELECT count(*) AS n FROM capacity_slots WHERE sandbox_id IS NOT NULL",
             "SELECT count(*) AS n FROM sandbox_artifact_refs",
-            "SELECT count(*) AS n FROM outbox",
+            "SELECT count(*) AS n FROM outbox WHERE kind IN ('start','stop')",
         ):
             result.append((await (await conn.execute(query)).fetchone())["n"])
         return tuple(result)

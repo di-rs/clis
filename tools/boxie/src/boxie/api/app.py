@@ -1,5 +1,6 @@
 """Construct an unprivileged private API from injected application ports."""
 
+import hmac
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -10,6 +11,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import RequestResponseEndpoint
 
 from boxie.api.auth import ConsumerAuth
+from boxie.api.observations import ObservationSink, observation_routes
 from boxie.api.routes import routes
 from boxie.api.terminal import terminal_routes
 from boxie.application.ports import ArtifactAccess
@@ -33,6 +35,9 @@ def create_app(
     lifecycle: ReadyLifecycle,
     artifacts: ArtifactAccess,
     terminal: TerminalAccess,
+    *,
+    observations: ObservationSink | None = None,
+    agent_credential: bytes | None = None,
 ) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     auth = ConsumerAuth(config.consumers)
@@ -51,9 +56,19 @@ def create_app(
         request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
         try:
-            if request.url.path != "/healthz":
+            if request.url.path == "/internal/observations":
+                if (
+                    observations is None
+                    or agent_credential is None
+                    or not hmac.compare_digest(
+                        request.headers.get("Authorization", "").encode(),
+                        b"Bearer " + agent_credential,
+                    )
+                ):
+                    raise BoxieError(401, "invalid agent credential")
+            elif request.url.path != "/healthz":
                 request.state.principal = auth.resolve(request.headers.get("Authorization", ""))
-            if request.method == "POST":
+            if request.method == "POST" or request.url.path == "/internal/observations":
                 body = bytearray()
                 async for chunk in request.stream():
                     if len(body) + len(chunk) > 65536:
@@ -72,10 +87,15 @@ def create_app(
     async def readiness() -> JSONResponse:
         ready = await lifecycle.ready()
         return JSONResponse(
-            {"release": config.release, "dependencies": {"agent": ready}},
+            {
+                "release": config.release,
+                "dependencies": {"orchestration" if observations else "agent": ready},
+            },
             status_code=200 if ready else 503,
         )
 
+    if observations is not None:
+        app.include_router(observation_routes(observations))
     app.include_router(routes(service))
     app.include_router(terminal_routes(service, auth))
     return app

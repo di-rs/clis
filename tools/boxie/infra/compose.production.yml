@@ -1,4 +1,4 @@
-# Independently resolvable; automated production activation unavailable until PR4.
+# Durable API, worker and agent; only agent receives Docker and artifact storage.
 name: ${BOXIE_PROJECT_NAME:-boxie}
 services:
   api:
@@ -11,6 +11,10 @@ services:
     - ${BOXIE_API_CONFIG:?Set API config file}:/etc/boxie/api.json:ro
     - ${BOXIE_AGENT_CREDENTIAL_FILE:?Set agent credential file}:/run/secrets/agent:ro
     - ${BOXIE_CONSUMER_CREDENTIAL_FILE:?Set consumer credential file}:/run/secrets/consumer:ro
+    - ${BOXIE_POSTGRES_DSN_FILE:?Set Boxie database DSN file}:/run/secrets/postgres-dsn:ro
+    - ${BOXIE_TEMPORAL_CA_FILE:?Set Temporal frontend CA}:/run/secrets/temporal-ca.pem:ro
+    - ${BOXIE_API_TEMPORAL_CERT_FILE:?Set dedicated Temporal client certificate}:/run/secrets/temporal-client.pem:ro
+    - ${BOXIE_API_TEMPORAL_KEY_FILE:?Set dedicated Temporal client key}:/run/secrets/temporal-client.key:ro
     networks:
       consumer:
         aliases:
@@ -37,6 +41,31 @@ services:
     - ${BOXIE_AGENT_CONFIG:?Set agent config file}:/etc/boxie/agent.json:ro
     - ${BOXIE_PROFILES_FILE:?Set approved profiles file}:/etc/boxie/profiles.json:ro
     - ${BOXIE_AGENT_CREDENTIAL_FILE}:/run/secrets/agent:ro
+    - ${BOXIE_POSTGRES_DSN_FILE:?Set Boxie database DSN file}:/run/secrets/postgres-dsn:ro
+    networks:
+    - control
+    read_only: true
+    tmpfs:
+    - /tmp
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    init: true
+    restart: unless-stopped
+  worker:
+    image: ${BOXIE_RUNTIME_IMAGE:?Set approved immutable Boxie image}
+    command:
+    - boxie-worker
+    - --config
+    - /etc/boxie/worker.json
+    volumes:
+    - ${BOXIE_WORKER_CONFIG:?Set worker config file}:/etc/boxie/worker.json:ro
+    - ${BOXIE_AGENT_CREDENTIAL_FILE}:/run/secrets/agent:ro
+    - ${BOXIE_POSTGRES_DSN_FILE}:/run/secrets/postgres-dsn:ro
+    - ${BOXIE_TEMPORAL_CA_FILE:?Set Temporal frontend CA}:/run/secrets/temporal-ca.pem:ro
+    - ${BOXIE_WORKER_TEMPORAL_CERT_FILE:?Set dedicated Temporal client certificate}:/run/secrets/temporal-client.pem:ro
+    - ${BOXIE_WORKER_TEMPORAL_KEY_FILE:?Set dedicated Temporal client key}:/run/secrets/temporal-client.key:ro
     networks:
     - control
     read_only: true

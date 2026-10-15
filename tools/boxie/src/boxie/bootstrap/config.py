@@ -11,7 +11,7 @@ from boxie.domain.models import AgentIdentity, LifetimePolicy
 from boxie.domain.policy import validate_policy
 
 
-def read_credential(path: Path) -> bytes:
+def read_credential(path: Path, *, allow_spaces: bool = False) -> bytes:
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     try:
         info = os.fstat(descriptor)
@@ -19,7 +19,9 @@ def read_credential(path: Path) -> bytes:
             raise ValueError("credential must be a private regular file")
         with os.fdopen(descriptor, "rb", closefd=False) as source:
             value = source.read(4097).strip()
-        if not 16 <= len(value) <= 4096 or any(byte < 33 or byte > 126 for byte in value):
+        if not 16 <= len(value) <= 4096 or any(
+            byte < (32 if allow_spaces else 33) or byte > 126 for byte in value
+        ):
             raise ValueError("invalid credential")
         return value
     finally:
@@ -38,6 +40,8 @@ class AgentConfig:
     sweep_seconds: float = 1
     bind_host: str = "127.0.0.1"
     bind_port: int = 8091
+    postgres_dsn_file: Path | None = None
+    api_url: str | None = None
 
     def __post_init__(self) -> None:
         if not 1 <= self.max_sandboxes <= 8:
@@ -53,6 +57,8 @@ class AgentConfig:
         data = json.loads(path.read_text())
         for key in ("data_dir", "profiles_file", "credential_file"):
             data[key] = Path(data[key])
+        if "postgres_dsn_file" in data:
+            data["postgres_dsn_file"] = Path(data["postgres_dsn_file"])
         identity = data.pop("identity")
         data["identity"] = AgentIdentity(UUID(identity["installation_id"]), identity["host_id"])
         if "policy_maximum" in data:

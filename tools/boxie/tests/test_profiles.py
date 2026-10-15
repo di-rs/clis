@@ -7,6 +7,8 @@ import pytest
 from boxie.domain.errors import BoxieError
 from boxie.sandbox.profiles import ProfileRegistry
 from boxie_test_support.agent import IMAGE, configuration
+from integration.conftest import postgres_dsn as postgres_dsn
+from integration.conftest import postgres_server as postgres_server
 
 
 def test_reload_is_atomic_and_retains_approved_snapshot(tmp_path: Path) -> None:
@@ -59,7 +61,8 @@ def test_local_content_addressed_image_is_approved(tmp_path: Path) -> None:
     assert profiles.resolve_profile("shell", ("/bin/sh",), {}).image_digest == "sha256:" + "3" * 64
 
 
-def test_service_sighup_reload_is_atomic(tmp_path: Path) -> None:
+@pytest.mark.integration
+def test_service_sighup_reload_is_atomic(tmp_path: Path, postgres_dsn: str) -> None:
     import asyncio
     import signal
     import socket
@@ -69,7 +72,14 @@ def test_service_sighup_reload_is_atomic(tmp_path: Path) -> None:
     from boxie_test_support.agent import AUTH
 
     async def exercise() -> None:
+        from boxie.persistence.migrate import migrate
+        from test_postgres import MIGRATIONS
+
+        await asyncio.to_thread(migrate, postgres_dsn, MIGRATIONS)
         config = configuration(tmp_path)
+        dsn_file = tmp_path / "postgres.secret"
+        dsn_file.write_text(postgres_dsn)
+        dsn_file.chmod(0o600)
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
             port = listener.getsockname()[1]
@@ -85,6 +95,8 @@ def test_service_sighup_reload_is_atomic(tmp_path: Path) -> None:
                         "host_id": "host-1",
                     },
                     "bind_port": port,
+                    "postgres_dsn_file": str(dsn_file),
+                    "api_url": "http://127.0.0.1:1",
                 }
             )
         )

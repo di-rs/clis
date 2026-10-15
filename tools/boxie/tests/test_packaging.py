@@ -28,7 +28,7 @@ def test_distributions_have_explicit_isolated_modules(relative: str, module: str
 def test_private_compose_units_do_not_share_privileges() -> None:
     boxie = yaml.safe_load((ROOT / "tools/boxie/infra/compose.yml").read_text())
     product = yaml.safe_load((ROOT / "tools/cli-playground/infra/compose.yml").read_text())
-    assert set(boxie["services"]) == {"api", "agent"}
+    assert set(boxie["services"]) == {"api", "agent", "worker"}
     for name, service in boxie["services"].items():
         assert not service.get("ports")
         assert ("docker.sock" in json.dumps(service)) == (name == "agent")
@@ -121,7 +121,7 @@ for name in ({forbidden!r}, 'boxie_infra', 'playground_infra', 'boxie_test_suppo
     assert importlib.util.find_spec(name) is None, name
 """
     if module == "boxie":
-        probe += "import boxie.bootstrap.api, boxie.bootstrap.agent\n"
+        probe += "import boxie.bootstrap.api, boxie.bootstrap.agent, boxie.bootstrap.worker\n"
     else:
         # Real installed assets via ASGI HTTP, without pytest/httpx or source imports.
         probe += """
@@ -172,6 +172,13 @@ def test_resolved_compose_isolated_topology(
     values = {
         "BOXIE_RUNTIME_IMAGE": "boxie:test",
         "BOXIE_API_CONFIG": str(tmp_path / "api.json"),
+        "BOXIE_WORKER_CONFIG": str(tmp_path / "worker.json"),
+        "BOXIE_POSTGRES_DSN_FILE": str(tmp_path / "postgres-dsn.secret"),
+        "BOXIE_TEMPORAL_CA_FILE": str(tmp_path / "ca.pem"),
+        "BOXIE_API_TEMPORAL_CERT_FILE": str(tmp_path / "api.pem"),
+        "BOXIE_API_TEMPORAL_KEY_FILE": str(tmp_path / "api.key"),
+        "BOXIE_WORKER_TEMPORAL_CERT_FILE": str(tmp_path / "worker.pem"),
+        "BOXIE_WORKER_TEMPORAL_KEY_FILE": str(tmp_path / "worker.key"),
         "BOXIE_AGENT_CONFIG": str(tmp_path / "agent.json"),
         "BOXIE_PROFILES_FILE": str(tmp_path / "profiles.json"),
         "BOXIE_AGENT_CREDENTIAL_FILE": str(tmp_path / "agent.secret"),

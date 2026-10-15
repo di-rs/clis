@@ -1,14 +1,10 @@
 import asyncio
 import hashlib
 import json
-import os
-import signal
-import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 from uuid import uuid4
 
-import httpx
 import pytest
 from boxie_test_support.agent import Clock, DockerDaemon, bundle, configuration, live, request
 from boxie_test_support.api import CONSUMER_AUTH, api_server, artifact, create, ready, terminal_url
@@ -103,65 +99,26 @@ def test_cancelled_upload_cleans_both_proxy_hops(
     asyncio.run(exercise())
 
 
-def test_standalone_api_reads_distinct_private_credentials(tmp_path: Path) -> None:
-    async def exercise() -> None:
-        config, daemon = configuration(tmp_path), DockerDaemon()
-        consumer = tmp_path / "consumer.secret"
-        consumer.write_text("consumer-one-secret\n")
-        consumer.chmod(0o600)
-        # A subprocess runs the actual API composition root and real agent client.
-        import socket
+def test_standalone_api_requires_durable_configuration(tmp_path: Path) -> None:
+    from boxie.bootstrap.api import load_configuration
 
-        sock = socket.socket()
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-        sock.close()
-        async with live(config, daemon, Clock()) as (control, _agent):
-            path = tmp_path / "api.json"
-            path.write_text(
-                json.dumps(
-                    {
-                        "agent_url": str(control.base_url),
-                        "agent_credential_file": str(config.credential_file),
-                        "consumer_credential_files": {"one": str(consumer)},
-                        "release": "process-release",
-                        "bind_port": port,
-                    }
-                )
-            )
-            process = await asyncio.create_subprocess_exec(
-                sys.executable,
-                "-m",
-                "boxie.bootstrap.api",
-                "--config",
-                str(path),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                env={key: value for key, value in os.environ.items() if key != "PYTHONPATH"},
-            )
-            try:
-                async with httpx.AsyncClient(
-                    base_url=f"http://127.0.0.1:{port}", headers=CONSUMER_AUTH
-                ) as client:
-                    for _ in range(200):
-                        try:
-                            response = await client.get("/readyz")
-                            break
-                        except httpx.ConnectError:
-                            assert process.returncode is None
-                            await asyncio.sleep(0.01)
-                    assert response.status_code == 200
-                    assert response.json()["release"] == "process-release"
-                    await ready(client, await create(client, await artifact(client)))
-            finally:
-                if process.returncode is None:
-                    process.terminate()
-                output, _ = await asyncio.wait_for(process.communicate(), 5)
-            assert process.returncode == -signal.SIGTERM, output.decode()
-            assert b"Application shutdown complete" in output and b"ERROR" not in output
-            assert b"consumer-one-secret" not in output and b"agent-test-secret" not in output
-
-    asyncio.run(exercise())
+    config = configuration(tmp_path)
+    consumer = tmp_path / "consumer.secret"
+    consumer.write_text("consumer-one-secret")
+    consumer.chmod(0o600)
+    path = tmp_path / "api.json"
+    path.write_text(
+        json.dumps(
+            {
+                "agent_url": "http://127.0.0.1:8091",
+                "agent_credential_file": str(config.credential_file),
+                "consumer_credential_files": {"one": str(consumer)},
+                "release": "process-release",
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="durable"):
+        load_configuration(path)
 
 
 def test_dependency_failure_is_bounded_and_readiness_reports_release() -> None:

@@ -11,9 +11,17 @@ import uvicorn
 from pydantic import TypeAdapter, ValidationError
 
 from boxie.api.app import ApiConfig, create_app
-from boxie.application.direct_lifecycle import DirectLifecycle
-from boxie.bootstrap.config import read_credential
-from boxie.sandbox.client import AgentClient
+from boxie.bootstrap.config import DurableConfig, read_credential
+from boxie.bootstrap.durable import (
+    Dependencies,
+    agent_identity,
+    durable_config,
+    pool_for,
+    temporal_client,
+)
+from boxie.domain.models import AgentIdentity
+from boxie.persistence.postgres import PostgresLifecycle
+from boxie.sandbox.durable_client import DurableAgentClient
 from boxie.sandbox.protocol import ConsumerId
 
 
@@ -22,6 +30,8 @@ class RuntimeConfig:
     api: ApiConfig
     agent_url: str
     agent_credential: bytes = field(repr=False)
+    durable: DurableConfig
+    identity: AgentIdentity
     bind_host: str = "127.0.0.1"
     bind_port: int = 8090
     request_timeout: float = 20
@@ -46,6 +56,10 @@ def load_configuration(path: Path) -> RuntimeConfig:
         except ValidationError:
             raise ValueError("invalid consumer ID") from None
     api = ApiConfig(data.pop("release"), consumers)
+    if "durable" not in data or "identity" not in data:
+        raise ValueError("durable configuration and agent identity required")
+    data["durable"] = durable_config(data.pop("durable"))
+    data["identity"] = agent_identity(data.pop("identity"))
     return RuntimeConfig(api=api, agent_credential=agent, **data)
 
 
@@ -56,10 +70,24 @@ def main() -> None:
     config = load_configuration(args.config)
 
     async def run() -> None:
-        async with AgentClient(
-            config.agent_url, config.agent_credential, timeout=config.request_timeout
-        ) as agent:
-            app = create_app(config.api, DirectLifecycle(agent), agent, agent)
+        temporal = await temporal_client(config.durable)
+        async with (
+            pool_for(config.durable.postgres_dsn_file) as pool,
+            DurableAgentClient(
+                config.agent_url, config.agent_credential, timeout=config.request_timeout
+            ) as agent,
+        ):
+            lifecycle = PostgresLifecycle(
+                pool, agent, config.identity, Dependencies(agent, temporal)
+            )
+            app = create_app(
+                config.api,
+                lifecycle,
+                agent,
+                agent,
+                observations=lifecycle,
+                agent_credential=config.agent_credential,
+            )
             server = uvicorn.Server(
                 uvicorn.Config(
                     app,

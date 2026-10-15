@@ -47,7 +47,9 @@ operators may separately approve the
 [Playground profile](../../cli-playground/infra/profiles/playground.json) with the
 immutable product sandbox image digest. Profiles are never consumer uploads.
 
-Generate the process JSON files (substitute your installation UUID and paths):
+Complete the required [durable runtime prerequisites](durable-runtime.md) first,
+including explicit SQL migrations, namespace setup, and API/worker mTLS identities.
+Generate all three process JSON files (substitute your installation UUID and paths):
 
 ```sh
 uv run --locked python -m boxie_infra.config \

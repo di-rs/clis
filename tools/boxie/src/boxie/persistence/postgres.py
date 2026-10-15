@@ -94,7 +94,7 @@ class PostgresLifecycle:
         row = await (
             await conn.execute("""SELECT count(*) AS backlog,
             COALESCE(EXTRACT(EPOCH FROM clock_timestamp() - min(created_at)), 0) AS age
-            FROM outbox WHERE delivered_at IS NULL""")
+            FROM outbox WHERE delivered_at IS NULL AND kind IN ('start','stop')""")
         ).fetchone()
         assert row is not None
         if (
@@ -332,13 +332,16 @@ class PostgresLifecycle:
             await conn.execute(
                 """INSERT INTO agent_observations
                 (sandbox_id,generation,boot_id,event_version,observed_at,ready_at,last_input_at,
-                 disconnected_at,resource_present,removal_confirmed,cleanup_pending)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                 disconnected_at,resource_present,removal_confirmed,cleanup_pending,
+                 attachment_epoch,absolute_deadline,control_lease_until,container_id)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (sandbox_id) DO UPDATE SET generation=EXCLUDED.generation,
                 boot_id=EXCLUDED.boot_id,event_version=EXCLUDED.event_version,
                 observed_at=EXCLUDED.observed_at,ready_at=EXCLUDED.ready_at,
                 last_input_at=EXCLUDED.last_input_at,disconnected_at=EXCLUDED.disconnected_at,
-                resource_present=EXCLUDED.resource_present,removal_confirmed=EXCLUDED.removal_confirmed,cleanup_pending=EXCLUDED.cleanup_pending""",
+                resource_present=EXCLUDED.resource_present,removal_confirmed=EXCLUDED.removal_confirmed,cleanup_pending=EXCLUDED.cleanup_pending,
+                attachment_epoch=EXCLUDED.attachment_epoch,absolute_deadline=EXCLUDED.absolute_deadline,
+                control_lease_until=EXCLUDED.control_lease_until,container_id=EXCLUDED.container_id""",
                 (
                     item.sandbox_id,
                     item.generation,
@@ -351,6 +354,10 @@ class PostgresLifecycle:
                     item.resource_present,
                     item.removal_confirmed,
                     item.cleanup_pending,
+                    item.attachment_epoch,
+                    item.absolute_deadline,
+                    item.control_lease_until,
+                    item.container_id,
                 ),
             )
             state = (
@@ -372,6 +379,15 @@ class PostgresLifecycle:
                         or item.state.value in ("terminating", "terminated", "failed")
                     ),
                     item.removal_confirmed,
+                    item.sandbox_id,
+                ),
+            )
+            await conn.execute(
+                """INSERT INTO outbox (id,deduplication_key,sandbox_id,kind)
+                VALUES (%s,%s,%s,'observation') ON CONFLICT DO NOTHING""",
+                (
+                    uuid4(),
+                    f"{item.sandbox_id}:{item.boot_id}:{item.event_version}",
                     item.sandbox_id,
                 ),
             )
