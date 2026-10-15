@@ -33,7 +33,12 @@ async def reconcile_removal(
             info = await owned_container(docker, record)
             if info is not None:
                 record.container_id = info.id
-                save()
+                try:
+                    save()
+                except Exception:
+                    # Ownership was checked against existing execution intent.
+                    # Failure to persist stop/ID facts must not prevent expiry.
+                    pass
                 await docker.delete(info.id)
                 if await docker.inspect(info.id) is not None:
                     return
@@ -58,4 +63,12 @@ async def reconcile_removal(
         pass
     finally:
         record.event_version += 1
-        save()
+        try:
+            save()
+        except Exception:
+            # No await separates the tentative terminal projection from its save.
+            # Never expose confirmation or forget intent without durable finality.
+            record.state = SandboxState.TERMINATING
+            record.cleanup_pending = True
+            record.removal_confirmed = False
+            raise

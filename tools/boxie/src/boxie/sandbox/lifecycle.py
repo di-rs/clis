@@ -1,6 +1,7 @@
 """Fenced execution of durable admissions; PostgreSQL owns all reservations."""
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -25,6 +26,8 @@ from boxie.sandbox.profiles import ProfileRegistry
 from boxie.sandbox.provision import ProvisionDecisions, provision
 from boxie.sandbox.reconcile import reconcile_removal
 from boxie.sandbox.terminal import ExecutionTerminal
+
+logger = logging.getLogger(__name__)
 
 FINAL = {SandboxState.TERMINATED, SandboxState.FAILED}
 ArtifactPath = Callable[[Principal, UUID], Awaitable[Path]]
@@ -67,6 +70,8 @@ class DurableAgent:
         self.reconciliations: dict[UUID, asyncio.Task[None]] = {}
         self.sweeper: asyncio.Task[None] | None = None
         self.stopping = False
+        self._journal_healthy = True
+        self._failed_reconciliations: set[UUID] = set()
 
     def _record(self, ref: SandboxRef) -> ExecutionRecord:
         record = self.records.get(ref.id)
@@ -77,9 +82,31 @@ class DurableAgent:
     def _lock(self, ref: SandboxRef) -> asyncio.Lock:
         return self.locks.setdefault(ref.id, asyncio.Lock())
 
+    @property
+    def execution_ready(self) -> bool:
+        """Local execution readiness, not Docker/SQL/control-plane availability.
+
+        False after an observed journal or reconciliation failure, until a full
+        journal flush and successful per-record retries establish recovery.
+        Task 3 must include this signal in its authenticated readiness response.
+        """
+        return not self.stopping and self._journal_healthy and not self._failed_reconciliations
+
+    def _save(self) -> None:
+        try:
+            self.journal.save()
+        except Exception:
+            if self._journal_healthy:
+                logger.exception("execution journal persistence failed; new execution disabled")
+            self._journal_healthy = False
+            raise
+        if not self._journal_healthy:
+            logger.info("execution journal persistence recovered")
+        self._journal_healthy = True
+
     def _changed(self, record: ExecutionRecord) -> None:
         record.event_version += 1
-        self.journal.save()
+        self._save()
 
     def _observation(self, record: ExecutionRecord) -> AgentObservation:
         return AgentObservation(
@@ -133,8 +160,8 @@ class DurableAgent:
                 if old.request() != request:
                     raise BoxieError(409, "immutable execution request differs")
                 return self._observation(old)
-            if self.stopping:
-                raise BoxieError(503, "agent stopping")
+            if not self.execution_ready:
+                raise BoxieError(503, "agent execution unavailable")
             now = self.clock()
             record = ExecutionRecord.create(request, self.boot_id, now + timedelta(seconds=90))
             self.records[record.id] = record
@@ -142,7 +169,16 @@ class DurableAgent:
                 self.monotonic() + max(0, (request.absolute_deadline - now).total_seconds()),
                 self.monotonic() + 90,
             )
-            self.journal.save()
+            try:
+                self._save()
+            except Exception:
+                # The atomic replacement may have succeeded before fsync failed.
+                # Keep the identity fenced and retry cleanup, never start this request.
+                record.state = SandboxState.TERMINATING
+                record.cleanup_pending = True
+                record.reason = TerminationReason.PROVISIONING_FAILED
+                record.event_version += 1
+                raise BoxieError(503, "agent execution unavailable") from None
             self.workers[record.id] = asyncio.create_task(self._provision(record))
             return self._observation(record)
 
@@ -163,7 +199,8 @@ class DurableAgent:
 
     def _live(self, record: ExecutionRecord) -> bool:
         return (
-            record.boot_id == self.boot_id
+            self.execution_ready
+            and record.boot_id == self.boot_id
             and record.state not in FINAL | {SandboxState.TERMINATING}
             and self._expiry(record) is None
         )
@@ -207,7 +244,13 @@ class DurableAgent:
         record.state, record.cleanup_pending = SandboxState.TERMINATING, True
         record.reason = record.reason or reason
         record.attached = False
-        self._changed(record)
+        try:
+            self._changed(record)
+        except Exception:
+            # A full disk must not defeat expiry. The prior execution/create intent
+            # is already durable; retain the in-memory stop latch and attempt only
+            # ownership-checked removal. Confirmation still requires a final save.
+            pass
 
     async def remove(self, ref: SandboxRef, reason: TerminationReason) -> AgentObservation:
         async with self._lock(ref):
@@ -228,13 +271,19 @@ class DurableAgent:
                 except Exception:
                     pass
             create = self.creates.get(record.id)
-            await reconcile_removal(
-                self.docker,
-                record,
-                self.journal.save,
-                self.config.docker_timeout,
-                create is not None and not create.done(),
-            )
+            try:
+                await reconcile_removal(
+                    self.docker,
+                    record,
+                    self._save,
+                    self.config.docker_timeout,
+                    create is not None and not create.done(),
+                )
+            except Exception:
+                if self._journal_healthy:
+                    raise
+                # Physical deletion may have succeeded, but the failed final save
+                # leaves a pending, unconfirmed record for autonomous retry.
 
     async def expire_if_current(self, request: ExpiryRequest) -> ExpiryDecision:
         async with self._lock(request.ref):
@@ -331,28 +380,43 @@ class DurableAgent:
         if reason:
             await self._cleanup(record)
 
+    async def _supervised_reconcile(self, record: ExecutionRecord) -> None:
+        try:
+            await self._reconcile_one(record)
+        except Exception:
+            if record.id not in self._failed_reconciliations:
+                logger.exception("sandbox reconciliation failed; retry pending: %s", record.id)
+            self._failed_reconciliations.add(record.id)
+        else:
+            self._failed_reconciliations.discard(record.id)
+
     async def reconcile(self) -> None:
         await asyncio.gather(
-            *(self._reconcile_one(record) for record in list(self.records.values()))
+            *(self._supervised_reconcile(record) for record in list(self.records.values()))
         )
 
     async def start(self) -> None:
-        # Persisted labels retain the creating boot for precise old-resource cleanup.
-        for record in self.records.values():
-            if record.boot_id != self.boot_id and record.state not in FINAL:
-                self._stop(record, TerminationReason.AGENT_RESTART)
+        # Missing process-local deadlines identify previous-boot sessions. Their
+        # stop/save is supervised too, so a startup write fault remains retryable.
         await self.reconcile()
         self.sweeper = asyncio.create_task(self._sweep())
 
     async def _sweep(self) -> None:
         while True:
+            if not self._journal_healthy:
+                try:
+                    # Flush all in-memory pending decisions, including a failed
+                    # final removal save, before advertising recovered durability.
+                    self._save()
+                except Exception:
+                    pass
             for record in list(self.records.values()):
                 previous = self.reconciliations.get(record.id)
                 if previous is None or previous.done():
-                    if previous is not None:
-                        previous.result()
+                    # The supervisor consumes and records failures. A cancelled
+                    # per-record task is also replaced without ending this loop.
                     self.reconciliations[record.id] = asyncio.create_task(
-                        self._reconcile_one(record)
+                        self._supervised_reconcile(record)
                     )
             await asyncio.sleep(self.config.sweep_seconds)
 

@@ -678,3 +678,60 @@ def test_start_guard_requires_retained_artifact_reference(
             assert not await guard.run_start_if_allowed(request, boot, forbidden_start)
 
     asyncio.run(exercise())
+
+
+def test_journal_outage_expires_container_but_retains_sql_accounting_until_durable_confirmation(
+    postgres_dsn: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def exercise() -> None:
+        from datetime import UTC, datetime
+
+        from boxie.domain.lifecycle import EnsureRequest
+        from boxie.persistence.start_guard import PostgresStartGuard
+        from boxie.sandbox.lifecycle import DurableAgent
+        from test_agent_lifecycle import Daemon, settled
+
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
+            view = await life.submit(OWNER, "journal-outage", await upload(artifacts))
+            clock = Clock()
+            clock.now = datetime.now(UTC)
+            daemon = Daemon()
+            agent = DurableAgent(
+                config, daemon, artifacts.path, PostgresStartGuard(pool), clock, clock.monotonic
+            )
+            await life.bind_agent_boot(OWNER, config.identity, view.id, 1, None, agent.boot_id)
+            request = EnsureRequest.from_durable(await life.load_request(view.id))
+            await agent.ensure(request)
+            ready = await settled(agent, request.ref, SandboxState.READY)
+            assert await life.record_observation(ready)
+            await agent.start()
+            original_save = agent.journal.save
+
+            def unavailable() -> None:
+                raise OSError("persistent journal storage outage")
+
+            monkeypatch.setattr(agent.journal, "save", unavailable)
+            try:
+                clock.advance(90)
+                for _ in range(200):
+                    if daemon.deleted_ids:
+                        break
+                    await asyncio.sleep(0.001)
+                assert daemon.deleted_ids == [ready.container_id]
+                pending = await agent.inspect(request.ref)
+                assert pending.cleanup_pending and not pending.removal_confirmed
+                assert not agent.execution_ready
+                assert await life.record_observation(pending)
+                assert await counts(pool) == (1, 1, 1, 1)
+                with pytest.raises(ValueError, match="explicit physical removal"):
+                    await life.confirm_removed(pending)
+                monkeypatch.setattr(agent.journal, "save", original_save)
+                removed = await settled(agent, request.ref, SandboxState.TERMINATED)
+                assert removed.removal_confirmed and not removed.cleanup_pending
+                assert await life.confirm_removed(removed)
+                assert await counts(pool) == (1, 0, 0, 1)
+            finally:
+                monkeypatch.setattr(agent.journal, "save", original_save)
+                await agent.close()
+
+    asyncio.run(exercise())

@@ -559,3 +559,220 @@ def test_control_loss_during_provisioning_prevents_late_start(tmp_path: Path) ->
         await agent.close()
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("failure_point", ["stop", "removed"])
+def test_transient_journal_failure_does_not_disable_unrelated_expiry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure_point: str
+) -> None:
+    async def exercise() -> None:
+        from boxie.domain.lifecycle import SandboxRef
+
+        agent, first, daemon, clock, _ = await setup(tmp_path)
+        await settled(agent, first.ref, SandboxState.READY)
+        second = replace(first, ref=SandboxRef(uuid4(), 1))
+        await agent.ensure(second)
+        await settled(agent, second.ref, SandboxState.READY)
+        clock.advance(30)
+        await agent.renew_control_lease(second.ref, agent.boot_id)
+        await agent.start()
+        original_save = agent.journal.save
+        failed = asyncio.Event()
+
+        def fail_once() -> None:
+            eligible = failure_point == "stop" or agent.records[first.ref.id].removal_confirmed
+            if eligible and not failed.is_set():
+                failed.set()
+                raise OSError("one-time journal failure")
+            original_save()
+
+        monkeypatch.setattr(agent.journal, "save", fail_once)
+        try:
+            clock.advance(60)
+            await asyncio.wait_for(failed.wait(), 1)
+            clock.advance(31)
+            first_removed = await settled(agent, first.ref, SandboxState.TERMINATED)
+            second_removed = await settled(agent, second.ref, SandboxState.TERMINATED)
+            assert first_removed.removal_confirmed and second_removed.removal_confirmed
+            assert not daemon.resources and len(daemon.deleted_ids) == 2
+            assert agent.sweeper is not None and not agent.sweeper.done()
+        finally:
+            monkeypatch.setattr(agent.journal, "save", original_save)
+            await agent.close()
+
+    asyncio.run(exercise())
+
+
+def test_unhealthy_journal_blocks_new_execution_and_recovers_autonomously(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    async def exercise() -> None:
+        from boxie.domain.lifecycle import SandboxRef
+
+        agent, first, daemon, clock, _ = await setup(tmp_path)
+        await settled(agent, first.ref, SandboxState.READY)
+        await agent.start()
+        original_save = agent.journal.save
+        failed = asyncio.Event()
+
+        def unavailable() -> None:
+            failed.set()
+            raise OSError("journal storage unavailable")
+
+        monkeypatch.setattr(agent.journal, "save", unavailable)
+        blocked = replace(first, ref=SandboxRef(uuid4(), 1))
+        try:
+            clock.advance(90)
+            await asyncio.wait_for(failed.wait(), 1)
+            assert hasattr(agent, "execution_ready"), "durability readiness missing"
+            assert not agent.execution_ready
+            with pytest.raises(BoxieError) as denied:
+                await agent.ensure(blocked)
+            assert denied.value.status == 503
+            assert daemon.creates == 1
+            assert "journal" in caplog.text
+            monkeypatch.setattr(agent.journal, "save", original_save)
+            removed = await settled(agent, first.ref, SandboxState.TERMINATED)
+            assert removed.removal_confirmed
+            for _ in range(200):
+                if agent.execution_ready:
+                    break
+                await asyncio.sleep(0.001)
+            assert agent.execution_ready
+            await agent.ensure(blocked)
+            await settled(agent, blocked.ref, SandboxState.READY)
+            assert daemon.creates == 2
+        finally:
+            monkeypatch.setattr(agent.journal, "save", original_save)
+            await agent.close()
+
+    asyncio.run(exercise())
+
+
+def test_failed_initial_journal_write_never_strands_an_unscheduled_acceptance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def exercise() -> None:
+        from boxie.domain.lifecycle import SandboxRef
+
+        agent, first, daemon, _, _ = await setup(tmp_path)
+        await settled(agent, first.ref, SandboxState.READY)
+        await agent.start()
+        original_save = agent.journal.save
+        broken = replace(first, ref=SandboxRef(uuid4(), 1))
+
+        def unavailable() -> None:
+            raise OSError("journal storage unavailable")
+
+        monkeypatch.setattr(agent.journal, "save", unavailable)
+        try:
+            with pytest.raises(BoxieError) as failure:
+                await agent.ensure(broken)
+            assert failure.value.status == 503
+            assert not agent.execution_ready
+            assert daemon.creates == 1
+        finally:
+            monkeypatch.setattr(agent.journal, "save", original_save)
+        try:
+            removed = await settled(agent, broken.ref, SandboxState.FAILED)
+            assert removed.removal_confirmed
+            assert daemon.creates == 1
+        finally:
+            await agent.close()
+
+    asyncio.run(exercise())
+
+
+def test_journal_failure_fences_an_already_provisioning_final_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def exercise() -> None:
+        from boxie.domain.lifecycle import SandboxRef
+
+        agent, first, daemon, _, guard = await setup(tmp_path)
+        await settled(agent, first.ref, SandboxState.READY)
+        await agent.start()
+        second = replace(first, ref=SandboxRef(uuid4(), 1))
+        entered, release = asyncio.Event(), asyncio.Event()
+        original_guard = guard.run_start_if_allowed
+
+        async def delayed_guard(request: Any, boot: Any, start: Any) -> bool:
+            entered.set()
+            await release.wait()
+            return await original_guard(request, boot, start)
+
+        monkeypatch.setattr(guard, "run_start_if_allowed", delayed_guard)
+        await agent.ensure(second)
+        await asyncio.wait_for(entered.wait(), 1)
+        original_save = agent.journal.save
+
+        def unavailable() -> None:
+            raise OSError("journal storage unavailable")
+
+        monkeypatch.setattr(agent.journal, "save", unavailable)
+        try:
+            pending = await agent.remove(first.ref, TerminationReason.REQUESTED)
+            assert pending.cleanup_pending and not pending.removal_confirmed
+            assert not agent.execution_ready
+            release.set()
+            await asyncio.gather(agent.workers[second.ref.id], return_exceptions=True)
+            assert len(daemon.started) == 1, "durability failure must fence a pending start"
+        finally:
+            monkeypatch.setattr(agent.journal, "save", original_save)
+        try:
+            await settled(agent, first.ref, SandboxState.TERMINATED)
+            removed = await settled(agent, second.ref, SandboxState.FAILED)
+            assert removed.removal_confirmed
+        finally:
+            await agent.close()
+
+    asyncio.run(exercise())
+
+
+def test_sustained_journal_outage_deletes_owned_resources_but_keeps_cleanup_unconfirmed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def exercise() -> None:
+        from boxie.domain.lifecycle import SandboxRef
+
+        agent, first, daemon, clock, _ = await setup(tmp_path)
+        await settled(agent, first.ref, SandboxState.READY)
+        daemon.create_gate = asyncio.Event()
+        daemon.create_entered.clear()
+        second = replace(first, ref=SandboxRef(uuid4(), 1))
+        await agent.ensure(second)
+        await asyncio.wait_for(daemon.create_entered.wait(), 1)
+        await agent.start()
+        original_save = agent.journal.save
+
+        def unavailable() -> None:
+            raise OSError("persistent journal storage outage")
+
+        monkeypatch.setattr(agent.journal, "save", unavailable)
+        try:
+            clock.advance(90)
+            for _ in range(200):
+                if daemon.deleted_ids:
+                    break
+                await asyncio.sleep(0.001)
+            assert len(daemon.deleted_ids) == 1, "storage failure must not defeat local expiry"
+            first_pending = await agent.inspect(first.ref)
+            late_pending = await agent.inspect(second.ref)
+            assert first_pending.cleanup_pending and not first_pending.removal_confirmed
+            assert late_pending.cleanup_pending and not late_pending.removal_confirmed
+            assert not agent.execution_ready
+            monkeypatch.setattr(agent.journal, "save", original_save)
+            removed = await settled(agent, first.ref, SandboxState.TERMINATED)
+            assert removed.removal_confirmed
+            assert (await agent.inspect(second.ref)).cleanup_pending
+            # A prior 404 plus recovered storage still cannot settle the unknown create.
+            daemon.create_gate.set()
+            late_removed = await settled(agent, second.ref, SandboxState.TERMINATED)
+            assert late_removed.removal_confirmed and len(daemon.deleted_ids) == 2
+            assert len(daemon.started) == 1
+        finally:
+            monkeypatch.setattr(agent.journal, "save", original_save)
+            daemon.create_gate.set()
+            await agent.close()
+
+    asyncio.run(exercise())
