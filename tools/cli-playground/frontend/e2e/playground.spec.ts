@@ -9,7 +9,17 @@ const metadata = {
   clis: ["catr"],
   pr: 42,
   sha: "0123456789abcdef0123456789abcdef01234567",
+  revision: "0123456789abcdef0123456789abcdef01234567",
+  build: null,
   expires_at: "2099-01-01T00:00:00Z",
+};
+
+const currentBuild = {
+  sha: metadata.sha,
+  run_id: 501,
+  run_number: 12,
+  run_attempt: 1,
+  state: "ready",
 };
 
 type ClientMessage =
@@ -160,7 +170,12 @@ for (const action of ["Reset session", "Start new session"]) {
     const sessions = await openPlayground(page);
     await page.route(`**${metadataPath}`, (route) =>
       route.fulfill({
-        json: { ...metadata, sha: "b".repeat(40), clis: ["echor", "wcr"] },
+        json: {
+          ...metadata,
+          sha: "b".repeat(40),
+          revision: "b".repeat(40),
+          clis: ["echor", "wcr"],
+        },
       }),
     );
     if (action === "Start new session") {
@@ -185,7 +200,7 @@ test("a rejected stale revision can reload metadata and reconnect at the same UR
   const sessions = await openPlayground(page);
   await page.route(`**${metadataPath}`, (route) =>
     route.fulfill({
-      json: { ...metadata, sha: "b".repeat(40) },
+      json: { ...metadata, sha: "b".repeat(40), revision: "b".repeat(40) },
     }),
   );
   await sessions[0].socket.close({ code: 1008, reason: "Revision changed" });
@@ -196,6 +211,146 @@ test("a rejected stale revision can reload metadata and reconnect at the same UR
   expect(new URL(sessions[1].socket.url()).searchParams.get("sha")).toBe("b".repeat(40));
   await expect(page.locator("#connection-status")).toHaveText("Connected");
   await expect(page).toHaveURL(previewPath);
+});
+
+test("a new build is discovered without replacing the current terminal, including same-SHA reruns", async ({
+  page,
+}) => {
+  await page.clock.install();
+  let latest = { ...metadata, revision: `${metadata.sha}-12-1`, build: currentBuild };
+  await page.route(`**${metadataPath}`, (route) => route.fulfill({ json: latest }));
+  const sessions = await mockTerminal(page);
+  await page.goto(previewPath);
+  await expect(page.locator("#connection-status")).toHaveText("Connected");
+  const first = sessions[0];
+  expect(new URL(first.socket.url()).searchParams.get("revision")).toBe(`${metadata.sha}-12-1`);
+  first.socket.send(Buffer.from("My work is still here\r\n"));
+  latest = {
+    ...latest,
+    revision: `${metadata.sha}-12-2`,
+    build: { ...currentBuild, run_attempt: 2 },
+  };
+  await page.clock.fastForward(10_000);
+  await expect(page.getByRole("button", { name: "Switch to latest build" })).toBeVisible();
+  await expect(page.locator(".xterm-accessibility-tree")).toContainText("My work is still here");
+  expect(first.closed).toBe(false);
+  expect(sessions).toHaveLength(1);
+  await page.getByRole("button", { name: "Switch to latest build" }).click();
+  await expect.poll(() => sessions.length).toBe(2);
+  await expect.poll(() => first.closed).toBe(true);
+  expect(new URL(sessions[1].socket.url()).searchParams.get("revision")).toBe(
+    `${metadata.sha}-12-2`,
+  );
+  await expect(page.locator(".xterm-accessibility-tree")).not.toContainText(
+    "My work is still here",
+  );
+});
+
+test("a first build opens its terminal when ready without reloading the page", async ({ page }) => {
+  await page.clock.install();
+  let ready = false;
+  await page.route(`**${metadataPath}`, (route) =>
+    route.fulfill({
+      json: ready
+        ? { ...metadata, revision: `${metadata.sha}-12-1`, build: currentBuild }
+        : {
+            ...metadata,
+            sha: null,
+            revision: null,
+            clis: [],
+            build: { ...currentBuild, state: "building" },
+          },
+    }),
+  );
+  const sessions = await mockTerminal(page);
+  await page.goto(previewPath);
+  await expect(page.getByRole("heading", { name: "This preview is building." })).toBeVisible();
+  expect(sessions).toHaveLength(0);
+  ready = true;
+  await page.clock.fastForward(10_000);
+  await expect(page.locator("#connection-status")).toHaveText("Connected");
+  expect(sessions).toHaveLength(1);
+});
+
+for (const [state, title] of [
+  ["failed", "The latest preview failed."],
+  ["empty", "No affected CLIs."],
+  ["cancelled", "The latest build was cancelled."],
+]) {
+  test(`${state} without a runnable artifact explains the state without a terminal`, async ({
+    page,
+  }) => {
+    await page.route(`**${metadataPath}`, (route) =>
+      route.fulfill({
+        json: {
+          ...metadata,
+          sha: null,
+          revision: null,
+          clis: [],
+          build: { ...currentBuild, state },
+        },
+      }),
+    );
+    const sessions = await mockTerminal(page);
+    await page.goto(previewPath);
+    await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
+    expect(sessions).toHaveLength(0);
+  });
+}
+
+test("a failed newer build labels the retained session and polling errors leave it usable", async ({
+  page,
+}) => {
+  await page.clock.install();
+  let failRequest = false;
+  let latest = { ...metadata, revision: `${metadata.sha}-12-1`, build: currentBuild };
+  await page.route(`**${metadataPath}`, (route) =>
+    route.fulfill({
+      status: failRequest ? 503 : 200,
+      json: latest,
+    }),
+  );
+  const sessions = await mockTerminal(page);
+  await page.goto(previewPath);
+  await expect(page.locator("#connection-status")).toHaveText("Connected");
+  latest = {
+    ...latest,
+    build: { ...currentBuild, sha: "b".repeat(40), run_number: 13, state: "failed" },
+  };
+  await page.clock.fastForward(10_000);
+  await expect(page.locator("#build-banner")).toContainText("Latest preview failed");
+  await expect(page.locator("#build-banner")).toContainText("bbbbbbb");
+  await expect(page.locator("#build-banner")).toContainText("last successful build");
+  await expect(page.locator("#meta-sha")).toHaveText("0123456");
+  failRequest = true;
+  await page.clock.fastForward(10_000);
+  await page.getByRole("button", { name: "Insert catr --help: Explore the options" }).click();
+  await expect.poll(() => inputs(sessions[0])).toEqual(["/opt/preview/bin/catr --help"]);
+  expect(sessions).toHaveLength(1);
+  expect(sessions[0].closed).toBe(false);
+});
+
+test("a failed head distinguishes the latest successful build from an older active terminal", async ({
+  page,
+}) => {
+  await page.clock.install();
+  let latest = { ...metadata, revision: `${metadata.sha}-12-1`, build: currentBuild };
+  await page.route(`**${metadataPath}`, (route) => route.fulfill({ json: latest }));
+  const sessions = await mockTerminal(page);
+  await page.goto(previewPath);
+  await expect(page.locator("#connection-status")).toHaveText("Connected");
+  latest = {
+    ...latest,
+    sha: "b".repeat(40),
+    revision: `${"b".repeat(40)}-13-1`,
+    build: { ...currentBuild, sha: "c".repeat(40), run_number: 14, state: "failed" },
+  };
+  await page.clock.fastForward(10_000);
+  await expect(page.locator("#build-banner")).toContainText("last successful build is bbbbbbb");
+  await expect(page.locator("#build-banner")).toContainText("Your terminal remains on 0123456");
+  await expect(page.getByRole("button", { name: "Switch to latest build" })).toBeVisible();
+  expect(sessions).toHaveLength(1);
+  expect(sessions[0].closed).toBe(false);
 });
 
 test("disconnect retains output and disables input, while reconnect and reset start fresh terminals", async ({
@@ -254,14 +409,26 @@ test("shows operator status as text and preserves its reason after a server disc
   await expect(page.getByRole("button", { name: "Start new session" })).toBeEnabled();
 });
 
-for (const status of [200, 410]) {
-  test(`expired metadata (${status}) never opens a terminal connection`, async ({ page }) => {
+test("server-approved metadata opens a terminal even when the browser clock is ahead of expiry", async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date("2100-01-01T00:00:00Z"));
+  const sessions = await openPlayground(page);
+  expect(sessions).toHaveLength(1);
+  expect(new URL(sessions[0].socket.url()).searchParams.get("revision")).toBe(metadata.revision);
+});
+
+for (const [status, title] of [
+  [404, "This playground wasn't found."],
+  [410, "This playground has expired."],
+] as const) {
+  test(`unavailable metadata (${status}) never opens a terminal connection`, async ({ page }) => {
     await page.route(`**${metadataPath}`, (route) =>
       route.fulfill({ status, json: { ...metadata, expires_at: "2000-01-01T00:00:00Z" } }),
     );
     const sessions = await mockTerminal(page);
     await page.goto(previewPath);
-    await expect(page.getByRole("heading", { name: "This playground has expired." })).toBeVisible();
+    await expect(page.getByRole("heading", { name: title })).toBeVisible();
     await expect(page.getByRole("button", { name: "Try again" })).toBeHidden();
     await expect(page.locator(".xterm")).toHaveCount(0);
     expect(sessions).toHaveLength(0);

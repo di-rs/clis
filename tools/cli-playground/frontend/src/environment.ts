@@ -1,9 +1,32 @@
-export interface Environment {
-  id: string;
-  clis: string[];
-  sha: string;
-  pr: number;
-  expiresAt: Date;
+import { z } from "zod";
+
+// Validate the fields the UI consumes; the gateway owns artifact and lifecycle rules.
+const environmentSchema = z
+  .object({
+    id: z.string(),
+    clis: z.array(z.string()),
+    sha: z.string().nullable(),
+    revision: z.string().nullable(),
+    build: z
+      .object({
+        sha: z.string(),
+        state: z.enum(["building", "ready", "failed", "empty", "cancelled"]),
+      })
+      .nullable(),
+    pr: z.int().positive(),
+    expires_at: z.iso.datetime({ offset: true }),
+  })
+  .transform(({ expires_at, ...environment }) => ({
+    ...environment,
+    expiresAt: new Date(expires_at),
+  }));
+
+export type Environment = z.infer<typeof environmentSchema>;
+
+export type RunnableEnvironment = Environment & { sha: string; revision: string };
+
+export function runnable(environment: Environment): environment is RunnableEnvironment {
+  return environment.sha !== null && environment.revision !== null && environment.clis.length > 0;
 }
 
 export class EnvironmentError extends Error {
@@ -29,37 +52,10 @@ function invalid(): EnvironmentError {
   );
 }
 
-export function parseEnvironment(value: unknown, now = Date.now()): Environment {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) throw invalid();
-  const data = value as Record<string, unknown>;
-  if (
-    typeof data.id !== "string" ||
-    !/^[a-f0-9]{32}$/.test(data.id) ||
-    !Array.isArray(data.clis) ||
-    data.clis.length === 0 ||
-    !data.clis.every(
-      (cli: unknown): cli is string =>
-        typeof cli === "string" && /^[a-z][a-z0-9_-]{0,63}$/.test(cli),
-    ) ||
-    new Set(data.clis).size !== data.clis.length ||
-    typeof data.sha !== "string" ||
-    !/^[a-f0-9]{40}$/.test(data.sha) ||
-    typeof data.pr !== "number" ||
-    !Number.isSafeInteger(data.pr) ||
-    data.pr < 1 ||
-    typeof data.expires_at !== "string"
-  )
-    throw invalid();
-  const expiresAt = new Date(data.expires_at);
-  if (Number.isNaN(expiresAt.getTime())) throw invalid();
-  if (expiresAt.getTime() <= now) {
-    throw new EnvironmentError(
-      "This playground has expired.",
-      "Open the latest playground link on the pull request to try a current build.",
-      false,
-    );
-  }
-  return { id: data.id, clis: data.clis, sha: data.sha, pr: data.pr, expiresAt };
+export function parseEnvironment(value: unknown): Environment {
+  const result = environmentSchema.safeParse(value);
+  if (!result.success) throw invalid();
+  return result.data;
 }
 
 export async function loadEnvironment(

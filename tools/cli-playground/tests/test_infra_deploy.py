@@ -75,6 +75,8 @@ def test_deploy_refuses_symlinked_secret_files(tmp_path: Path) -> None:
     "data",
     [
         APP_ENV.replace(b"local-test-secret", b"${TOKEN}"),
+        APP_ENV.replace(b"private-renewal-token", b"${TOKEN}"),
+        APP_ENV.replace(b"CLOUDFLARE_DNS_API_TOKEN=private-renewal-token\n", b""),
         APP_ENV + b"UNKNOWN_FIELD=extra-value\n",
     ],
 )
@@ -124,7 +126,7 @@ def test_deploy_uploads_only_committed_configuration_and_pulls_before_starting(
     assert {path.name for path in harness["config"].iterdir()} == {"app.env"}
     assert stat.S_IMODE((harness["config"] / "app.env").stat().st_mode) == 0o600
     calls = commands(harness)
-    assert calls[-1] == ["health", "play.example"]
+    assert calls[-2:] == [["health", "play.example"], ["health", "pr-1.play.example"]]
     docker = [call[1:] for call in calls if call[0] == "docker"]
     assert [call for call in docker if call[0] == "pull"] == [
         ["pull", "--platform", "linux/amd64", GATEWAY_IMAGE],
@@ -135,6 +137,12 @@ def test_deploy_uploads_only_committed_configuration_and_pulls_before_starting(
     assert "up" in docker[-1] and "--no-build" in docker[-1]
     assert docker[-1][docker[-1].index("--pull") + 1] == "never"
     assert "local-test-secret" not in harness["log"].read_text()
+    assert "private-renewal-token" not in harness["log"].read_text()
+    assert all(
+        b"private-renewal-token" not in path.read_bytes()
+        for path in release.rglob("*")
+        if path.is_file()
+    )
     assert not list((harness["remote"] / "releases").glob(".deploy.*"))
 
 

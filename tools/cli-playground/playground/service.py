@@ -12,7 +12,13 @@ from anyio import CancelScope
 
 from playground.artifacts import stage_archive
 from playground.config import Settings
-from playground.models import ArtifactIdentity, Environment, EnvironmentMetadata
+from playground.models import (
+    ArtifactIdentity,
+    BuildIdentity,
+    BuildUpdate,
+    Environment,
+    EnvironmentMetadata,
+)
 from playground.sessions import SessionManager
 from playground.storage import EnvironmentStore
 
@@ -33,7 +39,6 @@ class PlaygroundService:
         self.store = EnvironmentStore(settings)
         self.sessions = SessionManager(settings)
         self.uploads = asyncio.Semaphore(1)
-        self.updating: set[str] = set()
 
     async def cleanup_inactive(self) -> None:
         await self.sessions.retry_cleanup()
@@ -41,10 +46,27 @@ class PlaygroundService:
         identifiers.update(
             session.environment.id
             for session in self.sessions.active
-            if self.store.get(session.environment.id) is None
+            if self.store.record(session.environment.id) is None
         )
         await self.sessions.close_environments(identifiers)
-        self.store.remove(identifiers)
+        # A build update can refresh a record while container shutdown yields.
+        # Recheck without awaiting so cleanup cannot erase the accepted update.
+        self.store.remove(
+            {identifier for identifier in identifiers if self.store.record(identifier) is None}
+        )
+        self.collect_artifacts()
+
+    def collect_artifacts(self) -> None:
+        # Failed container cleanup stays in active, so its mounted files remain retained.
+        self.store.collect_revisions(
+            {session.environment.binary_dir for session in self.sessions.active}
+        )
+
+    def update_build(self, pr: int, update: BuildUpdate) -> EnvironmentMetadata:
+        # This synchronous atomic update must not wait behind a streaming upload.
+        metadata = self.store.update_build(pr, update)
+        self.collect_artifacts()
+        return metadata
 
     async def cleanup_periodically(self) -> None:
         while True:
@@ -55,8 +77,15 @@ class PlaygroundService:
             except OSError, RuntimeError, TimeoutError:
                 logger.exception("Failed to expire playground environments")
 
-    async def deploy(self, chunks: AsyncIterable[bytes], sha: str, pr: int) -> Environment:
+    async def deploy(
+        self,
+        chunks: AsyncIterable[bytes],
+        sha: str,
+        pr: int,
+        build: BuildIdentity | None = None,
+    ) -> Environment:
         artifact = ArtifactIdentity(sha=sha, pr=pr)
+        self.store.check_build(pr, build)
         try:
             await asyncio.wait_for(self.uploads.acquire(), timeout=1)
         except TimeoutError as error:
@@ -100,15 +129,9 @@ class PlaygroundService:
                     raise ValueError("invalid binary bundle") from error
                 # Revisions may expire while the upload body is streaming.
                 await self.cleanup_inactive()
-                identifier = self.store.identifier(artifact.pr)
-                existing = self.store.get(identifier)
-                self.updating.add(identifier)
-                try:
-                    if existing is not None and existing.sha != artifact.sha:
-                        await self.sessions.close_environments({identifier})
-                    return self.store.publish(staged, clis, artifact.sha, artifact.pr)
-                finally:
-                    self.updating.discard(identifier)
+                environment = self.store.publish(staged, clis, artifact.sha, artifact.pr, build)
+                self.collect_artifacts()
+                return environment
         finally:
             if temporary is not None:
                 shutil.rmtree(temporary, ignore_errors=True)
@@ -132,5 +155,4 @@ class PlaygroundService:
             self.store.reopen_pull_request(pr)
 
     async def metadata(self, identifier: str) -> EnvironmentMetadata | None:
-        environment = self.store.get(identifier)
-        return environment.metadata() if environment is not None else None
+        return self.store.metadata(identifier)

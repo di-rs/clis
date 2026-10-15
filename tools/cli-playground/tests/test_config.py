@@ -2,6 +2,7 @@
 
 import pytest
 from playground.config import Settings
+from playground.storage import EnvironmentStore
 from pydantic import ValidationError
 
 
@@ -51,3 +52,13 @@ def test_empty_preview_domain_keeps_path_based_previews(monkeypatch: pytest.Monk
     assert settings.preview_url("a" * 32) == (
         "https://play.example/p/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     )
+
+
+@pytest.mark.usefixtures("configured_environment")
+def test_readable_pr_hosts_bind_to_the_correct_preview() -> None:
+    settings = Settings(preview_domain="play.example")
+    identifier = EnvironmentStore.identifier(123)
+    assert settings.preview_url(identifier, pr=123) == f"https://pr-123.play.example/p/{identifier}"
+    assert settings.accepts_host("pr-123.play.example", identifier)
+    assert not settings.accepts_host("pr-124.play.example", identifier)
+    assert not settings.accepts_host("pr-0123.play.example", identifier)

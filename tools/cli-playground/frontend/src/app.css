@@ -754,3 +754,20 @@ main {
     transition: none !important;
   }
 }
+/* Build polling updates this notice without remounting the terminal. */
+.build-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  border: 1px solid #444;
+  background: #151515;
+  color: #dedede;
+}
+
+.build-banner p {
+  margin: 0;
+}

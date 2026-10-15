@@ -31,6 +31,7 @@ def ci_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         "PLAYGROUND_URL": "https://play.example.com",
         "ACME_EMAIL": "admin@example.com",
         "PLAYGROUND_DEPLOY_TOKEN": "test-deployment-token",
+        "CLOUDFLARE_DNS_API_TOKEN": "private-renewal-token",
         "PULUMI_CONFIG_PASSPHRASE": "private-state-passphrase",
         "RELEASE_REVISION": "c" * 40,
         "GATEWAY_IMAGE": GATEWAY_IMAGE,
@@ -67,6 +68,19 @@ def test_configure_cli_preserves_reviewed_stack_settings(
     }
     assert "private-state-passphrase" not in path.read_text()
     assert "test-deployment-token" not in path.read_text()
+    assert "private-renewal-token" not in path.read_text()
+
+
+def test_configure_does_not_require_runtime_credentials(
+    tmp_path: Path, ci_environment: None
+) -> None:
+    environment = dict(os.environ)
+    for name in ("CLOUDFLARE_DNS_API_TOKEN", "PLAYGROUND_DEPLOY_TOKEN", "ACME_EMAIL"):
+        environment.pop(name, None)
+    path = tmp_path / "stack.yaml"
+    result = configure_cli(path, environment)
+    assert result.returncode == 0, result.stderr
+    assert yaml.safe_load(path.read_text())["config"]["cli-playground:domain"] == "play.example.com"
 
 
 @pytest.mark.parametrize(
@@ -79,7 +93,7 @@ def test_configure_cli_preserves_reviewed_stack_settings(
         ("PLAYGROUND_URL", "https://play.example.com/path"),
         ("PLAYGROUND_URL", "https://play.example.com/"),
         ("PLAYGROUND_URL", "http://play.example.com"),
-        ("PLAYGROUND_DEPLOY_TOKEN", "do-not-print\nINJECT=value"),
+        ("PLAYGROUND_URL", "https://play..example.com"),
     ],
 )
 def test_configure_cli_fails_before_writing_invalid_configuration(
@@ -107,6 +121,7 @@ def test_prepare_pins_state_host_key_and_writes_only_private_files(
     assert stat.S_IMODE(directory.stat().st_mode) == 0o700
     assert (directory / "known_hosts").read_text() == "203.0.113.12 ssh-ed25519 YWJj\n"
     assert (directory / "identity").read_text() == OUTPUTS["sshPrivateKey"]
+    assert "CLOUDFLARE_DNS_API_TOKEN=private-renewal-token\n" in (directory / "app.env").read_text()
     assert {p.name for p in directory.iterdir()} == {
         "identity",
         "known_hosts",
@@ -115,6 +130,20 @@ def test_prepare_pins_state_host_key_and_writes_only_private_files(
     }
     for path in directory.iterdir():
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize("token", [None, "", "do-not-print\nINJECT=value", "${TOKEN}"])
+def test_prepare_rejects_invalid_dns_credentials_before_private_writes(
+    tmp_path: Path, ci_environment: None, monkeypatch: pytest.MonkeyPatch, token: str | None
+) -> None:
+    monkeypatch.delenv("CLOUDFLARE_DNS_API_TOKEN", raising=False)
+    if token is not None:
+        monkeypatch.setenv("CLOUDFLARE_DNS_API_TOKEN", token)
+    directory = tmp_path / "private"
+    with pytest.raises(ValueError) as error:
+        ci.prepare(directory, OUTPUTS)
+    assert "do-not-print" not in str(error.value)
+    assert not directory.exists()
 
 
 def test_release_from_another_commit_is_rejected_before_private_writes(
@@ -250,8 +279,13 @@ def test_ci_deploy_reads_state_then_deploys_and_cleans_credentials(
     commands = [json.loads(line) for line in harness["log"].read_text().splitlines()]
     assert commands[0][0] == "pulumi"
     assert [command[-1] for command in commands if command[0] == "health"] == (
-        ["play.example.com"] if success else []
+        ["play.example.com", "pr-1.play.example.com"] if success else []
     )
     logs = harness["log"].read_text() + "".join(capfd.readouterr())
-    for secret in ("secret-key", "private-registry-token", "test-deployment-token"):
+    for secret in (
+        "secret-key",
+        "private-registry-token",
+        "test-deployment-token",
+        "private-renewal-token",
+    ):
         assert secret not in logs

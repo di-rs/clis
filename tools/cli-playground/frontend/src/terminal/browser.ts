@@ -8,6 +8,7 @@ export function createBrowserTerminal(
   host: HTMLDivElement,
   environmentId: string,
   sha: string,
+  revision: string,
   onState: (state: SessionState) => void,
 ) {
   const terminal = new Terminal({
@@ -101,7 +102,7 @@ export function createBrowserTerminal(
       createSocket: () => {
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
         return new WebSocket(
-          `${protocol}//${window.location.host}/ws/${encodeURIComponent(environmentId)}?sha=${encodeURIComponent(sha)}`,
+          `${protocol}//${window.location.host}/ws/${encodeURIComponent(environmentId)}?sha=${encodeURIComponent(sha)}&revision=${encodeURIComponent(revision)}`,
         );
       },
       onState,

@@ -1,6 +1,7 @@
 """Exercise the public preview and authenticated deployment contract."""
 
 import asyncio
+import json
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -12,6 +13,169 @@ from playground.config import Settings
 from starlette.websockets import WebSocketDisconnect
 
 from .helpers import binary_bundle, elf_binary, upload
+
+AUTH = {"Authorization": "Bearer test-deployment-token"}
+
+
+def build_event(
+    client: TestClient,
+    state: str,
+    *,
+    run: int = 10,
+    attempt: int = 1,
+    sha: str = "a" * 40,
+    run_id: int | None = None,
+) -> httpx.Response:
+    response: httpx.Response = client.put(
+        "/api/pull-requests/123/build",
+        headers=AUTH,
+        json={
+            "sha": sha,
+            "run_id": run_id or run * 100,
+            "run_number": run,
+            "run_attempt": attempt,
+            "state": state,
+        },
+    )
+    return response
+
+
+def build_upload(
+    client: TestClient,
+    *,
+    run: int = 10,
+    attempt: int = 1,
+    sha: str = "a" * 40,
+    payload: bytes = b"fixture",
+) -> httpx.Response:
+    response: httpx.Response = client.post(
+        "/api/environments",
+        headers=AUTH,
+        params={
+            "pr": 123,
+            "sha": sha,
+            "run_id": run * 100,
+            "run_number": run,
+            "run_attempt": attempt,
+        },
+        content=binary_bundle({"echor": elf_binary(payload)}),
+    )
+    return response
+
+
+def test_build_only_preview_exposes_state_and_requires_auth(api_client: TestClient) -> None:
+    assert (
+        api_client.put(
+            "/api/pull-requests/123/build",
+            json={
+                "sha": "a" * 40,
+                "run_id": 1000,
+                "run_number": 10,
+                "run_attempt": 1,
+                "state": "building",
+            },
+        ).status_code
+        == 401
+    )
+    response = build_event(api_client, "building")
+    assert response.status_code == 200, response.text
+    state = response.json()
+    assert state["sha"] is None and state["revision"] is None and state["clis"] == []
+    assert state["build"] == {
+        "sha": "a" * 40,
+        "run_id": 1000,
+        "run_number": 10,
+        "run_attempt": 1,
+        "state": "building",
+    }
+    assert state.pop("url") == f"https://play.example/p/{state['id']}"
+    assert api_client.get(f"/api/environments/{state['id']}").json() == state
+    assert build_event(api_client, "ready").status_code == 422
+
+
+def test_build_order_and_terminal_events_cannot_regress_ready(api_client: TestClient) -> None:
+    assert build_event(api_client, "building", run=11).status_code == 200
+    assert build_event(api_client, "failed", run=10, attempt=99).status_code == 409
+    assert build_upload(api_client, run=10, attempt=99).status_code == 409
+    assert build_event(api_client, "building", run=11, run_id=9999).status_code == 409
+    assert build_event(api_client, "building", run=11, sha="b" * 40).status_code == 409
+    ready = build_upload(api_client, run=11)
+    assert ready.status_code == 201, ready.text
+    for state in ("building", "failed", "empty", "cancelled"):
+        response = build_event(api_client, state, run=11)
+        assert response.status_code == 200
+        assert response.json()["build"]["state"] == "ready"
+        assert response.json()["sha"] == "a" * 40
+
+
+def test_failed_build_keeps_last_ready_but_empty_hides_it(api_client: TestClient) -> None:
+    ready = build_upload(api_client)
+    assert ready.status_code == 201, ready.text
+    previous = api_client.get(f"/api/environments/{ready.json()['id']}").json()
+    for state in ("building", "failed", "cancelled"):
+        response = build_event(api_client, state, run=11, sha="b" * 40)
+        assert response.status_code == 200
+        assert response.json()["sha"] == previous["sha"]
+        assert response.json()["revision"] == previous["revision"]
+    assert (
+        build_event(api_client, "building", run=11, sha="b" * 40).json()["build"]["state"]
+        != "building"
+    )
+    empty = build_event(api_client, "empty", run=12, sha="c" * 40)
+    assert empty.status_code == 200
+    assert empty.json()["sha"] is None and empty.json()["clis"] == []
+
+
+def test_same_sha_rerun_publishes_a_distinct_immutable_revision(api_client: TestClient) -> None:
+    first = build_upload(api_client)
+    assert first.status_code == 201, first.text
+    path = f"/api/environments/{first.json()['id']}"
+    revision = api_client.get(path).json()["revision"]
+    assert build_upload(api_client, payload=b"changed").status_code == 409
+    assert build_upload(api_client, attempt=2, payload=b"changed").status_code == 201
+    current = api_client.get(path).json()
+    assert current["sha"] == "a" * 40
+    assert current["revision"] != revision
+    assert current["build"]["run_attempt"] == 2
+    assert build_upload(api_client).status_code == 409
+
+
+def test_run_identity_queries_are_all_or_none(api_client: TestClient) -> None:
+    response = api_client.post(
+        "/api/environments",
+        headers=AUTH,
+        params={"pr": 123, "sha": "a" * 40, "run_id": 1000},
+        content=binary_bundle({"echor": elf_binary()}),
+    )
+    assert response.status_code == 422
+
+
+def test_legacy_manifest_and_build_order_survive_restart(
+    api_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    deployed = upload(api_client)
+    path = f"/api/environments/{deployed['id']}"
+    original = api_client.get(path).json()
+    manifest = tmp_path / "data" / deployed["id"] / "metadata.json"
+    record = json.loads(manifest.read_text())
+    legacy = record["artifact"]
+    legacy.pop("revision")
+    manifest.write_text(json.dumps(legacy))
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        public_url="https://play.example",
+        deploy_token="test-deployment-token",
+        sandbox_image="sandbox",
+    )
+    with TestClient(create_app(settings), base_url=settings.public_url) as client:
+        assert client.get(path).json() == original
+        assert build_event(client, "failed", run=11, sha="b" * 40).status_code == 200
+    with TestClient(create_app(settings), base_url=settings.public_url) as client:
+        current = client.get(path).json()
+        assert current["sha"] == "a" * 40
+        assert current["build"]["state"] == "failed"
+        assert build_upload(client, run=10).status_code == 409
 
 
 def test_one_pr_url_publishes_all_clis_and_tracks_the_latest_revision(
@@ -27,6 +191,8 @@ def test_one_pr_url_publishes_all_clis_and_tracks_the_latest_revision(
         "sha": "a" * 40,
         "clis": ["catr", "echor"],
         "expires_at": metadata["expires_at"],
+        "revision": "a" * 40,
+        "build": None,
     }
     assert upload(api_client, clis=binaries) == deployed
     assert upload(api_client, cli="wcr", sha="b" * 40) == deployed
@@ -131,12 +297,29 @@ def test_subdomain_urls_bind_http_and_websocket_to_the_same_preview(
     )
     with TestClient(create_app(settings), base_url=settings.public_url) as client:
         current, sibling = upload(client), upload(client, cli="catr", pr=456)
-        authority = f"{current['id']}.play.example"
+        authority = "pr-123.play.example"
         assert current["url"] == f"https://{authority}/p/{current['id']}"
         metadata = client.get(f"https://{authority}/api/environments/{current['id']}")
         assert metadata.status_code == 200
         assert metadata.json()["clis"] == ["echor"]
         assert client.get(current["url"]).status_code == 200
+        assert (
+            client.get(f"https://{current['id']}.play.example/p/{current['id']}").status_code == 200
+        )
+        assert (
+            client.put(
+                f"https://{authority}/api/pull-requests/123/build",
+                headers=AUTH,
+                json={
+                    "sha": "a" * 40,
+                    "run_id": 1000,
+                    "run_number": 10,
+                    "run_attempt": 1,
+                    "state": "building",
+                },
+            ).status_code
+            == 404
+        )
         assert (
             client.get(f"https://{authority}/api/environments/{sibling['id']}").status_code == 404
         )

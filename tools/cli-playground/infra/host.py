@@ -199,6 +199,15 @@ def provision(config: HostConfig) -> hcloud.Server:
         ttl=300,
         proxied=False,
     )
+    cloudflare.DnsRecord(
+        "playground-previews",
+        zone_id=config.cloudflare_zone_id,
+        name=f"*.{config.domain}",
+        type="A",
+        content=ipv4.ip_address,
+        ttl=300,
+        proxied=False,
+    )
     pulumi.export("ipv4", ipv4.ip_address)
     pulumi.export("sshPrivateKey", pulumi.Output.secret(deployment_key.private_key_openssh))
     pulumi.export("sshHostPublicKey", host_public_key)

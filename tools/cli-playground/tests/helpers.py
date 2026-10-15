@@ -43,7 +43,11 @@ def upload(
     return result
 
 
-APP_ENV = b"PLAYGROUND_DOMAIN=play.example\nACME_EMAIL=ops@example.org\nPLAYGROUND_DEPLOY_TOKEN=local-test-secret\n"
+APP_ENV = (
+    b"PLAYGROUND_DOMAIN=play.example\nACME_EMAIL=ops@example.org\n"
+    b"PLAYGROUND_DEPLOY_TOKEN=local-test-secret\n"
+    b"CLOUDFLARE_DNS_API_TOKEN=private-renewal-token\n"
+)
 GATEWAY_IMAGE = "ghcr.io/di-rs/clis-playground-gateway@sha256:" + "1" * 64
 SANDBOX_IMAGE = "registry.example:5000/team/sandbox@sha256:" + "2" * 64
 

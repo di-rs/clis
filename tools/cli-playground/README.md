@@ -3,8 +3,14 @@
 Run a PR's native Rust CLIs in a browser terminal. Each PR has one stable URL
 containing all affected CLIs; each tab gets Bash, sample files and a disposable
 workspace. The selector changes starter commands without reconnecting or losing
-files. All CLIs share `PATH` for pipelines. Reset, disconnect or a new PR build
-ends the session and discards its files.
+files. All CLIs share `PATH` for pipelines. A new PR build leaves existing
+terminals and files intact; the page offers **Switch to latest build**. Reset or
+disconnect ends the session and discards its files.
+
+The page shows the latest build state independently of the running revision.
+Building, failed and cancelled builds can retain an explicitly labeled last
+successful build. A revision with no affected CLIs opens a status page instead
+of a new terminal. The page checks for updates every ten seconds.
 
 Architecture: Svelte + strict TypeScript + Vite+ static SPA, plain CSS, Python/FastAPI;
 no SSR, production Node server or Tailwind.
@@ -67,18 +73,36 @@ browser origin. Otherwise, rebuild the frontend and use port 8000.
 
 Follow the [browser-only hosting guide](infra/README.md) to create a private
 Cloudflare R2 state bucket, configure the domain and GitHub credentials, and run
-**CLI playground setup** on `master`. Setup provisions Hetzner and one DNS-only A
-record, then builds and deploys the application through GitHub Actions. After
-setup succeeds, enable `PLAYGROUND_AUTO_DEPLOY` for runtime releases on relevant
+**CLI playground setup** on `master`. Setup provisions Hetzner and DNS-only A
+records for the control hostname and its wildcard, then builds and deploys the
+application through GitHub Actions. After setup succeeds, enable
+`PLAYGROUND_AUTO_DEPLOY` for runtime releases on relevant
 pushes to `master`. **CLI playground release** also supports manual runs.
 
 Production requires no local deployment commands. One dedicated Docker/gVisor
-host runs one gateway worker; Traefik handles HTTP-01 certificates for the single
-hostname. Normal runtime releases read the existing SSH identity from R2 and
-deploy immutable images without provisioning infrastructure. Infrastructure
-changes require a manual setup run. PR links use paths on the same hostname and
-are public; add authentication if needed. PR closure removes the preview, and
-new builds replace it at the same URL while ending old sessions.
+host runs one gateway worker; Traefik uses Cloudflare DNS-01 for the control
+hostname and its wildcard certificate. Normal runtime releases read the existing
+SSH identity from R2 and deploy immutable images without provisioning
+infrastructure. Infrastructure changes require a manual setup run. Public PR links use
+`https://pr-123.play.example.com/p/<identifier>`; control-host paths are also
+supported. PR closure or expiry removes the preview and ends sessions. New builds
+update the stable link for new terminals while existing sessions retain their
+exact build attempt until they end. Runtime releases can still end all terminals.
+
+## Workflow responsibilities
+
+| Workflow | Responsibility |
+| --- | --- |
+| [CLI playground build](../../.github/workflows/cli-playground.yml) | Compile affected PR binaries without deployment credentials |
+| [CLI playground previews](../../.github/workflows/cli-playground-preview.yml) | Trusted build-state updates, artifact publication and PR close/reopen reconciliation |
+| [CLI playground release](../../.github/workflows/cli-playground-release.yml) | Build and deploy the shared gateway and sandbox images |
+| [CLI playground setup](../../.github/workflows/cli-playground-setup.yml) | Manually provision infrastructure, then invoke release |
+| [CLI playground sandbox](../../.github/workflows/cli-playground-sandbox.yml) | Verify actual PTY execution with Docker/gVisor on Linux |
+
+PR publication stores a binary batch and preview metadata. It does not deploy
+the runtime or start a sandbox; each browser terminal starts its own sandbox.
+The build and preview workflows remain separate because they execute with
+different trust and credentials.
 
 See [Testing](../../docs/testing.md) for Python, frontend and browser checks,
 and the [Linux smoke workflow](../../.github/workflows/cli-playground-sandbox.yml)

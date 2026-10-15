@@ -32,7 +32,7 @@ def required(name: str) -> str:
     return value
 
 
-def application_config() -> deploy.AppConfig:
+def application_domain() -> str:
     url = urlsplit(required("PLAYGROUND_URL"))
     if (
         url.scheme != "https"
@@ -44,30 +44,40 @@ def application_config() -> deploy.AppConfig:
     ):
         raise ValueError("PLAYGROUND_URL must be an HTTPS origin without a path or trailing slash")
     try:
+        return deploy.DomainConfig.model_validate({"PLAYGROUND_DOMAIN": url.hostname}).domain
+    except ValueError:
+        raise ValueError("PLAYGROUND_URL must contain a valid lowercase DNS hostname") from None
+
+
+def application_config() -> deploy.AppConfig:
+    try:
         return deploy.AppConfig.model_validate(
             {
-                "PLAYGROUND_DOMAIN": url.hostname,
+                "PLAYGROUND_DOMAIN": application_domain(),
                 "ACME_EMAIL": required("ACME_EMAIL"),
                 "PLAYGROUND_DEPLOY_TOKEN": required("PLAYGROUND_DEPLOY_TOKEN"),
+                "CLOUDFLARE_DNS_API_TOKEN": required("CLOUDFLARE_DNS_API_TOKEN"),
             }
         )
     except ValueError:
         # Validation errors can include secret values.
-        raise ValueError("Invalid playground URL, certificate email or deployment token") from None
+        raise ValueError(
+            "Invalid playground URL, certificate email or runtime credentials"
+        ) from None
 
 
 def configure_stack(path: Path) -> None:
     # Pulumi accepts an empty passphrase; a missing Actions secret must fail first.
     required("PULUMI_CONFIG_PASSPHRASE")
     required("PULUMI_BACKEND_URL")
-    config = application_config()
+    domain = application_domain()
     zone = required("CLOUDFLARE_ZONE_ID")
     if not re.fullmatch(r"[a-f0-9]{32}", zone):
         raise ValueError("Cloudflare zone ID must contain 32 lowercase hexadecimal characters")
     data = yaml.safe_load(path.read_text()) if path.exists() else {}
     data = data or {}
     values = data.setdefault("config", {})
-    values["cli-playground:domain"] = config.domain
+    values["cli-playground:domain"] = domain
     values["cli-playground:cloudflareZoneId"] = zone
     path.write_text(yaml.safe_dump(data, sort_keys=False))
 

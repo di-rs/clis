@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import {
   EnvironmentError,
   environmentIdFromPath,
@@ -11,20 +11,74 @@ const metadata = {
   id: identifier,
   clis: ["catr", "echor"],
   sha: "a".repeat(40),
+  revision: "a".repeat(40),
+  build: null,
   pr: 42,
   expires_at: "2030-01-02T03:04:05+00:00",
 };
-const now = Date.parse("2030-01-01T00:00:00Z");
 
 describe("environment metadata", () => {
   it("loads all revision CLIs in one PR environment", () => {
-    expect(parseEnvironment(metadata, now)).toEqual({
+    expect(parseEnvironment(metadata)).toEqual({
       id: identifier,
       clis: ["catr", "echor"],
       sha: "a".repeat(40),
+      revision: "a".repeat(40),
+      build: null,
       pr: 42,
       expiresAt: new Date("2030-01-02T03:04:05Z"),
     });
+  });
+
+  it("loads a first build before any runnable artifact exists", () => {
+    const result = parseEnvironment({
+      ...metadata,
+      sha: null,
+      revision: null,
+      clis: [],
+      build: {
+        sha: "b".repeat(40),
+        run_id: 501,
+        run_number: 12,
+        run_attempt: 1,
+        state: "building",
+      },
+    });
+    expect(result.sha).toBeNull();
+    expect(result.revision).toBeNull();
+    expect(result.clis).toEqual([]);
+    expect(result.build).toEqual({
+      sha: "b".repeat(40),
+      state: "building",
+    });
+  });
+
+  it("keeps the last runnable version separate from a failed newer head", () => {
+    const result = parseEnvironment({
+      ...metadata,
+      revision: `${metadata.sha}-11-1`,
+      build: {
+        sha: "b".repeat(40),
+        run_id: 501,
+        run_number: 12,
+        run_attempt: 2,
+        state: "failed",
+      },
+    });
+    expect(result.sha).toBe("a".repeat(40));
+    expect(result.revision).toBe(`${"a".repeat(40)}-11-1`);
+    expect(result.build?.sha).toBe("b".repeat(40));
+    expect(result.build?.state).toBe("failed");
+  });
+
+  it.each([
+    { revision: undefined },
+    { revision: 42 },
+    { build: undefined },
+    { build: { sha: "b".repeat(40), state: "unknown" } },
+    { build: { sha: null, state: "building" } },
+  ])("rejects missing or malformed preview fields: %j", (value) => {
+    expect(() => parseEnvironment({ ...metadata, ...value })).toThrow(EnvironmentError);
   });
 
   it.each(
@@ -32,13 +86,10 @@ describe("environment metadata", () => {
       null,
       [],
       {},
-      { ...metadata, id: "../../outside" },
-      { ...metadata, clis: [] },
+      { ...metadata, id: null },
       { ...metadata, clis: "catr" },
-      { ...metadata, clis: ["catr", "catr"] },
-      { ...metadata, clis: ["catr; echo unsafe"] },
       { ...metadata, clis: [42] },
-      { ...metadata, sha: "short" },
+      { ...metadata, sha: 42 },
       { ...metadata, pr: 0 },
       { ...metadata, pr: 1.5 },
       { ...metadata, pr: Number.MAX_SAFE_INTEGER + 1 },
@@ -47,13 +98,19 @@ describe("environment metadata", () => {
       { ...metadata, expires_at: "invalid" },
     ].map((value) => ({ value })),
   )("rejects malformed metadata: $value", ({ value }) => {
-    expect(() => parseEnvironment(value, now)).toThrow(EnvironmentError);
+    expect(() => parseEnvironment(value)).toThrow(EnvironmentError);
   });
 
-  it("does not offer retry for an expired build", () => {
-    expect(() => parseEnvironment(metadata, Date.parse(metadata.expires_at))).toThrow(
-      expect.objectContaining({ retryable: false }),
-    );
+  it("opens server-approved metadata even when the browser clock is ahead", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2040-01-01T00:00:00Z"));
+    try {
+      const fetcher = async () => Response.json(metadata);
+      const environment = await loadEnvironment(identifier, new AbortController().signal, fetcher);
+      expect(environment.revision).toBe("a".repeat(40));
+      expect(environment.expiresAt.toISOString()).toBe("2030-01-02T03:04:05.000Z");
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("extracts only a valid preview route", () => {

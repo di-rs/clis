@@ -37,7 +37,7 @@ DNS_LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 IMAGE_PATH = r"[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*"
 
 
-class AppConfig(BaseModel):
+class DomainConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
 
     domain: str = Field(
@@ -45,8 +45,12 @@ class AppConfig(BaseModel):
         max_length=220,
         pattern=rf"^(?:{DNS_LABEL}\.)+[a-z]{{2,63}}\z",
     )
+
+
+class AppConfig(DomainConfig):
     acme_email: str = Field(alias="ACME_EMAIL", pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+\z")
     deploy_token: str = Field(alias="PLAYGROUND_DEPLOY_TOKEN", min_length=1, repr=False)
+    dns_api_token: str = Field(alias="CLOUDFLARE_DNS_API_TOKEN", min_length=1, repr=False)
 
     @field_validator("*")
     @classmethod
@@ -332,6 +336,9 @@ def deploy(
                 f"Deployment failed; inspect cloud-init status and {REMOTE_LOG} over SSH."
             ) from None
     wait_for_health(config.domain)
+    # The control hostname can still have a valid certificate from an older release.
+    # Probe a PR hostname as well to verify wildcard DNS, TLS and gateway routing.
+    wait_for_health(f"pr-1.{config.domain}")
     return revision, f"https://{config.domain}/healthz"
 
 
