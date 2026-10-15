@@ -1,7 +1,9 @@
 """Durable ownership and observation facts shared by agent and orchestration."""
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Protocol
 from uuid import UUID
 
 from boxie.domain.models import (
@@ -57,6 +59,15 @@ class AgentObservation:
     last_input_at: datetime | None = None
     disconnected_at: datetime | None = None
 
+    attachment_epoch: int = 0
+    absolute_deadline: datetime | None = None
+    control_lease_until: datetime | None = None
+    container_id: str | None = None
+
+    @property
+    def ref(self) -> SandboxRef:
+        return SandboxRef(self.sandbox_id, self.generation)
+
     def __post_init__(self) -> None:
         if self.generation < 1 or self.event_version < 1:
             raise ValueError("positive generation and event version required")
@@ -69,3 +80,63 @@ class AgentObservation:
             or self.state not in (SandboxState.TERMINATED, SandboxState.FAILED)
         ):
             raise ValueError("confirmed removal requires absent resource and terminal state")
+
+
+@dataclass(frozen=True)
+class SandboxRef:
+    id: UUID
+    generation: int
+
+    def __post_init__(self) -> None:
+        if self.generation < 1:
+            raise ValueError("positive generation required")
+
+
+@dataclass(frozen=True)
+class EnsureRequest:
+    ref: SandboxRef
+    principal: Principal
+    identity: AgentIdentity
+    spec: SandboxSpec
+    profile_snapshot: ProfileSnapshot
+    accepted_at: datetime
+    absolute_deadline: datetime
+
+    @classmethod
+    def from_durable(cls, request: DurableRequest) -> EnsureRequest:
+        return cls(
+            SandboxRef(request.sandbox_id, request.generation),
+            request.principal,
+            request.identity,
+            request.spec,
+            request.snapshot,
+            request.accepted_at,
+            request.absolute_deadline,
+        )
+
+
+@dataclass(frozen=True)
+class ExpiryRequest:
+    ref: SandboxRef
+    reason: TerminationReason
+    observed_event_version: int
+    boot_id: UUID
+
+
+@dataclass(frozen=True)
+class ExpiryDecision:
+    applied: bool
+    observation: AgentObservation
+
+
+class StartGuard(Protocol):
+    """Agent-owned guard. The callback is only the bounded final Docker start.
+
+    start_allowed validates immutable admission AND its retained artifact reference,
+    before mount and again before READY. It is not final-start authorization.
+    """
+
+    async def start_allowed(self, request: EnsureRequest, boot_id: UUID) -> bool: ...
+    async def run_start_if_allowed(
+        self, request: EnsureRequest, boot_id: UUID, start: Callable[[], Awaitable[None]]
+    ) -> bool: ...

@@ -74,6 +74,7 @@ class TerminationReason(StrEnum):
     OUTPUT_LIMIT = "output_limit"
     EXITED = "exited"
     PROVISIONING_FAILED = "provisioning_failed"
+    CONTROL_PLANE_LOST = "control_plane_lost"
     AGENT_RESTART = "agent_restart"
     AGENT_SHUTDOWN = "agent_shutdown"
 

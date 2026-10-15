@@ -1,6 +1,7 @@
 """The only production adapter allowed to open the Docker socket."""
 
 import asyncio
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -17,6 +18,22 @@ class TerminalPort(Protocol):
     async def read(self) -> bytes: ...
     async def write(self, data: bytes) -> None: ...
     async def resize(self, columns: int, rows: int) -> None: ...
+    async def close(self) -> None: ...
+
+
+@dataclass(frozen=True)
+class ContainerInfo:
+    id: str
+    labels: dict[str, str]
+    running: bool
+
+
+class ExecutionDocker(Protocol):
+    async def inspect(self, identifier: str) -> ContainerInfo | None: ...
+    async def create(self, name: str, config: dict[str, Any]) -> None: ...
+    async def attach(self, identifier: str) -> TerminalPort: ...
+    async def start(self, identifier: str) -> None: ...
+    async def delete(self, identifier: str) -> None: ...
     async def close(self) -> None: ...
 
 
@@ -74,7 +91,7 @@ class DockerBackend:
     async def start(self, name: str) -> None:
         await self._client().containers.container(name).start()
 
-    async def labels(self, name: str) -> dict[str, str] | None:
+    async def inspect(self, name: str) -> ContainerInfo | None:
         try:
             data = await self._client().containers.container(name).show()
         except DockerError as error:
@@ -82,7 +99,11 @@ class DockerBackend:
                 return None
             raise
         labels: dict[str, str] = data["Config"]["Labels"] or {}
-        return labels
+        return ContainerInfo(data["Id"], labels, data["State"]["Running"])
+
+    async def labels(self, name: str) -> dict[str, str] | None:
+        info = await self.inspect(name)
+        return info.labels if info else None
 
     async def delete(self, name: str) -> None:
         async with asyncio.timeout(self.timeout):

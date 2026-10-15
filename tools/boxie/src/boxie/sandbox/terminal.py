@@ -1,6 +1,7 @@
 """Agent-owned terminals outlive API connections; bytes are never decoded."""
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from fastapi import WebSocket
@@ -8,6 +9,7 @@ from pydantic import ValidationError
 from starlette.websockets import WebSocketDisconnect
 
 from boxie.domain.errors import BoxieError
+from boxie.domain.lifecycle import AgentObservation
 from boxie.domain.models import SandboxState, TerminationReason
 from boxie.sandbox.docker import TerminalPort
 from boxie.sandbox.protocol import ResizeWire
@@ -117,3 +119,46 @@ class Terminal:
             await asyncio.gather(*tasks, return_exceptions=True)
             if accepted:
                 self.agent.disconnected(self.record)
+
+
+class ExecutionTerminal:
+    """PTY byte owner; durable attachment/activity decisions belong to the agent."""
+
+    def __init__(
+        self,
+        stream: TerminalPort,
+        output_limit: int,
+        terminate: Callable[[TerminationReason], Awaitable[AgentObservation]],
+    ) -> None:
+        self.stream, self.remaining, self.terminate = stream, output_limit, terminate
+        self.output: asyncio.Queue[bytes | None] = asyncio.Queue()
+        self.reader: asyncio.Task[None] | None = None
+
+    def start(self) -> None:
+        self.reader = asyncio.create_task(self._read())
+
+    async def _read(self) -> None:
+        reason = TerminationReason.EXITED
+        try:
+            while data := await self.stream.read():
+                accepted = data[: self.remaining]
+                if accepted:
+                    self.output.put_nowait(accepted)
+                self.remaining -= len(accepted)
+                if self.remaining == 0:
+                    reason = TerminationReason.OUTPUT_LIMIT
+                    break
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
+        await self.terminate(reason)
+
+    async def close(self) -> None:
+        if self.reader and self.reader is not asyncio.current_task():
+            self.reader.cancel()
+            await asyncio.gather(self.reader, return_exceptions=True)
+        try:
+            await self.stream.close()
+        finally:
+            self.output.put_nowait(None)

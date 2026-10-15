@@ -516,3 +516,165 @@ def test_consumer_database_error_boundary_never_retries(
                 assert await counts(pool) == expected_counts
 
     asyncio.run(exercise())
+
+
+def test_final_start_guard_serializes_stop_and_validates_durable_request(
+    postgres_dsn: str, tmp_path: Path
+) -> None:
+    async def exercise() -> None:
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
+            assert importlib.util.find_spec("boxie.persistence.start_guard"), (
+                "final-start guard missing"
+            )
+            from boxie.domain.lifecycle import EnsureRequest
+            from boxie.persistence.start_guard import PostgresStartGuard
+
+            view = await life.submit(OWNER, "guard", await upload(artifacts))
+            boot = uuid4()
+            await life.bind_agent_boot(OWNER, config.identity, view.id, 1, None, boot)
+            request = EnsureRequest.from_durable(await life.load_request(view.id))
+            guard = PostgresStartGuard(pool, timeout=1)
+            entered, release = asyncio.Event(), asyncio.Event()
+            starts = 0
+
+            async def start() -> None:
+                nonlocal starts
+                starts += 1
+                entered.set()
+                await release.wait()
+
+            assert await guard.start_allowed(request, boot)
+            assert not await guard.start_allowed(
+                replace(request, principal=Principal("other")), boot
+            )
+            assert not await guard.start_allowed(request, uuid4())
+            assert not await guard.start_allowed(
+                replace(request, spec=replace(request.spec, env={"GREETING": "hello"})), boot
+            )
+            task = asyncio.create_task(guard.run_start_if_allowed(request, boot, start))
+            await entered.wait()
+            stop = asyncio.create_task(life.terminate(OWNER, view.id, TerminationReason.REQUESTED))
+            await asyncio.sleep(0.05)
+            assert not stop.done(), "stop must share final-start row serialization"
+            release.set()
+            assert await task
+            await stop
+            assert not await guard.start_allowed(request, boot)
+            assert not await guard.run_start_if_allowed(request, boot, start)
+            assert starts == 1
+            assert await counts(pool) == (1, 1, 1, 2)
+
+    asyncio.run(exercise())
+
+
+def test_start_guard_timeout_and_lost_connection_retain_reservations(
+    postgres_dsn: str, tmp_path: Path
+) -> None:
+    async def exercise() -> None:
+        from boxie.domain.lifecycle import EnsureRequest
+        from boxie.persistence.start_guard import PostgresStartGuard
+
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
+            view = await life.submit(OWNER, "timeout", await upload(artifacts))
+            boot = uuid4()
+            await life.bind_agent_boot(OWNER, config.identity, view.id, 1, None, boot)
+            request = EnsureRequest.from_durable(await life.load_request(view.id))
+            guard = PostgresStartGuard(pool, timeout=0.05)
+
+            async def stuck() -> None:
+                await asyncio.Event().wait()
+
+            with pytest.raises(TimeoutError):
+                await guard.run_start_if_allowed(request, boot, stuck)
+            assert await counts(pool) == (1, 1, 1, 1)
+
+            # A real server-side connection termination during the callback models
+            # guard loss; the row lock cannot promise atomic DB/Docker execution.
+            async def disconnect() -> None:
+                async with pool.connection() as other:
+                    row = await (
+                        await other.execute("""SELECT pid FROM pg_stat_activity
+                        WHERE datname=current_database() AND pid<>pg_backend_pid()
+                        AND state='idle in transaction' AND query LIKE '%sandbox_artifact_refs%'""")
+                    ).fetchone()
+                    assert row is not None
+                    await other.execute("SELECT pg_terminate_backend(%s)", (row["pid"],))
+
+            guard.timeout = 1
+            with pytest.raises(psycopg.OperationalError):
+                await guard.run_start_if_allowed(request, boot, disconnect)
+            assert await counts(pool) == (1, 1, 1, 1)
+            await life.terminate(OWNER, view.id, TerminationReason.REQUESTED)
+            assert not await guard.run_start_if_allowed(request, boot, stuck)
+
+    asyncio.run(exercise())
+
+
+def test_durable_agent_and_postgres_release_only_after_reconciled_absence(
+    postgres_dsn: str, tmp_path: Path
+) -> None:
+    async def exercise() -> None:
+        from datetime import UTC, datetime
+
+        from boxie.domain.lifecycle import EnsureRequest
+        from boxie.persistence.start_guard import PostgresStartGuard
+        from boxie.sandbox.lifecycle import DurableAgent
+        from test_agent_lifecycle import Daemon, settled
+
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
+            view = await life.submit(OWNER, "real-persistence", await upload(artifacts))
+            clock = Clock()
+            clock.now = datetime.now(UTC)
+            daemon = Daemon()
+            agent = DurableAgent(
+                config, daemon, artifacts.path, PostgresStartGuard(pool), clock, clock.monotonic
+            )
+            await life.bind_agent_boot(OWNER, config.identity, view.id, 1, None, agent.boot_id)
+            request = EnsureRequest.from_durable(await life.load_request(view.id))
+            await agent.ensure(request)
+            observation = await settled(agent, request.ref, SandboxState.READY)
+            assert await life.record_observation(observation)
+            assert await counts(pool) == (1, 1, 1, 1)
+            daemon.unreachable = True
+            pending = await agent.remove(request.ref, TerminationReason.REQUESTED)
+            assert pending.cleanup_pending
+            assert await life.record_observation(pending)
+            assert await counts(pool) == (1, 1, 1, 1)
+            daemon.unreachable = False
+            await agent.reconcile()
+            removed = await agent.inspect(request.ref)
+            assert removed.removal_confirmed
+            assert await life.confirm_removed(removed)
+            assert await counts(pool) == (1, 0, 0, 1)
+            await agent.close()
+
+    asyncio.run(exercise())
+
+
+def test_start_guard_requires_retained_artifact_reference(
+    postgres_dsn: str, tmp_path: Path
+) -> None:
+    async def exercise() -> None:
+        from boxie.domain.lifecycle import EnsureRequest
+        from boxie.persistence.start_guard import PostgresStartGuard
+
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
+            view = await life.submit(OWNER, "reference", await upload(artifacts))
+            boot = uuid4()
+            await life.bind_agent_boot(OWNER, config.identity, view.id, 1, None, boot)
+            request = EnsureRequest.from_durable(await life.load_request(view.id))
+            guard = PostgresStartGuard(pool)
+            assert await guard.start_allowed(request, boot)
+            async with pool.connection() as conn:
+                await conn.execute(
+                    "DELETE FROM sandbox_artifact_refs WHERE sandbox_id=%s", (view.id,)
+                )
+            assert (await artifacts.path(OWNER, request.spec.artifact_id)).is_dir()
+            assert not await guard.start_allowed(request, boot)
+
+            async def forbidden_start() -> None:
+                raise AssertionError("missing reference must prevent start")
+
+            assert not await guard.run_start_if_allowed(request, boot, forbidden_start)
+
+    asyncio.run(exercise())
