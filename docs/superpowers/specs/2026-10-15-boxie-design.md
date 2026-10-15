@@ -179,11 +179,12 @@ Explicit stop, timeouts, process exit, and provisioning failures converge on the
 same idempotent cleanup path. A failed cleanup remains visible and retryable;
 it does not silently free capacity or release an artifact reference.
 
-PostgreSQL stores durable API requests, consumer/idempotency identity, resource
-ownership, capacity reservations, artifact references, and a queryable status
-projection. Temporal history owns orchestration progress; Docker inspection
-establishes which resources actually exist. Do not create two independent state
-machines that can each decide a sandbox is ready or deleted.
+PostgreSQL stores durable requests received through the API, consumer identities
+and idempotency keys, resource ownership, capacity reservations, artifact
+references, and a queryable status projection. Temporal history owns orchestration
+progress; Docker inspection establishes which resources actually exist. Do not
+create two independent state machines that can each decide a sandbox is ready or
+deleted.
 
 Commit accepted requests and an outbox record atomically. A dispatcher submits
 them to a stable workflow ID and retries safely if submission/acknowledgment is
