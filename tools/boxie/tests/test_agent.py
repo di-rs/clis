@@ -375,7 +375,7 @@ def test_unauthenticated_websocket_and_oversized_control_rejected(tmp_path: Path
             with pytest.raises(InvalidStatus) as error:
                 async with connect(url):
                     pytest.fail("missing agent credential accepted")
-            assert error.value.response.status_code == 403
+            assert error.value.response.status_code == 401
             result = await client.post("/v1/sandboxes", content=b" " * 65537)
             assert result.status_code == 413
 

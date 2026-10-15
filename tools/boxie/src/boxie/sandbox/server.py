@@ -1,5 +1,6 @@
 """Private authenticated HTTP/WS adapter for one privileged agent process."""
 
+import asyncio
 import hmac
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -11,6 +12,7 @@ from uuid import UUID
 from fastapi import FastAPI, Header, Query, Request, Response, WebSocket
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import RequestResponseEndpoint
+from starlette.websockets import WebSocketState
 
 from boxie.bootstrap.config import AgentConfig
 from boxie.domain.errors import BoxieError
@@ -31,9 +33,13 @@ from boxie.sandbox.registry import Agent
 
 
 def create_agent_app(
-    config: AgentConfig, docker: DockerPort, artifacts: ArtifactStore, clock: Callable[[], datetime]
+    config: AgentConfig,
+    docker: DockerPort,
+    artifacts: ArtifactStore,
+    clock: Callable[[], datetime],
+    *,
+    credential: bytes,
 ) -> FastAPI:
-    credential = config.credential()
     agent = Agent(config, docker, artifacts, clock)
 
     @asynccontextmanager
@@ -54,6 +60,24 @@ def create_agent_app(
         openapi_url=None,
     )
     app.state.agent = agent
+
+    @app.get("/readyz")
+    async def readiness() -> JSONResponse:
+        try:
+            async with asyncio.timeout(config.docker_timeout):
+                ready = await docker.ready()
+        except Exception:
+            ready = False
+        return JSONResponse(
+            {
+                "identity": {
+                    "installation_id": str(config.identity.installation_id),
+                    "host_id": config.identity.host_id,
+                },
+                "dependencies": {"docker": ready},
+            },
+            status_code=200 if ready else 503,
+        )
 
     @app.exception_handler(BoxieError)
     async def application_error(_request: Request, error: BoxieError) -> JSONResponse:
@@ -78,13 +102,15 @@ def create_agent_app(
     async def put_artifact(
         artifact_id: UUID,
         request: Request,
+        response: Response,
         consumer_id: Annotated[ConsumerId, Query()],
         x_content_sha256: Annotated[str, Header()],
     ) -> dict[str, object]:
-        view = await artifacts.put(
+        result = await artifacts.put(
             Principal(consumer_id), artifact_id, x_content_sha256, request.stream()
         )
-        return asdict(view)
+        response.status_code = 201 if result.created else 200
+        return asdict(result.artifact)
 
     @app.delete("/v1/artifacts/{artifact_id}", status_code=204)
     async def retire_artifact(
@@ -154,7 +180,9 @@ def create_agent_app(
         websocket: WebSocket, sandbox_id: UUID, consumer_id: Annotated[ConsumerId, Query()]
     ) -> None:
         if not authorized(websocket.headers.get("Authorization", "")):
-            await websocket.close(code=1008)
+            await websocket.send_denial_response(
+                JSONResponse({"detail": "invalid agent credential"}, status_code=401)
+            )
             return
         try:
             record = agent.owned(Principal(consumer_id), sandbox_id)
@@ -162,7 +190,13 @@ def create_agent_app(
             if session is None:
                 raise BoxieError(409, "terminal is unavailable")
             await session.serve(websocket)
-        except BoxieError:
-            await websocket.close(code=1008)
+        except BoxieError as error:
+            if websocket.application_state == WebSocketState.CONNECTING:
+                detail = "resource not found" if error.status == 404 else "terminal unavailable"
+                await websocket.send_denial_response(
+                    JSONResponse({"detail": detail}, status_code=error.status)
+                )
+            elif websocket.application_state == WebSocketState.CONNECTED:
+                await websocket.close(code=1008)
 
     return app

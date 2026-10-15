@@ -15,7 +15,7 @@ from uuid import uuid4
 
 import httpx
 import uvicorn
-from boxie.bootstrap.config import AgentConfig
+from boxie.bootstrap.config import AgentConfig, read_credential
 from boxie.domain.models import AgentIdentity
 from boxie.persistence.artifacts import ArtifactStore
 from boxie.sandbox.server import create_agent_app
@@ -74,6 +74,9 @@ class DockerDaemon:
         self.create_gate: asyncio.Event | None = None
         self.created = asyncio.Event()
         self.events: list[str] = []
+
+    async def ready(self) -> bool:
+        return True
 
     async def create(self, name: str, config: dict[str, Any]) -> None:
         assert name not in self.configs
@@ -142,7 +145,9 @@ async def live(
     config: AgentConfig, daemon: DockerDaemon, clock: Clock
 ) -> AsyncIterator[tuple[httpx.AsyncClient, Any]]:
     store = ArtifactStore(config.data_dir / "artifacts")
-    app = create_agent_app(config, daemon, store, clock)
+    app = create_agent_app(
+        config, daemon, store, clock, credential=read_credential(config.credential_file)
+    )
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
@@ -174,7 +179,7 @@ async def upload(client: httpx.AsyncClient, data: bytes | None = None) -> str:
         headers={"X-Content-SHA256": hashlib.sha256(content).hexdigest()},
         content=content,
     )
-    assert result.status_code == 200, result.text
+    assert result.status_code == 201, result.text
     return identifier
 
 

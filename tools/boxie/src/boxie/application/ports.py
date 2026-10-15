@@ -7,7 +7,7 @@ from uuid import UUID
 
 from boxie.domain.models import (
     AgentIdentity,
-    ArtifactView,
+    ArtifactPutResult,
     Principal,
     ProfileSnapshot,
     SandboxSpec,
@@ -29,7 +29,7 @@ class Lifecycle(Protocol):
 class ArtifactAccess(Protocol):
     async def put(
         self, principal: Principal, artifact_id: UUID, sha256: str, chunks: AsyncIterable[bytes]
-    ) -> ArtifactView: ...
+    ) -> ArtifactPutResult: ...
     async def retire(self, principal: Principal, artifact_id: UUID) -> None: ...
 
 

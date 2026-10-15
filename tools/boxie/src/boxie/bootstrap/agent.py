@@ -9,7 +9,7 @@ from pathlib import Path
 
 import uvicorn
 
-from boxie.bootstrap.config import AgentConfig
+from boxie.bootstrap.config import AgentConfig, read_credential
 from boxie.persistence.artifacts import ArtifactStore
 from boxie.sandbox.docker import DockerBackend
 from boxie.sandbox.server import create_agent_app
@@ -27,6 +27,7 @@ def main() -> None:
             DockerBackend(config.docker_timeout),
             ArtifactStore(config.data_dir / "artifacts"),
             lambda: datetime.now(UTC),
+            credential=read_credential(config.credential_file),
         )
 
         def reload_profiles() -> None:

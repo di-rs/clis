@@ -96,6 +96,12 @@ class ArtifactView:
 
 
 @dataclass(frozen=True)
+class ArtifactPutResult:
+    artifact: ArtifactView
+    created: bool
+
+
+@dataclass(frozen=True)
 class AgentIdentity:
     installation_id: UUID
     host_id: str

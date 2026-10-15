@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 from uuid import UUID
 
 from boxie.domain.errors import BoxieError
-from boxie.domain.models import ArtifactView, Principal
+from boxie.domain.models import ArtifactPutResult, ArtifactView, Principal
 from boxie.persistence.atomic import atomic_write, sync_directory
 from boxie.persistence.zip_metadata import validate_directory
 
@@ -95,7 +95,7 @@ class ArtifactStore:
 
     async def put(
         self, principal: Principal, artifact_id: UUID, sha256: str, chunks: AsyncIterable[bytes]
-    ) -> ArtifactView:
+    ) -> ArtifactPutResult:
         if not re.fullmatch(r"[a-f0-9]{64}", sha256):
             raise BoxieError(422, "invalid SHA-256 digest")
         async with self._lock:
@@ -117,7 +117,7 @@ class ArtifactStore:
                 if digest.hexdigest() != sha256:
                     raise BoxieError(422, "artifact digest mismatch")
                 if old is not None:
-                    return ArtifactView(artifact_id, sha256, old.retired)
+                    return ArtifactPutResult(ArtifactView(artifact_id, sha256, old.retired), False)
                 await self._extract(staged)
                 (staged / "archive.zip").unlink()
                 meta = Metadata(principal.consumer_id, sha256)
@@ -135,7 +135,7 @@ class ArtifactStore:
                 staged.replace(self.root / str(artifact_id))
                 sync_directory(self.root)
                 self._metadata[artifact_id] = meta
-                return ArtifactView(artifact_id, sha256, False)
+                return ArtifactPutResult(ArtifactView(artifact_id, sha256, False), True)
             except (
                 zipfile.BadZipFile,
                 NotImplementedError,

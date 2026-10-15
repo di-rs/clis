@@ -2,13 +2,14 @@
 
 from dataclasses import asdict
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from boxie.domain.models import (
     AgentIdentity,
+    ArtifactView,
     LifetimePolicy,
     ProfileSnapshot,
     SandboxLimits,
@@ -142,6 +143,28 @@ class ViewWire(WireModel):
     @classmethod
     def from_domain(cls, view: SandboxView) -> ViewWire:
         return cls(**asdict(view))
+
+    def domain(self) -> SandboxView:
+        return SandboxView(**self.model_dump())
+
+
+class ArtifactWire(WireModel):
+    id: UUID
+    sha256: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
+    retired: bool
+
+    def domain(self) -> ArtifactView:
+        return ArtifactView(**self.model_dump())
+
+
+class ReadyWire(WireModel):
+    identity: IdentityWire
+    dependencies: dict[str, bool]
+
+
+class StatusWire(WireModel):
+    type: Literal["status"]
+    reason: TerminationReason
 
 
 class ResizeWire(WireModel):

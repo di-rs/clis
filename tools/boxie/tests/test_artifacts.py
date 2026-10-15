@@ -30,7 +30,8 @@ def test_atomic_idempotent_metadata_and_retirement_survive_restart(tmp_path: Pat
         data = bundle()
         digest = hashlib.sha256(data).hexdigest()
         first = await store.put(principal, identifier, digest, chunks(data))
-        assert await store.put(principal, identifier, digest, chunks(data)) == first
+        retry = await store.put(principal, identifier, digest, chunks(data))
+        assert first.created and not retry.created and retry.artifact == first.artifact
         with pytest.raises(BoxieError) as error:
             await store.put(principal, identifier, "0" * 64, chunks(data))
         assert error.value.status == 409

@@ -21,6 +21,7 @@ class TerminalPort(Protocol):
 
 
 class DockerPort(Protocol):
+    async def ready(self) -> bool: ...
     async def create(self, name: str, config: dict[str, Any]) -> None: ...
     async def attach(self, name: str) -> TerminalPort: ...
     async def start(self, name: str) -> None: ...
@@ -56,6 +57,10 @@ class DockerBackend:
         if self.client is None:
             self.client = Docker(timeout=ClientTimeout(total=self.timeout))
         return self.client
+
+    async def ready(self) -> bool:
+        await self._client().version()
+        return True
 
     async def create(self, name: str, config: dict[str, Any]) -> None:
         await self._client().containers.create(config, name=name)

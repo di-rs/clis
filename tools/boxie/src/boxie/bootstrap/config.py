@@ -11,6 +11,21 @@ from boxie.domain.models import AgentIdentity, LifetimePolicy
 from boxie.domain.policy import validate_policy
 
 
+def read_credential(path: Path) -> bytes:
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
+            raise ValueError("credential must be a private regular file")
+        with os.fdopen(descriptor, "rb", closefd=False) as source:
+            value = source.read(4097).strip()
+        if not 16 <= len(value) <= 4096 or any(byte < 33 or byte > 126 for byte in value):
+            raise ValueError("invalid credential")
+        return value
+    finally:
+        os.close(descriptor)
+
+
 @dataclass(frozen=True)
 class AgentConfig:
     data_dir: Path
@@ -32,20 +47,6 @@ class AgentConfig:
         validate_policy(self.policy_maximum)
         if not self.identity.host_id or len(self.identity.host_id) > 128:
             raise ValueError("host ID required")
-
-    def credential(self) -> bytes:
-        descriptor = os.open(self.credential_file, os.O_RDONLY | os.O_NOFOLLOW)
-        try:
-            info = os.fstat(descriptor)
-            if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
-                raise ValueError("credential must be a private regular file")
-            with os.fdopen(descriptor, "rb", closefd=False) as source:
-                value = source.read(4097).strip()
-            if not 16 <= len(value) <= 4096 or any(byte < 33 or byte > 126 for byte in value):
-                raise ValueError("invalid agent credential")
-            return value
-        finally:
-            os.close(descriptor)
 
     @classmethod
     def from_file(cls, path: Path) -> AgentConfig:

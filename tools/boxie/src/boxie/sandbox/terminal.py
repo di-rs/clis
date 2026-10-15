@@ -71,7 +71,8 @@ class Terminal:
 
         async def send() -> None:
             while (data := await self.output.get()) is not None:
-                await websocket.send_bytes(data)
+                for offset in range(0, len(data), 65536):
+                    await websocket.send_bytes(data[offset : offset + 65536])
             await websocket.send_json({"type": "status", "reason": self.record.reason})
             await websocket.close()
 

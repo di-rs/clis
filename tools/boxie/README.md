@@ -1,4 +1,4 @@
-# Boxie sandbox agent
+# Boxie sandbox service
 
 Boxie is an independently deployed, private sandbox service. The privileged agent
 owns Docker access, immutable generic artifacts, admission, idempotency, capacity,
@@ -6,9 +6,9 @@ and terminal lifetimes. Consumers select approved profiles and upload ZIP files;
 they cannot supply images, host paths, Docker options, or isolation settings.
 This package does not depend on a consuming product or inspect executable formats.
 
-The first service increment provides the agent and its private control protocol.
-The consumer-facing API, PostgreSQL authority, and Temporal orchestration are
-separate increments. Run exactly one agent process against its local data directory.
+The unprivileged consumer API delegates admission and terminal ownership to the
+agent over its authenticated private protocol. PostgreSQL authority and Temporal
+orchestration are separate increments. Run exactly one agent process against its local data directory.
 The directory and profile files must be writable only by the operator/agent. The
 Docker daemon must see artifact paths at the same absolute location as the agent.
 
@@ -43,6 +43,71 @@ bytes, in a private regular file (mode `0600`). Consumer API credentials must no
 be reused here. Only trusted services on a private network may reach the agent;
 there is no public endpoint. Access logging is disabled by the entry point and
 credentials are never accepted in URLs.
+
+Run the separate consumer API without a Docker socket or artifact host mounts:
+
+```sh
+uv run --locked --package boxie boxie-api --config /etc/boxie/api.json
+```
+
+Its operator configuration contains:
+
+```json
+{
+  "agent_url": "http://boxie-agent:8091",
+  "agent_credential_file": "/run/secrets/boxie-agent",
+  "consumer_credential_files": {
+    "playground": "/run/secrets/boxie-playground"
+  },
+  "release": "boxie-pr1",
+  "request_timeout": 20,
+  "bind_host": "127.0.0.1",
+  "bind_port": 8090
+}
+```
+
+Each credential is a private regular file with the same restrictions as the agent
+secret. Consumer credentials must be unique and distinct from the agent secret.
+Only composition roots read secrets; transports receive injected credentials.
+The API resolves consumer identity from Bearer authentication and never accepts
+consumer identity in a sandbox request body. Neither API nor agent is public.
+HTTP and WebSocket redirects are disabled for agent calls. HTTP control bodies
+and responses are bounded to 64 KiB; uploads stream in chunks of at most 64 KiB
+with an actual-byte ceiling of 512 MiB and a configured total request deadline.
+
+## Consumer API
+
+Every resource request and terminal handshake requires a consumer Bearer secret.
+Foreign resources return 404. UUIDs and digests remain opaque to the API.
+
+| Operation | Request and response |
+| --- | --- |
+| Upload artifact | `PUT /v1/artifacts/{uuid}`, raw ZIP, `X-Content-SHA256`; 201 new, 200 exact retry |
+| Retire artifact | `DELETE /v1/artifacts/{uuid}`; 204 |
+| Create sandbox | `POST /v1/sandboxes`, `Idempotency-Key`, `spec` object described below; 202 with status |
+| Inspect sandbox | `GET /v1/sandboxes/{uuid}`; 200 with status |
+| Stop sandbox | `DELETE /v1/sandboxes/{uuid}`; 200 with status |
+| Terminal | `WS /v1/sandboxes/{uuid}/terminal` |
+
+Sandbox POST sends the `spec` object directly, without the agent's ownership or
+idempotency envelope. Unknown fields, images, paths and Docker settings are
+rejected. Invalid bodies return 422, conflicting retries 409, capacity exhaustion
+429 and unavailable agent calls 503. API restarts retain agent-owned IDs,
+idempotency records, capacity and terminal draining.
+
+Consumer terminal output is binary. Input is a JSON text frame
+`{"type":"input","data":"echo hello\n"}`; resize uses
+`{"type":"resize","columns":80,"rows":24}`. Control frames are at most 16 KiB
+of UTF-8 including JSON, columns are 1–500 and rows 1–300. Unicode survives
+fragmented WebSocket messages and output chunk boundaries. JSON status frames
+contain `type: status` and a termination `reason`. A disconnect keeps the agent
+draining during its two-minute grace. A consumer should offer a fresh session;
+reattachment and output replay arrive in the next increment.
+
+`GET /healthz` is unauthenticated liveness. Authenticated `GET /readyz` returns
+the API release and required agent dependency result, with 503 when unavailable.
+The agent's authenticated `/readyz` reports its identity and a bounded Docker
+dependency check. Access logs are disabled by both entry points.
 
 A trusted profile file is a JSON object keyed by profile ID:
 
@@ -83,6 +148,7 @@ opaque resource IDs. Wire schemas reject extra object fields and invalid bounds.
 | Inspect sandbox | `GET /v1/sandboxes/{uuid}?consumer_id=...` |
 | Terminate sandbox | `DELETE /v1/sandboxes/{uuid}?consumer_id=...&reason=requested` |
 | Terminal | `WS /v1/sandboxes/{uuid}/terminal?consumer_id=...` |
+| Readiness | `GET /readyz`, agent identity and dependency results |
 
 `spec` contains `artifact_id`, `profile_id`, `command`, `env`, and optional `policy`.
 Policy defaults are `max_seconds: 3600`, `idle_seconds: 600`, and
@@ -101,6 +167,10 @@ policy, capacity, or idempotency. The future database authority will supply a
 complete trusted provisioning request instead.
 
 Terminal input and output use binary WebSocket frames without Unicode decoding.
+Handshake denials use bounded HTTP JSON responses: 401 for invalid agent
+credentials, 404 for unavailable ownership, and 409 for attachment conflicts.
+The API maps failed internal authentication or unsupported denial codes to 503;
+consumer authentication is resolved before any agent request.
 Input frames are at most 64 KiB. Resize messages are JSON text frames:
 `{"type":"resize","columns":80,"rows":24}`; columns are 1–500 and rows 1–300.
 Termination status is a JSON text frame with `type: status` and a `reason`, distinct
@@ -153,7 +223,9 @@ and metadata replacement. Cancellation removes staging; startup removes abandone
 unpublished staging directories.
 
 An artifact UUID and digest are immutable. Repeating the same upload is idempotent;
-a different digest returns 409. Retirement is durable and prevents new admission.
+a different digest returns 409. Both private HTTP APIs return 201 for new
+publication and 200 for an exact retry, using an explicit typed application
+publication result. Retirement is durable and prevents new admission.
 Physical files remain while a sandbox reference exists, including uncertain
 creation or failed deletion. Metadata tombstones preserve UUID immutability after
 collection. No consumer can select a host filesystem path.
@@ -162,6 +234,7 @@ collection. No consumer can select a host filesystem path.
 
 ```sh
 uv run --locked pytest tools/boxie/tests/test_agent.py tools/boxie/tests/test_artifacts.py tools/boxie/tests/test_profiles.py
+uv run --locked pytest tools/boxie/tests/test_api.py tools/boxie/tests/test_service_boundary.py tools/boxie/tests/test_terminal_proxy.py
 uv run --locked ruff check .
 uv run --locked ruff format --check .
 uv run --locked mypy

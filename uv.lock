@@ -194,6 +194,7 @@ source = { editable = "tools/boxie" }
 dependencies = [
     { name = "aiodocker" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "pydantic" },
     { name = "uvicorn" },
     { name = "websockets" },
@@ -203,6 +204,7 @@ dependencies = [
 requires-dist = [
     { name = "aiodocker", specifier = ">=0.27,<1" },
     { name = "fastapi", specifier = ">=0.128" },
+    { name = "httpx", specifier = ">=0.28" },
     { name = "pydantic", specifier = ">=2.14,<3" },
     { name = "uvicorn", specifier = ">=0.40" },
     { name = "websockets", specifier = ">=16" },
