@@ -100,10 +100,6 @@ class RequestHostBoundary:
         await self.app(scope, receive, send)
 
 
-class TerminalOutputLimitError(Exception):
-    """A session produced more output than the browser should retain."""
-
-
 async def bridge_terminal(websocket: WebSocket, session: TerminalPort) -> None:
     async def output() -> None:
         forwarded = 0
@@ -114,10 +110,20 @@ async def bridge_terminal(websocket: WebSocket, session: TerminalPort) -> None:
                 )
                 return
             chunk = data[: MAX_TERMINAL_OUTPUT_BYTES - forwarded]
-            await websocket.send_bytes(chunk)
-            forwarded += len(chunk)
-            if forwarded >= MAX_TERMINAL_OUTPUT_BYTES:
-                raise TerminalOutputLimitError
+            if chunk:
+                await websocket.send_bytes(chunk)
+                forwarded += len(chunk)
+            if len(data) > len(chunk):
+                await websocket.send_json(
+                    {
+                        "type": "status",
+                        "reason": "output_limit",
+                        "message": "Session ended: output_limit.",
+                    }
+                )
+                return
+            # At exact equality, read the agent's authoritative status next.
+            # Any further binary bytes take the bounded defensive close above.
 
     async def inputs() -> None:
         while True:
@@ -345,7 +351,7 @@ def create_router(service: PlaygroundService, static_dir: Path) -> APIRouter:
             with suppress(WebSocketDisconnect, RuntimeError):
                 await websocket.close(code=1008)
             return
-        except BoxieUnavailable, TerminalOutputLimitError:
+        except BoxieUnavailable:
             with suppress(WebSocketDisconnect, RuntimeError):
                 await websocket.close(code=1011)
             return

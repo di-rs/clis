@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -88,6 +89,15 @@ class RegistryFile(WireModel):
     records: list[Record] = Field(default_factory=list)
 
 
+@dataclass
+class LiveDeadlines:
+    """Process-local elapsed timers; restart always reconciles persisted records."""
+
+    absolute: float
+    idle: float | None = None
+    disconnect: float | None = None
+
+
 class Agent:
     def __init__(
         self,
@@ -95,8 +105,11 @@ class Agent:
         docker: DockerPort,
         artifacts: ArtifactStore,
         clock: Callable[[], datetime],
+        monotonic: Callable[[], float],
     ) -> None:
         self.config, self.docker, self.artifacts, self.clock = config, docker, artifacts, clock
+        self.monotonic = monotonic
+        self._deadlines: dict[UUID, LiveDeadlines] = {}
         self.profiles = ProfileRegistry(config.profiles_file, config.data_dir / "profiles")
         self.path = config.data_dir / "registry.json"
         self.identity = IdentityWire(
@@ -189,11 +202,13 @@ class Agent:
             # Record intent first. No await may separate intent/reference persistence from
             # scheduling Docker; restart handles any crash in this sequence conservatively.
             self.records[record.id] = record
+            self._deadlines[record.id] = LiveDeadlines(self.monotonic() + spec.policy.max_seconds)
             self._save()
             try:
                 self.artifacts.retain(principal, spec.artifact_id, record.name)
             except Exception:
                 del self.records[record.id]
+                del self._deadlines[record.id]
                 self._save()
                 raise
             self._workers[record.id] = asyncio.create_task(self._provision(record))
@@ -231,7 +246,7 @@ class Agent:
 
     async def _provision(self, record: Record) -> None:
         try:
-            if self.clock() >= record.absolute_deadline:
+            if self.monotonic() >= self._deadlines[record.id].absolute:
                 await self._cleanup(record, TerminationReason.EXPIRED)
                 return
             record.state = SandboxState.PROVISIONING
@@ -253,6 +268,10 @@ class Agent:
             record.creation_uncertain = False
             record.state = SandboxState.READY
             record.idle_deadline = self.clock() + timedelta(seconds=record.spec.policy.idle_seconds)
+            deadlines = self._deadlines[record.id]
+            now = self.monotonic()
+            deadlines.idle = now + record.spec.policy.idle_seconds
+            deadlines.disconnect = now + record.spec.policy.disconnect_seconds
             self._save()
             terminal.start()
         except asyncio.CancelledError:
@@ -269,20 +288,37 @@ class Agent:
         return await self.remove(self.config.identity, sandbox_id, record.generation, reason)
 
     async def remove(
-        self, identity: AgentIdentity, sandbox_id: UUID, generation: int, reason: TerminationReason
+        self,
+        identity: AgentIdentity,
+        sandbox_id: UUID,
+        generation: int,
+        reason: TerminationReason,
+        *,
+        conditional: bool = False,
     ) -> SandboxView:
         record = self._controlled(identity, sandbox_id, generation)
         worker = self._workers.get(record.id)
         if worker and not worker.done() and worker is not asyncio.current_task():
             worker.cancel()
             await asyncio.gather(worker, return_exceptions=True)
-        return await self._cleanup(record, reason)
+        return await self._cleanup(record, reason, conditional=conditional)
 
-    async def _cleanup(self, record: Record, reason: TerminationReason) -> SandboxView:
+    async def _cleanup(
+        self, record: Record, reason: TerminationReason, *, conditional: bool = False
+    ) -> SandboxView:
         lock = self._operations.setdefault(record.id, asyncio.Lock())
         async with lock:
             if record.state in FINAL:
                 return record.view()
+            if conditional:
+                if record.state != SandboxState.READY:
+                    return record.view()
+                current_reason = self._expiry_reason(record, self.monotonic())
+                if current_reason is None:
+                    return record.view()
+                reason = current_reason
+            # No await separates revalidation and the state transition. Input and
+            # attachment mutations below share this event-loop serialization point.
             record.state = SandboxState.TERMINATING
             record.cleanup_pending = True
             record.reason = record.reason or reason
@@ -315,6 +351,7 @@ class Agent:
                 )
                 self._save()
                 self.artifacts.release(record.principal, record.spec.artifact_id, record.name)
+                self._deadlines.pop(record.id, None)
             except Exception:
                 logger.warning("sandbox cleanup remains pending: %s", record.id)
             return record.view()
@@ -331,40 +368,69 @@ class Agent:
     async def _sweep_loop(self) -> None:
         while True:
             await asyncio.sleep(self.config.sweep_seconds)
-            now = self.clock()
+            now = self.monotonic()
             for record in list(self.records.values()):
                 if record.state in FINAL:
                     continue
                 reason = None
                 if record.cleanup_pending:
                     reason = record.reason or TerminationReason.REQUESTED
-                elif now >= record.absolute_deadline:
-                    reason = TerminationReason.EXPIRED
-                elif (
-                    record.disconnected_at is not None
-                    and now
-                    >= record.disconnected_at
-                    + timedelta(seconds=record.spec.policy.disconnect_seconds)
-                ):
-                    reason = TerminationReason.DISCONNECTED
-                elif record.idle_deadline is not None and now >= record.idle_deadline:
-                    reason = TerminationReason.IDLE
+                else:
+                    reason = self._expiry_reason(record, now)
                 if reason:
                     pending = self._cleanup_tasks.get(record.id)
                     if pending is None or pending.done():
                         if pending is not None:
                             pending.result()
                         self._cleanup_tasks[record.id] = asyncio.create_task(
-                            self.remove(self.config.identity, record.id, record.generation, reason)
+                            self.remove(
+                                self.config.identity,
+                                record.id,
+                                record.generation,
+                                reason,
+                                conditional=not record.cleanup_pending
+                                and reason
+                                in {TerminationReason.IDLE, TerminationReason.DISCONNECTED},
+                            )
                         )
 
+    def _expiry_reason(self, record: Record, now: float) -> TerminationReason | None:
+        deadlines = self._deadlines[record.id]
+        if now >= deadlines.absolute:
+            return TerminationReason.EXPIRED
+        if deadlines.disconnect is not None and now >= deadlines.disconnect:
+            return TerminationReason.DISCONNECTED
+        if deadlines.idle is not None and now >= deadlines.idle:
+            return TerminationReason.IDLE
+        return None
+
+    def attach(self, record: Record) -> None:
+        # This synchronous check-and-clear cannot interleave with conditional expiry.
+        if (
+            record.state != SandboxState.READY
+            or record.disconnected_at is not None
+            or self._expiry_reason(record, self.monotonic()) is not None
+        ):
+            raise BoxieError(409, "terminal is unavailable")
+        self._deadlines[record.id].disconnect = None
+
     def accepted_input(self, record: Record) -> None:
+        if record.state != SandboxState.READY:
+            return
+        now = self.monotonic()
+        deadlines = self._deadlines[record.id]
+        if now >= deadlines.absolute:
+            return
+        deadlines.idle = now + record.spec.policy.idle_seconds
         record.idle_deadline = self.clock() + timedelta(seconds=record.spec.policy.idle_seconds)
         self._save()
 
     def disconnected(self, record: Record) -> None:
-        if record.disconnected_at is None:
+        if record.state == SandboxState.READY and record.disconnected_at is None:
             record.disconnected_at = self.clock()
+            self._deadlines[record.id].disconnect = (
+                self.monotonic() + record.spec.policy.disconnect_seconds
+            )
             self._save()
 
     async def close(self) -> None:

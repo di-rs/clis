@@ -35,12 +35,23 @@ def bundle(files: dict[str, bytes] | None = None) -> bytes:
 class Clock:
     def __init__(self) -> None:
         self.now = datetime(2026, 10, 15, tzinfo=UTC)
+        self.elapsed = 0.0
 
     def __call__(self) -> datetime:
         return self.now
 
-    def advance(self, seconds: int) -> None:
+    def monotonic(self) -> float:
+        return self.elapsed
+
+    def advance_wall(self, seconds: int) -> None:
         self.now += timedelta(seconds=seconds)
+
+    def advance_monotonic(self, seconds: int) -> None:
+        self.elapsed += seconds
+
+    def advance(self, seconds: int) -> None:
+        self.advance_wall(seconds)
+        self.advance_monotonic(seconds)
 
 
 class FakeTerminal:
@@ -146,7 +157,12 @@ async def live(
 ) -> AsyncIterator[tuple[httpx.AsyncClient, Any]]:
     store = ArtifactStore(config.data_dir / "artifacts")
     app = create_agent_app(
-        config, daemon, store, clock, credential=read_credential(config.credential_file)
+        config,
+        daemon,
+        store,
+        clock,
+        clock.monotonic,
+        credential=read_credential(config.credential_file),
     )
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))

@@ -60,12 +60,9 @@ class Terminal:
             self.output.put_nowait(None)
 
     async def serve(self, websocket: WebSocket) -> None:
-        if (
-            self.attached
-            or self.record.disconnected_at is not None
-            or self.record.state != SandboxState.READY
-        ):
+        if self.attached:
             raise BoxieError(409, "terminal is unavailable")
+        self.agent.attach(self.record)
         self.attached = True
         await websocket.accept()
 

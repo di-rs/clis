@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import logging
 import signal
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -27,6 +28,7 @@ def main() -> None:
             DockerBackend(config.docker_timeout),
             ArtifactStore(config.data_dir / "artifacts"),
             lambda: datetime.now(UTC),
+            time.monotonic,
             credential=read_credential(config.credential_file),
         )
 

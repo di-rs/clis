@@ -37,10 +37,11 @@ def create_agent_app(
     docker: DockerPort,
     artifacts: ArtifactStore,
     clock: Callable[[], datetime],
+    monotonic: Callable[[], float],
     *,
     credential: bytes,
 ) -> FastAPI:
-    agent = Agent(config, docker, artifacts, clock)
+    agent = Agent(config, docker, artifacts, clock, monotonic)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
