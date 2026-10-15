@@ -2,7 +2,7 @@ name: CLI benchmark suites
 
 on:
   pull_request:
-    branches: [master]
+    branches: [master, refactor/boxie-service, feat/boxie-temporal, feat/boxie-observability]
     types: [opened, synchronize, reopened, edited]
 
 permissions:

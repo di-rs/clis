@@ -7,8 +7,11 @@ they cannot supply images, host paths, Docker options, or isolation settings.
 This package does not depend on a consuming product or inspect executable formats.
 
 The unprivileged consumer API delegates admission and terminal ownership to the
-agent over its authenticated private protocol. PostgreSQL authority and Temporal
-orchestration are separate increments. Run exactly one agent process against its local data directory.
+agent over its authenticated private protocol. PR1 uses a transitional direct
+lifecycle with agent-local admission and recovery. PR2 replaces that authority
+with PostgreSQL and Temporal after PR1's required checks pass, including native
+Linux amd64/runsc. PR1 does not provide durable workflow orchestration or terminal
+replay. Run exactly one agent process against its local data directory.
 The directory and profile files must be writable only by the operator/agent. The
 Docker daemon must see artifact paths at the same absolute location as the agent.
 

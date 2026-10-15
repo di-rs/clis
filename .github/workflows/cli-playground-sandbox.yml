@@ -6,6 +6,8 @@ on:
     paths:
       - '.github/workflows/cli-playground-sandbox.yml'
       - 'tools/cli-playground/playground/**'
+      - 'tools/cli-playground/frontend/**'
+      - 'tools/cli-playground/pyproject.toml'
       - 'tools/cli-playground/Sandbox.Dockerfile*'
       - 'tools/cli-playground/shell.sh'
       - 'tools/cli-playground/fixtures/**'
@@ -19,6 +21,7 @@ on:
       - 'rust-toolchain.toml'
       - 'pyproject.toml'
       - 'uv.lock'
+      - '.python-version'
   workflow_dispatch:
 
 permissions:
