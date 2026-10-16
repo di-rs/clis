@@ -17,6 +17,7 @@ from uuid import UUID, uuid4
 from observability_infra.smoke_application import REPO, Application
 from observability_infra.smoke_pipe_api import validate_shutdown
 from observability_infra.smoke_runtime import event_identities, evidence
+from observability_infra.smoke_samples import record_progress
 from observability_infra.smoke_telemetry import Telemetry
 from observability_infra.smoke_units import transient_command, unit_name
 from observability_infra.smoke_watchdog import process_identity, restoration_valid
@@ -259,10 +260,9 @@ class Scenario:
                 await asyncio.sleep(0.1)
 
     async def progress(self, sandbox: str) -> None:
-        self.observations.setdefault("progress", []).append(await self.app.progress(sandbox))
-        self.observations.setdefault("resources", []).append(
-            await asyncio.to_thread(self.telemetry.resources)
-        )
+        progress = await self.app.progress(sandbox)
+        resources = await asyncio.to_thread(self.telemetry.resources)
+        record_progress(self.observations, progress, resources)
 
     async def accepted(self) -> set[str]:
         # A small recovery batch is accepted only if present in real binary journal.

@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import re
+import shlex
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
@@ -146,3 +147,46 @@ def test_retention_preserves_ceiling_and_evidence_before_failure(
     assert not queries
     assert scenario.observations["journal_usage"]["allocated_bytes"] == 101 * 1024**2
     assert "oldest_event_removed" not in scenario.observations
+
+
+@pytest.mark.parametrize(
+    "message,category,reason",
+    [
+        ("Failed to iterate through journal: Bad message\n", "iteration", "bad_message"),
+        (
+            "Failed to get MESSAGE field: Cannot assign requested address\n",
+            "message_read",
+            "address_unavailable",
+        ),
+        ('Bad pattern "PRIVATE_PATTERN": PRIVATE_DETAIL\n', "pattern_compile", "unclassified"),
+        ("Pattern matching failed: match limit exceeded\n", "pattern_match", "match_limit"),
+        ("Failed to iterate through journal: PRIVATE_DETAIL\n", "iteration", "unclassified"),
+    ],
+)
+def test_journal_diagnostic_retains_only_fixed_stage_and_errno(
+    tmp_path: Path, message: str, category: str, reason: str
+) -> None:
+    from observability_infra.smoke_runtime import Commands, Deadline
+
+    executable = tmp_path / "journalctl"
+    executable.write_text("#!/bin/sh\nprintf '%s' " + shlex.quote(message) + " >&2\nexit 1\n")
+    executable.chmod(0o700)
+    runner = Commands(Deadline(2, reserve=0.1))
+    with pytest.raises(RuntimeError, match="exit 1"):
+        runner.run([str(executable), "--grep=PRIVATE_QUERY", "--output=cat"], empty_journal_ok=True)
+    detail = runner.last_failure
+    assert detail is not None
+    assert detail["journal_error"] == {"stage": category, "reason": reason}
+    assert detail["captured_bytes"] == len(message.encode())
+    assert "PRIVATE" not in json.dumps(detail)
+    assert detail["raw_output_exported"] is False
+
+
+def test_journal_diagnostic_does_not_infer_errno_from_unrelated_text() -> None:
+    from observability_infra.smoke_runtime import command_diagnostic
+
+    output = b"PRIVATE_RECORD Bad message\nFailed to iterate through journal: PRIVATE_DETAIL\n"
+    detail = command_diagnostic(["journalctl"], output, 1, 0.1)
+    assert detail["journal_error"] == {"stage": "iteration", "reason": "unclassified"}
+    assert "PRIVATE" not in json.dumps(detail)
+    assert "journal_error" not in command_diagnostic(["other"], output, 1, 0.1)

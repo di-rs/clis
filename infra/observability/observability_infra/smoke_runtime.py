@@ -77,7 +77,7 @@ def command_diagnostic(args: list[str], output: bytes, code: int, elapsed: float
             ),
             "other",
         )
-    return {
+    result = {
         "operation": operation,
         "returncode": code,
         "elapsed_seconds": elapsed,
@@ -88,6 +88,33 @@ def command_diagnostic(args: list[str], output: bytes, code: int, elapsed: float
         "captured_bytes": len(output),
         "raw_output_exported": False,
     }
+    if executable == "journalctl":
+        stages = {
+            "failed to iterate through journal: ": "iteration",
+            "failed to get message field: ": "message_read",
+            "bad pattern ": "pattern_compile",
+            "pattern matching failed: ": "pattern_match",
+        }
+        reasons = {
+            "bad message": "bad_message",
+            "cannot assign requested address": "address_unavailable",
+            "invalid argument": "invalid_argument",
+            "input/output error": "io_error",
+            "identifier removed": "identifier_removed",
+            "permission denied": "permission",
+            "no such file or directory": "not_found",
+            "cannot allocate memory": "memory",
+            "match limit exceeded": "match_limit",
+        }
+        for line in text.splitlines():
+            for prefix, stage in stages.items():
+                if line.startswith(prefix):
+                    result["journal_error"] = {
+                        "stage": stage,
+                        "reason": reasons.get(line.removeprefix(prefix), "unclassified"),
+                    }
+                    return result
+    return result
 
 
 class PrivacyScan:
