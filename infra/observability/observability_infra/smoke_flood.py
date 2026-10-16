@@ -4,15 +4,25 @@ import datetime
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from uuid import UUID
 
 
 def main() -> None:
     instance, limit = sys.argv[1], int(sys.argv[2])
+    if not 1 <= limit <= 1000000:
+        raise ValueError("synthetic pressure event bound exceeded")
     control = Path("/control")
-    probe = sys.argv[3] if len(sys.argv) > 3 else None
+    paced = len(sys.argv) > 3 and sys.argv[3] == "--paced"
+    probe = sys.argv[3] if len(sys.argv) > 3 and not paced else None
     for sequence in range(limit):
+        if paced and sequence % 1000 == 0:
+            # A fresh interval per batch prevents catching up after slow writes.
+            # At most 1000 events per 0.1 seconds; the same 1M input takes >=100s.
+            until = time.monotonic() + 0.1
+            while (remaining := until - time.monotonic()) > 0:
+                time.sleep(remaining)
         event = {
             "schema_version": 1,
             "timestamp": datetime.datetime.now(datetime.UTC).isoformat().replace("+00:00", "Z"),

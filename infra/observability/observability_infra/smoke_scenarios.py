@@ -220,6 +220,14 @@ class Scenario:
         name = self.root.name + "-flood-" + self.name
         # Register exact unique name before creation; retain actual ID immediately.
         self.observations["flood_name"] = name
+        if self.name == "vector-full":
+            self.observations["pressure_pacing"] = {
+                "maximum_events": limit,
+                "maximum_events_per_second": 10000,
+                "batch_events": 1000,
+                "batch_wait_seconds": 0.1,
+                "catch_up": False,
+            }
         self.flood_id = await self.command(
             "docker",
             "run",
@@ -254,6 +262,7 @@ class Scenario:
             "/flood.py",
             self.flood_instance,
             str(limit),
+            *(["--paced"] if self.name == "vector-full" else []),
             *(
                 [self.probe_instance]
                 if self.name in ("journal-stopped", "journal-enospc") and not recovery
