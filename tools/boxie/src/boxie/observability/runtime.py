@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from service_logging.logging import configured_runtime
+from service_logging.logging import LogRuntime, run_process
 from service_logging.metrics import MetricsListener
 from temporalio.api.enums.v1 import TaskQueueType
 from temporalio.api.taskqueue.v1 import TaskQueue
@@ -24,19 +24,26 @@ if TYPE_CHECKING:
     from boxie.sandbox.lifecycle import DurableAgent
 
 
-@asynccontextmanager
-async def process_metrics(role: str) -> AsyncIterator[Metrics]:
-    metrics = Metrics(role, logs=configured_runtime())
-    listener = MetricsListener(
-        metrics,
-        os.environ.get("BOXIE_METRICS_HOST", "127.0.0.1"),
-        {"api": 9101, "worker": 9102, "agent": 9103}[role],
-    )
-    listener.start()
-    try:
-        yield metrics
-    finally:
-        await asyncio.to_thread(listener.close)
+def run_metrics_process(logs: LogRuntime, role: str, run: Callable[[Metrics], None]) -> None:
+    """Own the private listener beside logging, outside the application's loop."""
+    listener: MetricsListener | None = None
+
+    def start() -> None:
+        nonlocal listener
+        metrics = Metrics(role, logs=logs)
+        listener = MetricsListener(
+            metrics,
+            os.environ.get("BOXIE_METRICS_HOST", "127.0.0.1"),
+            {"api": 9101, "worker": 9102, "agent": 9103}[role],
+        )
+        listener.start()
+        run(metrics)
+
+    def close_metrics(remaining: float) -> None:
+        if listener is not None:
+            listener.close(remaining)
+
+    run_process(logs, start, close_metrics=close_metrics)
 
 
 async def _probe(metrics: Metrics, name: str, check: Callable[[], Awaitable[bool]]) -> None:

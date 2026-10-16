@@ -8,12 +8,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from service_logging.logging import install_asyncio_handler, log_runtime, run_process
+from service_logging.logging import install_asyncio_handler, log_runtime
 
 if TYPE_CHECKING:
     from boxie.api.app import ApiConfig
     from boxie.bootstrap.config import DurableConfig
     from boxie.domain.models import AgentIdentity
+    from boxie.observability.metrics import Metrics
 
 
 @dataclass(frozen=True)
@@ -61,12 +62,12 @@ def load_configuration(path: Path) -> RuntimeConfig:
     return RuntimeConfig(api=api, agent_credential=agent, **data)
 
 
-def _main() -> None:
+def _main(metrics: Metrics) -> None:
     import uvicorn
 
     from boxie.api.app import create_app
     from boxie.bootstrap.durable import Dependencies, pool_for, temporal_client
-    from boxie.observability.runtime import api_dependencies, background, process_metrics
+    from boxie.observability.runtime import api_dependencies, background
     from boxie.observability.snapshot import refresh_snapshots
     from boxie.persistence.postgres import PostgresLifecycle
     from boxie.sandbox.durable_client import DurableAgentClient
@@ -83,7 +84,6 @@ def _main() -> None:
         # only new admission depends on that probe. Worker startup stays eager.
         temporal = await temporal_client(config.durable, lazy=True)
         async with (
-            process_metrics("api") as metrics,
             pool_for(config.durable.postgres_dsn_file) as pool,
             DurableAgentClient(
                 config.agent_url, config.agent_credential, timeout=config.request_timeout
@@ -131,7 +131,9 @@ def main() -> None:
     from boxie.observability.logging import process_logging
 
     runtime = process_logging("api")
-    run_process(runtime, _main)
+    from boxie.observability.runtime import run_metrics_process
+
+    run_metrics_process(runtime, "api", _main)
 
 
 if __name__ == "__main__":

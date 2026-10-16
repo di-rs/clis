@@ -24,6 +24,7 @@ def main() -> None:
     )
 
     def run() -> None:
+        listener.start()
         import uvicorn
 
         from playground.app import create_app
@@ -46,11 +47,7 @@ def main() -> None:
 
         asyncio.run(serve())
 
-    listener.start()
-    try:
-        run_process(runtime, run)
-    finally:
-        listener.close()
+    run_process(runtime, run, close_metrics=listener.close)
 
 
 if __name__ == "__main__":

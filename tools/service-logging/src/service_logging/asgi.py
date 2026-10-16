@@ -77,5 +77,11 @@ class RequestLogging:
                         level=40 if failure is not None else 20,
                         error=failure,
                         duration_ms=duration * 1000,
-                        outcome="failed" if status == "error" else "succeeded",
+                        outcome=(
+                            "cancelled"
+                            if status == "disconnected"
+                            else "failed"
+                            if status == "error"
+                            else "succeeded"
+                        ),
                     )

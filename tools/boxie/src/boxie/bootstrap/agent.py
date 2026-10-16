@@ -7,11 +7,15 @@ import signal
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from service_logging.logging import install_asyncio_handler, log_runtime, run_process
+from service_logging.logging import install_asyncio_handler, log_runtime
+
+if TYPE_CHECKING:
+    from boxie.observability.metrics import Metrics
 
 
-def _main() -> None:
+def _main(metrics: Metrics) -> None:
     import uvicorn
 
     from boxie.bootstrap.config import AgentConfig, read_credential
@@ -21,7 +25,6 @@ def _main() -> None:
         agent_cache,
         agent_dependencies,
         background,
-        process_metrics,
     )
     from boxie.persistence.postgres_artifacts import PostgresArtifactStore
     from boxie.persistence.start_guard import PostgresStartGuard
@@ -41,7 +44,7 @@ def _main() -> None:
 
     async def run() -> None:
         install_asyncio_handler(log_runtime())
-        async with process_metrics("agent") as metrics, pool_for(dsn_file) as pool:
+        async with pool_for(dsn_file) as pool:
             artifacts = PostgresArtifactStore(pool, config.data_dir / "artifacts")
             agent = DurableAgent(
                 config,
@@ -100,7 +103,9 @@ def main() -> None:
     from boxie.observability.logging import process_logging
 
     runtime = process_logging("agent")
-    run_process(runtime, _main)
+    from boxie.observability.runtime import run_metrics_process
+
+    run_metrics_process(runtime, "agent", _main)
 
 
 if __name__ == "__main__":

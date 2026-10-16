@@ -4,6 +4,8 @@ import importlib.util
 from dataclasses import replace
 from typing import Any
 
+import pytest
+
 
 def metrics_type() -> tuple[Any, Any]:
     assert importlib.util.find_spec("boxie.observability.metrics") is not None, (
@@ -63,7 +65,7 @@ def test_bounded_labels_and_lease_unknown_empty_expired() -> None:
     assert b'boxie_dependency_ready{dependency="docker"}' not in metrics.render()
 
 
-def test_http_completion_is_bounded_and_disconnect_is_distinct() -> None:
+def test_http_completion_uses_bounded_route_template() -> None:
     import asyncio
 
     from service_logging.asgi import RequestLogging
@@ -160,3 +162,59 @@ def test_disabled_log_sink_is_visible_without_traffic() -> None:
         assert b"boxie_log_sink_available 0.0" in body
     finally:
         runtime.close()
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+def test_disconnect_completion_is_cancelled_once(
+    cancel: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+    import json
+    import os
+
+    from boxie.observability.metrics import Metrics
+    from service_logging.asgi import RequestLogging
+    from service_logging.logging import LogRuntime, LogSettings
+
+    read, write = os.pipe()
+    runtime = LogRuntime(LogSettings(service="boxie", role="api"), {}, {}, write, 4096, "enabled")
+    metrics = Metrics("api")
+    monkeypatch.setattr("service_logging.asgi.configured_runtime", lambda: runtime)
+
+    async def receive() -> dict[str, str]:
+        return {"type": "http.disconnect"}
+
+    async def send(message: Any) -> None:
+        pass
+
+    async def app(scope: Any, receive: Any, send: Any) -> None:
+        await send({"type": "http.response.start", "status": 200})
+        assert (await receive())["type"] == "http.disconnect"
+        if cancel:
+            raise asyncio.CancelledError()
+        # Return without completing a response body after the observed disconnect.
+
+    async def exercise() -> None:
+        completion = RequestLogging(app, completed=metrics.http_completed)(
+            {"type": "http", "method": "GET"}, receive, send
+        )
+        if cancel:
+            with pytest.raises(asyncio.CancelledError):
+                await completion
+        else:
+            await completion
+
+    try:
+        asyncio.run(exercise())
+        runtime.close()
+        records = [json.loads(line) for line in os.read(read, 65536).splitlines()]
+        assert len(records) == 1
+        assert records[0]["event"] == "request.completed"
+        assert records[0]["outcome"] == "cancelled"
+        assert (
+            b'boxie_http_requests_total{method="GET",route="unresolved",status_class="disconnected"} 1.0'
+            in metrics.render()
+        )
+    finally:
+        runtime.close()
+        os.close(read)

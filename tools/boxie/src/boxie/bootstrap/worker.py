@@ -8,7 +8,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from service_logging.logging import install_asyncio_handler, log_runtime, run_process
+from service_logging.logging import install_asyncio_handler, log_runtime
 
 from boxie.temporal.contracts import TASK_QUEUE
 
@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from temporalio.client import Client
     from temporalio.worker import Worker
 
+    from boxie.observability.metrics import Metrics
     from boxie.temporal.activities import LifecycleActivities
 
 
@@ -38,7 +39,7 @@ def lifecycle_worker(
     )
 
 
-def _main() -> None:
+def _main(metrics: Metrics) -> None:
     from boxie.bootstrap.config import read_credential
     from boxie.bootstrap.durable import (
         Dependencies,
@@ -47,7 +48,6 @@ def _main() -> None:
         pool_for,
         temporal_client,
     )
-    from boxie.observability.runtime import process_metrics
     from boxie.persistence.outbox import PostgresOutbox
     from boxie.persistence.postgres import PostgresLifecycle
     from boxie.sandbox.durable_client import DurableAgentClient
@@ -64,7 +64,6 @@ def _main() -> None:
         install_asyncio_handler(log_runtime())
         client = await temporal_client(config)
         async with (
-            process_metrics("worker") as metrics,
             pool_for(config.postgres_dsn_file) as pool,
             DurableAgentClient(
                 settings["agent_url"],
@@ -110,7 +109,9 @@ def main() -> None:
     from boxie.observability.logging import process_logging
 
     runtime = process_logging("worker")
-    run_process(runtime, _main)
+    from boxie.observability.runtime import run_metrics_process
+
+    run_metrics_process(runtime, "worker", _main)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 
 import ipaddress
 import threading
+import time
 from collections.abc import Iterable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -88,6 +89,8 @@ class MetricsListener:
         self.metrics, self.host, self.port = metrics, host, port
         self.retry_seconds = retry_seconds
         self._stop = threading.Event()
+        self._close_lock = threading.Lock()
+        self._close_deadline: float | None = None
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -138,6 +141,10 @@ class MetricsListener:
         return (str(server.server_address[0]), int(server.server_address[1])) if server else None
 
     def close(self, timeout: float = 2) -> None:
-        self._stop.set()
+        with self._close_lock:
+            if self._close_deadline is None:
+                self._close_deadline = time.monotonic() + min(2.0, max(0.0, timeout))
+            deadline = self._close_deadline
+            self._stop.set()
         if self._thread is not None:
-            self._thread.join(timeout=max(0, timeout))
+            self._thread.join(timeout=max(0.0, deadline - time.monotonic()))

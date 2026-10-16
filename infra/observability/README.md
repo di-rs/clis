@@ -42,7 +42,9 @@ Python listeners bind loopback by default; set `BOXIE_METRICS_HOST=0.0.0.0` or
 `PLAYGROUND_METRICS_HOST=0.0.0.0` explicitly inside the private container network.
 The exporter is never mounted on an application router. Python bind failures
 retry every 15 seconds without blocking lifecycle startup or flooding logs.
-Listener shutdown runs off the event loop with a 2-second join budget. The
+The synchronous process owner starts log drain and listener shutdown under one
+shared monotonic 2-second deadline after the event loop exits. Both joins use
+only remaining time; repeated closes cannot renew the deadline. The
 Temporal SDK Runtime exports on its own listener; construction failure records a
 configuration error and falls back to safe Core log forwarding until process
 restart (the pinned SDK has no public Runtime close).

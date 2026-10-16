@@ -312,13 +312,18 @@ class LogRuntime:
                 if self._state == "enabled":
                     self._state = "closed"
 
-    def close(self, timeout_seconds: float = 2) -> None:
+    def begin_close(self, timeout_seconds: float = 2) -> float:
+        """Signal terminal drain without joining; return the one shutdown deadline."""
         timeout = min(2.0, max(0.0, timeout_seconds)) if math.isfinite(timeout_seconds) else 0.0
         with self._lock:
             if self._deadline is None:
                 self._deadline = time.monotonic() + timeout
             deadline = self._deadline
             self._wake.set()
+        return deadline
+
+    def close(self, timeout_seconds: float = 2) -> None:
+        deadline = self.begin_close(timeout_seconds)
         # Async callers only initiate drain: off-loop owner/atexit does any join.
         try:
             asyncio.get_running_loop()
@@ -471,7 +476,12 @@ def install_asyncio_handler(runtime: LogRuntime) -> None:
     asyncio.get_running_loop().set_exception_handler(exception_handler)
 
 
-def run_process(runtime: LogRuntime, run: Callable[[], None]) -> None:
+def run_process(
+    runtime: LogRuntime,
+    run: Callable[[], None],
+    *,
+    close_metrics: Callable[[float], None] | None = None,
+) -> None:
     try:
         run()
     except BaseException as error:
@@ -481,7 +491,14 @@ def run_process(runtime: LogRuntime, run: Callable[[], None]) -> None:
             raise
         raise SystemExit(1) from None
     finally:
-        runtime.close()
+        # This owner runs after asyncio.run has returned. Start log drain before
+        # stopping/joining the metrics listener, sharing one terminal deadline.
+        deadline = runtime.begin_close()
+        try:
+            if close_metrics is not None:
+                close_metrics(max(0.0, deadline - time.monotonic()))
+        finally:
+            runtime.close(max(0.0, deadline - time.monotonic()))
 
 
 def log_runtime() -> LogRuntime:

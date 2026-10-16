@@ -545,3 +545,83 @@ runtime.close()
     assert all(
         "duration_ms" in event for event in correlated if event["event"] == "request.completed"
     )
+
+
+@pytest.mark.parametrize("role,fail", [("api", False), ("worker", False), ("agent", True)])
+def test_boxie_process_roots_share_shutdown_deadline(
+    role: str, fail: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+    import importlib
+    import os
+    import threading
+
+    from boxie.observability.metrics import Metrics
+    from service_logging.logging import LogRuntime, LogSettings
+    from service_logging.metrics import MetricsListener
+
+    root = importlib.import_module("boxie.bootstrap." + role)
+    read, write = os.pipe()
+    os.set_blocking(write, False)
+    try:
+        while True:
+            os.write(write, b"x" * 4096)
+    except BlockingIOError:
+        pass
+    runtime = LogRuntime(LogSettings(service="boxie", role=role), {}, {}, write, 4096, "enabled")
+    runtime.emit("request.completed")
+    entered, finished = threading.Event(), threading.Event()
+    listeners: list[MetricsListener] = []
+    original_run = MetricsListener._run
+    original_close = MetricsListener.close
+
+    def slow_listener(self: MetricsListener) -> None:
+        listeners.append(self)
+        entered.set()
+        try:
+            original_run(self)
+        finally:
+            time.sleep(3)  # Longer than the entire owner budget.
+            finished.set()
+
+    def off_loop_close(self: MetricsListener, timeout: float = 2) -> None:
+        with pytest.raises(RuntimeError, match="no running event loop"):
+            asyncio.get_running_loop()
+        original_close(self, timeout)
+
+    def service(metrics: Metrics) -> None:
+        assert metrics.role == role
+
+        async def run() -> None:
+            assert await asyncio.to_thread(entered.wait, 1)
+            if fail:
+                raise RuntimeError("service exit")
+
+        asyncio.run(run())
+
+    monkeypatch.setattr(MetricsListener, "_run", slow_listener)
+    monkeypatch.setattr(MetricsListener, "close", off_loop_close)
+    monkeypatch.setattr("boxie.observability.logging.process_logging", lambda role: runtime)
+    monkeypatch.setattr(root, "_main", service)
+    started = time.monotonic()
+    try:
+        if fail:
+            with pytest.raises(SystemExit) as failure:
+                root.main()
+            assert failure.value.code == 1
+        else:
+            root.main()
+        elapsed = time.monotonic() - started
+        assert 1.8 <= elapsed < 2.5, elapsed
+        # The listener is deliberately still finishing; neither repeated close
+        # may wait on a fresh budget or obscure the original process failure.
+        assert not finished.is_set()
+        repeated = time.monotonic()
+        listeners[0].close()
+        runtime.close()
+        assert time.monotonic() - repeated < 0.2
+        assert finished.wait(2)
+    finally:
+        runtime.close(0)
+        os.close(read)
+        assert finished.wait(2)

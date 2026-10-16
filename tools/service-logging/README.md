@@ -46,7 +46,10 @@ settings increment `configuration_errors` without replacing it. Close is termina
 until process restart. `close(timeout_seconds=2)` establishes one monotonic budget
 of at most two seconds, reused by explicit close and atexit. It only joins outside
 an active asyncio loop; async callers initiate drain and process ownership handles
-the eventual join. Handler flush/close do not drain or perform sink I/O. A blocked
+the eventual join. `run_process` signals log drain before closing the optional
+owned metrics listener, passing only the time remaining on that same deadline
+to its off-loop join. Metrics listeners also retain their first close deadline.
+Handler flush/close do not drain or perform sink I/O. A blocked
 pipe drops newest diagnostics and cannot make this writer block process exit.
 The budget allows scheduler overhead; it is not a hard real-time promise.
 
