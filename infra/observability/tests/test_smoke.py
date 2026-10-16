@@ -127,6 +127,38 @@ def test_failed_create_proxy_rejects_before_upstream(
     asyncio.run(exercise())
 
 
+def test_owned_stack_uses_direct_buildkit_with_existing_build_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import yaml
+    from observability_infra.smoke_application import stack_at
+    from observability_infra.smoke_runtime import Commands, Deadline
+
+    executable = tmp_path / "docker"
+    executable.write_text(
+        f"#!{sys.executable}\nimport json, os\n"
+        "print(json.dumps({key: os.environ[key] for key in ('COMPOSE_BAKE', 'DOCKER_HOST')}))\n"
+    )
+    executable.chmod(0o700)
+    monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ["PATH"])
+    monkeypatch.setenv("COMPOSE_BAKE", "true")
+    (tmp_path / "application").mkdir()
+    stack = stack_at(tmp_path, Commands(Deadline(5, reserve=0.1)))
+    stack.build_network = "host"
+    stack.write_overrides()
+    effective_environment = json.loads(stack.compose("temporal", "build", "bootstrap"))
+    assert effective_environment == {
+        "COMPOSE_BAKE": "false",
+        "DOCKER_HOST": "unix://" + str(tmp_path / "docker.sock"),
+    }
+    assert os.environ["COMPOSE_BAKE"] == "true"
+    override = yaml.safe_load(
+        (tmp_path / "application/temporal-override.yml").read_text().replace("!override", "")
+    )
+    assert override["services"]["bootstrap"]["build"] == {"network": "host"}
+    assert "network_mode" not in override["services"]["bootstrap"]
+
+
 def test_native_fixture_refuses_development_host_before_creating_resources(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

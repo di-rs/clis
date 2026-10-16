@@ -41,6 +41,9 @@ def stack_at(root: Path, commands: Commands) -> Any:
         for name, value in data.items():
             setattr(stack, name, value)
     stack.env["DOCKER_HOST"] = "unix://" + str(root / "docker.sock")
+    # Compose 2.38 Bake omits the allow flag for the explicit host build network.
+    # Use its direct BuildKit path within this fixture, without changing runtime networks.
+    stack.env["COMPOSE_BAKE"] = "false"
     return stack
 
 
