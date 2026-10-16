@@ -192,3 +192,113 @@ def test_temporal_publish_parser_reaches_docker_without_removing_compose_tags(
     publish = calls[0][calls[0].index("--publish") + 1]
     assert publish.startswith("127.0.0.1:") and publish.endswith(":7233")
     assert "logging: !override" in (tmp_path / "temporal-override.yml").read_text()
+
+
+@pytest.mark.parametrize("still_exists", [False, True])
+def test_children_tolerates_only_confirmed_concurrent_deletion(
+    tmp_path: Path, still_exists: bool
+) -> None:
+    from integration.stack import LifecycleStack
+
+    identifier = "a" * 64
+    calls: list[list[str]] = []
+
+    def run(args: list[str], *, env: dict[str, str] | None = None) -> str:
+        calls.append(args)
+        if args[1] == "inspect":
+            raise RuntimeError("inspect failed")
+        if "id=" + identifier in args:
+            return identifier if still_exists else ""
+        return identifier
+
+    stack = LifecycleStack(tmp_path, command_runner=run)
+    if still_exists:
+        with pytest.raises(RuntimeError, match="inspect failed"):
+            stack.children()
+    else:
+        assert stack.children() == []
+    assert "--no-trunc" in calls[0]
+    assert calls[-1][-1] == "id=" + identifier
+
+
+def test_readiness_probe_exports_only_allowlisted_booleans(monkeypatch: pytest.MonkeyPatch) -> None:
+    import contextlib
+    import io
+    import json
+
+    from integration.diagnostics import AGENT_PROBE
+
+    original_client = httpx.Client
+    secret = "secret-do-not-export"
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/readyz":
+            return httpx.Response(
+                503,
+                json={
+                    "dependencies": {
+                        "docker": True,
+                        "postgres": False,
+                        "execution": False,
+                        "private": secret,
+                    },
+                    "private": secret,
+                },
+            )
+        return httpx.Response(
+            200,
+            text='boxie_dependency_ready{dependency="agent"} 0\nboxie_dependency_known{dependency="agent"} 1\nprivate_metric{secret="'
+            + secret
+            + '"} 7\n',
+        )
+
+    monkeypatch.setattr(
+        httpx,
+        "Client",
+        lambda **kwargs: original_client(transport=httpx.MockTransport(respond), **kwargs),
+    )
+    monkeypatch.setattr(Path, "read_text", lambda self: secret)
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        exec(AGENT_PROBE, {})
+    assert secret not in output.getvalue()
+    data = json.loads(output.getvalue())
+    assert data["agent"] == {
+        "status": 503,
+        "dependencies": {"docker": True, "postgres": False, "execution": False},
+    }
+    assert data["dependencies"]["boxie_dependency_ready"]["agent"] == 0
+
+
+def test_readiness_details_exclude_container_error_and_configuration_secrets() -> None:
+    import json
+
+    from integration.diagnostics import readiness_details
+
+    secret = "credential-and-private-error"
+    item = {
+        "Config": {
+            "Labels": {
+                "com.docker.compose.project": "owned",
+                "com.docker.compose.service": "agent",
+            },
+            "Env": [secret],
+        },
+        "State": {
+            "Status": "exited",
+            "Running": False,
+            "OOMKilled": True,
+            "ExitCode": 137,
+            "Error": secret,
+        },
+    }
+    stack = SimpleNamespace(
+        runtime="owned",
+        runtime_command=lambda *args: "a" * 64 if args[0] == "ps" else "{}",
+        command=lambda args: json.dumps([item]),
+    )
+    output = readiness_details(stack)
+    assert secret not in output
+    state = json.loads(output)["containers"]["agent"]
+    assert state["oom_killed"] is True and state["exit_code"] == 137 and state["running"] is False
+    assert json.loads(output)["containers"]["worker"] == {"error_type": "ValueError"}

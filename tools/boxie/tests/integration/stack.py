@@ -15,6 +15,8 @@ from boxie.persistence.migrate import migrate
 from psycopg.rows import dict_row
 from run_integration import ROOT, CommandRunner, ProductionStack, command
 
+from integration.diagnostics import readiness_details
+
 
 class LifecycleStack(ProductionStack):
     def __init__(
@@ -186,6 +188,8 @@ class LifecycleStack(ProductionStack):
         raise RuntimeError(
             f"lifecycle API {self.api_url} did not become ready: {last}; "
             f"published={self.runtime_command('port', 'api', '8090')}\n"
+            + readiness_details(self)
+            + "\n"
             + self.runtime_command("logs", "--tail", "80")
         )
 
@@ -245,7 +249,9 @@ with httpx.Client(headers={'Authorization': 'Bearer ' + credential}, timeout=1, 
             [
                 "docker",
                 "ps",
-                "-aq",
+                "--all",
+                "--quiet",
+                "--no-trunc",
                 "--filter",
                 "label=boxie.installation=" + self.installation,
                 "--filter",
@@ -254,7 +260,25 @@ with httpx.Client(headers={'Authorization': 'Bearer ' + credential}, timeout=1, 
         ).split()
         owned = []
         for identifier in ids:
-            info = json.loads(self.command(["docker", "inspect", identifier]))[0]
+            try:
+                info = json.loads(self.command(["docker", "inspect", identifier]))[0]
+            except RuntimeError:
+                # Cleanup can remove a listed child before inspection. Confirm
+                # its exact ID is absent, without ownership filters masking it.
+                remains = self.command(
+                    [
+                        "docker",
+                        "ps",
+                        "--all",
+                        "--quiet",
+                        "--no-trunc",
+                        "--filter",
+                        "id=" + identifier,
+                    ]
+                )
+                if not remains:
+                    continue
+                raise
             labels = info["Config"]["Labels"]
             if (
                 labels.get("boxie.installation") == self.installation
