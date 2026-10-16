@@ -14,23 +14,23 @@ Apply Boxie migrations explicitly from the installed Boxie environment:
 uv run --locked python -m boxie.persistence.migrate --dsn-file /etc/boxie/postgres-dsn.secret
 ```
 
-Generate `api.json`, `worker.json` and `agent.json` with `boxie_infra.config` as in
+Generate `api.json`, `worker.json` and `orchestrator.json` with `boxie_infra.config` as in
 [the infrastructure guide](README.md). Provide the additional paths in
 [config.example.env](config.example.env). API and worker mount separate Temporal
 client identities signed by the dedicated client CA, verify the server's CA and
-hostname, and receive no Docker socket or artifact directory. The agent receives
-the Boxie DSN and agent credential, but no Temporal certificates.
+hostname, and receive no Docker socket or artifact directory. The orchestrator receives
+the Boxie DSN and orchestrator credential, but no Temporal certificates.
 
 The API commits admission, capacity and artifact references with a start outbox
-record. Only the agent stores artifact bytes; PostgreSQL is the artifact metadata
+record. Only the orchestrator stores artifact bytes; PostgreSQL is the artifact metadata
 authority. The worker dispatches durable notifications and executes lifecycle
-activities. The agent revalidates the same SQL admission under the final-start row
+activities. The orchestrator revalidates the same SQL admission under the final-start row
 guard. Stop is durable before cleanup starts. There is no direct-mode startup or
 fallback. Do not reuse an old direct-mode data directory; migration and restart
 terminal continuity are excluded.
 
 `/readyz` reports orchestration readiness: SQL/outbox age and backlog, authenticated
-agent execution/Docker readiness, Temporal health/namespace and recent workflow
+orchestrator execution/Docker readiness, Temporal health/namespace and recent workflow
 and activity pollers. Worker presence uses a 90-second freshness window: the
 pinned Temporal 1.32.0 server's 60-second matching long poll plus a 30-second
 scheduling/network margin. This is recent presence, not instantaneous liveness;
@@ -39,14 +39,14 @@ production server's long-poll setting must revisit this compatibility bound.
 Separately, a new undelivered command older than 30 seconds or backlog of 100
 rejects new admission. Matching retries, status and stop still use SQL when
 dependencies are unhealthy. Stop requires the normal API DELETE, never Temporal termination.
-Workers can restart without closing agent-owned terminals. Cleanup failures retain
+Workers can restart without closing orchestrator-owned terminals. Cleanup failures retain
 capacity and artifact references and retry durably every 30 seconds after each
 bounded cycle. Only fenced physical absence can release accounting.
 
-The agent publishes authenticated `PUT /internal/observations` with its agent
+The orchestrator publishes authenticated `PUT /internal/observations` with its orchestrator
 credential. Consumer credentials cannot publish facts. Input reports coalesce for
 10 seconds; attachment, detachment, exit and deletion trigger immediate delivery.
-One latest fact per sandbox survives an API outage in agent memory; 30-second
+One latest fact per sandbox survives an API outage in orchestrator memory; 30-second
 workflow inspection repairs lost reports and renews the control lease. Sensitive
 profile/command/environment values are resolved only inside activities; no PTY
 bytes enter SQL observations or Temporal history.
@@ -66,14 +66,14 @@ UV_CACHE_DIR=/tmp/boxie-uv-cache uv run --locked pytest -m integration \
 ```
 
 Time-skipping tests use deterministic activities and export/replay real histories.
-The separate production-server tests exercise PostgreSQL, mTLS, HTTP, agent fencing
-and resource accounting without skipping PostgreSQL or agent clocks. Native
+The separate production-server tests exercise PostgreSQL, mTLS, HTTP, orchestrator fencing
+and resource accounting without skipping PostgreSQL or orchestrator clocks. Native
 Linux/runsc and full process-crash proof are additional integration gates.
 
 ## Execution journal bounds
 
 Only durably removed executions with no pending create, uncertainty or protocol
-session can be reclaimed. The agent reads back the exact immutable SQL request
+session can be reclaimed. The orchestrator reads back the exact immutable SQL request
 and terminal cleaned state with no slot or artifact reference. This proof survives
 prior-boot reports and lost acknowledgments. An authoritative missing row after
 SQL retention is also safe: all fresh execution initialization revalidates SQL and
@@ -100,7 +100,7 @@ ambiguous publication/COMMIT retains bytes for retry/readback. Synchronous file
 operations and driver cancellation unwinding are not a hard wall-clock guarantee.
 
 If a lost create acknowledgment is discovered and physically deleted while all
-journal saves fail, then the agent crashes before recording discovery, the next
+journal saves fail, then the orchestrator crashes before recording discovery, the next
 boot must retain unknown ownership even when Docker reports absence. That case
 keeps SQL capacity/artifact references and needs operator investigation; recovery
 does not invent finality. A durably known container ID can instead reconcile

@@ -1,13 +1,13 @@
 # Boxie local infrastructure
 
-Boxie owns its runtime image, private API, privileged agent, artifact data and
+Boxie owns its runtime image, private API, privileged orchestrator, artifact data and
 trusted profile configuration. Both manifests default to Compose project `boxie`;
 set `BOXIE_PROJECT_NAME` in the operator environment file for another installation.
 Playground uses its own project identity, so either unit can perform orphan cleanup
 without owning the other unit's containers. Keep project names distinct, and avoid
 a shared `COMPOSE_PROJECT_NAME` or shared `--project-name` override.
 
-The consumer API has no host port. Only the agent mounts the Docker socket; it joins a separate control network. Playground is an
+The consumer API has no host port. Only the orchestrator mounts the Docker socket; it joins a separate control network. Playground is an
 optional consumer and is not required to configure or start Boxie.
 
 Production activation is unavailable during PR1–PR3. The independently targetable
@@ -33,18 +33,18 @@ docker network create --internal boxie-control
 Choose private operator-owned files outside the repository. Use the names in
 [config.example.env](config.example.env) as an environment-file template. Generate
 two different random printable credentials (at least 16 characters), stored as
-regular files with mode `0600`: one agent credential and one consumer credential.
-Do not put credentials in URLs. The API reads both files; the agent only reads its
+regular files with mode `0600`: one orchestrator credential and one consumer credential.
+Do not put credentials in URLs. The API reads both files; the orchestrator only reads its
 own credential. A consumer receives only its own credential.
 
 Linux bind mounts preserve numeric ownership. The current Boxie runtime image
 runs as UID 0; with `cap_drop: ALL`, it cannot bypass another UID's file
-permissions. Provision its agent/consumer credentials, database DSN and dedicated
+permissions. Provision its orchestrator/consumer credentials, database DSN and dedicated
 Temporal private keys as reader-owned regular files with mode `0600` (UID 0 for
 the current production manifests). Keep secret mounts read-only. Public
 certificates and configuration must also be readable by their service UID, and
 each containing directory must permit traversal. Create `BOXIE_DATA_DIR` and
-its `profiles` subdirectory with the agent's UID and owner write/traverse access
+its `profiles` subdirectory with the orchestrator's UID and owner write/traverse access
 before starting Compose; Docker-created bind-source directories can have the
 wrong owner. The pinned Temporal server, operator and UI images use UID 1000;
 their private keys must be owned by that reader with mode `0600` as well.
@@ -80,7 +80,7 @@ docker compose --env-file /etc/boxie/local.env \
 
 The configuration generator contains no secret values. `--data-dir` must equal
 `BOXIE_DATA_DIR`: this absolute directory is mounted at the **identical path** in
-the agent. Docker resolves child artifact bind sources on its daemon host, so a
+the orchestrator. Docker resolves child artifact bind sources on its daemon host, so a
 container-only path or a client path on a remote Docker host is invalid. Storage
 is an explicit host bind, not a volume whose opaque mountpoint must be guessed.
 The API receives no artifact storage. Both networks are externally supplied and
@@ -99,7 +99,7 @@ uv run --locked pytest tools/boxie/tests/test_packaging.py -m integration
 ```
 
 The native Linux [sandbox check](../../../.github/workflows/boxie-lifecycle.yml)
-starts isolated PostgreSQL, Temporal, API, worker, agent and Playground services,
+starts isolated PostgreSQL, Temporal, API, worker, orchestrator and Playground services,
 then exercises process faults, browser recovery and both
 `boxie_infra.smoke` and `playground_infra.smoke` through HTTP and WebSocket. Each
 inspects the actual sandbox's `runsc`, non-root user, no-network mode, read-only
@@ -108,7 +108,7 @@ Docker logs and confirmed container deletion. The product smoke also checks the
 native Rust CLI, fixtures, pipes/redirection, resize and Ctrl-C. Ordinary Docker
 image builds or fake-daemon E2Es do not count as this platform check.
 
-The lifecycle fixture runs API, worker and agent as the runner's numeric UID:GID
+The lifecycle fixture runs API, worker and orchestrator as the runner's numeric UID:GID
 so its private files and writable storage share one owner. Its Linux-volume DAC
 regression resolves the actual test Compose mounts and checks readable private
 credentials, immutable secret mounts, writable data/profiles and rejected unsafe

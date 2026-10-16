@@ -2,7 +2,7 @@ name: CodeQL
 
 on:
   pull_request:
-    branches: [master, refactor/boxie-service, feat/boxie-temporal, feat/boxie-observability]
+    branches: [master]
   push:
     branches: [master]
   schedule:

@@ -15,9 +15,9 @@ from temporalio.client import Client
 from temporalio.service import TLSConfig
 
 from boxie.bootstrap.config import DurableConfig, read_credential
-from boxie.domain.models import AgentIdentity
+from boxie.domain.models import OrchestratorIdentity
 from boxie.persistence.postgres import Pool
-from boxie.sandbox.durable_client import DurableAgentClient
+from boxie.sandbox.durable_client import DurableOrchestratorClient
 from boxie.temporal.contracts import TASK_QUEUE
 
 # Temporal 1.32.0's matching long poll defaults to 60 seconds. Poller access
@@ -33,8 +33,8 @@ def durable_config(data: dict[str, Any]) -> DurableConfig:
     return DurableConfig(**converted)
 
 
-def agent_identity(data: dict[str, str]) -> AgentIdentity:
-    return AgentIdentity(UUID(data["installation_id"]), data["host_id"])
+def orchestrator_identity(data: dict[str, str]) -> OrchestratorIdentity:
+    return OrchestratorIdentity(UUID(data["installation_id"]), data["host_id"])
 
 
 def pool_for(path: Path) -> Pool:
@@ -64,13 +64,13 @@ async def temporal_client(config: DurableConfig, *, lazy: bool = False) -> Clien
 
 
 class Dependencies:
-    def __init__(self, agent: DurableAgentClient, temporal: Client) -> None:
-        self.agent, self.temporal = agent, temporal
+    def __init__(self, orchestrator: DurableOrchestratorClient, temporal: Client) -> None:
+        self.orchestrator, self.temporal = orchestrator, temporal
 
     async def __call__(self) -> bool:
         async with asyncio.timeout(5):
             if (
-                not await self.agent.ready()
+                not await self.orchestrator.ready()
                 or not await self.temporal.service_client.check_health()
             ):
                 return False

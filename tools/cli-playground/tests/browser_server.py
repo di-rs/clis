@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from boxie_test_support.agent import FakeTerminal
+from boxie_test_support.orchestrator import FakeTerminal
 from fastapi import Request
 
 from tests.boxie_network import boxie_network, product_server, publish
@@ -25,7 +25,7 @@ class ObservedTerminal(FakeTerminal):
 async def main() -> None:
     with tempfile.TemporaryDirectory(prefix="boxie-browser-") as directory:
         root = Path(directory)
-        async with boxie_network(root / "agent") as network:
+        async with boxie_network(root / "orchestrator") as network:
 
             async def terminal(identifier: str) -> ObservedTerminal:
                 stream = ObservedTerminal()
@@ -67,7 +67,7 @@ async def main() -> None:
                                 if record.container_id in network.daemon.streams
                                 else [],
                             }
-                            for record in network.agent.records.values()
+                            for record in network.orchestrator.records.values()
                         ],
                     }
 
@@ -76,7 +76,7 @@ async def main() -> None:
                     value = await request.json()
                     record = next(
                         record
-                        for record in network.agent.records.values()
+                        for record in network.orchestrator.records.values()
                         if str(record.id) == value["id"]
                     )
                     stream = network.daemon.streams[record.container_id]

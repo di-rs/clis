@@ -1,4 +1,4 @@
-"""Translate bounded consumer JSON input into the byte-preserving agent stream."""
+"""Translate bounded consumer JSON input into the byte-preserving orchestrator stream."""
 
 import asyncio
 from contextlib import suppress
@@ -81,14 +81,14 @@ async def proxy(websocket: WebSocket, connection: TerminalConnection) -> None:
             async with asyncio.timeout(20):
                 if isinstance(message, bytes):
                     if not 9 <= len(message) <= 16392:
-                        raise BoxieError(503, "invalid agent output frame")
+                        raise BoxieError(503, "invalid orchestrator output frame")
                     cursor = int.from_bytes(message[:8], "big")
                     await websocket.send_bytes(message)
                 else:
                     try:
                         status = response.validate_json(message)
                     except ValidationError:
-                        raise BoxieError(503, "invalid agent terminal status") from None
+                        raise BoxieError(503, "invalid orchestrator terminal status") from None
                     if isinstance(status, Attached):
                         epoch = status.epoch
                     await websocket.send_text(status.model_dump_json())

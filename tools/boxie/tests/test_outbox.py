@@ -93,7 +93,7 @@ def test_idle_worker_presence_survives_long_poll_then_expires(
 
         async with durable_stack(postgres_dsn, tmp_path, client, TASK_QUEUE) as stack:
             activities = stack[5]
-            dependencies = Dependencies(activities.agent, client)
+            dependencies = Dependencies(activities.orchestrator, client)
             async with lifecycle_worker(client, activities):
                 async with asyncio.timeout(10):
                     while len(initial := await timestamps()) != 2 or not await dependencies():
@@ -156,7 +156,7 @@ def test_workflow_cleanup_preserves_first_termination_cause(
         from uuid import UUID
 
         from boxie.bootstrap.worker import lifecycle_worker
-        from boxie.domain.lifecycle import AgentObservation
+        from boxie.domain.lifecycle import OrchestratorObservation
         from boxie.domain.models import SandboxState, TerminationReason
         from boxie.sandbox.protocol import ObservationWire
         from boxie.temporal.workflows import SandboxLifecycle
@@ -171,7 +171,7 @@ def test_workflow_cleanup_preserves_first_termination_cause(
         async with durable_stack(postgres_dsn, tmp_path, client, queue) as (
             http,
             life,
-            agent,
+            orchestrator,
             daemon,
             pool,
             activities,
@@ -179,15 +179,17 @@ def test_workflow_cleanup_preserves_first_termination_cause(
         ):
             sid = UUID(await create(http, await artifact(http)))
             request = await life.load_request(sid)
-            assert await life.bind_agent_boot(OWNER, request.identity, sid, 1, None, agent.boot_id)
+            assert await life.bind_orchestrator_boot(
+                OWNER, request.identity, sid, 1, None, orchestrator.boot_id
+            )
             if requested_first:
                 await life.terminate(OWNER, sid, TerminationReason.REQUESTED)
-            observation = AgentObservation(
+            observation = OrchestratorObservation(
                 sid,
                 OWNER,
                 request.identity,
                 1,
-                agent.boot_id,
+                orchestrator.boot_id,
                 1,
                 datetime.now(UTC),
                 SandboxState.TERMINATING,
@@ -201,7 +203,7 @@ def test_workflow_cleanup_preserves_first_termination_cause(
                 response = await http.put(
                     "/internal/observations",
                     json=ObservationWire.from_domain(item).model_dump(mode="json"),
-                    headers={"Authorization": "Bearer agent-test-secret"},
+                    headers={"Authorization": "Bearer orchestrator-test-secret"},
                 )
                 assert response.status_code == 200
                 assert response.json() == {"accepted": accepted}
@@ -252,7 +254,7 @@ def test_runnable_stack_preserves_accounting_and_worker_replacement(
         async with durable_stack(postgres_dsn, tmp_path, client, queue) as (
             http,
             life,
-            agent,
+            orchestrator,
             daemon,
             pool,
             activities,
@@ -260,7 +262,7 @@ def test_runnable_stack_preserves_accounting_and_worker_replacement(
         ):
             import hashlib
 
-            from boxie_test_support.agent import bundle
+            from boxie_test_support.orchestrator import bundle
 
             artifact_id = str(uuid4())
             content = bundle({"file.txt": b"SECRET-ARTIFACT-BYTES"})
@@ -290,7 +292,7 @@ def test_runnable_stack_preserves_accounting_and_worker_replacement(
                 await life.terminate(OWNER, sid, TerminationReason.REQUESTED)
             else:
                 daemon.lost_ack = True  # Daemon creates, then loses the create response.
-                original = activities.agent.ensure_execution
+                original = activities.orchestrator.ensure_execution
                 lost = False
 
                 async def lose_ensure_response(request: Any, boot: Any) -> Any:
@@ -301,7 +303,9 @@ def test_runnable_stack_preserves_accounting_and_worker_replacement(
                         raise BoxieError(503, "lost RPC response SECRET-TRANSPORT")
                     return result
 
-                monkeypatch.setattr(activities.agent, "ensure_execution", lose_ensure_response)
+                monkeypatch.setattr(
+                    activities.orchestrator, "ensure_execution", lose_ensure_response
+                )
             delivery = asyncio.create_task(dispatcher.run())
             try:
                 async with lifecycle_worker(client, activities, task_queue=queue):
@@ -329,7 +333,7 @@ def test_runnable_stack_preserves_accounting_and_worker_replacement(
                         )
                     else:
                         await ready(http, identifier, "terminated")
-                # Worker replacement must not close an agent-owned live terminal.
+                # Worker replacement must not close an orchestrator-owned live terminal.
                 if not stop_first:
                     assert len(daemon.resources) == 1
                     await ws.send(
@@ -347,10 +351,10 @@ def test_runnable_stack_preserves_accounting_and_worker_replacement(
                 async with lifecycle_worker(client, activities, task_queue=queue):
                     if not stop_first:
                         for _ in range(100):
-                            if agent.records[sid].cleanup_pending:
+                            if orchestrator.records[sid].cleanup_pending:
                                 break
                             await asyncio.sleep(0.02)
-                        assert agent.records[sid].cleanup_pending
+                        assert orchestrator.records[sid].cleanup_pending
                         assert (await counts(pool))[1:3] == (1, 1)
                         daemon.unreachable = False
                         await ws.close()
@@ -374,7 +378,7 @@ def test_runnable_stack_preserves_accounting_and_worker_replacement(
                         assert b"SECRET-" not in encoded
                         assert (
                             b"consumer-one-secret" not in encoded
-                            and b"agent-test-secret" not in encoded
+                            and b"orchestrator-test-secret" not in encoded
                         )
                     await Replayer(workflows=[SandboxLifecycle]).replay_workflow(history)
                     assert "SECRET-" not in caplog.text
@@ -406,7 +410,7 @@ def test_actual_api_worker_processes_recover_worker_loss(
         async with durable_stack(postgres_dsn, tmp_path, client, "unused-process-fixture") as (
             _,
             life,
-            agent,
+            orchestrator,
             daemon,
             pool,
             activities,
@@ -423,11 +427,11 @@ def test_actual_api_worker_processes_recover_worker_loss(
                 port = sock.getsockname()[1]
             common = {
                 "identity": {
-                    "installation_id": str(agent.config.identity.installation_id),
-                    "host_id": agent.config.identity.host_id,
+                    "installation_id": str(orchestrator.config.identity.installation_id),
+                    "host_id": orchestrator.config.identity.host_id,
                 },
-                "agent_url": activities.agent._base_url,
-                "agent_credential_file": str(agent.config.credential_file),
+                "orchestrator_url": activities.orchestrator._base_url,
+                "orchestrator_credential_file": str(orchestrator.config.credential_file),
                 "durable": {
                     "postgres_dsn_file": str(dsn),
                     "temporal_address": temporal_stack.address,
@@ -553,7 +557,8 @@ def test_actual_api_worker_processes_recover_worker_loss(
                         raise AssertionError("process failed to shut down") from None
                     assert b"PROCESS-PTY-SENTINEL" not in output
                     assert (
-                        b"consumer-one-secret" not in output and b"agent-test-secret" not in output
+                        b"consumer-one-secret" not in output
+                        and b"orchestrator-test-secret" not in output
                     )
 
     asyncio.run(exercise())
@@ -570,8 +575,8 @@ def test_api_starts_during_temporal_outage_and_recovers(
 
         import httpx
         from boxie.bootstrap.worker import lifecycle_worker
-        from boxie_test_support.agent import request
         from boxie_test_support.api import CONSUMER_AUTH, artifact, create, ready
+        from boxie_test_support.orchestrator import request
         from temporal_support import durable_stack
 
         client = await Client.connect(
@@ -616,7 +621,7 @@ def test_api_starts_during_temporal_outage_and_recovers(
             await asyncio.start_server(proxy, "127.0.0.1", 0) as frontend,
             durable_stack(postgres_dsn, tmp_path, client, "boxie-lifecycle") as stack,
         ):
-            fixture_http, _, agent, daemon, _, activities, dispatcher = stack
+            fixture_http, _, orchestrator, daemon, _, activities, dispatcher = stack
             artifact_id = await artifact(fixture_http)
             existing = await create(fixture_http, artifact_id, "outage-retry")
             for name, value in (("postgres", postgres_dsn), ("consumer", "consumer-one-secret")):
@@ -634,11 +639,11 @@ def test_api_starts_during_temporal_outage_and_recovers(
                         "bind_port": api_port,
                         "consumer_credential_files": {"one": str(tmp_path / "consumer.secret")},
                         "identity": {
-                            "installation_id": str(agent.config.identity.installation_id),
-                            "host_id": agent.config.identity.host_id,
+                            "installation_id": str(orchestrator.config.identity.installation_id),
+                            "host_id": orchestrator.config.identity.host_id,
                         },
-                        "agent_url": activities.agent._base_url,
-                        "agent_credential_file": str(agent.config.credential_file),
+                        "orchestrator_url": activities.orchestrator._base_url,
+                        "orchestrator_credential_file": str(orchestrator.config.credential_file),
                         "durable": {
                             "postgres_dsn_file": str(tmp_path / "postgres.secret"),
                             "temporal_address": f"127.0.0.1:{frontend.sockets[0].getsockname()[1]}",
@@ -716,7 +721,10 @@ def test_api_starts_during_temporal_outage_and_recovers(
                 if process.returncode is None:
                     process.terminate()
                 output, _ = await asyncio.wait_for(process.communicate(), 10)
-                assert b"consumer-one-secret" not in output and b"agent-test-secret" not in output
+                assert (
+                    b"consumer-one-secret" not in output
+                    and b"orchestrator-test-secret" not in output
+                )
                 for connection in list(connections):
                     connection.cancel()
                 await asyncio.gather(*connections, return_exceptions=True)
@@ -732,7 +740,7 @@ def test_authenticated_observations_are_atomic_and_fenced(
         from datetime import UTC, datetime
         from uuid import UUID
 
-        from boxie.domain.lifecycle import AgentObservation
+        from boxie.domain.lifecycle import OrchestratorObservation
         from boxie.domain.models import SandboxState
         from boxie.sandbox.protocol import ObservationWire
         from boxie_test_support.api import artifact, create
@@ -744,20 +752,22 @@ def test_authenticated_observations_are_atomic_and_fenced(
         async with durable_stack(postgres_dsn, tmp_path, client, "unused-observation-queue") as (
             http,
             life,
-            agent,
+            orchestrator,
             _daemon,
             pool,
             _activities,
             _dispatcher,
         ):
             sid = UUID(await create(http, await artifact(http)))
-            await life.bind_agent_boot(OWNER, agent.config.identity, sid, 1, None, agent.boot_id)
-            observation = AgentObservation(
+            await life.bind_orchestrator_boot(
+                OWNER, orchestrator.config.identity, sid, 1, None, orchestrator.boot_id
+            )
+            observation = OrchestratorObservation(
                 sid,
                 OWNER,
-                agent.config.identity,
+                orchestrator.config.identity,
                 1,
-                agent.boot_id,
+                orchestrator.boot_id,
                 10,
                 datetime.now(UTC),
                 SandboxState.READY,
@@ -765,8 +775,10 @@ def test_authenticated_observations_are_atomic_and_fenced(
             )
             body = ObservationWire.from_domain(observation).model_dump(mode="json")
             assert (await http.put("/internal/observations", json=body)).status_code == 401
-            agent_headers = {"Authorization": "Bearer agent-test-secret"}
-            response = await http.put("/internal/observations", json=body, headers=agent_headers)
+            orchestrator_headers = {"Authorization": "Bearer orchestrator-test-secret"}
+            response = await http.put(
+                "/internal/observations", json=body, headers=orchestrator_headers
+            )
             assert response.json() == {"accepted": True}
             for stale in (
                 replace(observation, event_version=9),
@@ -776,14 +788,14 @@ def test_authenticated_observations_are_atomic_and_fenced(
                 response = await http.put(
                     "/internal/observations",
                     json=ObservationWire.from_domain(stale).model_dump(mode="json"),
-                    headers=agent_headers,
+                    headers=orchestrator_headers,
                 )
                 assert response.json() == {"accepted": False}
             async with pool.connection() as conn:
                 assert (
                     await (
                         await conn.execute(
-                            "SELECT event_version FROM agent_observations WHERE sandbox_id=%s",
+                            "SELECT event_version FROM orchestrator_observations WHERE sandbox_id=%s",
                             (sid,),
                         )
                     ).fetchone()
@@ -805,14 +817,14 @@ def test_authenticated_observations_are_atomic_and_fenced(
                 json=ObservationWire.from_domain(replace(observation, event_version=11)).model_dump(
                     mode="json"
                 ),
-                headers=agent_headers,
+                headers=orchestrator_headers,
             )
             assert response.status_code == 500
             async with pool.connection() as conn:
                 assert (
                     await (
                         await conn.execute(
-                            "SELECT event_version FROM agent_observations WHERE sandbox_id=%s",
+                            "SELECT event_version FROM orchestrator_observations WHERE sandbox_id=%s",
                             (sid,),
                         )
                     ).fetchone()
@@ -828,7 +840,7 @@ def test_timeout_closed_delivery_and_bounded_claims(
         import time
         from datetime import UTC, datetime
 
-        from boxie.domain.lifecycle import AgentObservation
+        from boxie.domain.lifecycle import OrchestratorObservation
         from boxie.domain.models import SandboxState
         from boxie.persistence.outbox import PostgresOutbox
         from boxie.temporal.dispatcher import OutboxDispatcher
@@ -862,9 +874,9 @@ def test_timeout_closed_delivery_and_bounded_claims(
                 await dispatcher.deliver(event)
             assert not await store.confirmed_terminal(sandbox.id)
             boot = uuid4()
-            await life.bind_agent_boot(OWNER, config.identity, sandbox.id, 1, None, boot)
+            await life.bind_orchestrator_boot(OWNER, config.identity, sandbox.id, 1, None, boot)
             await life.confirm_removed(
-                AgentObservation(
+                OrchestratorObservation(
                     sandbox.id,
                     OWNER,
                     config.identity,
@@ -1031,7 +1043,7 @@ def test_workflow_cancel_retains_uncertain_create_until_actual_removal(
         async with durable_stack(postgres_dsn, tmp_path, client, queue) as (
             http,
             life,
-            agent,
+            orchestrator,
             daemon,
             pool,
             activities,
@@ -1056,7 +1068,7 @@ def test_workflow_cancel_retains_uncertain_create_until_actual_removal(
                     else:
                         raise AssertionError("cancellation stop not persisted")
                     assert (await counts(pool))[1:3] == (1, 1)
-                    assert not agent.records[sid].removal_confirmed
+                    assert not orchestrator.records[sid].removal_confirmed
                     gate.set()  # Earlier 404s cannot settle this still-running create.
                     assert (await asyncio.wait_for(handle.result(), 30)).cleaned
                     assert daemon.creates == 1 and not daemon.started and not daemon.resources

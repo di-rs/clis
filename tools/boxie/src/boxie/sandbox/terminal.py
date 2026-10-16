@@ -1,22 +1,22 @@
-"""Agent-owned PTY reader and bounded sequenced output."""
+"""Orchestrator-owned PTY reader and bounded sequenced output."""
 
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from boxie.domain.lifecycle import AgentObservation
+from boxie.domain.lifecycle import OrchestratorObservation
 from boxie.domain.models import TerminationReason
 from boxie.sandbox.docker import TerminalPort
 from boxie.sandbox.replay import ReplayBuffer
 
 
 class ExecutionTerminal:
-    """PTY byte owner; durable attachment/activity decisions belong to the agent."""
+    """PTY byte owner; durable attachment/activity decisions belong to the orchestrator."""
 
     def __init__(
         self,
         stream: TerminalPort,
         output_limit: int,
-        terminate: Callable[[TerminationReason], Awaitable[AgentObservation]],
+        terminate: Callable[[TerminationReason], Awaitable[OrchestratorObservation]],
     ) -> None:
         self.stream, self.remaining, self.terminate = stream, output_limit, terminate
         self.replay = ReplayBuffer()

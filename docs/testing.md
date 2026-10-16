@@ -89,10 +89,9 @@ fail. The PR frontend job runs this gate. Image builds and native Linux/gVisor
 smoke are separate checks; ordinary Docker/runc is not gVisor evidence.
 
 Unprivileged PR quality, frontend, sandbox, binary-build and affected benchmark
-checks also accept the intermediate bases `refactor/boxie-service`,
-`feat/boxie-temporal` and `feat/boxie-observability`. Benchmark selection still
-runs only affected or explicitly requested suites. Privileged publication and
-deployment retain their trusted default-branch boundaries.
+checks target `master`. Benchmark selection runs only affected or explicitly
+requested suites. Privileged publication and deployment retain their trusted
+default-branch boundaries.
 
 Boxie has only the PostgreSQL/Temporal lifecycle. Default pytest excludes live
 services; explicit integration selection fails when dependencies are missing.
@@ -109,9 +108,9 @@ Docker with configured gVisor, built `boxie:lifecycle`, `cli-playground:lifecycl
 and `clis-playground-sandbox:lifecycle` images, `target/release/echor`, and Chromium.
 `BOXIE_NATIVE_BINARY` may select the native executable. The fixture owns random
 Compose projects, volumes, identity labels and fault proxies. It independently
-kills API, worker, agent and Temporal; tests failed Docker deletion, actual
+kills API, worker, orchestrator and Temporal; tests failed Docker deletion, actual
 artifact COMMIT acknowledgment loss, collector overlap and journal failure across
-agent restart; and replays production histories. Cleanup removes only verified
+orchestrator restart; and replays production histories. Cleanup removes only verified
 owned sandbox IDs and attempts every Compose layer even after a cleanup error.
 
 The native browser config uses the fixture's real Playground origin and Linux

@@ -156,6 +156,13 @@ class SessionStore:
 
     def stop_environments(self, identifiers: set[str]) -> None:
         for binding in self.bindings():
-            if binding.preview_id in identifiers:
+            if (
+                binding.preview_id in identifiers
+                and not binding.pending_stop
+                and (
+                    binding.sandbox.cleanup_pending
+                    or binding.sandbox.state not in {"terminated", "failed"}
+                )
+            ):
                 binding.pending_stop = True
                 self.save(binding)

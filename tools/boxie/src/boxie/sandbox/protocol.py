@@ -7,12 +7,12 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
-from boxie.domain.lifecycle import AgentObservation, ExpiryRequest, SandboxRef
 from boxie.domain.lifecycle import EnsureRequest as DomainEnsureRequest
+from boxie.domain.lifecycle import ExpiryRequest, OrchestratorObservation, SandboxRef
 from boxie.domain.models import (
-    AgentIdentity,
     ArtifactView,
     LifetimePolicy,
+    OrchestratorIdentity,
     Principal,
     ProfileSnapshot,
     SandboxLimits,
@@ -106,8 +106,8 @@ class IdentityWire(WireModel):
     installation_id: UUID
     host_id: Annotated[str, Field(min_length=1, max_length=128)]
 
-    def domain(self) -> AgentIdentity:
-        return AgentIdentity(self.installation_id, self.host_id)
+    def domain(self) -> OrchestratorIdentity:
+        return OrchestratorIdentity(self.installation_id, self.host_id)
 
 
 class ControlRequest(WireModel):
@@ -223,16 +223,16 @@ class ObservationWire(WireModel):
     container_id: str | None
 
     @classmethod
-    def from_domain(cls, observation: AgentObservation) -> ObservationWire:
+    def from_domain(cls, observation: OrchestratorObservation) -> ObservationWire:
         body = asdict(observation)
         body["consumer_id"] = body.pop("principal")["consumer_id"]
         return cls.model_validate(body)
 
-    def domain(self) -> AgentObservation:
+    def domain(self) -> OrchestratorObservation:
         body = self.model_dump()
         body["principal"] = Principal(body.pop("consumer_id"))
         body["identity"] = self.identity.domain()
-        return AgentObservation(**body)
+        return OrchestratorObservation(**body)
 
 
 class ExpiryWire(WireModel):

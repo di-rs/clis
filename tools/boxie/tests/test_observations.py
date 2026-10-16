@@ -7,8 +7,8 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from boxie.domain.lifecycle import AgentObservation
-from boxie.domain.models import AgentIdentity, Principal, SandboxState
+from boxie.domain.lifecycle import OrchestratorObservation
+from boxie.domain.models import OrchestratorIdentity, Principal, SandboxState
 from boxie.sandbox.reporting import ObservationReporter
 
 
@@ -25,23 +25,23 @@ def test_input_is_coalesced_edges_are_immediate_and_outage_keeps_latest(
         async def transport(request: httpx.Request) -> httpx.Response:
             import json
 
-            assert request.headers["Authorization"] == "Bearer reporter-agent-secret"
+            assert request.headers["Authorization"] == "Bearer reporter-orchestrator-secret"
             if unavailable:
                 return httpx.Response(503)
             delivered.append(json.loads(request.content)["event_version"])
             return httpx.Response(200, json={"accepted": True})
 
-        reporter = ObservationReporter("http://api.invalid", b"reporter-agent-secret")
+        reporter = ObservationReporter("http://api.invalid", b"reporter-orchestrator-secret")
         await reporter.client.aclose()
         reporter.client = httpx.AsyncClient(
             base_url="http://api.invalid",
-            headers={"Authorization": "Bearer reporter-agent-secret"},
+            headers={"Authorization": "Bearer reporter-orchestrator-secret"},
             transport=httpx.MockTransport(transport),
         )
-        observation = AgentObservation(
+        observation = OrchestratorObservation(
             uuid4(),
             Principal("one"),
-            AgentIdentity(uuid4(), "host"),
+            OrchestratorIdentity(uuid4(), "host"),
             1,
             uuid4(),
             1,

@@ -1,4 +1,4 @@
-"""Bounded authenticated private-agent network adapter; no Docker or disk access."""
+"""Bounded authenticated private-orchestrator network adapter; no Docker or disk access."""
 
 import asyncio
 from collections.abc import AsyncIterable, AsyncIterator, Mapping
@@ -10,23 +10,21 @@ from uuid import UUID
 
 import httpx
 from pydantic import ValidationError
-from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import (
-    ConnectionClosed,
-    ConnectionClosedOK,
     InvalidHandshake,
     InvalidStatus,
 )
 
 from boxie.application.service import TerminalConnection
-from boxie.domain.errors import BoxieError, TerminalWriteClosed
+from boxie.domain.errors import BoxieError
 from boxie.domain.models import (
-    AgentIdentity,
     ArtifactPutResult,
+    OrchestratorIdentity,
     Principal,
     ProfileSnapshot,
     SandboxSpec,
 )
+from boxie.sandbox.client_terminal import NoRedirectConnect, OrchestratorTerminal, dependency_error
 from boxie.sandbox.protocol import (
     ArtifactWire,
     ControlRequest,
@@ -35,7 +33,6 @@ from boxie.sandbox.protocol import (
     SnapshotWire,
     spec_wire,
 )
-from boxie.sandbox.terminal_protocol import response
 
 ERRORS = {
     404: "resource not found",
@@ -46,41 +43,7 @@ ERRORS = {
 }
 
 
-def dependency_error() -> BoxieError:
-    return BoxieError(503, "agent unavailable")
-
-
-class NoRedirectConnect(connect):
-    def process_redirect(self, exc: Exception) -> Exception:
-        return exc
-
-
-class AgentTerminal:
-    def __init__(self, connection: ClientConnection, timeout: float) -> None:
-        self._connection, self._timeout = connection, timeout
-
-    async def receive(self) -> bytes | str:
-        try:
-            message = await self._connection.recv()
-            if isinstance(message, str):
-                return response.validate_json(message).model_dump_json()
-            return message
-        except ConnectionClosed:
-            raise dependency_error() from None
-        except ValidationError:
-            raise dependency_error() from None
-
-    async def send(self, data: bytes | str) -> None:
-        try:
-            async with asyncio.timeout(self._timeout):
-                await self._connection.send(data)
-        except ConnectionClosedOK:
-            raise TerminalWriteClosed() from None
-        except ConnectionClosed, TimeoutError:
-            raise dependency_error() from None
-
-
-class AgentClient:
+class OrchestratorClient:
     def __init__(self, base_url: str, credential: bytes, *, timeout: float = 20) -> None:
         url = urlsplit(base_url)
         if (
@@ -92,9 +55,9 @@ class AgentClient:
             or url.fragment
             or url.path not in ("", "/")
         ):
-            raise ValueError("agent URL must be an HTTP origin")
+            raise ValueError("orchestrator URL must be an HTTP origin")
         if not 0 < timeout <= 60:
-            raise ValueError("invalid agent timeout")
+            raise ValueError("invalid orchestrator timeout")
         self._base_url = base_url.rstrip("/")
         self._ws_url = urlunsplit(
             ("wss" if url.scheme == "https" else "ws", url.netloc, "", "", "")
@@ -110,7 +73,7 @@ class AgentClient:
             limits=httpx.Limits(max_connections=16, max_keepalive_connections=8),
         )
 
-    async def __aenter__(self) -> AgentClient:
+    async def __aenter__(self) -> OrchestratorClient:
         return self
 
     async def __aexit__(
@@ -197,7 +160,7 @@ class AgentClient:
             raise dependency_error() from None
 
     def _control(
-        self, principal: Principal, identity: AgentIdentity, generation: int
+        self, principal: Principal, identity: OrchestratorIdentity, generation: int
     ) -> dict[str, Any]:
         return ControlRequest(
             consumer_id=principal.consumer_id,
@@ -227,7 +190,7 @@ class AgentClient:
                 compression=None,
                 proxy=None,
             ) as connection:
-                yield AgentTerminal(connection, self._timeout)
+                yield OrchestratorTerminal(connection, self._timeout)
         except InvalidStatus as error:
             status = error.response.status_code
             if status in (404, 409):

@@ -1,7 +1,7 @@
 """Explicit, checksum-verified test-server input; never resolve mutable defaults."""
 
 # The fixture uses the real SQL authority, authenticated HTTP adapters and
-# production worker. Only the agent's Docker port is substituted here.
+# production worker. Only the orchestrator's Docker port is substituted here.
 import asyncio
 import hashlib
 import json
@@ -22,18 +22,18 @@ from boxie.persistence.outbox import PostgresOutbox
 from boxie.persistence.postgres import PostgresLifecycle
 from boxie.persistence.postgres_artifacts import PostgresArtifactStore
 from boxie.persistence.start_guard import PostgresStartGuard
-from boxie.sandbox.durable_client import DurableAgentClient
-from boxie.sandbox.durable_server import create_durable_agent_app
-from boxie.sandbox.lifecycle import DurableAgent
+from boxie.sandbox.durable_client import DurableOrchestratorClient
+from boxie.sandbox.durable_server import create_durable_orchestrator_app
+from boxie.sandbox.lifecycle import DurableOrchestrator
 from boxie.sandbox.reporting import ObservationReporter
 from boxie.temporal.activities import LifecycleActivities
 from boxie.temporal.dispatcher import OutboxDispatcher
-from boxie_test_support.agent import configuration
 from boxie_test_support.api import CONSUMER_AUTH, serve
+from boxie_test_support.orchestrator import configuration
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 from temporalio.client import Client
-from test_agent_lifecycle import Daemon
+from test_orchestrator_lifecycle import Daemon
 from test_postgres import MIGRATIONS
 
 VARIANTS = {("Darwin", "arm64"): "macOS_arm64", ("Linux", "x86_64"): "linux_amd64"}
@@ -66,7 +66,7 @@ async def durable_stack(dsn: str, root: Path, client: Client, queue: str) -> Asy
         dsn, min_size=1, max_size=20, kwargs={"row_factory": dict_row}
     ) as pool:
         artifacts = PostgresArtifactStore(pool, root / "sql-artifacts")
-        agent = DurableAgent(
+        orchestrator = DurableOrchestrator(
             config,
             daemon,
             artifacts.path,
@@ -74,13 +74,15 @@ async def durable_stack(dsn: str, root: Path, client: Client, queue: str) -> Asy
             lambda: datetime.now(UTC),
             time.monotonic,
         )
-        reporter = ObservationReporter("http://127.0.0.1:1", b"agent-test-secret")
-        app = create_durable_agent_app(
-            agent, artifacts, credential=b"agent-test-secret", reporter=reporter
+        reporter = ObservationReporter("http://127.0.0.1:1", b"orchestrator-test-secret")
+        app = create_durable_orchestrator_app(
+            orchestrator, artifacts, credential=b"orchestrator-test-secret", reporter=reporter
         )
         async with (
-            serve(app) as agent_url,
-            DurableAgentClient(agent_url, b"agent-test-secret", timeout=2) as control,
+            serve(app) as orchestrator_url,
+            DurableOrchestratorClient(
+                orchestrator_url, b"orchestrator-test-secret", timeout=2
+            ) as control,
         ):
             life = PostgresLifecycle(pool, control, config.identity, control.ready)
             api = create_app(
@@ -89,7 +91,7 @@ async def durable_stack(dsn: str, root: Path, client: Client, queue: str) -> Asy
                 control,
                 control,
                 observations=life,
-                agent_credential=b"agent-test-secret",
+                orchestrator_credential=b"orchestrator-test-secret",
             )
             async with (
                 serve(api) as url,
@@ -98,4 +100,4 @@ async def durable_stack(dsn: str, root: Path, client: Client, queue: str) -> Asy
                 reporter.client.base_url = httpx.URL(url)
                 activities = LifecycleActivities(life, control)
                 dispatcher = OutboxDispatcher(PostgresOutbox(pool), client, queue)
-                yield http, life, agent, daemon, pool, activities, dispatcher
+                yield http, life, orchestrator, daemon, pool, activities, dispatcher

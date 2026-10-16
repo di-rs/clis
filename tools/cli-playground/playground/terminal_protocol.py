@@ -100,8 +100,8 @@ class TerminalStatus(WireModel):
         "output_limit",
         "exited",
         "provisioning_failed",
-        "agent_restart",
-        "agent_shutdown",
+        "orchestrator_restart",
+        "orchestrator_shutdown",
         "control_plane_lost",
         "stream_gap",
     ]

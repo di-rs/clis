@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from boxie.bootstrap.durable import Dependencies
-from boxie.sandbox.durable_client import DurableAgentClient
+from boxie.sandbox.durable_client import DurableOrchestratorClient
 from google.protobuf.timestamp_pb2 import Timestamp
 from temporalio.api.taskqueue.v1 import PollerInfo
 from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest, DescribeTaskQueueResponse
@@ -30,7 +30,7 @@ def test_each_queue_requires_recent_worker_presence(age: int | None, queue: int)
             timestamp.FromDatetime(datetime.now(UTC) - timedelta(seconds=selected_age))
             return DescribeTaskQueueResponse(pollers=[PollerInfo(last_access_time=timestamp)])
 
-        agent = SimpleNamespace(ready=AsyncMock(return_value=True))
+        orchestrator = SimpleNamespace(ready=AsyncMock(return_value=True))
         temporal = SimpleNamespace(
             namespace="boxie",
             service_client=SimpleNamespace(check_health=AsyncMock(return_value=True)),
@@ -38,8 +38,8 @@ def test_each_queue_requires_recent_worker_presence(age: int | None, queue: int)
                 describe_namespace=AsyncMock(), describe_task_queue=describe
             ),
         )
-        assert await Dependencies(cast(DurableAgentClient, agent), cast(Client, temporal))() == (
-            age in (60, 89)
-        )
+        assert await Dependencies(
+            cast(DurableOrchestratorClient, orchestrator), cast(Client, temporal)
+        )() == (age in (60, 89))
 
     asyncio.run(exercise())

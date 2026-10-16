@@ -4,7 +4,7 @@ import asyncio
 from typing import Any
 from uuid import uuid4
 
-from boxie_test_support.agent import FakeTerminal
+from boxie_test_support.orchestrator import FakeTerminal
 
 
 class Daemon:

@@ -6,11 +6,11 @@ from uuid import UUID
 
 import httpx
 
-from boxie.domain.lifecycle import AgentObservation
+from boxie.domain.lifecycle import OrchestratorObservation
 from boxie.sandbox.protocol import ObservationWire
 
 
-def edge(item: AgentObservation) -> tuple[object, ...]:
+def edge(item: OrchestratorObservation) -> tuple[object, ...]:
     return (
         item.boot_id,
         item.state,
@@ -31,11 +31,11 @@ class ObservationReporter:
             follow_redirects=False,
             trust_env=False,
         )
-        self.latest: dict[UUID, AgentObservation] = {}
+        self.latest: dict[UUID, OrchestratorObservation] = {}
         self.sent: dict[UUID, tuple[tuple[object, ...], float, int]] = {}
         self.changed = asyncio.Event()
 
-    def offer(self, observation: AgentObservation) -> None:
+    def offer(self, observation: OrchestratorObservation) -> None:
         previous = self.latest.get(observation.sandbox_id)
         if previous is None or observation.event_version > previous.event_version:
             self.latest[observation.sandbox_id] = observation

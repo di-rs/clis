@@ -1,4 +1,4 @@
-"""Two independent loopback servers, replacing only the agent's Docker port."""
+"""Two independent loopback servers, replacing only the orchestrator's Docker port."""
 
 import asyncio
 import hashlib
@@ -12,7 +12,7 @@ import httpx
 import uvicorn
 from fastapi import FastAPI
 
-from boxie_test_support.agent import bundle, request
+from boxie_test_support.orchestrator import bundle, request
 
 CONSUMER_AUTH = {"Authorization": "Bearer consumer-one-secret"}
 FOREIGN_AUTH = {"Authorization": "Bearer consumer-two-secret"}

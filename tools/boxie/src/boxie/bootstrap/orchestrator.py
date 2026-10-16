@@ -10,30 +10,30 @@ from pathlib import Path
 
 import uvicorn
 
-from boxie.bootstrap.config import AgentConfig, read_credential
+from boxie.bootstrap.config import OrchestratorConfig, read_credential
 from boxie.bootstrap.durable import pool_for
 from boxie.persistence.postgres_artifacts import PostgresArtifactStore
 from boxie.persistence.start_guard import PostgresStartGuard
 from boxie.sandbox.docker import DockerBackend
-from boxie.sandbox.durable_server import create_durable_agent_app
-from boxie.sandbox.lifecycle import DurableAgent
+from boxie.sandbox.durable_server import create_durable_orchestrator_app
+from boxie.sandbox.lifecycle import DurableOrchestrator
 from boxie.sandbox.reporting import ObservationReporter
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Boxie private sandbox agent")
+    parser = argparse.ArgumentParser(description="Boxie private sandbox orchestrator")
     parser.add_argument("--config", type=Path, required=True)
     args = parser.parse_args()
-    config = AgentConfig.from_file(args.config)
+    config = OrchestratorConfig.from_file(args.config)
 
     if config.postgres_dsn_file is None or config.api_url is None:
-        raise ValueError("durable agent requires postgres_dsn_file and api_url")
+        raise ValueError("durable orchestrator requires postgres_dsn_file and api_url")
     dsn_file, api_url = config.postgres_dsn_file, config.api_url
 
     async def run() -> None:
         async with pool_for(dsn_file) as pool:
             artifacts = PostgresArtifactStore(pool, config.data_dir / "artifacts")
-            agent = DurableAgent(
+            orchestrator = DurableOrchestrator(
                 config,
                 DockerBackend(config.docker_timeout),
                 artifacts.path,
@@ -42,8 +42,8 @@ def main() -> None:
                 time.monotonic,
             )
             credential = read_credential(config.credential_file)
-            app = create_durable_agent_app(
-                agent,
+            app = create_durable_orchestrator_app(
+                orchestrator,
                 artifacts,
                 credential=credential,
                 reporter=ObservationReporter(api_url, credential),
@@ -51,7 +51,7 @@ def main() -> None:
 
             def reload_profiles() -> None:
                 try:
-                    agent.profiles.reload()
+                    orchestrator.profiles.reload()
                 except Exception:
                     logging.getLogger(__name__).error(
                         "profile reload rejected; retaining approved profiles"

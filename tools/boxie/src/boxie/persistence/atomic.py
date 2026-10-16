@@ -1,4 +1,4 @@
-"""Durable local metadata replacement for the single-host agent."""
+"""Durable local metadata replacement for the single-host orchestrator."""
 
 import os
 import tempfile

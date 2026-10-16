@@ -9,13 +9,13 @@ from pathlib import Path
 from typing import Literal
 from uuid import UUID, uuid4
 
-from boxie.bootstrap.config import AgentConfig
+from boxie.bootstrap.config import OrchestratorConfig
 from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import (
-    AgentObservation,
     EnsureRequest,
     ExpiryDecision,
     ExpiryRequest,
+    OrchestratorObservation,
     SandboxRef,
     StartGuard,
 )
@@ -43,10 +43,10 @@ class Deadlines:
     disconnect: float | None = None
 
 
-class DurableAgent:
+class DurableOrchestrator:
     def __init__(
         self,
-        config: AgentConfig,
+        config: OrchestratorConfig,
         docker: ExecutionDocker,
         artifact_path: ArtifactPath,
         guard: StartGuard,
@@ -79,7 +79,7 @@ class DurableAgent:
         self.sweeper: asyncio.Task[None] | None = None
         self.compactor: asyncio.Task[None] | None = None
         self.stopping = False
-        self.observer: Callable[[AgentObservation], None] | None = None
+        self.observer: Callable[[OrchestratorObservation], None] | None = None
         self._reported: dict[UUID, int] = {}
         self._journal_healthy = True
         self._failed_reconciliations: set[UUID] = set()
@@ -132,8 +132,8 @@ class DurableAgent:
         record.event_version += 1
         self._save()
 
-    def _observation(self, record: ExecutionRecord) -> AgentObservation:
-        return AgentObservation(
+    def _observation(self, record: ExecutionRecord) -> OrchestratorObservation:
+        return OrchestratorObservation(
             record.id,
             Principal(record.consumer_id),
             self.config.identity,
@@ -155,13 +155,13 @@ class DurableAgent:
             record.container_id,
         )
 
-    async def inspect(self, ref: SandboxRef) -> AgentObservation:
+    async def inspect(self, ref: SandboxRef) -> OrchestratorObservation:
         async with self._lock(ref):
             return self._observation(self._record(ref))
 
-    async def ensure(self, request: EnsureRequest) -> AgentObservation:
+    async def ensure(self, request: EnsureRequest) -> OrchestratorObservation:
         if request.identity != self.config.identity:
-            raise BoxieError(404, "agent identity not found")
+            raise BoxieError(404, "orchestrator identity not found")
         validate_policy(request.spec.policy, self.config.policy_maximum)
         self.profiles.validate_snapshot(request.profile_snapshot)
         snapshot, spec = request.profile_snapshot, request.spec
@@ -195,7 +195,7 @@ class DurableAgent:
                 or (mode == "execute" and self._failed_reconciliations)
                 or len(self.records) >= limit
             ):
-                raise BoxieError(503, "agent execution unavailable")
+                raise BoxieError(503, "orchestrator execution unavailable")
             now = self.clock()
             record = ExecutionRecord.create(request, self.boot_id, now + timedelta(seconds=90))
             if mode != "execute":
@@ -216,7 +216,7 @@ class DurableAgent:
                 record.cleanup_pending = True
                 record.reason = TerminationReason.PROVISIONING_FAILED
                 record.event_version += 1
-                raise BoxieError(503, "agent execution unavailable") from None
+                raise BoxieError(503, "orchestrator execution unavailable") from None
             self.workers[record.id] = asyncio.create_task(
                 self._provision(record) if mode == "execute" else self._cleanup(record)
             )
@@ -225,7 +225,7 @@ class DurableAgent:
     def _expiry(self, record: ExecutionRecord) -> TerminationReason | None:
         timers = self.deadlines.get(record.id)
         if timers is None:
-            return TerminationReason.AGENT_RESTART
+            return TerminationReason.ORCHESTRATOR_RESTART
         choices = [
             (timers.absolute, TerminationReason.EXPIRED),
             (timers.lease, TerminationReason.CONTROL_PLANE_LOST),
@@ -294,7 +294,7 @@ class DurableAgent:
             # ownership-checked removal. Confirmation still requires a final save.
             pass
 
-    async def remove(self, ref: SandboxRef, reason: TerminationReason) -> AgentObservation:
+    async def remove(self, ref: SandboxRef, reason: TerminationReason) -> OrchestratorObservation:
         async with self._lock(ref):
             record = self._record(ref)
             self._stop(record, reason)
@@ -349,7 +349,7 @@ class DurableAgent:
         await self._cleanup(record)
         return ExpiryDecision(True, await self.inspect(request.ref))
 
-    async def renew_control_lease(self, ref: SandboxRef, boot_id: UUID) -> AgentObservation:
+    async def renew_control_lease(self, ref: SandboxRef, boot_id: UUID) -> OrchestratorObservation:
         async with self._lock(ref):
             record = self._record(ref)
             if boot_id != self.boot_id or not self._live(record):
@@ -514,7 +514,7 @@ class DurableAgent:
             await asyncio.gather(self.compactor, return_exceptions=True)
         await asyncio.gather(
             *(
-                self.remove(r.ref, TerminationReason.AGENT_SHUTDOWN)
+                self.remove(r.ref, TerminationReason.ORCHESTRATOR_SHUTDOWN)
                 for r in list(self.records.values())
                 if r.state not in FINAL
             )

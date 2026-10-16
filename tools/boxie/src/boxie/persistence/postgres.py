@@ -19,9 +19,9 @@ from boxie.application.durable_lifecycle import (
     DependencyCheck,
 )
 from boxie.domain.errors import BoxieError
-from boxie.domain.lifecycle import AgentObservation, DurableRequest
+from boxie.domain.lifecycle import DurableRequest, OrchestratorObservation
 from boxie.domain.models import (
-    AgentIdentity,
+    OrchestratorIdentity,
     Principal,
     SandboxSpec,
     SandboxView,
@@ -83,7 +83,7 @@ class PostgresLifecycle:
         self,
         pool: Pool,
         resolver: AdmissionProfileResolver,
-        identity: AgentIdentity,
+        identity: OrchestratorIdentity,
         dependencies: DependencyCheck,
         readiness: AdmissionReadiness | None = None,
     ) -> None:
@@ -251,9 +251,9 @@ class PostgresLifecycle:
             return DurableRequest(
                 sandbox_id,
                 Principal(row["consumer_id"]),
-                AgentIdentity(row["installation_id"], row["host_id"]),
+                OrchestratorIdentity(row["installation_id"], row["host_id"]),
                 row["generation"],
-                row["agent_boot_id"],
+                row["orchestrator_boot_id"],
                 SpecWire.model_validate(row["spec"]).domain(),
                 SnapshotWire.model_validate(row["snapshot"]).domain(),
                 row["accepted_at"],
@@ -262,16 +262,16 @@ class PostgresLifecycle:
                 TerminationReason(row["reason"]) if row["reason"] else None,
             )
 
-    async def bind_agent_boot(
+    async def bind_orchestrator_boot(
         self,
         principal: Principal,
-        identity: AgentIdentity,
+        identity: OrchestratorIdentity,
         sandbox_id: UUID,
         generation: int,
         expected_boot: UUID | None,
         boot_id: UUID,
     ) -> bool:
-        """Trusted caller must authenticate the current agent boot before this CAS.
+        """Trusted caller must authenticate the current orchestrator boot before this CAS.
 
         Boot observations are never evidence of a boot transition on their own.
         Callers handling a restart must reconcile absence before confirming removal.
@@ -279,9 +279,9 @@ class PostgresLifecycle:
         async with self.pool.connection() as conn, conn.transaction():
             row = await (
                 await conn.execute(
-                    """UPDATE sandboxes SET agent_boot_id=%s
+                    """UPDATE sandboxes SET orchestrator_boot_id=%s
                 WHERE id=%s AND consumer_id=%s AND installation_id=%s AND host_id=%s
-                AND generation=%s AND agent_boot_id IS NOT DISTINCT FROM %s
+                AND generation=%s AND orchestrator_boot_id IS NOT DISTINCT FROM %s
                 AND cleaned_at IS NULL RETURNING id""",
                     (
                         boot_id,
@@ -296,11 +296,11 @@ class PostgresLifecycle:
             ).fetchone()
             if row and expected_boot != boot_id:
                 await conn.execute(
-                    "DELETE FROM agent_observations WHERE sandbox_id=%s", (sandbox_id,)
+                    "DELETE FROM orchestrator_observations WHERE sandbox_id=%s", (sandbox_id,)
                 )
             return row is not None
 
-    async def record_observation(self, observation: AgentObservation) -> bool:
+    async def record_observation(self, observation: OrchestratorObservation) -> bool:
         """Atomically project a fresh authenticated report, releasing only proven absence."""
         item = observation
         async with self.pool.connection() as conn, conn.transaction():
@@ -308,7 +308,7 @@ class PostgresLifecycle:
                 await conn.execute(
                     """SELECT * FROM sandboxes WHERE id=%s
                 AND consumer_id=%s AND installation_id=%s AND host_id=%s
-                AND generation=%s AND agent_boot_id=%s FOR UPDATE""",
+                AND generation=%s AND orchestrator_boot_id=%s FOR UPDATE""",
                     (
                         item.sandbox_id,
                         item.principal.consumer_id,
@@ -323,14 +323,14 @@ class PostgresLifecycle:
                 return False
             old = await (
                 await conn.execute(
-                    "SELECT event_version FROM agent_observations WHERE sandbox_id=%s",
+                    "SELECT event_version FROM orchestrator_observations WHERE sandbox_id=%s",
                     (item.sandbox_id,),
                 )
             ).fetchone()
             if old is not None and old["event_version"] >= item.event_version:
                 return False
             await conn.execute(
-                """INSERT INTO agent_observations
+                """INSERT INTO orchestrator_observations
                 (sandbox_id,generation,boot_id,event_version,observed_at,ready_at,last_input_at,
                  disconnected_at,resource_present,removal_confirmed,cleanup_pending,
                  attachment_epoch,absolute_deadline,control_lease_until,container_id)
@@ -401,7 +401,7 @@ class PostgresLifecycle:
                 )
             return True
 
-    async def confirm_removed(self, observation: AgentObservation) -> bool:
+    async def confirm_removed(self, observation: OrchestratorObservation) -> bool:
         if not observation.removal_confirmed:
             raise ValueError("explicit physical removal confirmation required")
         return await self.record_observation(observation)
@@ -422,6 +422,6 @@ class PostgresLifecycle:
             ).fetchall()
             for row in rows:
                 await conn.execute(
-                    "DELETE FROM agent_observations WHERE sandbox_id=%s", (row["id"],)
+                    "DELETE FROM orchestrator_observations WHERE sandbox_id=%s", (row["id"],)
                 )
                 await conn.execute("DELETE FROM sandboxes WHERE id=%s", (row["id"],))

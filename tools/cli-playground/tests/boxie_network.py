@@ -1,4 +1,4 @@
-"""Loopback product/API/agent harness; only the Docker daemon is substituted."""
+"""Loopback product/API/orchestrator harness; only the Docker daemon is substituted."""
 
 import asyncio
 import socket
@@ -21,7 +21,7 @@ from playground.service import PlaygroundService
 class Network:
     api: httpx.AsyncClient
     daemon: Any
-    agent: Any
+    orchestrator: Any
     config: Any
     clock: Any
 
@@ -38,7 +38,7 @@ async def boxie_network(root: Path) -> AsyncIterator[Network]:
     from boxie_test_support.terminal_network import network
 
     async with network(root, shell="/opt/playground/shell.sh") as result:
-        yield Network(result.api, result.daemon, result.agent, result.config, result.clock)
+        yield Network(result.api, result.daemon, result.orchestrator, result.config, result.clock)
 
 
 @asynccontextmanager

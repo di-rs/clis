@@ -10,7 +10,7 @@ from starlette.websockets import WebSocketDisconnect
 from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import SandboxRef
 from boxie.domain.models import SandboxState
-from boxie.sandbox.lifecycle import DurableAgent
+from boxie.sandbox.lifecycle import DurableOrchestrator
 from boxie.sandbox.replay import StreamGap
 from boxie.sandbox.terminal_protocol import (
     Ack,
@@ -34,10 +34,12 @@ async def close_socket(websocket: WebSocket, code: int = 1000) -> None:
             await websocket.close(code=code)
 
 
-async def serve_terminal(websocket: WebSocket, agent: DurableAgent, ref: SandboxRef) -> None:
-    agent._record(ref)
-    terminal = agent.terminals[ref.id]
-    agent.sessions[ref.id] = agent.sessions.get(ref.id, 0) + 1
+async def serve_terminal(
+    websocket: WebSocket, orchestrator: DurableOrchestrator, ref: SandboxRef
+) -> None:
+    orchestrator._record(ref)
+    terminal = orchestrator.terminals[ref.id]
+    orchestrator.sessions[ref.id] = orchestrator.sessions.get(ref.id, 0) + 1
     ring = terminal.replay
     epoch: int | None = None
     tasks: list[asyncio.Task[None]] = []
@@ -61,7 +63,7 @@ async def serve_terminal(websocket: WebSocket, agent: DurableAgent, ref: Sandbox
             raise ValueError("attach too large")
         request = AttachRequest.model_validate_json(text)
         ring.after(request.resume_after)
-        epoch = await agent.attach(
+        epoch = await orchestrator.attach(
             ref, attachment_order=request.attachment_order, resume_after=request.resume_after
         )
         # No await between validation/cursor snapshot and registering delivery.
@@ -71,7 +73,7 @@ async def serve_terminal(websocket: WebSocket, agent: DurableAgent, ref: Sandbox
         acked = cursor
         outstanding: deque[tuple[int, int]] = deque()
         pending_bytes = 0
-        last_heartbeat = agent.monotonic()
+        last_heartbeat = orchestrator.monotonic()
         last_nonce = -1
         resize: Resize | None = None
         replaying = True
@@ -88,10 +90,10 @@ async def serve_terminal(websocket: WebSocket, agent: DurableAgent, ref: Sandbox
                 message = control.validate_json(text)
                 if isinstance(message, AttachRequest) or message.epoch != epoch:
                     raise ValueError("incorrect attachment epoch")
-                await agent.check_attachment(ref, epoch, allow_ended=True)
+                await orchestrator.check_attachment(ref, epoch, allow_ended=True)
                 # Late input/resize must not cancel final output/status delivery.
                 # Only ACKs and heartbeat still have work while the terminal drains.
-                if agent.records[ref.id].state != SandboxState.READY and not isinstance(
+                if orchestrator.records[ref.id].state != SandboxState.READY and not isinstance(
                     message, (Ack, Heartbeat)
                 ):
                     continue
@@ -99,9 +101,11 @@ async def serve_terminal(websocket: WebSocket, agent: DurableAgent, ref: Sandbox
                     if message.source == "user" and not input_ready:
                         raise ValueError("input before resize barrier")
                     try:
-                        await agent.write(ref, epoch, message.data.encode(), source=message.source)
+                        await orchestrator.write(
+                            ref, epoch, message.data.encode(), source=message.source
+                        )
                     except BoxieError:
-                        if agent.records[ref.id].reason is None:
+                        if orchestrator.records[ref.id].reason is None:
                             raise
                 elif isinstance(message, Ack):
                     if not acked <= message.sequence <= cursor:
@@ -118,7 +122,7 @@ async def serve_terminal(websocket: WebSocket, agent: DurableAgent, ref: Sandbox
                     if message.nonce <= last_nonce:
                         raise ValueError("stale heartbeat")
                     last_nonce = message.nonce
-                    last_heartbeat = agent.monotonic()
+                    last_heartbeat = orchestrator.monotonic()
                     await send(message.model_dump())
                 elif isinstance(message, Detach):
                     return
@@ -129,7 +133,7 @@ async def serve_terminal(websocket: WebSocket, agent: DurableAgent, ref: Sandbox
             assert epoch is not None
             sent_geometry: tuple[int, int] | None = None
             while True:
-                await agent.check_attachment(ref, epoch, allow_ended=True)
+                await orchestrator.check_attachment(ref, epoch, allow_ended=True)
                 ring.changed.clear()
                 frames = ring.after(cursor)
                 limit = boundary if replaying else ring.tail
@@ -182,9 +186,9 @@ async def serve_terminal(websocket: WebSocket, agent: DurableAgent, ref: Sandbox
                         continue
                     size, resize = resize, None
                     try:
-                        await agent.resize(ref, epoch, size.cols, size.rows)
+                        await orchestrator.resize(ref, epoch, size.cols, size.rows)
                     except BoxieError:
-                        if agent.records[ref.id].reason is None:
+                        if orchestrator.records[ref.id].reason is None:
                             raise
                         continue
                     await send(
@@ -193,7 +197,7 @@ async def serve_terminal(websocket: WebSocket, agent: DurableAgent, ref: Sandbox
                     sent_geometry = (size.cols, size.rows)
                     input_ready = True
                 if ring.closed and cursor == ring.tail:
-                    reason = agent.records[ref.id].reason
+                    reason = orchestrator.records[ref.id].reason
                     await send({"type": "status", "reason": reason.value if reason else "exited"})
                     return
                 await ring.changed.wait()
@@ -202,8 +206,8 @@ async def serve_terminal(websocket: WebSocket, agent: DurableAgent, ref: Sandbox
             assert epoch is not None
             while True:
                 await asyncio.sleep(0.25)
-                await agent.check_attachment(ref, epoch, allow_ended=True)
-                if agent.monotonic() - last_heartbeat >= HEARTBEAT_TIMEOUT:
+                await orchestrator.check_attachment(ref, epoch, allow_ended=True)
+                if orchestrator.monotonic() - last_heartbeat >= HEARTBEAT_TIMEOUT:
                     return
 
         tasks = [
@@ -215,7 +219,7 @@ async def serve_terminal(websocket: WebSocket, agent: DurableAgent, ref: Sandbox
         for task in done:
             await task
     except StreamGap:
-        reason = agent.records[ref.id].reason
+        reason = orchestrator.records[ref.id].reason
         await send({"type": "status", "reason": reason.value if reason else "stream_gap"})
     except WebSocketDisconnect, BoxieError, ValueError, TimeoutError, RuntimeError, OSError:
         pass
@@ -229,11 +233,11 @@ async def serve_terminal(websocket: WebSocket, agent: DurableAgent, ref: Sandbox
         finally:
             try:
                 if epoch is not None:
-                    await agent.detach(ref, epoch)
+                    await orchestrator.detach(ref, epoch)
             finally:
                 try:
                     await close_socket(websocket)
                 finally:
-                    agent.sessions[ref.id] -= 1
-                    if not agent.sessions[ref.id]:
-                        agent.sessions.pop(ref.id)
+                    orchestrator.sessions[ref.id] -= 1
+                    if not orchestrator.sessions[ref.id]:
+                        orchestrator.sessions.pop(ref.id)

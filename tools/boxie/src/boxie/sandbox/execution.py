@@ -1,4 +1,4 @@
-"""Agent execution journal; contains no capacity or artifact-reference authority."""
+"""Orchestrator execution journal; contains no capacity or artifact-reference authority."""
 
 from datetime import datetime
 from pathlib import Path
@@ -7,7 +7,7 @@ from uuid import UUID
 from pydantic import Field
 
 from boxie.domain.lifecycle import EnsureRequest, SandboxRef
-from boxie.domain.models import AgentIdentity, Principal, SandboxState, TerminationReason
+from boxie.domain.models import OrchestratorIdentity, Principal, SandboxState, TerminationReason
 from boxie.persistence.atomic import atomic_write
 from boxie.sandbox.protocol import IdentityWire, SnapshotWire, SpecWire, WireModel, spec_wire
 
@@ -96,7 +96,7 @@ class JournalData(WireModel):
 
 
 class ExecutionJournal:
-    def __init__(self, path: Path, identity: AgentIdentity) -> None:
+    def __init__(self, path: Path, identity: OrchestratorIdentity) -> None:
         self.path = path
         self.identity = IdentityWire(
             installation_id=identity.installation_id, host_id=identity.host_id

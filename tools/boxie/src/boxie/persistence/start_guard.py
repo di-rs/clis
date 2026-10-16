@@ -1,4 +1,4 @@
-"""Agent-owned final-start guard sharing durable stop's sandbox row lock."""
+"""Orchestrator-owned final-start guard sharing durable stop's sandbox row lock."""
 
 import asyncio
 from collections.abc import Awaitable, Callable
@@ -25,7 +25,7 @@ class PostgresStartGuard:
         row = await (
             await conn.execute(
                 """SELECT * FROM sandboxes WHERE id=%s AND consumer_id=%s
-            AND installation_id=%s AND host_id=%s AND generation=%s AND agent_boot_id=%s
+            AND installation_id=%s AND host_id=%s AND generation=%s AND orchestrator_boot_id=%s
             AND NOT desired_stop AND cleaned_at IS NULL
             AND state IN ('accepted','provisioning','ready')
             AND absolute_deadline > clock_timestamp() FOR UPDATE""",
@@ -67,7 +67,7 @@ class PostgresStartGuard:
                         """SELECT s.*, absolute_deadline > clock_timestamp() AS fresh,
                     EXISTS (SELECT 1 FROM capacity_slots c WHERE c.sandbox_id=s.id) AS reserved,
                     EXISTS (SELECT 1 FROM sandbox_artifact_refs r WHERE r.sandbox_id=s.id AND r.artifact_id=%s) AS retained
-                    FROM sandboxes s WHERE id=%s AND consumer_id=%s AND installation_id=%s AND host_id=%s AND generation=%s AND agent_boot_id=%s AND cleaned_at IS NULL""",
+                    FROM sandboxes s WHERE id=%s AND consumer_id=%s AND installation_id=%s AND host_id=%s AND generation=%s AND orchestrator_boot_id=%s AND cleaned_at IS NULL""",
                         (
                             request.spec.artifact_id,
                             request.ref.id,

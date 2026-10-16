@@ -9,11 +9,11 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from boxie.bootstrap.config import AgentConfig
-from boxie.domain.models import AgentIdentity
+from boxie.bootstrap.config import OrchestratorConfig
+from boxie.domain.models import OrchestratorIdentity
 
 IMAGE = "example.org/shell@sha256:" + "1" * 64
-AUTH = {"Authorization": "Bearer agent-test-secret"}
+AUTH = {"Authorization": "Bearer orchestrator-test-secret"}
 
 
 def bundle(files: dict[str, bytes] | None = None) -> bytes:
@@ -67,10 +67,10 @@ class FakeTerminal:
         self.queue.put_nowait(b"")
 
 
-def configuration(root: Path, **changes: Any) -> AgentConfig:
+def configuration(root: Path, **changes: Any) -> OrchestratorConfig:
     root.mkdir(exist_ok=True)
-    secret = root / "agent.secret"
-    secret.write_text("agent-test-secret\n")
+    secret = root / "orchestrator.secret"
+    secret.write_text("orchestrator-test-secret\n")
     secret.chmod(0o600)
     profile = root / "profiles.json"
     profile.write_text(
@@ -85,11 +85,11 @@ def configuration(root: Path, **changes: Any) -> AgentConfig:
             }
         )
     )
-    return AgentConfig(
+    return OrchestratorConfig(
         data_dir=root / "state",
         profiles_file=profile,
         credential_file=secret,
-        identity=AgentIdentity(uuid4(), "host-1"),
+        identity=OrchestratorIdentity(uuid4(), "host-1"),
         sweep_seconds=0.01,
         **changes,
     )

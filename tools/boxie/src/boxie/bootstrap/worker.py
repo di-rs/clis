@@ -13,14 +13,14 @@ from temporalio.worker import Worker
 from boxie.bootstrap.config import read_credential
 from boxie.bootstrap.durable import (
     Dependencies,
-    agent_identity,
     durable_config,
+    orchestrator_identity,
     pool_for,
     temporal_client,
 )
 from boxie.persistence.outbox import PostgresOutbox
 from boxie.persistence.postgres import PostgresLifecycle
-from boxie.sandbox.durable_client import DurableAgentClient
+from boxie.sandbox.durable_client import DurableOrchestratorClient
 from boxie.temporal.activities import LifecycleActivities, SafeActivityErrors
 from boxie.temporal.contracts import TASK_QUEUE
 from boxie.temporal.dispatcher import OutboxDispatcher
@@ -52,16 +52,19 @@ def main() -> None:
         client = await temporal_client(config)
         async with (
             pool_for(config.postgres_dsn_file) as pool,
-            DurableAgentClient(
-                settings["agent_url"],
-                read_credential(Path(settings["agent_credential_file"])),
+            DurableOrchestratorClient(
+                settings["orchestrator_url"],
+                read_credential(Path(settings["orchestrator_credential_file"])),
                 timeout=settings.get("request_timeout", 20),
-            ) as agent,
+            ) as orchestrator,
         ):
             repository = PostgresLifecycle(
-                pool, agent, agent_identity(settings["identity"]), Dependencies(agent, client)
+                pool,
+                orchestrator,
+                orchestrator_identity(settings["identity"]),
+                Dependencies(orchestrator, client),
             )
-            activities = LifecycleActivities(repository, agent)
+            activities = LifecycleActivities(repository, orchestrator)
             dispatcher = OutboxDispatcher(PostgresOutbox(pool), client)
             stopped = asyncio.Event()
             loop = asyncio.get_running_loop()

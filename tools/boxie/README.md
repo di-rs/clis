@@ -3,15 +3,15 @@
 Boxie is an independently deployed private sandbox service. PostgreSQL owns
 admission, idempotency, eight capacity slots and artifact references. The API
 commits requests and an outbox; a separate Temporal worker drives the durable
-lifecycle. Only the sandbox agent receives Docker access and owns artifact bytes,
+lifecycle. Only the sandbox orchestrator receives Docker access and owns artifact bytes,
 PTYs and the execution journal. Consumers select approved profiles and upload ZIP
 files; they cannot supply images, host paths or isolation settings. Boxie does not
 inspect executable formats or depend on Playground.
 
 Production requires the [durable runtime](infra/durable-runtime.md); there is no
-direct lifecycle bootstrap. Run exactly one agent against its data directory.
-The directory and profile files must be writable only by the operator/agent. The
-Docker daemon must see artifact paths at the same absolute location as the agent.
+direct lifecycle bootstrap. Run exactly one orchestrator against its data directory.
+The directory and profile files must be writable only by the operator/orchestrator. The
+Docker daemon must see artifact paths at the same absolute location as the orchestrator.
 
 ## Run
 
@@ -19,7 +19,7 @@ Use the root workspace and lockfile:
 
 ```sh
 uv sync --locked --all-packages
-uv run --locked --package boxie boxie-agent --config /etc/boxie/agent.json
+uv run --locked --package boxie boxie-orchestrator --config /etc/boxie/orchestrator.json
 ```
 
 An operator configuration file contains:
@@ -30,7 +30,7 @@ An operator configuration file contains:
   "postgres_dsn_file": "/run/secrets/postgres-dsn",
   "api_url": "http://boxie-api:8090",
   "profiles_file": "/etc/boxie/profiles.json",
-  "credential_file": "/run/secrets/boxie-agent",
+  "credential_file": "/run/secrets/boxie-orchestrator",
   "identity": {
     "installation_id": "b18283b1-dc32-46e7-8da5-7aa380043685",
     "host_id": "sandbox-1"
@@ -41,9 +41,9 @@ An operator configuration file contains:
 ```
 
 Generate a unique installation UUID once and preserve it with the data directory.
-The credential is a separate agent-control secret, at least 16 printable ASCII
+The credential is a separate orchestrator-control secret, at least 16 printable ASCII
 bytes, in a private regular file (mode `0600`). Consumer API credentials must not
-be reused here. Only trusted services on a private network may reach the agent;
+be reused here. Only trusted services on a private network may reach the orchestrator;
 there is no public endpoint. Access logging is disabled by the entry point and
 credentials are never accepted in URLs.
 
@@ -57,8 +57,8 @@ Its operator configuration contains:
 
 ```json
 {
-  "agent_url": "http://boxie-agent:8091",
-  "agent_credential_file": "/run/secrets/boxie-agent",
+  "orchestrator_url": "http://boxie-orchestrator:8091",
+  "orchestrator_credential_file": "/run/secrets/boxie-orchestrator",
   "consumer_credential_files": {
     "playground": "/run/secrets/boxie-playground"
   },
@@ -81,12 +81,12 @@ Its operator configuration contains:
 }
 ```
 
-Each credential is a private regular file with the same restrictions as the agent
-secret. Consumer credentials must be unique and distinct from the agent secret.
+Each credential is a private regular file with the same restrictions as the orchestrator
+secret. Consumer credentials must be unique and distinct from the orchestrator secret.
 Only composition roots read secrets; transports receive injected credentials.
 The API resolves consumer identity from Bearer authentication and never accepts
-consumer identity in a sandbox request body. Neither API nor agent is public.
-HTTP and WebSocket redirects are disabled for agent calls. HTTP control bodies
+consumer identity in a sandbox request body. Neither API nor orchestrator is public.
+HTTP and WebSocket redirects are disabled for orchestrator calls. HTTP control bodies
 and responses are bounded to 64 KiB; uploads stream in chunks of at most 64 KiB
 with an actual-byte ceiling of 512 MiB and a configured total request deadline.
 
@@ -104,11 +104,11 @@ Foreign resources return 404. UUIDs and digests remain opaque to the API.
 | Stop sandbox | `DELETE /v1/sandboxes/{uuid}`; 200 with status |
 | Terminal | `WS /v1/sandboxes/{uuid}/terminal` |
 
-Sandbox POST sends the `spec` object directly, without the agent's ownership or
+Sandbox POST sends the `spec` object directly, without the orchestrator's ownership or
 idempotency envelope. Unknown fields, images, paths and Docker settings are
 rejected. Invalid bodies return 422, conflicting retries 409, capacity exhaustion
-429 and unavailable agent calls 503. API restarts retain SQL-owned IDs,
-idempotency records and capacity; the agent keeps draining terminal output.
+429 and unavailable orchestrator calls 503. API restarts retain SQL-owned IDs,
+idempotency records and capacity; the orchestrator keeps draining terminal output.
 
 Terminal attachments start with a JSON text frame
 `{"type":"attach","attachment_order":1,"resume_after":0,"cols":80,"rows":24}`. The response
@@ -116,7 +116,7 @@ Terminal attachments start with a JSON text frame
 `{"type":"input","epoch":1,"source":"user","data":"echo hello\n"}`;
 parser-generated replies use `source: terminal` and do not renew idle time.
 The consumer allocates a strictly increasing `attachment_order` per sandbox
-execution (1–9007199254740991). The agent persists the highest accepted order with
+execution (1–9007199254740991). The orchestrator persists the highest accepted order with
 its attachment state before returning success. Equal/older orders fail before any
 epoch or grace change, even when an older request was already in flight through a
 relay. A new attempt or retry after an uncertain result must use a higher order;
@@ -131,7 +131,7 @@ most 16 KiB of UTF-8 including JSON, columns are 1–500 and rows 1–300.
 Each binary output frame contains an eight-byte unsigned big-endian sequence
 followed by at most 16 KiB of raw PTY bytes. Sequences start at one and continue
 across attachments. ACK only after applying bytes; reconnect with the last applied
-sequence. The agent retains at most 1 MiB of payload and 4096 frames while draining
+sequence. The orchestrator retains at most 1 MiB of payload and 4096 frames while draining
 independently of readers. An evicted cursor returns `stream_gap`; a future cursor
 is invalid. Replayed bytes and control metadata do not count toward the 16 MiB
 cumulative PTY output limit. JSON status frames contain `type: status` and a
@@ -145,7 +145,7 @@ retained per output frame plus one current tail value, including when a resize
 acknowledgment is lost. This defines observable frame-assignment/resize-success
 order, not exact kernel-time causality for bytes already queued in Docker.
 
-Send browser-origin heartbeat controls every ten seconds; the agent disconnects
+Send browser-origin heartbeat controls every ten seconds; the orchestrator disconnects
 a path after thirty seconds without one. Relay-local WebSocket pings do not renew
 that deadline. A detected disconnect retains the terminal for its two-minute
 grace, subject to the earlier absolute or idle deadline. A successful replacement
@@ -154,8 +154,8 @@ cursors stay in page memory. Page reload starts fresh; restart continuity and
 screen snapshots are not supported.
 
 `GET /healthz` is unauthenticated liveness. Authenticated `GET /readyz` returns
-the API release and SQL, agent and Temporal readiness, with 503 when unavailable.
-The agent's authenticated `/readyz` reports Docker, SQL and execution persistence. Access logs are disabled by both entry points.
+the API release and SQL, orchestrator and Temporal readiness, with 503 when unavailable.
+The orchestrator's authenticated `/readyz` reports Docker, SQL and execution persistence. Access logs are disabled by both entry points.
 
 A trusted profile file is a JSON object keyed by profile ID:
 
@@ -176,14 +176,14 @@ are exact argument-vector allowlists; environment keys and values are allowlists
 The artifact mount must be a normalized path under `/opt/`. Optional `limits`
 may lower the defaults but cannot increase them. Send `SIGHUP` to validate and
 atomically reload all profiles. A failed reload keeps the last valid version.
-Approved versions are retained by configuration hash, including across agent
+Approved versions are retained by configuration hash, including across orchestrator
 restarts, so delayed requests can validate their original snapshot. Reloads never
 change an admitted sandbox's image, command, environment, or limits.
 
 ## Private protocol
 
 Every HTTP request and WebSocket handshake requires `Authorization: Bearer SECRET`.
-The agent uses constant-time credential comparison. A trusted API supplies the
+The orchestrator uses constant-time credential comparison. A trusted API supplies the
 consumer identity; resources belonging to another consumer return 404. UUIDs are
 opaque resource IDs. Wire schemas reject extra object fields and invalid bounds.
 
@@ -192,10 +192,10 @@ opaque resource IDs. Wire schemas reject extra object fields and invalid bounds.
 | Upload artifact | `PUT /v1/artifacts/{uuid}?consumer_id=...`, raw ZIP body, `X-Content-SHA256` header |
 | Retire artifact | `DELETE /v1/artifacts/{uuid}?consumer_id=...` |
 | Resolve profile | `POST /v1/profiles/resolve`, `{profile_id, command, env}` |
-| Execute admitted request | `POST /v1/sandboxes/{uuid}/ensure`, complete immutable SQL request and `X-Agent-Boot` |
+| Execute admitted request | `POST /v1/sandboxes/{uuid}/ensure`, complete immutable SQL request and `X-Orchestrator-Boot` |
 | Inspect/renew/remove/expire | `POST /v1/sandboxes/{uuid}/{operation}`, consumer, installation, host, generation and boot fences |
 | Terminal | `WS /v1/sandboxes/{uuid}/terminal?consumer_id=...` |
-| Readiness | `GET /readyz`, agent identity and dependency results |
+| Readiness | `GET /readyz`, orchestrator identity and dependency results |
 
 `spec` contains `artifact_id`, `profile_id`, `command`, `env`, and optional `policy`.
 Policy defaults are `max_seconds: 3600`, `idle_seconds: 600`, and
@@ -212,12 +212,12 @@ lock used by durable stop. Only fenced confirmed absence releases SQL accounting
 
 The private terminal uses the same sequenced output and strict JSON controls
 as the consumer terminal above. Handshake denials use bounded HTTP JSON responses:
-401 for invalid agent credentials, 404 for unavailable ownership, and 409 for an
-unavailable lifecycle state. Consumer authentication is resolved before any agent
+401 for invalid orchestrator credentials, 404 for unavailable ownership, and 409 for an
+unavailable lifecycle state. Consumer authentication is resolved before any orchestrator
 request. The API maps failed internal authentication or unsupported denial codes
 to 503. Only a browser-origin attach after downstream WebSocket acceptance acquires
 an attachment epoch. Opening a private relay alone does not renew disconnect grace.
-The agent attaches to Docker before starting the container so initial output is
+The orchestrator attaches to Docker before starting the container so initial output is
 retained even without Docker logs.
 
 ## Isolation and lifetime
@@ -235,8 +235,8 @@ Resize, output, reads, and reconnect attempts do not reset it. Disconnection
 starts a separate two-minute deadline. Cleanup operations are bounded and run
 independently so an unresponsive container does not block other deadlines.
 Terminals close when termination begins; slots and artifacts remain reserved
-until Docker deletion is confirmed. The agent survives consumer API restarts;
-an agent restart may end terminals.
+until Docker deletion is confirmed. The orchestrator survives consumer API restarts;
+an orchestrator restart may end terminals.
 
 Local intent records are durably replaced before Docker creation. Deterministic
 names and installation, host, sandbox, generation, consumer, artifact, and deadline
@@ -276,7 +276,7 @@ collection. No consumer can select a host filesystem path.
 ## Verification and feasibility
 
 ```sh
-uv run --locked pytest tools/boxie/tests/test_agent.py tools/boxie/tests/test_artifacts.py tools/boxie/tests/test_profiles.py
+uv run --locked pytest tools/boxie/tests/test_orchestrator.py tools/boxie/tests/test_artifacts.py tools/boxie/tests/test_profiles.py
 uv run --locked pytest tools/boxie/tests/test_service_boundary.py tools/boxie/tests/test_terminal_proxy.py
 uv run --locked pytest -m integration tools/boxie/tests/test_api.py
 uv run --locked ruff check .
@@ -285,10 +285,10 @@ uv run --locked mypy
 uv run --locked pytest
 ```
 
-Fast terminal tests use real loopback HTTP/WebSocket servers, durable agent
+Fast terminal tests use real loopback HTTP/WebSocket servers, durable orchestrator
 execution, and explicit test-only SQL admission/artifact metadata and Docker
 boundaries. Integration tests use real PostgreSQL and production Temporal;
-profile reload also starts the real agent subprocess. They cover generic text ZIPs,
+profile reload also starts the real orchestrator subprocess. They cover generic text ZIPs,
 isolation requests, attach-before-start, ownership, immutable profile versions,
 byte-preserving terminal input, timeouts, cancellation, cleanup failures, restart
 reconciliation, concurrent idempotency, and artifact retention. These tests do
@@ -305,7 +305,7 @@ exercises Linux amd64/runsc, process loss, SQL accounting and browser reconnecti
 
 ## Independent distribution and topology
 
-[Local infrastructure](infra/README.md) owns the private API/worker/agent Compose unit,
+[Local infrastructure](infra/README.md) owns the private API/worker/orchestrator Compose unit,
 Docker build, trusted generic profile and installed operator smoke commands.
 `boxie` and `cli-playground` are independent runtime distributions; neither image
 installs an infrastructure package. The root lockfile pins both builds. Production

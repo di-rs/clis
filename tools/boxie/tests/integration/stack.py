@@ -32,16 +32,16 @@ class LifecycleStack(ProductionStack):
             # Bind-mounted private files and writable storage belong to this runner.
             # UID 0 with cap_drop ALL cannot bypass another UID's mode-0600 files.
             BOXIE_TEST_USER=f"{os.getuid()}:{os.getgid()}",
-            BOXIE_TEST_AGENT_SCRIPT=str(Path(__file__).with_name("agent_fixture.py")),
+            BOXIE_TEST_ORCHESTRATOR_SCRIPT=str(Path(__file__).with_name("orchestrator_fixture.py")),
             BOXIE_TEST_FAULTS_SCRIPT=str(Path(__file__).with_name("faults.py")),
             BOXIE_RUNTIME_IMAGE=os.environ.get("BOXIE_RUNTIME_IMAGE", "boxie:lifecycle"),
             PLAYGROUND_IMAGE=os.environ.get("PLAYGROUND_IMAGE", "cli-playground:lifecycle"),
             BOXIE_DATA_DIR=str(root / "data"),
-            BOXIE_AGENT_CONFIG=str(root / "agent.json"),
+            BOXIE_ORCHESTRATOR_CONFIG=str(root / "orchestrator.json"),
             BOXIE_API_CONFIG=str(root / "api.json"),
             BOXIE_WORKER_CONFIG=str(root / "worker.json"),
             BOXIE_PROFILES_FILE=str(root / "profiles.json"),
-            BOXIE_AGENT_CREDENTIAL_FILE=str(root / "agent.secret"),
+            BOXIE_ORCHESTRATOR_CREDENTIAL_FILE=str(root / "orchestrator.secret"),
             BOXIE_CONSUMER_CREDENTIAL_FILE=str(root / "consumer.secret"),
             BOXIE_POSTGRES_DSN_FILE=str(root / "postgres-dsn"),
             BOXIE_TEMPORAL_CA_FILE=str(root / "clients/frontend-ca.pem"),
@@ -78,14 +78,14 @@ class LifecycleStack(ProductionStack):
             raise RuntimeError("native echor binary is required (BOXIE_NATIVE_BINARY)")
         super().start()
         for name, value in (
-            ("agent.secret", secrets.token_hex(24)),
+            ("orchestrator.secret", secrets.token_hex(24)),
             ("consumer.secret", self.consumer),
         ):
             path = self.root / name
             path.write_text(value)
             path.chmod(0o600)
         self.dsn = f"host=127.0.0.1 port={self.pg_port} dbname=boxie user=boxie password={self.env['BOXIE_DB_PASSWORD']} sslmode=disable"
-        for name, host in (("postgres-dsn", "postgres"), ("agent-dsn", "faults")):
+        for name, host in (("postgres-dsn", "postgres"), ("orchestrator-dsn", "faults")):
             path = self.root / name
             path.write_text(
                 f"host={host} dbname=boxie user=boxie password={self.env['BOXIE_DB_PASSWORD']} sslmode=disable"
@@ -144,7 +144,9 @@ class LifecycleStack(ProductionStack):
         self.product_url = f"http://127.0.0.1:{port}"
         self.env["PLAYGROUND_PUBLIC_URL"] = self.product_url
         self.runtime_started = True
-        self.runtime_command("up", "--detach", "faults", "agent", "api", "worker", "playground")
+        self.runtime_command(
+            "up", "--detach", "faults", "orchestrator", "api", "worker", "playground"
+        )
         self.api_url = "http://" + self.runtime_command("port", "api", "8090")
         self.product_url = "http://" + self.runtime_command("port", "playground", "8000")
         self.env["PLAYGROUND_PUBLIC_URL"] = self.product_url
@@ -178,20 +180,20 @@ class LifecycleStack(ProductionStack):
             + self.runtime_command("logs", "--tail", "80")
         )
 
-    def agent_boot(self) -> UUID:
-        """Read the running agent's authenticated identity after startup reconciliation."""
+    def orchestrator_boot(self) -> UUID:
+        """Read the running orchestrator's authenticated identity after startup reconciliation."""
         return UUID(
             self.runtime_command(
                 "exec",
                 "-T",
-                "agent",
+                "orchestrator",
                 "python",
                 "-c",
                 """
 import time
 from pathlib import Path
 import httpx
-credential = Path('/run/secrets/agent').read_text().strip()
+credential = Path('/run/secrets/orchestrator').read_text().strip()
 with httpx.Client(headers={'Authorization': 'Bearer ' + credential}, timeout=1, trust_env=False) as client:
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
@@ -203,7 +205,7 @@ with httpx.Client(headers={'Authorization': 'Bearer ' + credential}, timeout=1, 
         except httpx.HTTPError:
             time.sleep(0.2)
     else:
-        raise RuntimeError('restarted agent identity unavailable')
+        raise RuntimeError('restarted orchestrator identity unavailable')
 """,
             )
         )
@@ -218,7 +220,10 @@ with httpx.Client(headers={'Authorization': 'Bearer ' + credential}, timeout=1, 
             path.unlink(missing_ok=True)
 
     def process(self, service: str, action: str) -> None:
-        if service not in {"api", "worker", "agent", "temporal"} or action not in {"kill", "start"}:
+        if service not in {"api", "worker", "orchestrator", "temporal"} or action not in {
+            "kill",
+            "start",
+        }:
             raise ValueError("unknown owned process action")
         if service == "temporal":
             self.compose("temporal", action, service)

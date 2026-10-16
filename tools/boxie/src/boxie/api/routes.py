@@ -1,4 +1,4 @@
-"""Consumer schemas exclude all agent ownership and privileged configuration."""
+"""Consumer schemas exclude all orchestrator ownership and privileged configuration."""
 
 from dataclasses import asdict
 from typing import Annotated, cast

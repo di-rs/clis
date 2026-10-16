@@ -8,7 +8,7 @@ from uuid import UUID
 import pytest
 from boxie_test_support.terminal_network import attach
 from fastapi import WebSocket
-from playground import routes
+from playground import transport
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 from websockets.typing import Origin
@@ -20,7 +20,7 @@ def test_failed_resume_cannot_stop_healthy_successor_and_browser_loss_crosses_bo
     tmp_path: Path,
 ) -> None:
     async def exercise() -> None:
-        async with boxie_network(tmp_path / "agent") as network:
+        async with boxie_network(tmp_path / "orchestrator") as network:
             async with product_server(tmp_path / "product", str(network.api.base_url)) as product:
                 identifier = (await publish(product, "a" * 40)).json()["id"]
                 binding = await admit(product, identifier, "a" * 40)
@@ -71,10 +71,10 @@ def test_failed_resume_cannot_stop_healthy_successor_and_browser_loss_crosses_bo
                         await (await new.ping())
                         network.clock.advance(30)
                         await asyncio.wait_for(new.wait_closed(), 2)
-                        record = network.agent.records[saved.sandbox.id]
+                        record = network.orchestrator.records[saved.sandbox.id]
                         assert not record.attached
                         assert (
-                            network.agent.deadlines[record.id].disconnect
+                            network.orchestrator.deadlines[record.id].disconnect
                             == network.clock.monotonic() + 120
                         )
 
@@ -85,8 +85,8 @@ def test_stalled_browser_send_close_and_relay_join_are_finite(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def exercise() -> None:
-        monkeypatch.setattr(routes, "TERMINAL_SEND_TIMEOUT", 0.02)
-        monkeypatch.setattr(routes, "TERMINAL_CLOSE_TIMEOUT", 0.02)
+        monkeypatch.setattr(transport, "TERMINAL_SEND_TIMEOUT", 0.02)
+        monkeypatch.setattr(transport, "TERMINAL_CLOSE_TIMEOUT", 0.02)
 
         async def blocked_send(message: object) -> None:
             await asyncio.Event().wait()
@@ -115,8 +115,8 @@ def test_stalled_browser_send_close_and_relay_join_are_finite(
         websocket.application_state = websocket.client_state = WebSocketState.CONNECTED
         async with asyncio.timeout(0.2):
             with pytest.raises(TimeoutError):
-                await routes.bridge_terminal(websocket, Peer())
-            await routes.close_terminal(websocket)
+                await transport.bridge_terminal(websocket, Peer())
+            await transport.close_terminal(websocket)
         assert not receiving
 
     asyncio.run(exercise())
@@ -126,14 +126,14 @@ def test_stalled_browser_send_close_and_relay_join_are_finite(
 def test_delayed_old_attach_cannot_replace_a_healthy_successor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, in_flight: bool
 ) -> None:
-    from boxie.sandbox.client import AgentTerminal
+    from boxie.sandbox.client_terminal import OrchestratorTerminal
 
     async def exercise() -> None:
         forwarded, release = asyncio.Event(), asyncio.Event()
         first = True
-        original = AgentTerminal.send
+        original = OrchestratorTerminal.send
 
-        async def delayed(self: AgentTerminal, data: bytes | str) -> None:
+        async def delayed(self: OrchestratorTerminal, data: bytes | str) -> None:
             nonlocal first
             if (
                 in_flight
@@ -148,8 +148,8 @@ def test_delayed_old_attach_cannot_replace_a_healthy_successor(
                 await release.wait()
             await original(self, data)
 
-        monkeypatch.setattr(AgentTerminal, "send", delayed)
-        async with boxie_network(tmp_path / "agent") as network:
+        monkeypatch.setattr(OrchestratorTerminal, "send", delayed)
+        async with boxie_network(tmp_path / "orchestrator") as network:
             async with product_server(tmp_path / "product", str(network.api.base_url)) as product:
                 identifier = (await publish(product, "a" * 40)).json()["id"]
                 binding = await admit(product, identifier, "a" * 40)
@@ -175,9 +175,9 @@ def test_delayed_old_attach_cannot_replace_a_healthy_successor(
                             epoch, _ = await attach(new)
                             saved = product.service.sessions.get(UUID(binding["id"]))
                             assert saved is not None
-                            record = network.agent.records[saved.sandbox.id]
+                            record = network.orchestrator.records[saved.sandbox.id]
                             assert record.attachment_epoch == epoch and record.attached
-                            grace = vars(network.agent.deadlines[record.id]).copy()
+                            grace = vars(network.orchestrator.deadlines[record.id]).copy()
                             if in_flight:
                                 release.set()
                             else:
@@ -186,7 +186,7 @@ def test_delayed_old_attach_cannot_replace_a_healthy_successor(
                             await asyncio.sleep(0.3)
                             assert record.attachment_epoch == epoch and record.attached
                             assert new.close_code is None
-                            assert vars(network.agent.deadlines[record.id]) == grace
+                            assert vars(network.orchestrator.deadlines[record.id]) == grace
                             assert record.attachment_order == 2
                             async with connect(url, origin=origin) as forged:
                                 await forged.send(
@@ -208,7 +208,7 @@ def test_delayed_old_attach_cannot_replace_a_healthy_successor(
                                 )
                                 await asyncio.wait_for(forged.wait_closed(), 2)
                             assert record.attachment_order == 2 and record.attachment_epoch == epoch
-                            assert vars(network.agent.deadlines[record.id]) == grace
+                            assert vars(network.orchestrator.deadlines[record.id]) == grace
                             await new.send(
                                 json.dumps(
                                     {

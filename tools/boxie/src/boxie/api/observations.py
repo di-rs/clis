@@ -1,15 +1,15 @@
-"""Agent-only observation ingress; consumer credentials cannot publish execution facts."""
+"""Orchestrator-only observation ingress; consumer credentials cannot publish execution facts."""
 
 from typing import Protocol
 
 from fastapi import APIRouter
 
-from boxie.domain.lifecycle import AgentObservation
+from boxie.domain.lifecycle import OrchestratorObservation
 from boxie.sandbox.protocol import ObservationWire
 
 
 class ObservationSink(Protocol):
-    async def record_observation(self, observation: AgentObservation) -> bool: ...
+    async def record_observation(self, observation: OrchestratorObservation) -> bool: ...
 
 
 def observation_routes(sink: ObservationSink) -> APIRouter:

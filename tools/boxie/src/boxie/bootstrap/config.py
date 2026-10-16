@@ -1,4 +1,4 @@
-"""Agent configuration comes from operator-owned files, never from API consumers."""
+"""Orchestrator configuration comes from operator-owned files, never from API consumers."""
 
 import json
 import os
@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import UUID
 
-from boxie.domain.models import AgentIdentity, LifetimePolicy
+from boxie.domain.models import LifetimePolicy, OrchestratorIdentity
 from boxie.domain.policy import validate_policy
 
 
@@ -29,11 +29,11 @@ def read_credential(path: Path, *, allow_spaces: bool = False) -> bytes:
 
 
 @dataclass(frozen=True)
-class AgentConfig:
+class OrchestratorConfig:
     data_dir: Path
     profiles_file: Path
     credential_file: Path
-    identity: AgentIdentity
+    identity: OrchestratorIdentity
     policy_maximum: LifetimePolicy = field(default_factory=LifetimePolicy)
     docker_timeout: float = 20
     sweep_seconds: float = 1
@@ -44,20 +44,22 @@ class AgentConfig:
 
     def __post_init__(self) -> None:
         if not 0 < self.docker_timeout <= 60 or not 0 < self.sweep_seconds <= 10:
-            raise ValueError("invalid agent intervals")
+            raise ValueError("invalid orchestrator intervals")
         validate_policy(self.policy_maximum)
         if not self.identity.host_id or len(self.identity.host_id) > 128:
             raise ValueError("host ID required")
 
     @classmethod
-    def from_file(cls, path: Path) -> AgentConfig:
+    def from_file(cls, path: Path) -> OrchestratorConfig:
         data = json.loads(path.read_text())
         for key in ("data_dir", "profiles_file", "credential_file"):
             data[key] = Path(data[key])
         if "postgres_dsn_file" in data:
             data["postgres_dsn_file"] = Path(data["postgres_dsn_file"])
         identity = data.pop("identity")
-        data["identity"] = AgentIdentity(UUID(identity["installation_id"]), identity["host_id"])
+        data["identity"] = OrchestratorIdentity(
+            UUID(identity["installation_id"]), identity["host_id"]
+        )
         if "policy_maximum" in data:
             data["policy_maximum"] = LifetimePolicy(**data["policy_maximum"])
         return cls(**data)
@@ -67,7 +69,7 @@ class AgentConfig:
 class DurableConfig:
     """Explicit inputs for the coordinated durable composition; no migration hook.
 
-    API and worker use separate client certificate/key files. Agent receives only
+    API and worker use separate client certificate/key files. Orchestrator receives only
     its PostgreSQL connection and remains the sole artifact filesystem owner.
     """
 

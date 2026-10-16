@@ -14,13 +14,13 @@ import psycopg
 import pytest
 from boxie.domain.errors import BoxieError
 from boxie.domain.models import (
-    AgentIdentity,
+    OrchestratorIdentity,
     Principal,
     SandboxSpec,
     SandboxState,
     TerminationReason,
 )
-from boxie_test_support.agent import Clock, bundle, configuration
+from boxie_test_support.orchestrator import Clock, bundle, configuration
 from boxie_test_support.terminal_network import network
 from integration.conftest import postgres_dsn as postgres_dsn
 from integration.conftest import postgres_server as postgres_server
@@ -48,10 +48,12 @@ async def database(dsn: str, root: Path) -> AsyncIterator[tuple[Any, Any, Any, A
     migrate, lifecycle_type, artifact_type = adapters()
     await asyncio.to_thread(migrate, dsn, MIGRATIONS)
     config = configuration(root)
-    from boxie.sandbox.client import AgentClient
+    from boxie.sandbox.client import OrchestratorClient
 
     async with network(root / "resolver") as harness:
-        async with AgentClient(harness.agent_url, b"agent-test-secret") as resolver:
+        async with OrchestratorClient(
+            harness.orchestrator_url, b"orchestrator-test-secret"
+        ) as resolver:
             async with AsyncConnectionPool(
                 dsn, min_size=1, max_size=24, kwargs={"row_factory": dict_row}
             ) as pool:
@@ -119,12 +121,14 @@ def test_identical_retries_old_snapshot_and_conflicting_key(
             data["shell"]["image_digest"] = "example.org/shell@sha256:" + "4" * 64
             config.profiles_file.write_text(json.dumps(data))
             # A fresh trusted resolver reads the operator's new profile file.
-            from boxie.sandbox.client import AgentClient
+            from boxie.sandbox.client import OrchestratorClient
 
             async with network(tmp_path / "reloaded-resolver") as harness:
                 harness.config.profiles_file.write_text(config.profiles_file.read_text())
-                harness.agent.profiles.reload()
-                async with AgentClient(harness.agent_url, b"agent-test-secret") as resolver:
+                harness.orchestrator.profiles.reload()
+                async with OrchestratorClient(
+                    harness.orchestrator_url, b"orchestrator-test-secret"
+                ) as resolver:
                     life.resolver = resolver
                     retry = await life.submit(OWNER, "same", spec)
                     new = await life.submit(OWNER, "new", spec)
@@ -233,15 +237,15 @@ def test_only_fenced_confirmed_removal_releases_capacity_and_references(
     async def exercise() -> None:
         from datetime import UTC, datetime
 
-        from boxie.domain.lifecycle import AgentObservation
+        from boxie.domain.lifecycle import OrchestratorObservation
 
         async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
             view = await life.submit(OWNER, "fence", await upload(artifacts))
             assert not view.cleanup_pending
             boot = uuid4()
-            assert hasattr(life, "bind_agent_boot"), "authenticated boot binding missing"
-            assert await life.bind_agent_boot(OWNER, config.identity, view.id, 1, None, boot)
-            observation = AgentObservation(
+            assert hasattr(life, "bind_orchestrator_boot"), "authenticated boot binding missing"
+            assert await life.bind_orchestrator_boot(OWNER, config.identity, view.id, 1, None, boot)
+            observation = OrchestratorObservation(
                 view.id,
                 OWNER,
                 config.identity,
@@ -262,7 +266,7 @@ def test_only_fenced_confirmed_removal_releases_capacity_and_references(
                 replace(confirmed, boot_id=uuid4()),
                 replace(confirmed, generation=2),
                 replace(confirmed, principal=Principal("other")),
-                replace(confirmed, identity=AgentIdentity(uuid4(), config.identity.host_id)),
+                replace(confirmed, identity=OrchestratorIdentity(uuid4(), config.identity.host_id)),
                 replace(confirmed, event_version=1),
             ):
                 assert not await life.confirm_removed(bad)
@@ -286,7 +290,7 @@ def test_retention_never_ages_out_pending_cleanup_or_undelivered_commands(
     async def exercise() -> None:
         from datetime import UTC, datetime
 
-        from boxie.domain.lifecycle import AgentObservation
+        from boxie.domain.lifecycle import OrchestratorObservation
 
         async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
             spec = await upload(artifacts)
@@ -295,9 +299,9 @@ def test_retention_never_ages_out_pending_cleanup_or_undelivered_commands(
             await life.terminate(OWNER, pending.id, TerminationReason.REQUESTED)
             boot = uuid4()
             assert hasattr(life, "purge_retained"), "safe retention missing"
-            await life.bind_agent_boot(OWNER, config.identity, cleaned.id, 1, None, boot)
+            await life.bind_orchestrator_boot(OWNER, config.identity, cleaned.id, 1, None, boot)
             await life.confirm_removed(
-                AgentObservation(
+                OrchestratorObservation(
                     cleaned.id,
                     OWNER,
                     config.identity,
@@ -535,7 +539,7 @@ def test_final_start_guard_serializes_stop_and_validates_durable_request(
 
             view = await life.submit(OWNER, "guard", await upload(artifacts))
             boot = uuid4()
-            await life.bind_agent_boot(OWNER, config.identity, view.id, 1, None, boot)
+            await life.bind_orchestrator_boot(OWNER, config.identity, view.id, 1, None, boot)
             request = EnsureRequest.from_durable(await life.load_request(view.id))
             guard = PostgresStartGuard(pool, timeout=1)
             entered, release = asyncio.Event(), asyncio.Event()
@@ -581,7 +585,7 @@ def test_start_guard_timeout_and_lost_connection_retain_reservations(
         async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
             view = await life.submit(OWNER, "timeout", await upload(artifacts))
             boot = uuid4()
-            await life.bind_agent_boot(OWNER, config.identity, view.id, 1, None, boot)
+            await life.bind_orchestrator_boot(OWNER, config.identity, view.id, 1, None, boot)
             request = EnsureRequest.from_durable(await life.load_request(view.id))
             guard = PostgresStartGuard(pool, timeout=0.05)
 
@@ -614,7 +618,7 @@ def test_start_guard_timeout_and_lost_connection_retain_reservations(
     asyncio.run(exercise())
 
 
-def test_durable_agent_and_postgres_release_only_after_reconciled_absence(
+def test_durable_orchestrator_and_postgres_release_only_after_reconciled_absence(
     postgres_dsn: str, tmp_path: Path
 ) -> None:
     async def exercise() -> None:
@@ -622,35 +626,37 @@ def test_durable_agent_and_postgres_release_only_after_reconciled_absence(
 
         from boxie.domain.lifecycle import EnsureRequest
         from boxie.persistence.start_guard import PostgresStartGuard
-        from boxie.sandbox.lifecycle import DurableAgent
-        from test_agent_lifecycle import Daemon, settled
+        from boxie.sandbox.lifecycle import DurableOrchestrator
+        from test_orchestrator_lifecycle import Daemon, settled
 
         async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
             view = await life.submit(OWNER, "real-persistence", await upload(artifacts))
             clock = Clock()
             clock.now = datetime.now(UTC)
             daemon = Daemon()
-            agent = DurableAgent(
+            orchestrator = DurableOrchestrator(
                 config, daemon, artifacts.path, PostgresStartGuard(pool), clock, clock.monotonic
             )
-            await life.bind_agent_boot(OWNER, config.identity, view.id, 1, None, agent.boot_id)
+            await life.bind_orchestrator_boot(
+                OWNER, config.identity, view.id, 1, None, orchestrator.boot_id
+            )
             request = EnsureRequest.from_durable(await life.load_request(view.id))
-            await agent.ensure(request)
-            observation = await settled(agent, request.ref, SandboxState.READY)
+            await orchestrator.ensure(request)
+            observation = await settled(orchestrator, request.ref, SandboxState.READY)
             assert await life.record_observation(observation)
             assert await counts(pool) == (1, 1, 1, 1)
             daemon.unreachable = True
-            pending = await agent.remove(request.ref, TerminationReason.REQUESTED)
+            pending = await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
             assert pending.cleanup_pending
             assert await life.record_observation(pending)
             assert await counts(pool) == (1, 1, 1, 1)
             daemon.unreachable = False
-            await agent.reconcile()
-            removed = await agent.inspect(request.ref)
+            await orchestrator.reconcile()
+            removed = await orchestrator.inspect(request.ref)
             assert removed.removal_confirmed
             assert await life.confirm_removed(removed)
             assert await counts(pool) == (1, 0, 0, 1)
-            await agent.close()
+            await orchestrator.close()
 
     asyncio.run(exercise())
 
@@ -665,7 +671,7 @@ def test_start_guard_requires_retained_artifact_reference(
         async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
             view = await life.submit(OWNER, "reference", await upload(artifacts))
             boot = uuid4()
-            await life.bind_agent_boot(OWNER, config.identity, view.id, 1, None, boot)
+            await life.bind_orchestrator_boot(OWNER, config.identity, view.id, 1, None, boot)
             request = EnsureRequest.from_durable(await life.load_request(view.id))
             guard = PostgresStartGuard(pool)
             assert await guard.start_allowed(request, boot)
@@ -692,29 +698,31 @@ def test_journal_outage_expires_container_but_retains_sql_accounting_until_durab
 
         from boxie.domain.lifecycle import EnsureRequest
         from boxie.persistence.start_guard import PostgresStartGuard
-        from boxie.sandbox.lifecycle import DurableAgent
-        from test_agent_lifecycle import Daemon, settled
+        from boxie.sandbox.lifecycle import DurableOrchestrator
+        from test_orchestrator_lifecycle import Daemon, settled
 
         async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
             view = await life.submit(OWNER, "journal-outage", await upload(artifacts))
             clock = Clock()
             clock.now = datetime.now(UTC)
             daemon = Daemon()
-            agent = DurableAgent(
+            orchestrator = DurableOrchestrator(
                 config, daemon, artifacts.path, PostgresStartGuard(pool), clock, clock.monotonic
             )
-            await life.bind_agent_boot(OWNER, config.identity, view.id, 1, None, agent.boot_id)
+            await life.bind_orchestrator_boot(
+                OWNER, config.identity, view.id, 1, None, orchestrator.boot_id
+            )
             request = EnsureRequest.from_durable(await life.load_request(view.id))
-            await agent.ensure(request)
-            ready = await settled(agent, request.ref, SandboxState.READY)
+            await orchestrator.ensure(request)
+            ready = await settled(orchestrator, request.ref, SandboxState.READY)
             assert await life.record_observation(ready)
-            await agent.start()
-            original_save = agent.journal.save
+            await orchestrator.start()
+            original_save = orchestrator.journal.save
 
             def unavailable() -> None:
                 raise OSError("persistent journal storage outage")
 
-            monkeypatch.setattr(agent.journal, "save", unavailable)
+            monkeypatch.setattr(orchestrator.journal, "save", unavailable)
             try:
                 clock.advance(90)
                 for _ in range(200):
@@ -722,21 +730,21 @@ def test_journal_outage_expires_container_but_retains_sql_accounting_until_durab
                         break
                     await asyncio.sleep(0.001)
                 assert daemon.deleted_ids == [ready.container_id]
-                pending = await agent.inspect(request.ref)
+                pending = await orchestrator.inspect(request.ref)
                 assert pending.cleanup_pending and not pending.removal_confirmed
-                assert not agent.execution_ready
+                assert not orchestrator.execution_ready
                 assert await life.record_observation(pending)
                 assert await counts(pool) == (1, 1, 1, 1)
                 with pytest.raises(ValueError, match="explicit physical removal"):
                     await life.confirm_removed(pending)
-                monkeypatch.setattr(agent.journal, "save", original_save)
-                removed = await settled(agent, request.ref, SandboxState.TERMINATED)
+                monkeypatch.setattr(orchestrator.journal, "save", original_save)
+                removed = await settled(orchestrator, request.ref, SandboxState.TERMINATED)
                 assert removed.removal_confirmed and not removed.cleanup_pending
                 assert await life.confirm_removed(removed)
                 assert await counts(pool) == (1, 0, 0, 1)
             finally:
-                monkeypatch.setattr(agent.journal, "save", original_save)
-                await agent.close()
+                monkeypatch.setattr(orchestrator.journal, "save", original_save)
+                await orchestrator.close()
 
     asyncio.run(exercise())
 
@@ -749,9 +757,9 @@ def test_terminal_receipt_survives_prior_boot_and_retry_row_purge(
 
     from boxie.domain.lifecycle import EnsureRequest
     from boxie.persistence.start_guard import PostgresStartGuard
-    from boxie.sandbox.lifecycle import DurableAgent
+    from boxie.sandbox.lifecycle import DurableOrchestrator
     from boxie_test_support.durable import Daemon
-    from test_agent_lifecycle import settled
+    from test_orchestrator_lifecycle import settled
 
     async def exercise() -> None:
         async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
@@ -759,13 +767,17 @@ def test_terminal_receipt_survives_prior_boot_and_retry_row_purge(
             clock, daemon = Clock(), Daemon()
             clock.now = datetime.now(UTC)
             guard = PostgresStartGuard(pool)
-            agent = DurableAgent(config, daemon, artifacts.path, guard, clock, clock.monotonic)
-            await life.bind_agent_boot(OWNER, config.identity, view.id, 1, None, agent.boot_id)
+            orchestrator = DurableOrchestrator(
+                config, daemon, artifacts.path, guard, clock, clock.monotonic
+            )
+            await life.bind_orchestrator_boot(
+                OWNER, config.identity, view.id, 1, None, orchestrator.boot_id
+            )
             request = EnsureRequest.from_durable(await life.load_request(view.id))
-            await agent.ensure(request)
-            await settled(agent, request.ref, SandboxState.READY)
+            await orchestrator.ensure(request)
+            await settled(orchestrator, request.ref, SandboxState.READY)
             await life.terminate(OWNER, view.id, TerminationReason.REQUESTED)
-            observation = await agent.remove(request.ref, TerminationReason.REQUESTED)
+            observation = await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
             assert await life.record_observation(observation)
             assert await guard.terminal_receipt(request)
             from dataclasses import replace
@@ -776,8 +788,8 @@ def test_terminal_receipt_survives_prior_boot_and_retry_row_purge(
             assert not await guard.terminal_receipt(
                 replace(request, absolute_deadline=request.absolute_deadline + timedelta(seconds=1))
             )
-            assert await guard.initialization(request, agent.boot_id) is None
-            await agent.close()
+            assert await guard.initialization(request, orchestrator.boot_id) is None
+            await orchestrator.close()
             if purged:
                 async with pool.connection() as conn:
                     await conn.execute(
@@ -789,8 +801,10 @@ def test_terminal_receipt_survives_prior_boot_and_retry_row_purge(
                         (view.id,),
                     )
                 await life.purge_retained()
-            restarted = DurableAgent(config, daemon, artifacts.path, guard, clock, clock.monotonic)
-            assert restarted.boot_id != agent.boot_id
+            restarted = DurableOrchestrator(
+                config, daemon, artifacts.path, guard, clock, clock.monotonic
+            )
+            assert restarted.boot_id != orchestrator.boot_id
             await restarted.compact()
             assert not restarted.records
             with pytest.raises(BoxieError):
@@ -812,23 +826,27 @@ def test_failed_restart_journal_projection_waits_for_authenticated_inspection(
         import httpx
         from boxie.domain.lifecycle import EnsureRequest
         from boxie.persistence.start_guard import PostgresStartGuard
-        from boxie.sandbox.durable_client import DurableAgentClient
-        from boxie.sandbox.durable_server import create_durable_agent_app
-        from boxie.sandbox.lifecycle import DurableAgent
+        from boxie.sandbox.durable_client import DurableOrchestratorClient
+        from boxie.sandbox.durable_server import create_durable_orchestrator_app
+        from boxie.sandbox.lifecycle import DurableOrchestrator
         from boxie.sandbox.reporting import ObservationReporter
         from boxie.temporal.activities import LifecycleActivities
         from fastapi import Request, Response
         from starlette.middleware.base import RequestResponseEndpoint
         from temporalio.exceptions import ApplicationError
-        from test_agent_lifecycle import Daemon, settled
+        from test_orchestrator_lifecycle import Daemon, settled
 
         async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
             view = await life.submit(OWNER, "restart-journal", await upload(artifacts))
             clock, daemon = Clock(), Daemon()
             clock.now = datetime.now(UTC)
             guard = PostgresStartGuard(pool)
-            original = DurableAgent(config, daemon, artifacts.path, guard, clock, clock.monotonic)
-            await life.bind_agent_boot(OWNER, config.identity, view.id, 1, None, original.boot_id)
+            original = DurableOrchestrator(
+                config, daemon, artifacts.path, guard, clock, clock.monotonic
+            )
+            await life.bind_orchestrator_boot(
+                OWNER, config.identity, view.id, 1, None, original.boot_id
+            )
             request = EnsureRequest.from_durable(await life.load_request(view.id))
             await original.ensure(request)
             ready = await settled(original, request.ref, SandboxState.READY)
@@ -838,17 +856,17 @@ def test_failed_restart_journal_projection_waits_for_authenticated_inspection(
             def unavailable() -> None:
                 raise OSError("persistent journal storage outage")
 
-            agents = [original]
+            orchestrators = [original]
             try:
                 for restart in range(2):
-                    agent = DurableAgent(
+                    orchestrator = DurableOrchestrator(
                         config, daemon, artifacts.path, guard, clock, clock.monotonic
                     )
-                    agents.append(agent)
-                    monkeypatch.setattr(agent.journal, "save", unavailable)
+                    orchestrators.append(orchestrator)
+                    monkeypatch.setattr(orchestrator.journal, "save", unavailable)
                     reporter = ObservationReporter("http://api", b"restart-secret")
-                    app = create_durable_agent_app(
-                        agent, artifacts, credential=b"restart-secret", reporter=reporter
+                    app = create_durable_orchestrator_app(
+                        orchestrator, artifacts, credential=b"restart-secret", reporter=reporter
                     )
                     entered, release = asyncio.Event(), asyncio.Event()
 
@@ -867,11 +885,11 @@ def test_failed_restart_journal_projection_waits_for_authenticated_inspection(
                     try:
                         # start() reconciles before serving; omit its periodic sweep to
                         # place the worker inspection deterministically after the assertion.
-                        await agent.reconcile()
+                        await orchestrator.reconcile()
                         assert not daemon.resources and len(daemon.deleted_ids) == 1
-                        assert not agent.execution_ready
+                        assert not orchestrator.execution_ready
                         assert original.journal.path.read_bytes() == journal
-                        pending = await agent.inspect(request.ref)
+                        pending = await orchestrator.inspect(request.ref)
                         assert pending.cleanup_pending and not pending.removal_confirmed
                         assert pending.boot_id != ready.boot_id
                         assert not reporter.latest  # Failed saves cannot publish finality.
@@ -880,11 +898,13 @@ def test_failed_restart_journal_projection_waits_for_authenticated_inspection(
                             # This is the native failure's premature visibility assumption.
                             stale = await life.get(OWNER, view.id)
                             assert stale.state == SandboxState.READY and not stale.cleanup_pending
-                        async with DurableAgentClient("http://agent", b"restart-secret") as client:
+                        async with DurableOrchestratorClient(
+                            "http://orchestrator", b"restart-secret"
+                        ) as client:
                             await client._http.aclose()
                             client._http = httpx.AsyncClient(
                                 transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
-                                base_url="http://agent",
+                                base_url="http://orchestrator",
                                 headers={"Authorization": "Bearer restart-secret"},
                             )
                             activities = LifecycleActivities(life, client)
@@ -901,7 +921,7 @@ def test_failed_restart_journal_projection_waits_for_authenticated_inspection(
                                     await asyncio.wait_for(entered.wait(), 5)
                                     assert (
                                         await life.load_request(view.id)
-                                    ).agent_boot_id == agent.boot_id
+                                    ).orchestrator_boot_id == orchestrator.boot_id
                                     in_flight = await life.get(OWNER, view.id)
                                     assert (
                                         in_flight.state == SandboxState.TERMINATING
@@ -910,7 +930,7 @@ def test_failed_restart_journal_projection_waits_for_authenticated_inspection(
                                     async with pool.connection() as conn:
                                         row = await (
                                             await conn.execute(
-                                                "SELECT * FROM agent_observations WHERE sandbox_id=%s",
+                                                "SELECT * FROM orchestrator_observations WHERE sandbox_id=%s",
                                                 (view.id,),
                                             )
                                         ).fetchone()
@@ -926,33 +946,42 @@ def test_failed_restart_journal_projection_waits_for_authenticated_inspection(
                             projected.state == SandboxState.TERMINATING
                             and projected.cleanup_pending
                         )
-                        assert (await life.load_request(view.id)).agent_boot_id == agent.boot_id
+                        assert (
+                            await life.load_request(view.id)
+                        ).orchestrator_boot_id == orchestrator.boot_id
                         assert not await life.record_observation(ready)
                         assert await counts(pool) == (1, 1, 1, restart + 1)
                         print(
                             f"restart {restart + 1}: authenticated boot, pending SQL, slot/ref retained; {'inspection repair' if restart == 0 else 'cleanup retry with no observation while RPC in flight'}"
                         )
                         if restart == 0:
-                            await life.terminate(OWNER, view.id, TerminationReason.AGENT_RESTART)
+                            await life.terminate(
+                                OWNER, view.id, TerminationReason.ORCHESTRATOR_RESTART
+                            )
                     finally:
                         await reporter.close()
-                recovered = DurableAgent(
+                recovered = DurableOrchestrator(
                     config, daemon, artifacts.path, guard, clock, clock.monotonic
                 )
-                agents.append(recovered)
+                orchestrators.append(recovered)
                 await recovered.reconcile()
                 removed = await recovered.inspect(request.ref)
                 assert removed.removal_confirmed
                 prior = await life.load_request(view.id)
-                assert await life.bind_agent_boot(
-                    OWNER, config.identity, view.id, 1, prior.agent_boot_id, recovered.boot_id
+                assert await life.bind_orchestrator_boot(
+                    OWNER,
+                    config.identity,
+                    view.id,
+                    1,
+                    prior.orchestrator_boot_id,
+                    recovered.boot_id,
                 )
                 assert await life.confirm_removed(removed)
                 assert await counts(pool) == (1, 0, 0, 2)
             finally:
                 # Restore saves only during teardown, after every accounting assertion.
                 monkeypatch.undo()
-                for agent in agents:
-                    await agent.close()
+                for orchestrator in orchestrators:
+                    await orchestrator.close()
 
     asyncio.run(exercise())

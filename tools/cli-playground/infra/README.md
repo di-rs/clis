@@ -49,7 +49,7 @@ The credential must be a regular non-symlink file, mode `0600`, containing a
 The independently resolvable production manifest uses an explicit immutable
 `PLAYGROUND_IMAGE`, external `PLAYGROUND_PROXY_NETWORK` and
 `PLAYGROUND_CERTIFICATES_VOLUME`; only Traefik publishes 80/443 and receives the
-Cloudflare certificate-renewal credential. Boxie's artifact data and agent
+Cloudflare certificate-renewal credential. Boxie's artifact data and orchestrator
 credential never enter Playground. Runtime images contain only their own installed
 package/dependencies and, for Playground, its real built frontend assets.
 

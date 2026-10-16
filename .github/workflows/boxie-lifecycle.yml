@@ -2,17 +2,10 @@ name: Boxie durable lifecycle
 
 on:
   pull_request:
-    branches: [master, refactor/boxie-service, feat/boxie-temporal, feat/boxie-observability]
+    branches: [master]
     paths:
       - '.github/workflows/boxie-lifecycle.yml'
-      - 'tools/cli-playground/playground/**'
-      - 'tools/cli-playground/frontend/**'
-      - 'tools/cli-playground/pyproject.toml'
-      - 'tools/cli-playground/Sandbox.Dockerfile*'
-      - 'tools/cli-playground/shell.sh'
-      - 'tools/cli-playground/fixtures/**'
-      - 'tools/cli-playground/infra/bootstrap.sh'
-      - 'tools/cli-playground/infra/**'
+      - 'tools/cli-playground/**'
       - 'tools/boxie/**'
       - 'infra/platform/**'
       - 'infra/temporal/**'

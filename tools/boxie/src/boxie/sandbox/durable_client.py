@@ -5,17 +5,23 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
-from boxie.domain.lifecycle import AgentObservation, DurableRequest, EnsureRequest, ExpiryRequest
-from boxie.domain.models import AgentIdentity
-from boxie.sandbox.client import AgentClient, dependency_error
+from boxie.domain.lifecycle import (
+    DurableRequest,
+    EnsureRequest,
+    ExpiryRequest,
+    OrchestratorObservation,
+)
+from boxie.domain.models import OrchestratorIdentity
+from boxie.sandbox.client import OrchestratorClient
+from boxie.sandbox.client_terminal import dependency_error
 from boxie.sandbox.protocol import BootWire, DurableEnsureWire, ObservationWire
 
 
-class DurableAgentClient(AgentClient):
-    async def __aenter__(self) -> DurableAgentClient:
+class DurableOrchestratorClient(OrchestratorClient):
+    async def __aenter__(self) -> DurableOrchestratorClient:
         return self
 
-    async def boot(self, expected: AgentIdentity) -> UUID:
+    async def boot(self, expected: OrchestratorIdentity) -> UUID:
         _status, body = await self._request("GET", "/v1/identity")
         try:
             identity = BootWire.model_validate_json(body)
@@ -27,18 +33,18 @@ class DurableAgentClient(AgentClient):
 
     async def _observation(
         self, path: str, body: dict[str, Any], **kwargs: Any
-    ) -> AgentObservation:
+    ) -> OrchestratorObservation:
         _status, response = await self._request("POST", path, json=body, **kwargs)
         try:
             return ObservationWire.model_validate_json(response).domain()
         except ValidationError, ValueError:
             raise dependency_error() from None
 
-    async def ensure_execution(self, request: EnsureRequest, boot: UUID) -> AgentObservation:
+    async def ensure_execution(self, request: EnsureRequest, boot: UUID) -> OrchestratorObservation:
         return await self._observation(
             f"/v1/sandboxes/{request.ref.id}/ensure",
             DurableEnsureWire.from_domain(request).model_dump(mode="json"),
-            headers={"X-Agent-Boot": str(boot)},
+            headers={"X-Orchestrator-Boot": str(boot)},
         )
 
     def _execution_control(self, request: DurableRequest, boot: UUID) -> dict[str, Any]:
@@ -48,24 +54,28 @@ class DurableAgentClient(AgentClient):
             "reason": (request.reason or "requested"),
         }
 
-    async def inspect_execution(self, request: DurableRequest, boot: UUID) -> AgentObservation:
+    async def inspect_execution(
+        self, request: DurableRequest, boot: UUID
+    ) -> OrchestratorObservation:
         return await self._observation(
             f"/v1/sandboxes/{request.sandbox_id}/inspect", self._execution_control(request, boot)
         )
 
-    async def renew_execution(self, request: DurableRequest, boot: UUID) -> AgentObservation:
+    async def renew_execution(self, request: DurableRequest, boot: UUID) -> OrchestratorObservation:
         return await self._observation(
             f"/v1/sandboxes/{request.sandbox_id}/renew", self._execution_control(request, boot)
         )
 
-    async def remove_execution(self, request: DurableRequest, boot: UUID) -> AgentObservation:
+    async def remove_execution(
+        self, request: DurableRequest, boot: UUID
+    ) -> OrchestratorObservation:
         return await self._observation(
             f"/v1/sandboxes/{request.sandbox_id}/remove", self._execution_control(request, boot)
         )
 
     async def expire_execution(
         self, request: DurableRequest, expiry: ExpiryRequest
-    ) -> AgentObservation:
+    ) -> OrchestratorObservation:
         return await self._observation(
             f"/v1/sandboxes/{request.sandbox_id}/expire",
             {

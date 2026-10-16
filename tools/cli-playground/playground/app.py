@@ -12,10 +12,11 @@ from fastapi.staticfiles import StaticFiles
 
 from playground.boxie_client import BoxieClient, HttpBoxieClient
 from playground.config import Settings
-from playground.routes import RequestHostBoundary, create_router
+from playground.routes import create_router
 from playground.service import PlaygroundService
 from playground.session_store import SessionStore
 from playground.storage import EnvironmentStore
+from playground.transport import RequestHostBoundary
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 

@@ -18,7 +18,7 @@ CREATE TABLE sandboxes (
     installation_id uuid NOT NULL,
     host_id text NOT NULL,
     generation bigint NOT NULL DEFAULT 1 CHECK (generation > 0),
-    agent_boot_id uuid,
+    orchestrator_boot_id uuid,
     accepted_at timestamptz NOT NULL,
     absolute_deadline timestamptz NOT NULL,
     desired_stop boolean NOT NULL DEFAULT false,
@@ -55,7 +55,7 @@ CREATE TABLE outbox (
     CHECK ((lease_owner IS NULL) = (lease_expires_at IS NULL))
 );
 CREATE INDEX outbox_pending ON outbox (next_attempt_at) WHERE delivered_at IS NULL;
-CREATE TABLE agent_observations (
+CREATE TABLE orchestrator_observations (
     sandbox_id uuid PRIMARY KEY REFERENCES sandboxes(id) ON DELETE RESTRICT,
     generation bigint NOT NULL,
     boot_id uuid NOT NULL,

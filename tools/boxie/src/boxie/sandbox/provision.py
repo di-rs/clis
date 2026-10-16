@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from boxie.domain.lifecycle import AgentObservation, SandboxRef, StartGuard
+from boxie.domain.lifecycle import OrchestratorObservation, SandboxRef, StartGuard
 from boxie.domain.models import Principal, SandboxState, TerminationReason
-from boxie.sandbox.docker import ExecutionDocker, container_config
+from boxie.sandbox.docker import CreateRejected, ExecutionDocker, container_config
 from boxie.sandbox.execution import ExecutionRecord
 from boxie.sandbox.reconcile import owned_container
 from boxie.sandbox.terminal import ExecutionTerminal
@@ -16,7 +16,7 @@ from boxie.sandbox.terminal import ExecutionTerminal
 
 @dataclass(frozen=True)
 class ProvisionDecisions:
-    """Explicit lifecycle callbacks; no access to admission or general agent internals.
+    """Explicit lifecycle callbacks; no access to admission or general orchestrator internals.
 
     Lock order: SQL row -> local decision lock for bounded start. Never acquire
     SQL from inside a local decision lock. Create/attach hold neither lock.
@@ -26,7 +26,7 @@ class ProvisionDecisions:
     live: Callable[[ExecutionRecord], bool]
     expiry: Callable[[ExecutionRecord], TerminationReason | None]
     changed: Callable[[ExecutionRecord], None]
-    remove: Callable[[SandboxRef, TerminationReason], Awaitable[AgentObservation]]
+    remove: Callable[[SandboxRef, TerminationReason], Awaitable[OrchestratorObservation]]
     cleanup: Callable[[ExecutionRecord], Awaitable[None]]
     ready: Callable[[ExecutionRecord], Awaitable[bool]]
     creating: Callable[[UUID, asyncio.Task[None]], None]
@@ -43,6 +43,9 @@ async def _create(
         await docker.create(
             record.name, container_config(record.snapshot.domain(), artifact, record.labels)
         )
+    except CreateRejected:
+        record.creation_uncertain = False
+        changed(record)
     except Exception:
         # Transport failure leaves the side effect unknown; owned discovery resolves it.
         pass

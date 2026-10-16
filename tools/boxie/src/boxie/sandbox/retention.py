@@ -7,12 +7,12 @@ from boxie.domain.models import SandboxState
 from boxie.sandbox.execution import ExecutionRecord
 
 if TYPE_CHECKING:
-    from boxie.sandbox.lifecycle import DurableAgent
+    from boxie.sandbox.lifecycle import DurableOrchestrator
 
 MAX_RECORDS = 128
 
 
-def settled(agent: DurableAgent, record: ExecutionRecord) -> bool:
+def settled(orchestrator: DurableOrchestrator, record: ExecutionRecord) -> bool:
     return (
         record.state in (SandboxState.TERMINATED, SandboxState.FAILED)
         and record.removal_confirmed
@@ -20,62 +20,62 @@ def settled(agent: DurableAgent, record: ExecutionRecord) -> bool:
         and not record.creation_uncertain
         and not record.start_uncertain
         and record.container_id is None
-        and agent.durable_versions.get(record.id) == record.event_version
-        and not agent.sessions.get(record.id)
+        and orchestrator.durable_versions.get(record.id) == record.event_version
+        and not orchestrator.sessions.get(record.id)
         and all(
             record.id not in tasks or tasks[record.id].done()
             for tasks in (
-                agent.creates,
-                agent.workers,
-                agent.reconciliations,
-                agent.terminal_readers,
+                orchestrator.creates,
+                orchestrator.workers,
+                orchestrator.reconciliations,
+                orchestrator.terminal_readers,
             )
         )
-        and not agent.locks.get(record.id, asyncio.Lock()).locked()
-        and not agent.cleanup_locks.get(record.id, asyncio.Lock()).locked()
+        and not orchestrator.locks.get(record.id, asyncio.Lock()).locked()
+        and not orchestrator.cleanup_locks.get(record.id, asyncio.Lock()).locked()
     )
 
 
-async def compact(agent: DurableAgent) -> None:
-    for record in list(agent.records.values()):
-        if not settled(agent, record):
+async def compact(orchestrator: DurableOrchestrator) -> None:
+    for record in list(orchestrator.records.values()):
+        if not settled(orchestrator, record):
             continue
         version = record.event_version
         try:
             # Never acquire SQL beneath a record lock (final-start uses SQL -> record).
-            if not await agent.guard.terminal_receipt(record.request()):
+            if not await orchestrator.guard.terminal_receipt(record.request()):
                 continue
         except Exception:
             continue  # An outage is not a missing admission or an eviction certificate.
-        async with agent.admission_lock:
+        async with orchestrator.admission_lock:
             if (
-                agent.records.get(record.id) is not record
+                orchestrator.records.get(record.id) is not record
                 or record.event_version != version
-                or not settled(agent, record)
+                or not settled(orchestrator, record)
             ):
                 continue
             # No await through replacement or map reclamation. Old lock waiters can
             # only find 404, and ensure must revalidate SQL before inserting a record.
-            agent.records.pop(record.id)
+            orchestrator.records.pop(record.id)
             try:
-                agent._save()
+                orchestrator._save()
             except Exception:
-                agent.records[record.id] = record
+                orchestrator.records[record.id] = record
                 continue
             for mapping in (
-                agent.deadlines,
-                agent.locks,
-                agent.cleanup_locks,
-                agent.workers,
-                agent.creates,
-                agent.terminals,
-                agent.terminal_readers,
-                agent.reconciliations,
-                agent._reported,
-                agent.durable_versions,
-                agent.sessions,
+                orchestrator.deadlines,
+                orchestrator.locks,
+                orchestrator.cleanup_locks,
+                orchestrator.workers,
+                orchestrator.creates,
+                orchestrator.terminals,
+                orchestrator.terminal_readers,
+                orchestrator.reconciliations,
+                orchestrator._reported,
+                orchestrator.durable_versions,
+                orchestrator.sessions,
             ):
                 mapping.pop(record.id, None)
-            agent._failed_reconciliations.discard(record.id)
-            if agent.forget_observation:
-                agent.forget_observation(record.id)
+            orchestrator._failed_reconciliations.discard(record.id)
+            if orchestrator.forget_observation:
+                orchestrator.forget_observation(record.id)

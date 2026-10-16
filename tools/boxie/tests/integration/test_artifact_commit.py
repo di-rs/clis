@@ -11,7 +11,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 from boxie.persistence.postgres_artifacts import PostgresArtifactStore
-from boxie_test_support.agent import bundle
+from boxie_test_support.orchestrator import bundle
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 from test_postgres import OWNER, database
@@ -127,13 +127,15 @@ def test_native_fixture_compose_resolves_owned_fault_boundaries(tmp_path: Path) 
         ] == [("127.0.0.1", published, target, "tcp")]
     for name in ("api", "worker", "playground"):
         assert not any("docker.sock" in str(mount) for mount in services[name].get("volumes", []))
-    assert services["agent"]["environment"]["DOCKER_HOST"] == "unix:///faults/docker.sock"
-    assert not any(m["target"] == "/var/run/docker.sock" for m in services["agent"]["volumes"])
+    assert services["orchestrator"]["environment"]["DOCKER_HOST"] == "unix:///faults/docker.sock"
+    assert not any(
+        m["target"] == "/var/run/docker.sock" for m in services["orchestrator"]["volumes"]
+    )
     assert any(m["target"] == "/var/run/docker.sock" for m in services["faults"]["volumes"])
-    mounts = {m["target"]: m for m in services["agent"]["volumes"]}
+    mounts = {m["target"]: m for m in services["orchestrator"]["volumes"]}
     assert mounts[str(tmp_path / "data")]["read_only"] is True
     assert not mounts[str(tmp_path / "data/profiles")].get("read_only", False)
-    assert mounts["/fixture/agent_fixture.py"]["read_only"] is True
+    assert mounts["/fixture/orchestrator_fixture.py"]["read_only"] is True
     assert all(service.get("restart") == "no" for service in services.values())
 
 
@@ -142,13 +144,13 @@ def test_disconnected_upload_waiter_and_collector_have_one_total_deadline(
 ) -> None:
     from boxie.domain.errors import BoxieError
     from boxie.persistence.start_guard import PostgresStartGuard
-    from boxie.sandbox.client import AgentClient
-    from boxie.sandbox.durable_server import create_durable_agent_app
-    from boxie.sandbox.lifecycle import DurableAgent
+    from boxie.sandbox.client import OrchestratorClient
+    from boxie.sandbox.durable_server import create_durable_orchestrator_app
+    from boxie.sandbox.lifecycle import DurableOrchestrator
     from boxie.sandbox.reporting import ObservationReporter
-    from boxie_test_support.agent import Clock
     from boxie_test_support.api import serve
     from boxie_test_support.durable import Daemon
+    from boxie_test_support.orchestrator import Clock
 
     async def exercise() -> None:
         async with database(postgres_dsn, tmp_path) as (_, store, pool, config):
@@ -156,17 +158,19 @@ def test_disconnected_upload_waiter_and_collector_have_one_total_deadline(
                 "boxie.persistence.postgres_artifacts.OPERATION_SECONDS", 0.15, raising=False
             )
             clock = Clock()
-            agent = DurableAgent(
+            orchestrator = DurableOrchestrator(
                 config, Daemon(), store.path, PostgresStartGuard(pool), clock, clock.monotonic
             )
             reporter = ObservationReporter("http://127.0.0.1:1", b"unused")
-            app = create_durable_agent_app(
-                agent, store, credential=b"agent-test-secret", reporter=reporter
+            app = create_durable_orchestrator_app(
+                orchestrator, store, credential=b"orchestrator-test-secret", reporter=reporter
             )
             async with serve(app) as origin:
                 await store._files_lock.acquire()
                 try:
-                    async with AgentClient(origin, b"agent-test-secret", timeout=0.05) as upstream:
+                    async with OrchestratorClient(
+                        origin, b"orchestrator-test-secret", timeout=0.05
+                    ) as upstream:
 
                         async def chunks() -> Any:
                             yield bundle()
@@ -176,7 +180,7 @@ def test_disconnected_upload_waiter_and_collector_have_one_total_deadline(
                                 OWNER, uuid4(), hashlib.sha256(bundle()).hexdigest(), chunks()
                             )
                         assert error.value.status == 503
-                    # Upstream already disconnected; the agent's own deadline must
+                    # Upstream already disconnected; the orchestrator's own deadline must
                     # evict its waiter without needing to read another body byte.
                     await asyncio.sleep(0.2)
                     assert not store._files_lock._waiters

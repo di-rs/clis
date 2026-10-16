@@ -16,15 +16,15 @@ from boxie.api.app import ApiConfig, create_app
 from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import EnsureRequest, SandboxRef
 from boxie.domain.models import Principal, SandboxSpec, SandboxView, TerminationReason
-from boxie.sandbox.durable_client import DurableAgentClient
-from boxie.sandbox.durable_server import create_durable_agent_app
-from boxie.sandbox.lifecycle import DurableAgent
+from boxie.sandbox.durable_client import DurableOrchestratorClient
+from boxie.sandbox.durable_server import create_durable_orchestrator_app
+from boxie.sandbox.lifecycle import DurableOrchestrator
 from boxie.sandbox.reporting import ObservationReporter
 
-from boxie_test_support.agent import Clock, configuration
 from boxie_test_support.api import CONSUMER_AUTH, serve
 from boxie_test_support.artifacts import Artifacts
 from boxie_test_support.durable import Daemon, Guard
+from boxie_test_support.orchestrator import Clock, configuration
 
 
 class EchoDaemon(Daemon):
@@ -38,8 +38,8 @@ class EchoDaemon(Daemon):
 
 
 class Admission:
-    def __init__(self, agent: DurableAgent, artifacts: Artifacts) -> None:
-        self.agent, self.artifacts = agent, artifacts
+    def __init__(self, orchestrator: DurableOrchestrator, artifacts: Artifacts) -> None:
+        self.orchestrator, self.artifacts = orchestrator, artifacts
         self.keys: dict[tuple[Principal, str], UUID] = {}
 
     async def ready(self) -> bool:
@@ -53,21 +53,21 @@ class Admission:
         request = EnsureRequest(
             SandboxRef(identifier, 1),
             principal,
-            self.agent.config.identity,
+            self.orchestrator.config.identity,
             spec,
-            self.agent.profiles.resolve_profile(spec.profile_id, spec.command, spec.env),
-            self.agent.clock(),
-            self.agent.clock() + timedelta(seconds=spec.policy.max_seconds),
+            self.orchestrator.profiles.resolve_profile(spec.profile_id, spec.command, spec.env),
+            self.orchestrator.clock(),
+            self.orchestrator.clock() + timedelta(seconds=spec.policy.max_seconds),
         )
-        await self.agent.ensure(request)
+        await self.orchestrator.ensure(request)
         self.keys[principal, key] = identifier
         return await self.get(principal, identifier)
 
     async def get(self, principal: Principal, identifier: UUID) -> SandboxView:
-        record = self.agent.records.get(identifier)
+        record = self.orchestrator.records.get(identifier)
         if record is None or record.consumer_id != principal.consumer_id:
             raise BoxieError(404, "sandbox not found")
-        item = await self.agent.inspect(record.ref)
+        item = await self.orchestrator.inspect(record.ref)
         return SandboxView(
             identifier,
             item.state,
@@ -81,7 +81,7 @@ class Admission:
         self, principal: Principal, identifier: UUID, reason: TerminationReason
     ) -> SandboxView:
         await self.get(principal, identifier)
-        await self.agent.remove(self.agent.records[identifier].ref, reason)
+        await self.orchestrator.remove(self.orchestrator.records[identifier].ref, reason)
         return await self.get(principal, identifier)
 
 
@@ -103,22 +103,24 @@ async def network(root: Path, *, shell: str = "/bin/sh") -> AsyncIterator[Any]:
     async def noop() -> None:
         pass
 
-    agent = DurableAgent(config, daemon, path, Guard(), clock, clock.monotonic)
-    # No artifact HTTP route is called on the agent in this terminal-only harness.
-    agent_artifacts: Any = SimpleNamespace(collect=noop, collect_orphans=noop)
-    app = create_durable_agent_app(
-        agent,
-        agent_artifacts,
-        credential=b"agent-test-secret",
+    orchestrator = DurableOrchestrator(config, daemon, path, Guard(), clock, clock.monotonic)
+    # No artifact HTTP route is called on the orchestrator in this terminal-only harness.
+    orchestrator_artifacts: Any = SimpleNamespace(collect=noop, collect_orphans=noop)
+    app = create_durable_orchestrator_app(
+        orchestrator,
+        orchestrator_artifacts,
+        credential=b"orchestrator-test-secret",
         reporter=ObservationReporter("http://127.0.0.1:1", b"unused"),
     )
     async with serve(app) as origin:
-        async with DurableAgentClient(origin, b"agent-test-secret", timeout=1) as client:
+        async with DurableOrchestratorClient(
+            origin, b"orchestrator-test-secret", timeout=1
+        ) as client:
             api = create_app(
                 ApiConfig(
                     "terminal-test", {"one": b"consumer-one-secret", "two": b"consumer-two-secret"}
                 ),
-                Admission(agent, artifacts),
+                Admission(orchestrator, artifacts),
                 artifacts,
                 client,
             )
@@ -126,9 +128,9 @@ async def network(root: Path, *, shell: str = "/bin/sh") -> AsyncIterator[Any]:
                 async with httpx.AsyncClient(base_url=url, headers=CONSUMER_AUTH) as http:
                     yield SimpleNamespace(
                         api=http,
-                        agent_url=origin,
+                        orchestrator_url=origin,
                         daemon=daemon,
-                        agent=agent,
+                        orchestrator=orchestrator,
                         config=config,
                         clock=clock,
                     )

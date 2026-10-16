@@ -37,7 +37,7 @@ def create_app(
     terminal: TerminalAccess,
     *,
     observations: ObservationSink | None = None,
-    agent_credential: bytes | None = None,
+    orchestrator_credential: bytes | None = None,
 ) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     auth = ConsumerAuth(config.consumers)
@@ -59,13 +59,13 @@ def create_app(
             if request.url.path == "/internal/observations":
                 if (
                     observations is None
-                    or agent_credential is None
+                    or orchestrator_credential is None
                     or not hmac.compare_digest(
                         request.headers.get("Authorization", "").encode(),
-                        b"Bearer " + agent_credential,
+                        b"Bearer " + orchestrator_credential,
                     )
                 ):
-                    raise BoxieError(401, "invalid agent credential")
+                    raise BoxieError(401, "invalid orchestrator credential")
             elif request.url.path != "/healthz":
                 request.state.principal = auth.resolve(request.headers.get("Authorization", ""))
             if request.method == "POST" or request.url.path == "/internal/observations":
@@ -89,7 +89,7 @@ def create_app(
         return JSONResponse(
             {
                 "release": config.release,
-                "dependencies": {"orchestration" if observations else "agent": ready},
+                "dependencies": {"orchestration" if observations else "orchestrator": ready},
             },
             status_code=200 if ready else 503,
         )

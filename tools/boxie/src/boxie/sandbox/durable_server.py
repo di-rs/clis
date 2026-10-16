@@ -18,7 +18,7 @@ from boxie.domain.lifecycle import ExpiryRequest, SandboxRef
 from boxie.domain.models import Principal, SandboxState
 from boxie.domain.policy import validate_policy
 from boxie.persistence.postgres_artifacts import PostgresArtifactStore
-from boxie.sandbox.lifecycle import DurableAgent
+from boxie.sandbox.lifecycle import DurableOrchestrator
 from boxie.sandbox.protocol import (
     AdmissionProfileRequest,
     ConsumerId,
@@ -32,15 +32,15 @@ from boxie.sandbox.reporting import ObservationReporter
 from boxie.sandbox.terminal_session import serve_terminal
 
 
-def create_durable_agent_app(
-    agent: DurableAgent,
+def create_durable_orchestrator_app(
+    orchestrator: DurableOrchestrator,
     artifacts: PostgresArtifactStore,
     *,
     credential: bytes,
     reporter: ObservationReporter,
 ) -> FastAPI:
-    agent.observer = reporter.offer
-    agent.forget_observation = reporter.forget
+    orchestrator.observer = reporter.offer
+    orchestrator.forget_observation = reporter.forget
 
     async def collect() -> None:
         while True:
@@ -53,20 +53,20 @@ def create_durable_agent_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        await agent.start()
+        await orchestrator.start()
         reporting = asyncio.create_task(reporter.run())
         collection = asyncio.create_task(collect())
         try:
             yield
         finally:
-            await agent.close()
+            await orchestrator.close()
             reporting.cancel()
             collection.cancel()
             await asyncio.gather(reporting, collection, return_exceptions=True)
             await reporter.close()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
-    app.state.agent = agent
+    app.state.orchestrator = orchestrator
 
     def authorized(value: str) -> bool:
         return hmac.compare_digest(value.encode(), b"Bearer " + credential)
@@ -74,7 +74,7 @@ def create_durable_agent_app(
     @app.middleware("http")
     async def authenticate(request: Request, next: RequestResponseEndpoint) -> Response:
         if not authorized(request.headers.get("Authorization", "")):
-            return JSONResponse({"detail": "invalid agent credential"}, status_code=401)
+            return JSONResponse({"detail": "invalid orchestrator credential"}, status_code=401)
         if request.method == "POST":
             data = bytearray()
             async for chunk in request.stream():
@@ -94,13 +94,13 @@ def create_durable_agent_app(
 
     @app.get("/v1/identity")
     async def identity() -> dict[str, object]:
-        return {"identity": asdict(agent.config.identity), "boot_id": agent.boot_id}
+        return {"identity": asdict(orchestrator.config.identity), "boot_id": orchestrator.boot_id}
 
     @app.get("/readyz")
     async def ready() -> JSONResponse:
         try:
             async with asyncio.timeout(5):
-                docker_ready = await agent.docker.ready()
+                docker_ready = await orchestrator.docker.ready()
                 async with artifacts.pool.connection() as conn:
                     await conn.execute("SELECT 1")
                 sql_ready = True
@@ -109,13 +109,13 @@ def create_durable_agent_app(
         dependencies = {
             "docker": docker_ready,
             "postgres": sql_ready,
-            "execution": agent.execution_ready,
+            "execution": orchestrator.execution_ready,
         }
         return JSONResponse(
             {
                 "identity": {
-                    "installation_id": str(agent.config.identity.installation_id),
-                    "host_id": agent.config.identity.host_id,
+                    "installation_id": str(orchestrator.config.identity.installation_id),
+                    "host_id": orchestrator.config.identity.host_id,
                 },
                 "dependencies": dependencies,
             },
@@ -124,9 +124,9 @@ def create_durable_agent_app(
 
     @app.post("/v1/profiles/resolve")
     async def profile(body: AdmissionProfileRequest) -> SnapshotWire:
-        validate_policy(body.policy.domain(), agent.config.policy_maximum)
+        validate_policy(body.policy.domain(), orchestrator.config.policy_maximum)
         return SnapshotWire.from_domain(
-            agent.profiles.resolve_profile(body.profile_id, body.command, body.env)
+            orchestrator.profiles.resolve_profile(body.profile_id, body.command, body.env)
         )
 
     @app.put("/v1/artifacts/{artifact_id}")
@@ -149,45 +149,47 @@ def create_durable_agent_app(
         return Response(status_code=204)
 
     def boot(expected: UUID) -> None:
-        if expected != agent.boot_id:
-            raise BoxieError(409, "agent boot changed")
+        if expected != orchestrator.boot_id:
+            raise BoxieError(409, "orchestrator boot changed")
 
     async def owned(identifier: UUID, body: ExecutionControlWire) -> SandboxRef:
         boot(body.boot_id)
         ref = SandboxRef(identifier, body.generation)
-        item = await agent.inspect(ref)
+        item = await orchestrator.inspect(ref)
         if item.principal != Principal(body.consumer_id) or item.identity != body.identity.domain():
             raise BoxieError(404, "execution not found")
         return ref
 
     @app.post("/v1/sandboxes/{identifier}/ensure")
     async def ensure(
-        identifier: UUID, body: DurableEnsureWire, x_agent_boot: Annotated[UUID, Header()]
+        identifier: UUID, body: DurableEnsureWire, x_orchestrator_boot: Annotated[UUID, Header()]
     ) -> ObservationWire:
-        boot(x_agent_boot)
+        boot(x_orchestrator_boot)
         if body.ref.id != identifier:
             raise BoxieError(422, "execution identity differs")
-        return ObservationWire.from_domain(await agent.ensure(body.domain()))
+        return ObservationWire.from_domain(await orchestrator.ensure(body.domain()))
 
     @app.post("/v1/sandboxes/{identifier}/inspect")
     async def inspect(identifier: UUID, body: ExecutionControlWire) -> ObservationWire:
-        return ObservationWire.from_domain(await agent.inspect(await owned(identifier, body)))
+        return ObservationWire.from_domain(
+            await orchestrator.inspect(await owned(identifier, body))
+        )
 
     @app.post("/v1/sandboxes/{identifier}/renew")
     async def renew(identifier: UUID, body: ExecutionControlWire) -> ObservationWire:
         return ObservationWire.from_domain(
-            await agent.renew_control_lease(await owned(identifier, body), body.boot_id)
+            await orchestrator.renew_control_lease(await owned(identifier, body), body.boot_id)
         )
 
     @app.post("/v1/sandboxes/{identifier}/remove")
     async def remove(identifier: UUID, body: ExecutionControlWire) -> ObservationWire:
         return ObservationWire.from_domain(
-            await agent.remove(await owned(identifier, body), body.reason)
+            await orchestrator.remove(await owned(identifier, body), body.reason)
         )
 
     @app.post("/v1/sandboxes/{identifier}/expire")
     async def expire(identifier: UUID, body: ExecutionExpiryWire) -> ObservationWire:
-        decision = await agent.expire_if_current(
+        decision = await orchestrator.expire_if_current(
             ExpiryRequest(
                 await owned(identifier, body),
                 body.reason,
@@ -203,20 +205,20 @@ def create_durable_agent_app(
     ) -> None:
         if not authorized(websocket.headers.get("Authorization", "")):
             await websocket.send_denial_response(
-                JSONResponse({"detail": "invalid agent credential"}, status_code=401)
+                JSONResponse({"detail": "invalid orchestrator credential"}, status_code=401)
             )
             return
-        record = agent.records.get(identifier)
+        record = orchestrator.records.get(identifier)
         if record is None or record.consumer_id != consumer_id:
             await websocket.send_denial_response(
                 JSONResponse({"detail": "execution not found"}, status_code=404)
             )
             return
-        if record.state != SandboxState.READY or identifier not in agent.terminals:
+        if record.state != SandboxState.READY or identifier not in orchestrator.terminals:
             await websocket.send_denial_response(
                 JSONResponse({"detail": "terminal unavailable"}, status_code=409)
             )
             return
-        await serve_terminal(websocket, agent, record.ref)
+        await serve_terminal(websocket, orchestrator, record.ref)
 
     return app

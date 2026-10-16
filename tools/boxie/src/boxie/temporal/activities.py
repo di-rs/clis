@@ -11,15 +11,15 @@ from temporalio.worker import ActivityInboundInterceptor, ExecuteActivityInput, 
 
 from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import (
-    AgentObservation,
     DurableRequest,
     EnsureRequest,
     ExpiryRequest,
+    OrchestratorObservation,
     SandboxRef,
 )
 from boxie.domain.models import SandboxState, TerminationReason
 from boxie.persistence.postgres import PostgresLifecycle
-from boxie.sandbox.durable_client import DurableAgentClient
+from boxie.sandbox.durable_client import DurableOrchestratorClient
 from boxie.temporal.contracts import LifecycleFacts, StopRequest
 
 
@@ -64,26 +64,28 @@ class SafeActivityErrors(Interceptor):
 
 
 class LifecycleActivities:
-    def __init__(self, repository: PostgresLifecycle, agent: DurableAgentClient) -> None:
-        self.repository, self.agent = repository, agent
+    def __init__(
+        self, repository: PostgresLifecycle, orchestrator: DurableOrchestratorClient
+    ) -> None:
+        self.repository, self.orchestrator = repository, orchestrator
 
     async def _request(self, sandbox_id: str) -> DurableRequest:
         return await self.repository.load_request(UUID(sandbox_id))
 
     async def _bind(self, request: DurableRequest) -> UUID:
-        boot = await self.agent.boot(request.identity)
-        if not await self.repository.bind_agent_boot(
+        boot = await self.orchestrator.boot(request.identity)
+        if not await self.repository.bind_orchestrator_boot(
             request.principal,
             request.identity,
             request.sandbox_id,
             request.generation,
-            request.agent_boot_id,
+            request.orchestrator_boot_id,
             boot,
         ):
-            raise BoxieError(409, "agent boot changed")
+            raise BoxieError(409, "orchestrator boot changed")
         return boot
 
-    async def _record(self, observation: AgentObservation) -> None:
+    async def _record(self, observation: OrchestratorObservation) -> None:
         await self.repository.record_observation(observation)
 
     @activity.defn
@@ -93,7 +95,7 @@ class LifecycleActivities:
             row = await (
                 await conn.execute(
                     """SELECT s.cleaned_at,s.state,o.ready_at,o.last_input_at,o.disconnected_at
-                FROM sandboxes s LEFT JOIN agent_observations o ON o.sandbox_id=s.id
+                FROM sandboxes s LEFT JOIN orchestrator_observations o ON o.sandbox_id=s.id
                 WHERE s.id=%s""",
                     (request.sandbox_id,),
                 )
@@ -122,12 +124,14 @@ class LifecycleActivities:
         if request.desired_stop:
             return
         boot = await self._bind(request)
-        observation = await self.agent.ensure_execution(EnsureRequest.from_durable(request), boot)
+        observation = await self.orchestrator.ensure_execution(
+            EnsureRequest.from_durable(request), boot
+        )
         await self._record(observation)
         while observation.state in (SandboxState.ACCEPTED, SandboxState.PROVISIONING):
             activity.heartbeat()
             await asyncio.sleep(1)
-            observation = await self.agent.inspect_execution(request, boot)
+            observation = await self.orchestrator.inspect_execution(request, boot)
             await self._record(observation)
         if observation.state != SandboxState.READY:
             raise ApplicationError(
@@ -141,7 +145,7 @@ class LifecycleActivities:
             return await self.load_request(sandbox_id)
         boot = await self._bind(request)
         try:
-            observation = await self.agent.inspect_execution(request, boot)
+            observation = await self.orchestrator.inspect_execution(request, boot)
         except BoxieError as error:
             if error.status != 404:
                 raise
@@ -153,11 +157,11 @@ class LifecycleActivities:
             SandboxState.READY,
         ):
             try:
-                observation = await self.agent.renew_execution(request, boot)
+                observation = await self.orchestrator.renew_execution(request, boot)
             except BoxieError as error:
                 if error.status != 409:
                     raise
-                observation = await self.agent.inspect_execution(request, boot)
+                observation = await self.orchestrator.inspect_execution(request, boot)
         await self._record(observation)
         return await self.load_request(sandbox_id)
 
@@ -171,7 +175,7 @@ class LifecycleActivities:
             )
         else:
             boot = await self._bind(request)
-            observation = await self.agent.inspect_execution(request, boot)
+            observation = await self.orchestrator.inspect_execution(request, boot)
             choices: list[tuple[datetime, TerminationReason]] = []
             if observation.ready_at:
                 choices.append(
@@ -192,7 +196,7 @@ class LifecycleActivities:
             if choices:
                 deadline, reason = min(choices, key=lambda item: item[0])
                 if now >= deadline:
-                    observation = await self.agent.expire_execution(
+                    observation = await self.orchestrator.expire_execution(
                         request,
                         ExpiryRequest(
                             SandboxRef(request.sandbox_id, request.generation),
@@ -220,14 +224,14 @@ class LifecycleActivities:
             raise BoxieError(409, "durable stop required before removal")
         boot = await self._bind(request)
         try:
-            observation = await self.agent.remove_execution(request, boot)
+            observation = await self.orchestrator.remove_execution(request, boot)
         except BoxieError as error:
             if error.status != 404:
                 raise
             # Initialize a fenced absent identity. Durable stop is already committed;
-            # the agent-owned SQL guard forbids create/start even if this RPC is lost.
-            await self.agent.ensure_execution(EnsureRequest.from_durable(request), boot)
-            observation = await self.agent.remove_execution(request, boot)
+            # the orchestrator-owned SQL guard forbids create/start even if this RPC is lost.
+            await self.orchestrator.ensure_execution(EnsureRequest.from_durable(request), boot)
+            observation = await self.orchestrator.remove_execution(request, boot)
         await self._record(observation)
         if not observation.removal_confirmed:
             raise ApplicationError("physical cleanup pending", type="CleanupPending")
@@ -236,11 +240,11 @@ class LifecycleActivities:
     async def record_observation(self, sandbox_id: str) -> None:
         request = await self._request(sandbox_id)
         boot = await self._bind(request)
-        await self._record(await self.agent.inspect_execution(request, boot))
+        await self._record(await self.orchestrator.inspect_execution(request, boot))
 
     @activity.defn
     async def confirm_removed(self, sandbox_id: str) -> bool:
-        # Agent confirmation was persisted atomically with release; activity replay
+        # Orchestrator confirmation was persisted atomically with release; activity replay
         # after a lost SQL acknowledgement is a read, never a second release.
         return (await self.load_request(sandbox_id)).cleaned
 

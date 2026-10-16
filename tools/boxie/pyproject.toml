@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-boxie-agent = "boxie.bootstrap.agent:main"
+boxie-orchestrator = "boxie.bootstrap.orchestrator:main"
 boxie-api = "boxie.bootstrap.api:main"
 boxie-worker = "boxie.bootstrap.worker:main"
 
