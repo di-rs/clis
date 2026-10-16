@@ -91,7 +91,7 @@ class Telemetry:
         if (actual.st_uid, actual.st_gid) != (uid, gid):
             raise RuntimeError("telemetry volume ownership initialization failed")
 
-    def endpoint(self, service: str) -> str:
+    def endpoint(self, service: str, *, expected: str | None = None) -> str:
         # Native host queries the existing internal bridge; internal-only services
         # cannot publish ports. Verify both sides of the exact owned attachment.
         if service not in QUERY_PORTS:
@@ -105,6 +105,8 @@ class Telemetry:
         ):
             raise RuntimeError("foreign telemetry query daemon")
         identifier = self.container(service)
+        if expected is not None and identifier != expected:
+            raise RuntimeError("telemetry container changed during fault")
         item = json.loads(self.commands.run(["docker", "inspect", identifier], env=self.env))[0]
         name = self.env["OBS_METRICS_NETWORK"]
         network = json.loads(
@@ -136,9 +138,38 @@ class Telemetry:
             raise RuntimeError("foreign telemetry network attachment")
         return f"http://{address}:{QUERY_PORTS[service]}"
 
-    def refresh_endpoint(self, service: str) -> None:
-        self.endpoints[service] = self.endpoint(service)
+    def refresh_endpoint(self, service: str, *, expected: str | None = None) -> None:
+        self.endpoints[service] = self.endpoint(service, expected=expected)
         evidence(self.root / "telemetry.json", self.endpoints)
+
+    def vector_identity(self, expected: str | None = None) -> dict[str, Any]:
+        identifier = self.container("vector")
+        item = json.loads(self.commands.run(["docker", "inspect", identifier], env=self.env))[0]
+        state = item["State"]
+        labels = item["Config"]["Labels"]
+        if (
+            item["Id"] != identifier
+            or (expected is not None and identifier != expected)
+            or labels.get("com.docker.compose.project") != self.project
+            or labels.get("com.docker.compose.service") != "vector"
+            or type(item["RestartCount"]) is not int
+            or item["RestartCount"] < 0
+            or type(state["Pid"]) is not int
+            or state["Pid"] < 0
+            or type(state["ExitCode"]) is not int
+            or any(type(state[key]) is not bool for key in ("Running", "Restarting", "OOMKilled"))
+            or not isinstance(state["StartedAt"], str)
+            or not re.fullmatch(r"[0-9T:.Z+-]{1,40}", state["StartedAt"])
+        ):
+            raise RuntimeError("invalid Vector fault lifecycle identity")
+        return {
+            "Id": identifier,
+            "RestartCount": item["RestartCount"],
+            **{
+                key: state[key]
+                for key in ("Pid", "StartedAt", "Running", "Restarting", "ExitCode", "OOMKilled")
+            },
+        }
 
     def prepare(self, resources: Resources) -> None:
         image = json.loads(

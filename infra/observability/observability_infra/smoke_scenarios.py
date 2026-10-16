@@ -29,6 +29,7 @@ from observability_infra.smoke_runtime import (
 from observability_infra.smoke_samples import bounded, record_progress
 from observability_infra.smoke_telemetry import Telemetry
 from observability_infra.smoke_units import transient_command, unit_name
+from observability_infra.smoke_vector_fault import VectorDiagnostics
 from observability_infra.smoke_watchdog import journal_identity, process_identity, restoration_valid
 
 SCENARIOS = (
@@ -243,6 +244,11 @@ class Scenario:
             await asyncio.to_thread(self.telemetry.refresh_endpoint, "vector")
         if self.name in ("vector-full", "vector-enospc", "storage-restart"):
             while True:
+                if self.name == "vector-enospc":
+                    if not await self.vector_lifecycle():
+                        self.commands.deadline.remaining(restoring=True)
+                        await asyncio.sleep(0.1)
+                        continue
                 try:
                     after = await self.telemetry.metrics("vector")
                     if total(after, "vector_buffer_size_events") == 0:
@@ -705,6 +711,7 @@ class Scenario:
                 "progress",
                 "vector_pressure",
                 "vector_fault_state",
+                "vector_fault_lifecycle",
                 "vector_fault_metrics",
                 "vector_fault_diagnostics",
                 "vector_enospc_diagnostic_observed",
@@ -728,7 +735,51 @@ class Scenario:
         evidence(self.root / ("enospc-checkpoint-" + self.name + ".json"), data)
         self.observations["enospc_phase"] = fault_phase
 
+    async def vector_lifecycle(self) -> bool:
+        record = self.observations.get("vector_fault_lifecycle")
+        expected = None if record is None else record["baseline"]["Id"]
+        state = await asyncio.to_thread(self.telemetry.vector_identity, expected)
+        self.observations["vector_fault_state"] = state
+        if record is None:
+            record = {"baseline": state, "endpoint_changes": 0, "restart_count_delta": 0}
+            self.observations["vector_fault_lifecycle"] = record
+        delta = state["RestartCount"] - record["baseline"]["RestartCount"]
+        if delta < 0:
+            raise RuntimeError("Vector restart counter regressed")
+        record["restart_count_delta"] = delta
+        if not state["Running"] or state["Restarting"] or not state["Pid"]:
+            return False
+        previous = self.telemetry.endpoints.get("vector")
+        await asyncio.to_thread(self.telemetry.refresh_endpoint, "vector", expected=state["Id"])
+        record["endpoint_changes"] += previous != self.telemetry.endpoints["vector"]
+        return True
+
     async def exhaustion(self, sandbox: str) -> None:
+        if self.name != "vector-enospc":
+            await self.exhaust_filesystem(sandbox)
+            return
+        if not await self.vector_lifecycle():
+            raise RuntimeError("Vector fault baseline unavailable")
+        identifier = self.observations["vector_fault_lifecycle"]["baseline"]["Id"]
+        # Replay only this fault interval, then follow concurrently with allocation
+        # and resource probes so journal vacuum cannot erase an already read error.
+        since = datetime.now().astimezone().isoformat()
+        reader = VectorDiagnostics(
+            ["docker", "logs", "--follow", "--since", since, identifier],
+            self.telemetry.env,
+            self.commands.deadline,
+        )
+        try:
+            with reader:
+                await self.exhaust_filesystem(sandbox, reader)
+        finally:
+            self.observations["vector_fault_diagnostics"] = reader.snapshot()
+
+    async def exhaust_filesystem(
+        self,
+        sandbox: str,
+        reader: VectorDiagnostics | None = None,
+    ) -> None:
         vector = self.name == "vector-enospc"
         if not vector:
             self.observations["journal_before"] = await self.journal_observation()
@@ -780,28 +831,33 @@ class Scenario:
         self.enospc_checkpoint("flood_launch")
         await self.flood(500000)
         self.enospc_checkpoint("flood_started")
+        if vector:
+            assert reader is not None
+            self.observations["vector_fault_diagnostics"] = reader.snapshot()
+            reader.check()
         await self.progress(sandbox)
         if vector:
+            assert reader is not None
             while True:
+                self.observations["vector_fault_diagnostics"] = reader.snapshot()
                 self.enospc_checkpoint("diagnostic_wait")
-                diagnostics = await asyncio.to_thread(
-                    self.telemetry.compose, "logs", "--no-color", "--tail=100", "vector"
-                )
-                self.observations["vector_fault_diagnostics"] = {
-                    "errno_text_observed": "No space left on device" in diagnostics
-                    or "os error 28" in diagnostics,
-                    "writer_unrecoverable_observed": "Disk buffer writer has encountered an unrecoverable error."
-                    in diagnostics,
-                }
+                reader.check()
+                ready = await self.vector_lifecycle()
+                self.observations["vector_fault_lifecycle"]["fault_latest"] = self.observations[
+                    "vector_fault_state"
+                ]
                 self.enospc_checkpoint("diagnostic_wait")
-                identifier = await asyncio.to_thread(self.telemetry.container, "vector")
-                info = json.loads(await self.command("docker", "inspect", identifier))[0]
-                if info["Id"] != identifier:
-                    raise RuntimeError("Vector fault container identity differs")
-                self.observations["vector_fault_state"] = {
-                    key: info["State"][key] for key in ("Running", "ExitCode", "OOMKilled")
-                }
-                self.enospc_checkpoint("diagnostic_wait")
+                if not ready:
+                    self.observations["vector_fault_metrics"] = {
+                        "available": False,
+                        "error_type": "CollectorNotRunning",
+                    }
+                    if reader.snapshot()["errno_text_observed"]:
+                        self.observations["vector_enospc_diagnostic_observed"] = True
+                        break
+                    await asyncio.sleep(0.1)
+                    await self.progress(sandbox)
+                    continue
                 try:
                     metrics = await self.telemetry.metrics("vector")
                 except Exception as error:
@@ -821,7 +877,7 @@ class Scenario:
                         self.enospc_checkpoint("diagnostic_wait")
                         raise
                 self.enospc_checkpoint("diagnostic_wait")
-                if "No space left on device" in diagnostics or "os error 28" in diagnostics:
+                if reader.snapshot()["errno_text_observed"]:
                     self.observations["vector_enospc_diagnostic_observed"] = True
                     break
                 await asyncio.sleep(0.5)
@@ -838,11 +894,17 @@ class Scenario:
         filler.unlink()
         if vector:
             self.enospc_checkpoint("restart_started")
-            identifier = await asyncio.to_thread(self.telemetry.container, "vector")
+            identity = await asyncio.to_thread(
+                self.telemetry.vector_identity,
+                self.observations["vector_fault_lifecycle"]["baseline"]["Id"],
+            )
+            identifier = identity["Id"]
             await self.command("docker", "restart", "--time=3", identifier)
             await self.command("docker", "start", data["sink"])
-            for service in ("vector", "victorialogs"):
-                await asyncio.to_thread(self.telemetry.refresh_endpoint, service)
+            await asyncio.to_thread(
+                self.telemetry.refresh_endpoint, "victorialogs", expected=data["sink"]
+            )
+            await self.vector_lifecycle()
             self.observations["same_state_restart_id"] = identifier
             self.enospc_checkpoint("restart_completed")
         self.observations["free_after_release"] = (

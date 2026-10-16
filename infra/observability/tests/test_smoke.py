@@ -261,7 +261,23 @@ def test_telemetry_endpoint_requires_running_owned_network_membership(
         return json.dumps([network if args[1] == "network" else item])
 
     monkeypatch.setattr(telemetry.commands, "run", run)
-    assert telemetry.endpoint("vector") == "http://172.20.0.2:9598"
+    assert telemetry.endpoint("vector", expected=identifier) == "http://172.20.0.2:9598"
+    with pytest.raises(RuntimeError, match="changed during fault"):
+        telemetry.refresh_endpoint("vector", expected="c" * 64)
+    assert telemetry.endpoints == {}
+    item["RestartCount"] = 0
+    item["State"].update(
+        Pid=20, StartedAt="2026-10-16T00:00:00Z", Restarting=False, ExitCode=0, OOMKilled=False
+    )
+    assert telemetry.vector_identity(identifier)["Pid"] == 20
+    with pytest.raises(RuntimeError, match="lifecycle identity"):
+        telemetry.vector_identity("c" * 64)
+    for state_key, bad_state in (("Pid", -1), ("StartedAt", "PRIVATE"), ("OOMKilled", "false")):
+        previous_state = item["State"][state_key]
+        item["State"][state_key] = bad_state
+        with pytest.raises(RuntimeError, match="lifecycle identity"):
+            telemetry.vector_identity(identifier)
+        item["State"][state_key] = previous_state
     for target, key, value in (
         (info, "DockerRootDir", "/foreign"),
         (labels, "com.docker.compose.project", "foreign"),
