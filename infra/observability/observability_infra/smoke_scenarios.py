@@ -374,20 +374,30 @@ class Scenario:
         return self.journal_identities(read.text, self.flood_instance, "persistent")
 
     async def journal_read(self, directory: Path, instance: str) -> JournalRead:
-        return await asyncio.to_thread(
-            self.commands.read_journal,
-            [
-                "journalctl",
-                "--directory=" + str(directory),
-                "--no-pager",
-                "--output=cat",
-                "--grep=" + instance,
-                "--lines=100",
-            ],
-            directory=directory,
-            allow_incomplete=self.name == "journal-enospc",
-            env=dict(self.app.stack.env, LC_ALL="C"),
-        )
+        surface = "persistent" if directory == self.root / "journal" else "runtime"
+        try:
+            read = await asyncio.to_thread(
+                self.commands.read_journal,
+                [
+                    "journalctl",
+                    "--directory=" + str(directory),
+                    "--no-pager",
+                    "--output=cat",
+                    "--grep=" + instance,
+                    "--lines=100",
+                ],
+                directory=directory,
+                allow_incomplete=self.name == "journal-enospc",
+                env=dict(self.app.stack.env, LC_ALL="C"),
+            )
+        except Exception:
+            if (
+                self.commands.last_failure is not None
+                and "journal_read" in self.commands.last_failure
+            ):
+                self.commands.last_failure["journal_read"]["surface"] = surface
+            raise
+        return JournalRead(read.text, dict(read.observation, surface=surface))
 
     def journal_identities(self, text: str, instance: str, surface: str) -> set[str]:
         if surface not in {"persistent", "runtime"}:

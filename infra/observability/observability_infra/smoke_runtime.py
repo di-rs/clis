@@ -209,6 +209,7 @@ class Commands:
         result = self._run(args, env=env, journal=True)
         assert isinstance(result, _JournalOutput)
         warnings: dict[str, int] = {}
+        rejection: dict[str, Any] | None = None
         valid = (not result.stderr or result.stderr.endswith(b"\n")) and len(
             result.stderr.splitlines()
         ) <= 128
@@ -220,22 +221,65 @@ class Commands:
         except UnicodeError:
             raise RuntimeError("journal stream decoding failed") from None
         for line in diagnostic.splitlines():
+            category = "unknown"
+            if line.startswith("Journal file "):
+                for suffix, kind in (
+                    (" is truncated, ignoring file.", "truncated_file"),
+                    (" corrupted, ignoring file.", "corrupted_file"),
+                    (" uses an unsupported feature, ignoring file.", "unsupported_feature"),
+                ):
+                    if line.endswith(suffix):
+                        category = kind
+            elif line.startswith(
+                "Use SYSTEMD_LOG_LEVEL=debug journalctl --file="
+            ) and line.endswith(" to see the details."):
+                category = "unsupported_details"
+            elif (
+                line.startswith("Too many journal files (limit is at ")
+                and ") in scope, ignoring file '" in line
+                and line.endswith("'.")
+            ):
+                category = "too_many_files"
+            elif (
+                line.startswith("An error was encountered while opening journal file or directory ")
+                and ", ignoring file: " in line
+            ):
+                category = "open_error"
+            elif line == "No journal files were opened due to insufficient permissions.":
+                category = "access_denied"
+            elif line == "No journal files were found.":
+                category = "no_files"
             match = re.fullmatch(
                 r"Journal file (.+) (is truncated|corrupted), ignoring file\.", line
             )
+            reason = None
             if match is None:
+                reason = "format"
+            else:
+                path = Path(match[1])
+                if path.parent != directory:
+                    reason = "foreign_parent"
+                elif str(path) != match[1]:
+                    reason = "path_spelling"
+                elif not path.name.endswith((".journal", ".journal~")):
+                    reason = "file_suffix"
+                elif any(ord(char) < 32 for char in match[1]):
+                    reason = "path_control"
+            if reason is not None or not valid:
+                rejection = {
+                    "reason": reason
+                    if valid
+                    else ("line_boundary" if not result.stderr.endswith(b"\n") else "line_count"),
+                    "category": category,
+                    "known_prefix": line.startswith("Journal file "),
+                    "known_suffix": line.endswith(
+                        ("is truncated, ignoring file.", "corrupted, ignoring file.")
+                    ),
+                    "escape_present": "\x1b" in line,
+                    "control_present": any(ord(char) < 32 or ord(char) == 127 for char in line),
+                }
                 valid = False
                 break
-            path = Path(match[1])
-            if (
-                path.parent != directory
-                or str(path) != match[1]
-                or not path.name.endswith((".journal", ".journal~"))
-                or any(ord(char) < 32 for char in match[1])
-            ):
-                valid = False
-                break
-            category = "truncated_file" if match[2] == "is truncated" else "corrupted_file"
             warnings[category] = warnings.get(category, 0) + 1
         observation = {
             "complete": not result.stderr
@@ -245,6 +289,7 @@ class Commands:
             "stderr_bytes": len(result.stderr),
             "returncode": result.returncode,
             "output_provenance": "stdout_only",
+            "rejection": rejection,
         }
         # v255 grep no-match exits 1 after a successful read, including when
         # access-check warnings describe ignored files. Such a result is partial,
