@@ -64,6 +64,10 @@ operators may separately approve the
 [Playground profile](../../cli-playground/infra/profiles/playground.json) with the
 immutable product sandbox image digest. Profiles are never consumer uploads.
 
+The [Temporal deployment](temporal/README.md) is owned here and operated as a
+separate Compose project. Its server releases and schema operations remain
+independent of Boxie application releases.
+
 Complete the required [durable runtime prerequisites](durable-runtime.md) first,
 including explicit Alembic revisions, namespace setup, and API/orchestrator mTLS identities.
 Generate all three process JSON files (substitute your installation UUID and paths):

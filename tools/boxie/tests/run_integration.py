@@ -66,6 +66,11 @@ class ProductionStack:
         self.evidence: dict[str, Any] = {}
 
     def compose(self, package: str, *args: str) -> str:
+        directory = (
+            ROOT / "tools/boxie/infra/temporal"
+            if package == "temporal"
+            else ROOT / "infra/platform"
+        )
         return command(
             [
                 "docker",
@@ -73,7 +78,7 @@ class ProductionStack:
                 "--project-name",
                 getattr(self, package),
                 "--file",
-                str(ROOT / "infra" / package / "compose.yml"),
+                str(directory / "compose.yml"),
                 "--file",
                 str(self.root / f"{package}-override.yml"),
                 *args,
@@ -220,7 +225,7 @@ class ProductionStack:
                 ["docker", "version", "--format", "{{.Server.Version}} {{.Server.Arch}}"]
             ),
             "bootstrap_sdk": version("temporalio"),
-            "images": json.loads((ROOT / "infra/temporal/versions.json").read_text()),
+            "images": json.loads((ROOT / "tools/boxie/infra/temporal/versions.json").read_text()),
             "schema": "fresh setup and explicit update succeeded for distinct databases",
             "namespace": "bootstrap succeeded twice and checked seven-day retention",
         }

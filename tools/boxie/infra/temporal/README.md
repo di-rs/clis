@@ -1,6 +1,9 @@
-# Independently operated Temporal
+# Boxie Temporal deployment
 
-This package runs the production Temporal server, never a development server.
+Boxie owns this deployment package. It runs the production Temporal server
+as a separate Compose project with explicit schema operations, so ordinary
+Boxie application releases do not restart the server or upgrade its schemas.
+Production never uses a development server.
 [versions.json](versions.json) records the verified upstream releases and exact
 multi-platform image identities: server/admin-tools 1.32.0 and UI 2.56.0.
 Schema jobs use the unchanged upstream admin-tools image and its schema tool.
@@ -51,7 +54,7 @@ credential or Docker socket. UI backend TLS explicitly verifies the server name.
 
 ## Explicit operations
 
-Start the [platform](../platform/README.md) first. From this directory:
+Start the [platform](../../../../infra/platform/README.md) first. From this directory:
 
 ```sh
 # Empty pre-created databases only:
@@ -112,7 +115,7 @@ denials. It writes nonsecret runtime evidence into pytest's temporary directory.
 Linux arm64/runc proves this infrastructure path, not the later native
 Linux/amd64/runsc full-stack gate or production deployment.
 
-The [durable lifecycle workflow](../../.github/workflows/boxie-lifecycle.yml)
+The [durable lifecycle workflow](../../../../.github/workflows/boxie-lifecycle.yml)
 adds interpreter imports, pinned test-server history replay/cancellation and the
 native Linux amd64/runsc full stack. Its test-only agent launcher observes
 collector entry/completion around a successful SQL COMMIT with lost acknowledgment;

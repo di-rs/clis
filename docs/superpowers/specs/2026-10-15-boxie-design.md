@@ -93,6 +93,7 @@ tools/boxie/
     observability/   # event schema, contextual logging, metrics
     bootstrap/       # configuration and process composition roots
   infra/             # Boxie components, configuration, manifests and smoke checks
+    temporal/        # Boxie-owned, independently operated Temporal deployment
   tests/
 tools/cli-playground/
   playground/        # product application, Boxie HTTP client, preview adapters
@@ -101,7 +102,6 @@ tools/cli-playground/
 tools/deploy/        # shared release/configuration/transport commands
 infra/
   platform/          # shared host, networks, storage and persistence service
-  temporal/          # independent Temporal deployment package
   observability/     # independent telemetry deployment package
   ingress/           # shared proxy/tunnel process configuration
   environments/
@@ -292,7 +292,8 @@ The reconnect guarantee ends when the old PTY or output continuity is lost.
 
 ## Self-hosted Temporal and persistence
 
-Ship an independent Temporal deployment package using the upstream production
+Ship a Boxie-owned Temporal deployment package under `tools/boxie/infra/temporal/`
+with an independent release lifecycle, using the upstream production
 server image, pinned versions, explicit schema-management jobs, and idempotent
 namespace bootstrap. Do not deploy a development server or implicitly upgrade
 schemas on every Boxie start. Follow the [self-hosted deployment guidance](https://docs.temporal.io/self-hosted-guide/deployment)
@@ -413,8 +414,9 @@ endpoints, approved image identities, and secret references. Boxie infrastructur
 does not import Playground infrastructure or create Temporal implicitly.
 Playground infrastructure receives Boxie's private endpoint and consumer
 credential reference without importing Boxie's resource implementation. Temporal
-and observability remain independent infrastructure packages that the environment
-selects and wires. Shared component contracts stay small and typed.
+is owned under Boxie infrastructure but remains a separate deployment unit.
+The environment selects and wires it alongside the independent observability
+package. Shared component contracts stay small and typed.
 
 One host and one Pulumi state boundary are initial deployment choices, not code
 ownership boundaries. Separate application releases already operate independently.

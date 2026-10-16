@@ -1,7 +1,7 @@
 # Durable runtime
 
 Boxie uses independently operated [PostgreSQL](../../../infra/platform/README.md)
-and production [Temporal](../../../infra/temporal/README.md) on the private control
+and production [Temporal](temporal/README.md) on the private control
 network. Apply their explicit schema and namespace jobs first. Production never
 uses a development/test Temporal server. Temporal certificate holders are trusted
 cluster administrators; a namespace is organizational, not an RBAC boundary.

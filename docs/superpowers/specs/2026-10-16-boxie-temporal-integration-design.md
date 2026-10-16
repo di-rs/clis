@@ -27,7 +27,8 @@ the protocol and background machinery. Making Temporal the admission database
 would require changing availability and cross-sandbox transaction semantics.
 Neither is the objective of this PR revision.
 
-Temporal remains independently deployed infrastructure. Its SDK worker is a
+Temporal deployment is owned under `tools/boxie/infra/temporal/` and remains
+independently operated, with explicit server and schema releases. Its SDK worker is a
 necessary executor embedded in the application, not a third Boxie service.
 Workflows remain deterministic; Docker, SQL, filesystem, clocks, and runtime
 objects are accessed only inside activities or the ordinary live I/O path.

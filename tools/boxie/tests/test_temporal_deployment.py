@@ -28,8 +28,8 @@ def test_private_production_deployment_has_explicit_jobs_and_trust() -> None:
     platform_path = ROOT / "infra/platform/compose.yml"
     assert platform_path.exists(), "independent platform deployment missing"
     platform = yaml.safe_load(platform_path.read_text())
-    temporal = yaml.safe_load((ROOT / "infra/temporal/compose.yml").read_text())
-    versions = json.loads((ROOT / "infra/temporal/versions.json").read_text())
+    temporal = yaml.safe_load((ROOT / "tools/boxie/infra/temporal/compose.yml").read_text())
+    versions = json.loads((ROOT / "tools/boxie/infra/temporal/versions.json").read_text())
     for package in (platform, temporal):
         for name, service in package["services"].items():
             assert not service.get("ports"), "production ports must remain private"
@@ -46,7 +46,9 @@ def test_private_production_deployment_has_explicit_jobs_and_trust() -> None:
     assert temporal["services"]["schema"]["image"] == versions["admin_tools"]["image"]
     assert temporal["services"]["bootstrap"]["profiles"] == ["operations"]
     config = yaml.safe_load(
-        re.sub(r"{{.*?}}", "test-value", (ROOT / "infra/temporal/config.yaml").read_text())
+        re.sub(
+            r"{{.*?}}", "test-value", (ROOT / "tools/boxie/infra/temporal/config.yaml").read_text()
+        )
     )
     tls = config["global"]["tls"]
     for plane in ("frontend", "internode"):
