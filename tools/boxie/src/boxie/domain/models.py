@@ -74,6 +74,7 @@ class TerminationReason(StrEnum):
     OUTPUT_LIMIT = "output_limit"
     EXITED = "exited"
     PROVISIONING_FAILED = "provisioning_failed"
+    CONTROL_PLANE_LOST = "control_plane_lost"
     ORCHESTRATOR_RESTART = "orchestrator_restart"
     ORCHESTRATOR_SHUTDOWN = "orchestrator_shutdown"
 

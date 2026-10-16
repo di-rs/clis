@@ -6,244 +6,376 @@ export interface SessionState {
   absoluteDeadline?: string;
   reason?: string | null;
 }
-
 export interface TerminalPort {
   readonly cols: number;
   readonly rows: number;
-  options: { disableStdin?: boolean };
   write(data: Uint8Array, callback?: () => void): void;
   paste(data: string): void;
   focus(): void;
   reset(): void;
-  onData(listener: (data: string) => void): { dispose(): void };
-  onResize(listener: (size: { cols: number; rows: number }) => void): { dispose(): void };
 }
-
+export interface InputEvent {
+  data: string;
+  source: "user" | "terminal";
+}
+export interface InputIntent {
+  onInput(listener: (event: InputEvent) => void): { dispose(): void };
+  setUserEnabled(enabled: boolean): void;
+}
 export interface PreparedConnection {
   createSocket: () => WebSocket;
   credential: string;
   stop: () => Promise<void>;
 }
-
+interface Size {
+  cols: number;
+  rows: number;
+}
 interface SessionOptions {
   terminal: TerminalPort;
-  fit: () => void;
+  input: InputIntent;
+  geometry: { measure(): Size; apply(size: Size): void };
   prepare: () => Promise<PreparedConnection>;
   onState: (state: SessionState) => void;
 }
 
-export function createSession({ terminal, fit, prepare, onState }: SessionOptions) {
+export function createSession({ terminal, input, geometry, prepare, onState }: SessionOptions) {
   let socket: WebSocket | null = null;
   let binding: PreparedConnection | null = null;
-  let detachSocket: (() => void) | undefined;
-  let disposed = false;
-  let suspended = false;
-  let serverMessage = "";
-  let connection = 0;
+  let detach: (() => void) | undefined;
+  let disposed = false,
+    suspended = false,
+    ended = false;
+  let attempt = 0,
+    sandbox = 0,
+    epoch = 0;
+  let queued = 0,
+    applied = 0,
+    queuedBytes = 0;
+  let synced: Size = { cols: terminal.cols, rows: terminal.rows };
+  let resizing: Size | null = null;
+  let timer: ReturnType<typeof setInterval> | undefined;
   let state: SessionState = {
     phase: "disconnected",
     label: "Disconnected",
     message: null,
     canReconnect: false,
   };
-  terminal.options.disableStdin = true;
+  input.setUserEnabled(false);
 
   function update(next: SessionState) {
     state = next;
-    terminal.options.disableStdin = next.phase !== "connected";
+    input.setUserEnabled(next.phase === "connected");
     onState(next);
   }
-
+  function release(reason: string) {
+    attempt++;
+    epoch = 0;
+    resizing = null;
+    input.setUserEnabled(false);
+    if (timer) clearInterval(timer);
+    timer = undefined;
+    const old = socket;
+    socket = null;
+    detach?.();
+    detach = undefined;
+    old?.close(1000, reason);
+  }
+  function disconnected(message = "Connection lost. Reconnect to continue this session.") {
+    release("Disconnected");
+    update({
+      ...state,
+      phase: "disconnected",
+      label: "Disconnected",
+      message,
+      canReconnect: !!binding && !ended,
+    });
+  }
   function send(message: object) {
-    if (!disposed && !suspended && state.phase === "connected" && socket?.readyState === 1) {
-      socket.send(JSON.stringify(message));
+    if (!socket || socket.readyState !== 1 || disposed || suspended) return false;
+    const wire = JSON.stringify(message);
+    if (socket.bufferedAmount + new TextEncoder().encode(wire).length > 65536) {
+      disconnected("Connection is too slow. Reconnect to continue.");
+      return false;
+    }
+    try {
+      socket.send(wire);
+      return true;
+    } catch {
+      disconnected();
+      return false;
     }
   }
-
-  const input = terminal.onData((data) => {
+  const subscription = input.onInput(({ data, source }) => {
+    if (!epoch || !socket || (source === "user" && state.phase !== "connected")) return;
     let chunk = "";
-    // Even six-character JSON escapes fit below the gateway's 16 KiB limit.
-    // Iterating code points keeps surrogate pairs together across messages.
     for (const character of data) {
       chunk += character;
       if (chunk.length >= 2048) {
-        send({ type: "input", data: chunk });
+        if (!send({ type: "input", epoch, source, data: chunk })) return;
         chunk = "";
       }
     }
-    if (chunk) send({ type: "input", data: chunk });
+    if (chunk) send({ type: "input", epoch, source, data: chunk });
   });
-  const resize = terminal.onResize(({ cols, rows }) => send({ type: "resize", cols, rows }));
-
-  function releaseSocket(reason: string, close = true, stop = true) {
-    connection++;
-    const previous = socket;
-    socket = null;
-    detachSocket?.();
-    detachSocket = undefined;
-    if (close) previous?.close(1000, reason);
-    if (stop) {
-      const oldBinding = binding;
-      binding = null;
-      void oldBinding?.stop().catch(() => {});
-    }
+  function measuredSize(): Size {
+    const size = geometry.measure();
+    const cols = Number.isFinite(size.cols) ? size.cols : terminal.cols;
+    const rows = Number.isFinite(size.rows) ? size.rows : terminal.rows;
+    return {
+      cols: Math.max(1, Math.min(500, cols)),
+      rows: Math.max(1, Math.min(300, rows)),
+    };
   }
-
-  function disconnected(message: string, label = "Disconnected") {
-    update({ ...state, phase: "disconnected", label, message, canReconnect: true });
+  function requestSize() {
+    if (!epoch || resizing) return;
+    resizing = measuredSize();
+    update({ ...state, phase: "connecting", label: "Synchronizing", canReconnect: false });
+    send({ type: "resize", epoch, ...resizing });
   }
-
-  function connect() {
-    if (disposed || suspended) return;
-    releaseSocket("Reset session");
-    serverMessage = "";
-    update({ phase: "connecting", label: "Connecting", message: null, canReconnect: false });
-    const pending = connection;
-    // xterm writes asynchronously: drain the old output before resetting its
-    // buffer and modes, then open the new session. Disconnect cancels this work.
-    terminal.write(new Uint8Array(), () => {
-      if (disposed || suspended || connection !== pending) return;
-      terminal.reset();
-      void openSocket(pending);
-    });
+  function syncGeometry() {
+    if (state.phase === "connected") requestSize();
   }
-
-  async function openSocket(pending: number) {
+  function openSocket(pending: number) {
+    if (disposed || suspended || pending !== attempt || !binding) return;
     let next: WebSocket;
     try {
-      const prepared = await prepare();
-      if (disposed || suspended || connection !== pending) {
-        await prepared.stop().catch(() => {});
-        return;
-      }
-      binding = prepared;
-      next = prepared.createSocket();
-      next.binaryType = "arraybuffer";
-      socket = next;
+      next = binding.createSocket();
     } catch {
-      if (disposed || suspended || connection !== pending) return;
-      releaseSocket("Connection failed");
-      disconnected(
-        "Could not connect to the terminal. Try starting a new session.",
-        "Connection failed",
-      );
+      disconnected();
       return;
     }
-    // Every handler belongs to one connection. Late events from a reset or closed
-    // socket must never write into the replacement session or change its status.
-    const current = () => !disposed && !suspended && socket === next;
+    socket = next;
+    next.binaryType = "arraybuffer";
+    const current = () => !disposed && !suspended && socket === next && pending === attempt;
+    const owner = sandbox;
+    let lastResponse = Date.now(),
+      nonce = 0,
+      lastPong = 0;
     const open = () => {
-      if (!current()) return;
-      next.send(JSON.stringify({ type: "auth", credential: binding!.credential }));
+      if (current()) send({ type: "auth", credential: binding!.credential });
     };
     const message = (event: MessageEvent<unknown>) => {
       if (!current()) return;
       if (event.data instanceof ArrayBuffer) {
-        if (state.phase === "connected") terminal.write(new Uint8Array(event.data));
+        if (!epoch || event.data.byteLength < 9 || event.data.byteLength > 16392) {
+          disconnected("Invalid terminal frame.");
+          return;
+        }
+        const sequence = Number(new DataView(event.data).getBigUint64(0));
+        if (!Number.isSafeInteger(sequence) || sequence < 1) {
+          disconnected("Invalid output sequence.");
+          return;
+        }
+        if (sequence <= queued) return;
+        if (sequence !== queued + 1) {
+          ended = true;
+          disconnected("Output history is unavailable. Start a new session.");
+          return;
+        }
+        const bytes = new Uint8Array(event.data, 8);
+        if (queuedBytes + bytes.length > 65536) {
+          disconnected("Terminal output is too slow. Reconnect to continue.");
+          return;
+        }
+        queued = sequence;
+        queuedBytes += bytes.length;
+        const writeEpoch = epoch;
+        terminal.write(bytes, () => {
+          if (owner !== sandbox) return;
+          applied = sequence;
+          queuedBytes -= bytes.length;
+          // Same-sandbox writes remain applied after transport loss. They never
+          // acknowledge on a different socket or attachment.
+          if (current() && epoch === writeEpoch) send({ type: "ack", epoch, sequence: applied });
+        });
         return;
       }
       if (typeof event.data !== "string") return;
+      let data: Record<string, unknown>;
       try {
-        const data: unknown = JSON.parse(event.data);
-        if (typeof data !== "object" || data === null) return;
-        const status = data as Record<string, unknown>;
-        if (
-          status.type === "authenticated" &&
-          status.state === "ready" &&
-          typeof status.absolute_deadline === "string" &&
-          Number.isFinite(Date.parse(status.absolute_deadline))
-        ) {
-          update({
-            phase: "connected",
-            label: "Connected",
-            message: null,
-            canReconnect: false,
-            absoluteDeadline: status.absolute_deadline,
-            reason: null,
-          });
-          fit();
-          send({ type: "resize", cols: terminal.cols, rows: terminal.rows });
-          terminal.focus();
-        }
-        if (status.type === "status" && typeof status.message === "string") {
-          serverMessage = status.message;
-          update({
-            ...state,
-            message: serverMessage,
-            reason: typeof status.reason === "string" ? status.reason : null,
-            canReconnect: false,
-          });
-        }
+        const value: unknown = JSON.parse(event.data);
+        if (typeof value !== "object" || value === null) return;
+        data = value as Record<string, unknown>;
       } catch {
-        // The gateway sends binary PTY output or a structured terminal status.
+        return;
+      }
+      if (
+        data.type === "authenticated" &&
+        data.state === "ready" &&
+        typeof data.absolute_deadline === "string"
+      ) {
+        state = { ...state, absoluteDeadline: data.absolute_deadline };
+        send({ type: "attach", resume_after: applied, ...synced });
+      } else if (
+        data.type === "attached" &&
+        Number.isSafeInteger(data.epoch) &&
+        Number(data.epoch) > 0 &&
+        !epoch
+      ) {
+        epoch = Number(data.epoch);
+        lastResponse = Date.now();
+        timer = setInterval(() => {
+          if (!current()) return;
+          if (Date.now() - lastResponse >= 30000) {
+            disconnected("Connection timed out. Reconnect to continue.");
+            return;
+          }
+          send({ type: "heartbeat", epoch, nonce: ++nonce });
+        }, 10000);
+      } else if (data.type === "status" && typeof data.reason === "string") {
+        ended = true;
+        state = { ...state, reason: data.reason };
+        disconnected(
+          typeof data.message === "string"
+            ? data.message
+            : `Session ended: ${data.reason}. Start a new session.`,
+        );
+      } else if (data.epoch === epoch && epoch) {
+        if (
+          data.type === "geometry" &&
+          data.sequence === queued &&
+          Number.isInteger(data.cols) &&
+          Number.isInteger(data.rows) &&
+          Number(data.cols) >= 1 &&
+          Number(data.cols) <= 500 &&
+          Number(data.rows) >= 1 &&
+          Number(data.rows) <= 300
+        ) {
+          const size = { cols: Number(data.cols), rows: Number(data.rows) };
+          terminal.write(new Uint8Array(), () => {
+            // Like queued bytes, an old socket's already-ordered geometry remains
+            // part of this sandbox's screen after disconnect. Resume drains it.
+            if (owner !== sandbox || disposed) return;
+            if (terminal.cols !== size.cols || terminal.rows !== size.rows) geometry.apply(size);
+            synced = size;
+          });
+        } else if (data.type === "replay_complete" && data.sequence === queued) {
+          terminal.write(new Uint8Array(), () => {
+            if (current()) requestSize();
+          });
+        } else if (
+          data.type === "resized" &&
+          resizing &&
+          data.cols === resizing.cols &&
+          data.rows === resizing.rows
+        ) {
+          const size = resizing;
+          terminal.write(new Uint8Array(), () => {
+            if (!current()) return;
+            geometry.apply(size);
+            synced = size;
+            resizing = null;
+            update({
+              ...state,
+              phase: "connected",
+              label: "Connected",
+              message: null,
+              reason: null,
+              canReconnect: false,
+            });
+            terminal.focus();
+            const desired = measuredSize();
+            if (desired.cols !== synced.cols || desired.rows !== synced.rows) requestSize();
+          });
+        } else if (
+          data.type === "heartbeat" &&
+          typeof data.nonce === "number" &&
+          data.nonce > lastPong &&
+          data.nonce <= nonce
+        ) {
+          lastPong = data.nonce;
+          lastResponse = Date.now();
+        }
       }
     };
-    const error = () => {
-      if (!current()) return;
-      releaseSocket("Connection failed");
-      disconnected(
-        serverMessage || "Could not connect to the terminal. Try starting a new session.",
-        "Connection failed",
-      );
-    };
-    const close = (event: CloseEvent) => {
-      if (!current()) return;
-      releaseSocket("Session ended", false, false);
-      disconnected(
-        serverMessage ||
-          (event.code === 1000
-            ? "Session ended. Start a new session for a fresh workspace."
-            : "The connection closed. Start a new session to continue in a fresh workspace."),
-      );
+    const close = () => {
+      if (current()) disconnected(state.message || undefined);
     };
     next.addEventListener("open", open);
     next.addEventListener("message", message);
-    next.addEventListener("error", error);
     next.addEventListener("close", close);
-    detachSocket = () => {
+    next.addEventListener("error", close);
+    detach = () => {
       next.removeEventListener("open", open);
       next.removeEventListener("message", message);
-      next.removeEventListener("error", error);
       next.removeEventListener("close", close);
+      next.removeEventListener("error", close);
     };
   }
-
-  function disconnect() {
-    if (disposed) return;
-    releaseSocket("Visitor disconnected", true, false);
-    disconnected(
-      "Disconnected. Your terminal output stays here; a new session starts with fresh files.",
-    );
+  function startFresh() {
+    if (disposed || suspended) return;
+    release("Fresh session");
+    const pending = attempt;
+    const previous = binding;
+    binding = null;
+    void previous?.stop().catch(() => {});
+    ended = false;
+    update({ phase: "connecting", label: "Connecting", message: null, canReconnect: false });
+    terminal.write(new Uint8Array(), () => {
+      if (disposed || suspended || pending !== attempt) return;
+      sandbox++;
+      queued = applied = queuedBytes = 0;
+      terminal.reset();
+      synced = { cols: terminal.cols, rows: terminal.rows };
+      void prepare()
+        .then((prepared) => {
+          if (disposed || suspended || pending !== attempt) {
+            void prepared.stop().catch(() => {});
+            return;
+          }
+          binding = prepared;
+          openSocket(pending);
+        })
+        .catch(() => {
+          if (pending === attempt) disconnected("Could not start a session. Try a new session.");
+        });
+    });
   }
-
+  function resumeExisting() {
+    if (disposed || suspended || !binding || ended) return;
+    release("Reconnect");
+    const pending = attempt;
+    update({
+      ...state,
+      phase: "connecting",
+      label: "Reconnecting",
+      message: null,
+      canReconnect: false,
+    });
+    terminal.write(new Uint8Array(), () => {
+      if (pending === attempt) openSocket(pending);
+    });
+  }
   return {
-    connect,
-    disconnect,
+    startFresh,
+    resumeExisting,
+    syncGeometry,
+    disconnect: () => {
+      if (!disposed) disconnected("Disconnected. Reconnect to continue this session.");
+    },
     paste: (command: string) => {
-      if (disposed || suspended || state.phase !== "connected" || socket?.readyState !== 1) return;
-      // xterm respects bracketed paste. No trailing newline: the visitor decides
-      // when an example executes, including shell operators and redirections.
-      terminal.paste(command);
-      terminal.focus();
+      if (state.phase === "connected" && !disposed && !suspended) {
+        terminal.paste(command);
+        terminal.focus();
+      }
     },
     suspend() {
       if (disposed) return;
       suspended = true;
-      releaseSocket("Page closed", true, false);
-      disconnected("Disconnected. Start a new session to continue with fresh files.");
+      disconnected("Disconnected. Reconnect to continue this session.");
     },
     resume() {
-      if (disposed) return;
-      suspended = false;
-      disconnect();
+      if (!disposed) suspended = false;
     },
     dispose() {
       if (disposed) return;
       disposed = true;
-      releaseSocket("Terminal disposed");
-      input.dispose();
-      resize.dispose();
-      terminal.options.disableStdin = true;
+      release("Terminal disposed");
+      subscription.dispose();
+      const previous = binding;
+      binding = null;
+      void previous?.stop().catch(() => {});
     },
   };
 }

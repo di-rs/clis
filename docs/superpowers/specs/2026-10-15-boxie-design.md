@@ -36,7 +36,7 @@ where it does not conflict with these decisions.
 | Boxie sandbox orchestrator | Docker/gVisor provisioning adapter, actual resource inspection, PTY ownership, local cleanup enforcement | Preview metadata, public ingress |
 | Temporal deployment | Upstream server, persistence configuration, schema jobs, namespace bootstrap, private operator UI origin | Boxie's application workflows |
 | Observability deployment | Collection, log and metric storage, provisioned dashboards and alert rules | Terminal transcripts or product state |
-| Platform deployment | Host, firewall, persistent storage, shared networks, component composition | Individual ephemeral sandboxes |
+| Host deployment | Host, firewall, persistent storage, shared networks, component composition | Individual ephemeral sandboxes |
 
 The Boxie processes form one service and release family. The sandbox orchestrator is a
 separate process/container and the only component with Docker socket access.
@@ -93,6 +93,8 @@ tools/boxie/
     observability/   # event schema, contextual logging, metrics
     bootstrap/       # configuration and process composition roots
   infra/             # Boxie components, configuration, manifests and smoke checks
+    postgres/        # Boxie-owned PostgreSQL deployment and persistent storage
+    temporal/        # Boxie-owned, independently operated Temporal deployment
   tests/
 tools/cli-playground/
   playground/        # product application, Boxie HTTP client, preview adapters
@@ -100,17 +102,17 @@ tools/cli-playground/
   infra/             # product components, manifests, domains, routes and checks
 tools/deploy/        # shared release/configuration/transport commands
 infra/
-  platform/          # shared host, networks, storage and persistence service
-  temporal/          # independent Temporal deployment package
+  host/              # shared host, networks and storage provisioning
   observability/     # independent telemetry deployment package
   ingress/           # shared proxy/tunnel process configuration
   environments/
     single-host/     # thin Pulumi project and deployment composition
 ```
 
-Each service owns its infrastructure beside its code from PR1. Its `infra/`
-directory contains provisioning components, validated configuration, Compose
-manifests, deployment documentation, and smoke checks. Infrastructure dependencies
+Each service owns its infrastructure beside its code, including Boxie’s
+PostgreSQL and Temporal deployments. These directories contain provisioning
+components, validated configuration, Compose manifests, deployment documentation,
+and smoke checks. Infrastructure dependencies
 stay out of runtime images. The environment composition chooses which components
 to deploy and connects their inputs/outputs; it does not define service internals.
 There is no second central copy of Boxie or Playground deployment configuration.
@@ -165,11 +167,11 @@ Sandbox identifiers alone do not authorize terminal access. Enforce consumer
 ownership on status, stop, artifact access, and terminal attachment. Never put
 bearer capabilities in logged URLs or forward operator credentials to sandboxes.
 
-## Durable lifecycle and Temporal
+## Lifecycle and Temporal
 
-Temporal provides durable orchestration, retry, timers, and recovery of workflow
-execution. It does **not** checkpoint a sandbox's filesystem or process memory,
-and replay does not undo arbitrary side effects. Compensating operations must be
+Temporal persists workflow history so orchestration, retries, and timers resume
+after worker restarts. It does **not** checkpoint a sandbox's filesystem or
+process memory, and replay does not undo arbitrary side effects. Compensating operations must be
 explicit. See [Temporal workflows](https://docs.temporal.io/workflows) and
 [event history](https://docs.temporal.io/encyclopedia/event-history).
 
@@ -179,7 +181,7 @@ Explicit stop, timeouts, process exit, and provisioning failures converge on the
 same idempotent cleanup path. A failed cleanup remains visible and retryable;
 it does not silently free capacity or release an artifact reference.
 
-PostgreSQL stores durable requests received through the API, consumer identities
+PostgreSQL persists requests received through the API, consumer identities
 and idempotency keys, resource ownership, capacity reservations, artifact
 references, and a queryable status projection. Temporal history owns orchestration
 progress; Docker inspection establishes which resources actually exist. Do not
@@ -189,8 +191,8 @@ deleted.
 Commit accepted requests and an outbox record atomically. A dispatcher submits
 them to a stable workflow ID and retries safely if submission/acknowledgment is
 interrupted. Status distinguishes accepted from provisioning and ready. Stop
-requests are durable too, including a stop that arrives before workflow startup.
-If the outbox backlog or a required dependency exceeds readiness limits, reject
+requests are committed before acknowledgement, including a stop that arrives
+before workflow startup. If the outbox backlog or a required dependency exceeds readiness limits, reject
 new work explicitly instead of accepting an unbounded queue.
 
 Capacity reservations cover the full resource lifetime, including uncertain
@@ -292,7 +294,8 @@ The reconnect guarantee ends when the old PTY or output continuity is lost.
 
 ## Self-hosted Temporal and persistence
 
-Ship an independent Temporal deployment package using the upstream production
+Ship a Boxie-owned Temporal deployment package under `tools/boxie/infra/temporal/`
+with an independent release lifecycle, using the upstream production
 server image, pinned versions, explicit schema-management jobs, and idempotent
 namespace bootstrap. Do not deploy a development server or implicitly upgrade
 schemas on every Boxie start. Follow the [self-hosted deployment guidance](https://docs.temporal.io/self-hosted-guide/deployment)
@@ -394,8 +397,9 @@ Keep the initial Pulumi project under `infra/environments/single-host`, with an
 environment per stack. It is a thin composition root over service-owned
 infrastructure and the independently owned shared components. Boxie's provisioning
 components live in `tools/boxie/infra`; Playground's live in
-`tools/cli-playground/infra`. Shared host, networking, storage, and persistence
-definitions live in `infra/platform`. Pulumi owns cloud resources,
+`tools/cli-playground/infra`. Boxie owns PostgreSQL deployment definitions in
+`tools/boxie/infra/postgres`. Shared host, networking, and storage provisioning
+definitions belong in `infra/host`. Pulumi owns cloud resources,
 host/bootstrap identity, firewall rules, persistent disks, and configured DNS.
 It never provisions individual sandboxes. The existing remote Pulumi
 state-backend approach remains separate from application backups. See
@@ -413,8 +417,9 @@ endpoints, approved image identities, and secret references. Boxie infrastructur
 does not import Playground infrastructure or create Temporal implicitly.
 Playground infrastructure receives Boxie's private endpoint and consumer
 credential reference without importing Boxie's resource implementation. Temporal
-and observability remain independent infrastructure packages that the environment
-selects and wires. Shared component contracts stay small and typed.
+is owned under Boxie infrastructure but remains a separate deployment unit.
+The environment selects and wires it alongside the independent observability
+package. Shared component contracts stay small and typed.
 
 One host and one Pulumi state boundary are initial deployment choices, not code
 ownership boundaries. Separate application releases already operate independently.
@@ -424,7 +429,7 @@ still requires an explicit resource-ownership transfer; directory separation alo
 does not perform that transfer or solve remote artifact/storage access.
 
 Application releases use explicit manifests and separate Compose units for
-platform persistence, Temporal, observability, Boxie, shared ingress, and
+Boxie PostgreSQL, Temporal, observability, Boxie, shared ingress, and
 Playground.
 Assign shared networks, volumes, and proxy process configuration one owner.
 Service manifests and product routes remain in their owning `infra/` directories;
@@ -434,7 +439,7 @@ startup. It must not turn a targeted application release into a global Compose
 update. Shared release tooling must not grow Boxie/Playground-specific branches
 or become a second home for their deployment logic.
 
-Platform ingress owns the dashboard tunnel, Access configuration, and operator
+Shared ingress owns the dashboard tunnel, Access configuration, and operator
 DNS. Playground owns its product hostname and public routes. One release manifest
 versions Boxie's API, workflow worker, and orchestrator together. Independently released
 components declare their dependency/schema compatibility; an application release
@@ -493,9 +498,9 @@ PR. Each stage updates its documentation and runs affected checks.
 | PR | Title | Reviewable result and acceptance |
 | --- | --- | --- |
 | 1 | ♻️ Separate Boxie from CLI Playground | Extract independently runnable Boxie API/orchestrator and generic contracts; inject adapters; keep product policy in Playground; replace direct imports with HTTP/WebSocket client. Establish each service's own `infra/` directory and deployment contract now. A generic consumer can create/attach/stop without PR/SHA/domain fields. Existing Playground E2E behavior works across the service boundary. |
-| 2 | ✨ Add durable Boxie lifecycle with Temporal | Add independent Temporal/PostgreSQL deployment, workflow worker, outbox, reservations, idempotent orchestrator operations, deadlines, cleanup/reconciliation, and same-page reconnect. Retries and worker restarts do not duplicate resources; timeout/disconnect/stop behavior is verified. |
+| 2 | ✨ Add Boxie lifecycle with Temporal | Add independent Temporal/PostgreSQL deployment, workflow worker, outbox, reservations, idempotent orchestrator operations, deadlines, cleanup/reconciliation, and same-page reconnect. Retries and worker restarts do not duplicate resources; timeout/disconnect/stop behavior is verified. |
 | 3 | ✨ Add Boxie operational visibility | Add JSON event/correlation schema, collector, VictoriaLogs, Prometheus, Grafana, Access-protected operator routes, dashboards and alert rules. A deliberately failed lifecycle can be diagnosed without terminal contents entering logs. |
-| 4 | ♻️ Compose deployment and harden operations | Wire the service-owned infrastructure into the thin single-host Pulumi environment, finish shared platform components and split CI responsibilities, validate release identity/deadlines, verify fresh installation and independent updates/failure handling, finish operator runbooks and security/resource checks. No migration or full backup system. |
+| 4 | ♻️ Compose deployment and harden operations | Wire the service-owned infrastructure into the thin single-host Pulumi environment, finish shared host components and split CI responsibilities, validate release identity/deadlines, verify fresh installation and independent updates/failure handling, finish operator runbooks and security/resource checks. No migration or full backup system. |
 
 PR1 may retain a minimal direct lifecycle implementation behind the new service
 boundary to keep the extraction runnable. PR2 replaces it; the final system does

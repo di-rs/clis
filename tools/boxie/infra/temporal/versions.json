@@ -1,0 +1,21 @@
+{
+  "verified_at": "2026-10-15",
+  "server": {
+    "version": "1.32.0",
+    "image": "temporalio/server:1.32.0@sha256:c3e752127759616bb1615e0f9ba0e21635aeb5fdeb922de4f371c350955f46ae",
+    "release": "https://github.com/temporalio/temporal/releases/tag/v1.32.0",
+    "arm64_manifest": "sha256:c75012952e4c29acb36ce24243dcdb47822c0134719ea48a1870248620a336d4"
+  },
+  "admin_tools": {
+    "version": "1.32.0",
+    "image": "temporalio/admin-tools:1.32.0@sha256:a9f84fb9a374b2374fe2e67c8efc0468ff3f1c66c8a0b14597ec86e349e62bca",
+    "arm64_manifest": "sha256:2fe54408e988e3b53860f77f06742592f1b50a4256d64f28f02fc73213ed6687",
+    "cli_version": "1.9.0"
+  },
+  "ui": {
+    "version": "2.56.0",
+    "image": "temporalio/ui:2.56.0@sha256:66d55d383bfb334ee0781f21a3b36c865b3f0f2262491a070bb2143394e9fe88",
+    "release": "https://github.com/temporalio/ui/releases/tag/v2.56.0",
+    "arm64_manifest": "sha256:d2240ecc69118b8c5b8319ed687dd051f83500300fdd6522d5de65296f40b213"
+  }
+}

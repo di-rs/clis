@@ -1,6 +1,7 @@
 """The only production adapter allowed to open the Docker socket."""
 
 import asyncio
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -24,13 +25,21 @@ class TerminalPort(Protocol):
     async def close(self) -> None: ...
 
 
-class DockerPort(Protocol):
+@dataclass(frozen=True)
+class ContainerInfo:
+    id: str
+    labels: dict[str, str]
+    running: bool
+
+
+class ExecutionDocker(Protocol):
     async def ready(self) -> bool: ...
+
+    async def inspect(self, identifier: str) -> ContainerInfo | None: ...
     async def create(self, name: str, config: dict[str, Any]) -> None: ...
-    async def attach(self, name: str) -> TerminalPort: ...
-    async def start(self, name: str) -> None: ...
-    async def labels(self, name: str) -> dict[str, str] | None: ...
-    async def delete(self, name: str) -> None: ...
+    async def attach(self, identifier: str) -> TerminalPort: ...
+    async def start(self, identifier: str) -> None: ...
+    async def delete(self, identifier: str) -> None: ...
     async def close(self) -> None: ...
 
 
@@ -53,9 +62,9 @@ class DockerTerminal:
 
 
 class DockerBackend:
-    def __init__(self, timeout: float = 20) -> None:
+    def __init__(self, timeout: float = 20, *, client: Docker | None = None) -> None:
         self.timeout = timeout
-        self.client: Docker | None = None
+        self.client = client
 
     def _client(self) -> Docker:
         if self.client is None:
@@ -70,8 +79,6 @@ class DockerBackend:
         try:
             await self._client().containers.create(config, name=name)
         except DockerError as error:
-            # Only documented bad-parameter / missing-image responses prove rejection.
-            # Conflict, server errors and transport failures can leave resources behind.
             if error.status in (400, 404):
                 raise CreateRejected from error
             raise
@@ -85,7 +92,7 @@ class DockerBackend:
     async def start(self, name: str) -> None:
         await self._client().containers.container(name).start()
 
-    async def labels(self, name: str) -> dict[str, str] | None:
+    async def inspect(self, name: str) -> ContainerInfo | None:
         try:
             data = await self._client().containers.container(name).show()
         except DockerError as error:
@@ -93,7 +100,7 @@ class DockerBackend:
                 return None
             raise
         labels: dict[str, str] = data["Config"]["Labels"] or {}
-        return labels
+        return ContainerInfo(data["Id"], labels, data["State"]["Running"])
 
     async def delete(self, name: str) -> None:
         async with asyncio.timeout(self.timeout):

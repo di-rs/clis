@@ -70,7 +70,7 @@ def test_auto_release_is_opt_in_and_does_not_restart_runtime_for_ordinary_cli_ch
         "cancel-in-progress": "false",
     }
     paths = release["on"]["push"]["paths"]
-    assert "tools/cli-playground/playground/**" in paths
+    assert "tools/cli-playground/src/playground/**" in paths
     assert "tools/cli-playground/frontend/**" in paths
     assert "tools/cli-playground/infra/compose.production.yml" in paths
     assert "tools/cli-playground/infra/host.py" not in paths

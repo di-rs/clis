@@ -319,6 +319,6 @@ Backup/restore automation and cloud activation are outside this increment.
 Build the real frontend before `uv run --locked pytest
 tools/boxie/tests/test_packaging.py -m integration`. The required PR frontend job
 runs that isolated-wheel/static-response/Compose check. The separate
-[Linux sandbox workflow](../../../.github/workflows/cli-playground-sandbox.yml)
+[Linux sandbox workflow](../../../.github/workflows/boxie-lifecycle.yml)
 checks native runsc security and both generic and product terminals through the
 private API. Missing runsc is a failure, never a successful runc substitute.

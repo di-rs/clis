@@ -5,7 +5,7 @@ export default defineConfig(({ command }) => ({
   plugins: [svelte()],
   base: command === "build" ? "/static/" : "/",
   build: {
-    outDir: "../playground/static",
+    outDir: "../src/playground/static",
     emptyOutDir: true,
     license: { fileName: "licenses.md" },
   },
@@ -19,5 +19,5 @@ export default defineConfig(({ command }) => ({
     },
   },
   lint: { options: { typeAware: true, typeCheck: true } },
-  test: { include: ["src/**/*.test.ts"] },
+  test: { include: ["src/**/*.test.ts", "e2e-native/*.test.ts"] },
 }));

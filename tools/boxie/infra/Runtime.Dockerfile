@@ -11,6 +11,7 @@ COPY tools/cli-playground/infra/pyproject.toml tools/cli-playground/infra/pyproj
 COPY tools/cli-bench/pyproject.toml tools/cli-bench/pyproject.toml
 COPY tools/cli-testing/pyproject.toml tools/cli-testing/pyproject.toml
 COPY tools/boxie/src tools/boxie/src
+COPY tools/boxie/alembic tools/boxie/alembic
 RUN uv sync --locked --package boxie --no-dev --no-editable --no-python-downloads
 FROM python:3.15-slim
 WORKDIR /app

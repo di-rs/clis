@@ -37,6 +37,23 @@ regular files with mode `0600`: one orchestrator credential and one consumer cre
 Do not put credentials in URLs. The API reads both files; the orchestrator only reads its
 own credential. A consumer receives only its own credential.
 
+Linux bind mounts preserve numeric ownership. The current Boxie runtime image
+runs as UID 0; with `cap_drop: ALL`, it cannot bypass another UID's file
+permissions. Provision its orchestrator/consumer credentials, database DSN and dedicated
+Temporal private keys as reader-owned regular files with mode `0600` (UID 0 for
+the current production manifests). Keep secret mounts read-only. Public
+certificates and configuration must also be readable by their service UID, and
+each containing directory must permit traversal. Create `BOXIE_DATA_DIR` and
+its `profiles` subdirectory with the orchestrator's UID and owner write/traverse access
+before starting Compose; Docker-created bind-source directories can have the
+wrong owner. The pinned Temporal server, operator and UI images use UID 1000;
+their private keys must be owned by that reader with mode `0600` as well.
+Do not compensate with group/world access or additional DAC capabilities.
+
+PR4 provisioning must enforce these per-service UID, private-file and writable
+directory contracts, including consumer credential delivery and key rotation.
+The configuration generator writes paths only; it does not provision ownership.
+
 Copy [profiles.example.json](profiles.example.json) to the configured profiles
 file, replacing its placeholder digest with the immutable Docker image ID or
 registry digest for an approved shell image. For example, after pulling
@@ -47,7 +64,13 @@ operators may separately approve the
 [Playground profile](../../cli-playground/infra/profiles/playground.json) with the
 immutable product sandbox image digest. Profiles are never consumer uploads.
 
-Generate the process JSON files (substitute your installation UUID and paths):
+The [Temporal deployment](temporal/README.md) is owned here and operated as a
+separate Compose project. Its server releases and schema operations remain
+independent of Boxie application releases.
+
+Complete the required [runtime prerequisites](runtime.md) first,
+including explicit Alembic revisions, namespace setup, and API/orchestrator mTLS identities.
+Generate all three process JSON files (substitute your installation UUID and paths):
 
 ```sh
 uv run --locked python -m boxie_infra.config \
@@ -79,31 +102,37 @@ pnpm --dir tools/cli-playground/frontend build
 uv run --locked pytest tools/boxie/tests/test_packaging.py -m integration
 ```
 
-The native Linux [sandbox check](../../../.github/workflows/cli-playground-sandbox.yml)
-runs [smoke.sh](smoke.sh), which starts separate API and orchestrator processes
-bound to loopback, then exercises both
+The optional native Linux [sandbox check](../../../.github/workflows/boxie-lifecycle.yml)
+starts isolated PostgreSQL, Temporal, API, orchestrator and Playground services.
+Manual `workflow_dispatch` runs exercise browser recovery, process faults and both
 `boxie_infra.smoke` and `playground_infra.smoke` through HTTP and WebSocket. Each
 inspects the actual sandbox's `runsc`, non-root user, no-network mode, read-only
 root/artifact, capabilities, no-new-privileges, resource limits, tmpfs, disabled
 Docker logs and confirmed container deletion. The product smoke also checks the
 native Rust CLI, fixtures, pipes/redirection, resize and Ctrl-C. Ordinary Docker
-image builds or fake-daemon E2Es do not count as this platform check.
+image builds or fake-daemon E2Es do not count as this platform check. All six native
+lifecycle/browser cases are temporarily excluded from automatic PR runs while
+their hang is investigated. PRs retain real SQL/Temporal integration, credential
+permission and endpoint restart checks.
+
+The lifecycle fixture runs API and orchestrator as the runner's numeric UID:GID
+so its private files and writable storage share one owner. Its Linux-volume DAC
+regression resolves the actual test Compose mounts and checks readable private
+credentials, immutable secret mounts, writable data/profiles and rejected unsafe
+credentials. Run it with the freshly built runtime image:
+
+```sh
+uv run --locked pytest -m integration tools/boxie/tests/test_native_permissions.py
+```
+
+This probe can verify Linux ownership on an arm64 Docker host, but only the native
+amd64/runsc lifecycle workflow proves the full lifecycle. The existing disposable
+Temporal server/operator/UI fixture keys remain mode `0644` to support their
+unchanged UID-1000 images and host-side test readers; this is a fixture limitation,
+not the production provisioning policy. API/orchestrator and host-only client fixture
+keys are mode `0600`.
 
 A consumer-network operator can run `python -m boxie_infra.smoke --boxie-url
 http://boxie-api:8090 --credential-file /private/consumer.secret` with the `smoke`
 profile approved. The inspection portion also requires operator Docker access;
 that access belongs to the test runner, never the Playground service.
-
-## Runtime identities before production activation
-
-The current API and orchestrator containers use the image's root identity.
-Before PR4 enables production activation, assign an explicit non-root identity
-per service and validate startup with the actual mounted secrets and storage.
-Provision credential files with mode `0600` and ownership readable by each
-intended process; use separate file copies where service UIDs differ. Provision
-the Playground data volume and Boxie data directory for their service owners.
-Grant the orchestrator the Docker socket's group, while keeping that group and
-the socket out of the API and Playground containers. Do not set a global `USER`
-on the shared Boxie image without coordinating these mounts. Acceptance requires
-real container tests of secret reads, persistent writes, Docker access, and
-independent restarts under the selected identities.

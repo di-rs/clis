@@ -1,329 +1,310 @@
-import { describe, expect, it } from "vite-plus/test";
-import { Terminal } from "@xterm/xterm";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { createSession, type SessionState, type TerminalPort } from "./session";
 
 class TestTerminal implements TerminalPort {
   cols = 80;
   rows = 24;
-  options = { disableStdin: true };
-  output: Uint8Array[] = [];
-  pastes: string[] = [];
+  options = { disableStdin: false };
+  output: number[] = [];
+  callbacks: (() => void)[] = [];
+  delayed = false;
   resets = 0;
-  focused = false;
-  input?: (data: string) => void;
-  resize?: (size: { cols: number; rows: number }) => void;
+  input?: (value: { data: string; source: "user" | "terminal" }) => void;
   write(data: Uint8Array, callback?: () => void) {
-    this.output.push(data);
-    callback?.();
+    this.output.push(...data);
+    if (callback) {
+      if (this.delayed) this.callbacks.push(callback);
+      else callback();
+    }
+  }
+  drain() {
+    while (this.callbacks.length) this.callbacks.shift()!();
   }
   paste(data: string) {
-    this.pastes.push(data);
-    this.input?.(data);
+    this.input?.({ data, source: "user" });
   }
-  focus() {
-    this.focused = true;
-  }
+  focus() {}
   reset() {
     this.resets++;
     this.output = [];
   }
-  onData(listener: (data: string) => void) {
-    this.input = listener;
-    return {
-      dispose: () => {
-        this.input = undefined;
-      },
-    };
-  }
-  onResize(listener: (size: { cols: number; rows: number }) => void) {
-    this.resize = listener;
-    return {
-      dispose: () => {
-        this.resize = undefined;
-      },
-    };
-  }
 }
-
 class TestSocket extends EventTarget {
   readyState = 0;
-  binaryType: BinaryType = "blob";
-  sent: unknown[] = [];
-  frames: string[] = [];
-  closed = false;
+  bufferedAmount = 0;
+  binaryType = "blob";
+  sent: Record<string, unknown>[] = [];
+  close() {
+    this.readyState = 3;
+  }
   send(data: string) {
-    this.frames.push(data);
     this.sent.push(JSON.parse(data));
   }
-  close() {
-    this.closed = true;
-    this.readyState = 3;
-  }
-  open(authenticate = true) {
+  open() {
     this.readyState = 1;
     this.dispatchEvent(new Event("open"));
-    if (authenticate)
-      this.message(
-        JSON.stringify({
-          type: "authenticated",
-          state: "ready",
-          absolute_deadline: "2026-10-15T23:00:00Z",
-          reason: null,
-        }),
-      );
+    this.control({
+      type: "authenticated",
+      state: "ready",
+      absolute_deadline: "2099-01-01T00:00:00Z",
+    });
   }
-  message(data: unknown) {
-    this.dispatchEvent(new MessageEvent("message", { data }));
+  control(data: object) {
+    this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(data) }));
   }
-  end(code = 1000) {
+  frame(sequence: number, data: string) {
+    const payload = new TextEncoder().encode(data);
+    const wire = new Uint8Array(payload.length + 8);
+    new DataView(wire.buffer).setBigUint64(0, BigInt(sequence));
+    wire.set(payload, 8);
+    this.dispatchEvent(new MessageEvent("message", { data: wire.buffer }));
+  }
+  end() {
     this.readyState = 3;
-    const event = new Event("close");
-    Object.defineProperty(event, "code", { value: code });
-    this.dispatchEvent(event);
+    this.dispatchEvent(new Event("close"));
   }
 }
-
 function setup() {
   const terminal = new TestTerminal();
   const sockets: TestSocket[] = [];
   const states: SessionState[] = [];
-  let fits = 0;
+  let prepared = 0,
+    stopped = 0,
+    enabled = false,
+    applied = 0;
+  let desired = { cols: 80, rows: 24 };
   const session = createSession({
     terminal,
-    fit: () => {
-      fits++;
-    },
-    prepare: async () => ({
-      credential: "page-secret",
-      stop: async () => {},
-      createSocket: () => {
-        const socket = new TestSocket();
-        sockets.push(socket);
-        return socket as unknown as WebSocket;
+    input: {
+      onInput(listener) {
+        terminal.input = listener;
+        return {
+          dispose: () => {
+            terminal.input = undefined;
+          },
+        };
       },
-    }),
-    onState: (state) => states.push(state),
-  });
-  const currentSocket = () => sockets.at(-1)!;
-  const state = () => states.at(-1)!;
-  return { terminal, sockets, session, currentSocket, state, fits: () => fits };
-}
-
-describe("terminal session", () => {
-  it.each([
-    { name: "plain text", text: "a".repeat(17_000) },
-    { name: "JSON escapes", text: '\u0000\n\r\t"\\'.repeat(4_000) },
-    { name: "Unicode", text: "é漢🙂".repeat(8_000) },
-    {
-      name: "bracketed paste",
-      text: `\x1b[200~${"a".repeat(2_041)}🙂${"b".repeat(17_000)}\x1b[201~`,
+      setUserEnabled(value) {
+        enabled = value;
+      },
     },
-  ])("sends $name within gateway limits without changing the input stream", async ({ text }) => {
-    const test = setup();
-    test.session.connect();
-    await Promise.resolve();
-    test.currentSocket().open();
-    test.terminal.input?.(text);
-    const frames = test.currentSocket().frames.slice(2);
-    const chunks = frames.map((frame) => (JSON.parse(frame) as { data: string }).data);
-    expect(chunks.join("")).toBe(text);
-    for (const [index, frame] of frames.entries()) {
-      expect(frame.length).toBeLessThanOrEqual(16_384);
-      expect(new TextEncoder().encode(frame).length).toBeLessThanOrEqual(16_384);
-      expect(new TextDecoder().decode(new TextEncoder().encode(chunks[index]))).toBe(chunks[index]);
-    }
-  });
-
-  it("clears xterm's pending writes before starting a replacement session", async () => {
-    const terminal = new Terminal();
-    const sockets: TestSocket[] = [];
-    const session = createSession({
-      terminal,
-      fit: () => {},
-      prepare: async () => ({
+    geometry: {
+      measure: () => desired,
+      apply(size) {
+        terminal.cols = size.cols;
+        terminal.rows = size.rows;
+        applied++;
+      },
+    },
+    prepare: async () => {
+      prepared++;
+      return {
         credential: "page-secret",
-        stop: async () => {},
+        stop: async () => {
+          stopped++;
+        },
         createSocket: () => {
           const socket = new TestSocket();
           sockets.push(socket);
           return socket as unknown as WebSocket;
         },
-      }),
-      onState: () => {},
-    });
-    const drained = () => new Promise<void>((resolve) => terminal.write(new Uint8Array(), resolve));
-    try {
-      session.connect();
-      await drained();
-      sockets[0].open();
-      sockets[0].message(new TextEncoder().encode("OLD SESSION").buffer);
-      session.connect();
-      await drained();
-      expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe("");
-      sockets[1].open();
-      sockets[1].message(new TextEncoder().encode("NEW SESSION").buffer);
-      await drained();
-      expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe("NEW SESSION");
-    } finally {
-      session.dispose();
-      terminal.dispose();
-    }
+      };
+    },
+    onState: (state) => states.push(state),
   });
+  const socket = () => sockets.at(-1)!;
+  async function start() {
+    session.startFresh();
+    await Promise.resolve();
+    socket().open();
+    socket().control({ type: "attached", epoch: 1 });
+  }
+  function ready(epoch = 1, sequence = 0) {
+    socket().control({ type: "replay_complete", epoch, sequence });
+    terminal.drain();
+    socket().control({ type: "resized", epoch, ...desired });
+  }
+  return {
+    session,
+    terminal,
+    sockets,
+    socket,
+    start,
+    ready,
+    states,
+    resize: (cols: number, rows: number) => {
+      desired = { cols, rows };
+      session.syncGeometry();
+    },
+    prepared: () => prepared,
+    stopped: () => stopped,
+    enabled: () => enabled,
+    applied: () => applied,
+  };
+}
 
-  it("enables input only after opening and sends the current terminal size", async () => {
-    const test = setup();
-    test.session.connect();
-    await Promise.resolve();
-    test.terminal.input?.("too early");
-    expect(test.currentSocket().sent).toEqual([]);
-    expect(test.state().phase).toBe("connecting");
-    test.currentSocket().open();
-    test.terminal.input?.("pwd\r");
-    test.terminal.resize?.({ cols: 100, rows: 30 });
-    expect(test.currentSocket().sent).toEqual([
-      { type: "auth", credential: "page-secret" },
-      { type: "resize", cols: 80, rows: 24 },
-      { type: "input", data: "pwd\r" },
-      { type: "resize", cols: 100, rows: 30 },
-    ]);
-    expect(test.terminal.options.disableStdin).toBe(false);
-    expect(test.state().phase).toBe("connected");
-    expect(test.fits()).toBe(1);
-  });
-
-  it("pastes examples without executing them and ignores them while disconnected", async () => {
-    const test = setup();
-    test.session.paste("cat welcome.txt");
-    expect(test.terminal.pastes).toEqual([]);
-    test.session.connect();
-    await Promise.resolve();
-    test.currentSocket().open();
-    test.session.paste("cat welcome.txt");
-    expect(test.terminal.pastes).toEqual(["cat welcome.txt"]);
-    expect(test.currentSocket().sent.at(-1)).toEqual({ type: "input", data: "cat welcome.txt" });
-    expect(test.terminal.focused).toBe(true);
-  });
-
-  it("reset closes the old socket and ignores late output, close, and open events", async () => {
-    const test = setup();
-    test.session.connect();
-    await Promise.resolve();
-    const old = test.currentSocket();
-    old.open();
-    old.message(new Uint8Array([65]).buffer);
-    expect(test.terminal.output).toEqual([new Uint8Array([65])]);
-    test.session.connect();
-    await Promise.resolve();
-    expect(old.closed).toBe(true);
-    old.message(new Uint8Array([66]).buffer);
+describe("same-page reconnect", () => {
+  it("drains pending writes, deduplicates queued frames and resumes last applied cursor without input replay", async () => {
+    const t = setup();
+    await t.start();
+    t.ready();
+    t.terminal.input?.({ data: "one", source: "user" });
+    t.terminal.delayed = true;
+    t.socket().frame(1, "🙂");
+    t.socket().frame(1, "🙂");
+    const old = t.socket();
     old.end();
-    old.open();
-    expect(test.state().phase).toBe("connecting");
-    expect(test.terminal.output).toEqual([]);
-    test.currentSocket().open();
-    test.currentSocket().message(new Uint8Array([67]).buffer);
-    expect(test.terminal.output).toEqual([new Uint8Array([67])]);
-    expect(test.terminal.resets).toBe(2);
+    t.terminal.input?.({ data: "lost", source: "user" });
+    t.session.resumeExisting();
+    expect(t.sockets).toHaveLength(1);
+    t.terminal.drain();
+    await Promise.resolve();
+    expect(t.prepared()).toBe(1);
+    expect(t.stopped()).toBe(0);
+    expect(t.terminal.resets).toBe(1);
+    t.socket().open();
+    expect(t.socket().sent.at(-1)).toEqual({ type: "attach", resume_after: 1, cols: 80, rows: 24 });
+    expect(old.sent.filter((x) => x.type === "ack")).toEqual([]);
+    t.socket().control({ type: "attached", epoch: 2 });
+    t.socket().frame(1, "🙂");
+    t.ready(2, 1);
+    t.terminal.drain();
+    expect(new TextDecoder().decode(new Uint8Array(t.terminal.output))).toBe("🙂");
+    expect(t.socket().sent.filter((x) => x.type === "input")).toEqual([]);
+    old.end();
+    expect(t.states.at(-1)?.phase).toBe("connected");
+    t.session.dispose();
   });
-
-  it("keeps output on disconnect and starts a clean workspace on reconnect", async () => {
-    const test = setup();
-    test.session.connect();
-    await Promise.resolve();
-    const old = test.currentSocket();
-    old.open();
-    old.message(new Uint8Array([65]).buffer);
-    test.session.disconnect();
-    test.terminal.input?.("ignored");
-    expect(test.terminal.output).toEqual([new Uint8Array([65])]);
-    expect(test.terminal.options.disableStdin).toBe(true);
-    expect(test.state()).toMatchObject({ phase: "disconnected", canReconnect: true });
-    expect(old.sent).toHaveLength(2);
-    test.session.connect();
-    await Promise.resolve();
-    expect(test.sockets).toHaveLength(2);
-    expect(test.terminal.output).toEqual([]);
+  it("freezes geometry until replay drains and permits parser replies while user input is gated", async () => {
+    const t = setup();
+    await t.start();
+    t.terminal.input?.({ data: "key", source: "user" });
+    t.terminal.input?.({ data: "\x1b[1;1R", source: "terminal" });
+    expect(t.socket().sent.filter((x) => x.type === "input")).toEqual([
+      { type: "input", epoch: 1, source: "terminal", data: "\x1b[1;1R" },
+    ]);
+    t.resize(120, 40);
+    expect(t.applied()).toBe(0);
+    expect(t.enabled()).toBe(false);
+    t.socket().control({ type: "replay_complete", epoch: 1, sequence: 0 });
+    expect(t.socket().sent.at(-1)).toEqual({ type: "resize", epoch: 1, cols: 120, rows: 40 });
+    expect(t.enabled()).toBe(false);
+    t.socket().control({ type: "resized", epoch: 1, cols: 120, rows: 40 });
+    expect(t.applied()).toBe(1);
+    expect(t.enabled()).toBe(true);
+    t.session.dispose();
   });
-
-  it("retains the server reason after close and safely ignores unrelated messages", async () => {
-    const test = setup();
-    test.session.connect();
+  it("starts a fresh admission after draining old output and ignores stale frames", async () => {
+    const t = setup();
+    await t.start();
+    t.ready();
+    const old = t.socket();
+    t.terminal.delayed = true;
+    old.frame(1, "old");
+    t.session.startFresh();
+    t.terminal.drain();
     await Promise.resolve();
-    const socket = test.currentSocket();
-    socket.open();
-    for (const value of ["null", "{}", "{", "[]", '{"type":"status","message":12}'])
-      socket.message(value);
-    expect(test.state().message).toBeNull();
-    socket.message('{"type":"status","message":"Session limit reached"}');
-    expect(test.state()).toMatchObject({ message: "Session limit reached", canReconnect: false });
-    socket.end(1013);
-    expect(test.state()).toMatchObject({
-      phase: "disconnected",
-      message: "Session limit reached",
-      canReconnect: true,
+    old.frame(2, "stale");
+    old.end();
+    expect(t.prepared()).toBe(2);
+    expect(t.stopped()).toBe(1);
+    expect(t.terminal.output).toEqual([]);
+    expect(t.terminal.resets).toBe(2);
+    t.session.dispose();
+  });
+  it("uses browser heartbeat responses, ignores stale pongs, and bounds browser sends", async () => {
+    vi.useFakeTimers();
+    const t = setup();
+    await t.start();
+    t.ready();
+    vi.advanceTimersByTime(10000);
+    expect(t.socket().sent.at(-1)).toEqual({ type: "heartbeat", epoch: 1, nonce: 1 });
+    t.socket().control({ type: "heartbeat", epoch: 99, nonce: 1 });
+    vi.advanceTimersByTime(20000);
+    expect(t.states.at(-1)?.phase).toBe("disconnected");
+    expect(t.stopped()).toBe(0);
+    t.session.resumeExisting();
+    await Promise.resolve();
+    t.socket().open();
+    t.socket().control({ type: "attached", epoch: 2 });
+    t.ready(2);
+    t.socket().bufferedAmount = 65537;
+    t.terminal.input?.({ data: "overloaded", source: "user" });
+    expect(t.socket().readyState).toBe(3);
+    expect(t.socket().sent.filter((x) => x.type === "input")).toEqual([]);
+    t.session.dispose();
+    vi.useRealTimers();
+  });
+  it.each(["a".repeat(17000), '\u0000\n\r\t"\\'.repeat(4000), "é漢🙂".repeat(8000)])(
+    "preserves large input with source and epoch inside frame limit",
+    async (text) => {
+      const t = setup();
+      await t.start();
+      t.ready();
+      t.terminal.input?.({ data: text, source: "user" });
+      const messages = t.socket().sent.filter((x) => x.type === "input");
+      expect(messages.map((x) => x.data).join("")).toBe(text);
+      for (const message of messages)
+        expect(new TextEncoder().encode(JSON.stringify(message)).length).toBeLessThanOrEqual(16384);
+      t.session.dispose();
+    },
+  );
+  it("offers a fresh session on a replay gap", async () => {
+    const t = setup();
+    await t.start();
+    t.socket().control({
+      type: "status",
+      reason: "stream_gap",
+      message: "Output history is unavailable. Start a new session.",
     });
-  });
-
-  it("turns transport errors into a recoverable disconnected state", async () => {
-    const test = setup();
-    test.session.connect();
-    await Promise.resolve();
-    test.currentSocket().dispatchEvent(new Event("error"));
-    expect(test.state()).toMatchObject({ phase: "disconnected", canReconnect: true });
-    expect(test.currentSocket().closed).toBe(true);
-    expect(test.terminal.options.disableStdin).toBe(true);
-    test.session.connect();
-    await Promise.resolve();
-    test.currentSocket().open();
-    expect(test.state().phase).toBe("connected");
-  });
-
-  it("suspends on pagehide and restores a disconnected state after bfcache return", async () => {
-    const test = setup();
-    test.session.connect();
-    await Promise.resolve();
-    test.currentSocket().open();
-    test.session.suspend();
-    test.session.connect();
-    await Promise.resolve();
-    expect(test.sockets).toHaveLength(1);
-    expect(test.currentSocket().closed).toBe(true);
-    test.session.resume();
-    expect(test.state()).toMatchObject({ phase: "disconnected", canReconnect: true });
-    test.session.connect();
-    await Promise.resolve();
-    expect(test.sockets).toHaveLength(2);
-  });
-
-  it("disposes terminal subscriptions and prevents reconnection or stale output", async () => {
-    const test = setup();
-    test.session.connect();
-    await Promise.resolve();
-    const socket = test.currentSocket();
-    socket.open();
-    test.session.dispose();
-    test.session.dispose();
-    socket.message(new Uint8Array([65]).buffer);
-    test.session.connect();
-    await Promise.resolve();
-    test.session.paste("ignored");
-    expect(socket.closed).toBe(true);
-    expect(test.terminal.input).toBeUndefined();
-    expect(test.terminal.resize).toBeUndefined();
-    expect(test.terminal.options.disableStdin).toBe(true);
-    expect(test.terminal.output).toEqual([]);
-    expect(test.sockets).toHaveLength(1);
+    t.socket().end();
+    expect(t.states.at(-1)).toMatchObject({ canReconnect: false, reason: "stream_gap" });
+    t.session.dispose();
   });
 });
 
-it("keeps input gated until the authentication acknowledgement", async () => {
-  const test = setup();
-  test.session.connect();
+it("applies a retained geometry barrier after pending old-socket writes before resuming", async () => {
+  const t = setup();
+  await t.start();
+  t.ready();
+  t.terminal.delayed = true;
+  t.socket().frame(1, "old width");
+  t.socket().control({ type: "geometry", epoch: 1, sequence: 1, cols: 100, rows: 30 });
+  t.socket().frame(2, "new width");
+  t.socket().end();
+  t.session.resumeExisting();
+  t.terminal.drain();
   await Promise.resolve();
-  test.currentSocket().open(false);
-  test.terminal.input?.("before auth");
-  expect(test.terminal.options.disableStdin).toBe(true);
-  expect(test.currentSocket().sent).toEqual([{ type: "auth", credential: "page-secret" }]);
+  t.socket().open();
+  expect(t.socket().sent.at(-1)).toEqual({ type: "attach", resume_after: 2, cols: 100, rows: 30 });
+  t.session.dispose();
+});
+
+it("suspends for bfcache without replaying input and disposes subscriptions", async () => {
+  const t = setup();
+  await t.start();
+  t.ready();
+  const old = t.socket();
+  t.session.suspend();
+  t.session.resumeExisting();
+  t.session.paste("discarded");
+  expect(t.sockets).toHaveLength(1);
+  expect(t.enabled()).toBe(false);
+  t.session.resume();
+  t.session.resumeExisting();
+  await Promise.resolve();
+  t.socket().open();
+  t.socket().control({ type: "attached", epoch: 2 });
+  t.ready(2);
+  old.frame(1, "stale");
+  expect(t.terminal.output).toEqual([]);
+  expect(t.socket().sent.filter((x) => x.type === "input")).toEqual([]);
+  t.session.dispose();
+  expect(t.terminal.input).toBeUndefined();
+  t.session.resumeExisting();
+  t.session.startFresh();
+  expect(t.sockets).toHaveLength(2);
+  expect(t.stopped()).toBe(1);
 });
 
 it("stops a late page admission without opening a socket after disposal", async () => {
@@ -333,14 +314,15 @@ it("stops a late page admission without opening a socket after disposal", async 
   let opened = 0;
   const session = createSession({
     terminal,
-    fit: () => {},
+    input: { onInput: () => ({ dispose() {} }), setUserEnabled() {} },
+    geometry: { measure: () => ({ cols: 80, rows: 24 }), apply() {} },
     onState: () => {},
     prepare: () =>
       new Promise((resolve) => {
         finish = resolve;
       }),
   });
-  session.connect();
+  session.startFresh();
   session.dispose();
   finish({
     credential: "page-secret",
@@ -356,3 +338,43 @@ it("stops a late page admission without opening a socket after disposal", async 
   expect(stopped).toBe(1);
   expect(opened).toBe(0);
 });
+
+it.each([
+  [500, 300, 500, 300],
+  [501, 24, 500, 24],
+  [80, 301, 80, 300],
+  [501, 301, 500, 300],
+  [0, 24, 1, 24],
+  [80, 0, 80, 1],
+  [NaN, NaN, 80, 24],
+  [Infinity, -Infinity, 80, 24],
+  [-Infinity, Infinity, 80, 24],
+  [NaN, 40, 80, 40],
+  [120, NaN, 120, 24],
+])(
+  "settles measured geometry %i x %i at bounded %i x %i",
+  async (cols, rows, boundedCols, boundedRows) => {
+    const t = setup();
+    t.resize(cols, rows);
+    await t.start();
+    t.socket().control({ type: "replay_complete", epoch: 1, sequence: 0 });
+    expect(t.socket().sent.at(-1)).toEqual({
+      type: "resize",
+      epoch: 1,
+      cols: boundedCols,
+      rows: boundedRows,
+    });
+    t.socket().control({ type: "resized", epoch: 1, cols: boundedCols, rows: boundedRows });
+    expect(t.socket().sent.filter((frame) => frame.type === "resize")).toHaveLength(1);
+    expect(t.states.at(-1)?.phase).toBe("connected");
+    expect(t.enabled()).toBe(true);
+    t.terminal.input?.({ source: "user", data: "usable" });
+    expect(t.socket().sent.at(-1)).toEqual({
+      type: "input",
+      epoch: 1,
+      source: "user",
+      data: "usable",
+    });
+    t.session.dispose();
+  },
+);

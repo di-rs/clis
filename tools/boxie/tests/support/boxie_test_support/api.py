@@ -5,7 +5,6 @@ import hashlib
 import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -13,41 +12,10 @@ import httpx
 import uvicorn
 from fastapi import FastAPI
 
-from boxie_test_support.orchestrator import (
-    Clock,
-    DockerDaemon,
-    bundle,
-    configuration,
-    live,
-    request,
-)
+from boxie_test_support.orchestrator import bundle, request
 
 CONSUMER_AUTH = {"Authorization": "Bearer consumer-one-secret"}
 FOREIGN_AUTH = {"Authorization": "Bearer consumer-two-secret"}
-
-
-@asynccontextmanager
-async def api_server(
-    orchestrator_url: str, orchestrator_credential: bytes = b"orchestrator-test-secret"
-) -> AsyncIterator[httpx.AsyncClient]:
-    from boxie.api.app import ApiConfig, create_app
-    from boxie.application.direct_lifecycle import DirectLifecycle
-    from boxie.sandbox.client import OrchestratorClient
-
-    async with OrchestratorClient(
-        orchestrator_url, orchestrator_credential, timeout=0.5
-    ) as orchestrator:
-        app = create_app(
-            ApiConfig(
-                "test-release", {"one": b"consumer-one-secret", "two": b"consumer-two-secret"}
-            ),
-            DirectLifecycle(orchestrator),
-            orchestrator,
-            orchestrator,
-        )
-        async with serve(app) as url:
-            async with httpx.AsyncClient(base_url=url, headers=CONSUMER_AUTH) as client:
-                yield client
 
 
 @asynccontextmanager
@@ -72,20 +40,6 @@ async def serve(app: FastAPI) -> AsyncIterator[str]:
         server.should_exit = True
         await asyncio.wait_for(task, 5)
         sock.close()
-
-
-@asynccontextmanager
-async def stack(
-    root: Path, **changes: Any
-) -> AsyncIterator[tuple[httpx.AsyncClient, Any, DockerDaemon, Clock]]:
-    daemon, clock = DockerDaemon(), Clock()
-    async with live(configuration(root, **changes), daemon, clock) as (
-        orchestrator_http,
-        orchestrator,
-    ):
-        async with api_server(str(orchestrator_http.base_url)) as client:
-            assert client.base_url.port != orchestrator_http.base_url.port
-            yield client, orchestrator, daemon, clock
 
 
 async def artifact(client: httpx.AsyncClient) -> str:

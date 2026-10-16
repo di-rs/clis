@@ -4,7 +4,6 @@ import os
 import stat
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -182,13 +181,17 @@ def test_ssh_readiness_retries_with_pinned_identity_and_stops_at_deadline(
         return subprocess.CompletedProcess(command, 0 if success and len(calls) == 2 else 255)
 
     monkeypatch.setattr(subprocess, "run", ssh)
-    monkeypatch.setattr(time, "monotonic", lambda: elapsed[0])
-    monkeypatch.setattr(time, "sleep", lambda n: elapsed.__setitem__(0, elapsed[0] + n))
+
+    def sleep(seconds: float) -> None:
+        elapsed[0] += seconds
+
     if success:
-        ci.wait_for_ssh("192.0.2.1", tmp_path, timeout=10)
+        ci.wait_for_ssh("192.0.2.1", tmp_path, timeout=10, clock=lambda: elapsed[0], sleep=sleep)
     else:
         with pytest.raises(RuntimeError, match="pinned host"):
-            ci.wait_for_ssh("192.0.2.1", tmp_path, timeout=10)
+            ci.wait_for_ssh(
+                "192.0.2.1", tmp_path, timeout=10, clock=lambda: elapsed[0], sleep=sleep
+            )
     assert len(calls) == 2
     assert all(command[-3:] == ["--", "root@192.0.2.1", "true"] for command in calls)
     assert all("StrictHostKeyChecking=yes" in command for command in calls)

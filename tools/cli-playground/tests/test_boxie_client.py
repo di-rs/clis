@@ -123,3 +123,39 @@ def test_sandbox_lifetime_cannot_drift_after_acceptance(method: str, field: str)
                 await client.close()
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("valid", [True, False])
+def test_terminal_adapter_validates_events_before_returning_them(valid: bool) -> None:
+    from fastapi import WebSocket
+    from playground.terminal_protocol import Attached
+
+    async def exercise() -> None:
+        peer = FastAPI()
+
+        @peer.websocket("/v1/sandboxes/{resource}/terminal")
+        async def reply(websocket: WebSocket, resource: str) -> None:
+            await websocket.accept()
+            await websocket.send_text(
+                '{"type":"attached","epoch":3}'
+                if valid
+                else '{"type":"status","reason":"private-consumer-secret"}'
+            )
+            await websocket.close()
+
+        async with serve(peer) as url:
+            client = HttpBoxieClient(url, "private-consumer-secret")
+            try:
+                async with client.terminal(uuid4()) as connection:
+                    if valid:
+                        event = await connection.receive()
+                        assert isinstance(event, Attached)
+                        assert event.epoch == 3
+                    else:
+                        with pytest.raises(BoxieUnavailable) as error:
+                            await connection.receive()
+                        assert "private-consumer-secret" not in str(error.value)
+            finally:
+                await client.close()
+
+    asyncio.run(exercise())
