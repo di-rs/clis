@@ -6,6 +6,7 @@ import json
 import os
 import re
 import signal
+import stat
 import sys
 import time
 from datetime import datetime
@@ -31,6 +32,32 @@ SCENARIOS = (
     "vector-full",
     "vector-enospc",
 )
+
+
+def journal_usage(directory: Path) -> dict[str, int]:
+    """Match journald's allocated-block accounting without following other sources."""
+    result = {"files": 0, "apparent_bytes": 0, "allocated_bytes": 0}
+    seen: set[tuple[int, int]] = set()
+    with os.scandir(directory) as entries:
+        for index, entry in enumerate(entries):
+            if index >= 128:
+                raise RuntimeError("journal usage inventory exceeded bound")
+            if not entry.name.endswith((".journal", ".journal~")):
+                continue
+            try:
+                info = entry.stat(follow_symlinks=False)
+            except FileNotFoundError:  # Concurrent journal rotation/vacuum.
+                continue
+            if not stat.S_ISREG(info.st_mode):
+                raise RuntimeError("unexpected journal usage source")
+            identity = (info.st_dev, info.st_ino)
+            if identity in seen:  # Rotation can expose the same inode under two names.
+                continue
+            seen.add(identity)
+            result["files"] += 1
+            result["apparent_bytes"] += info.st_size
+            result["allocated_bytes"] += 512 * info.st_blocks
+    return result
 
 
 def total(metrics: dict[str, list[dict[str, Any]]], name: str) -> float:
@@ -597,9 +624,17 @@ class Scenario:
             await self.flood(20)
             while len(await self.accepted()) != 20:
                 await asyncio.sleep(0.1)
+            baseline_instance = self.flood_instance
+            baseline_operation = str(UUID(int=1))
             await self.command("docker", "rm", "--force", str(self.flood_id))
             self.flood_id = None
-            self.observations["retention_baseline_accepted"] = 20
+            self.observations.update(
+                retention_baseline_accepted=20,
+                retention_baseline_instance=baseline_instance,
+                retention_baseline_operation=baseline_operation,
+            )
+            # A new batch must not re-emit the accepted baseline event identity.
+            self.flood_instance = str(uuid4())
         await self.flood(1000000)
         while True:
             await self.progress(sandbox)
@@ -621,33 +656,27 @@ class Scenario:
             else:
                 # Rotation plus size-driven deletion, independently of ENOSPC.
                 await self.command("journalctl", "--namespace=" + self.root.name, "--rotate")
-                size = sum(
-                    path.stat().st_size for path in (self.root / "journal").glob("*.journal*")
-                )
+                usage = journal_usage(self.root / "journal")
+                self.observations["journal_usage"] = usage
+                size = usage["allocated_bytes"]
                 if size > 100 * 1024**2:
                     raise RuntimeError("reduced journal size ceiling exceeded")
-                text = await self.command(
+                # smoke_flood emits these exact JSON fields in this order. Match both
+                # identities so another batch's operation 1 cannot mask removal.
+                first = await self.command(
                     "journalctl",
                     "--directory=" + str(self.root / "journal"),
                     "--no-pager",
                     "--output=cat",
-                    "--grep=" + self.flood_instance,
+                    "--grep="
+                    + re.escape('"instance_id": "' + baseline_instance + '"')
+                    + ".*"
+                    + re.escape('"operation_id": "' + baseline_operation + '"'),
                     "--lines=1",
-                    "--reverse",
                 )
-                if text and json.loads(text.splitlines()[0])["operation_id"] != str(UUID(int=1)):
-                    # Query the original first event exactly; disappearance is retention evidence.
-                    first = await self.command(
-                        "journalctl",
-                        "--directory=" + str(self.root / "journal"),
-                        "--no-pager",
-                        "--output=cat",
-                        "--grep=" + str(UUID(int=1)),
-                        "--lines=1",
-                    )
-                    if not first and size >= 32 * 1024**2:
-                        self.observations.update(journal_bytes=size, oldest_event_removed=True)
-                        break
+                if not first and size >= 32 * 1024**2:
+                    self.observations.update(journal_bytes=size, oldest_event_removed=True)
+                    break
             await asyncio.sleep(0.5)
 
     async def producer_pipe(self, sandbox: str) -> None:
