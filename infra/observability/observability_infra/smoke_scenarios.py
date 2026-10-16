@@ -9,6 +9,7 @@ import signal
 import stat
 import sys
 import time
+from contextlib import AsyncExitStack
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ from uuid import UUID, uuid4
 
 from observability_infra.smoke_application import REPO, Application
 from observability_infra.smoke_pipe_api import validate_shutdown
+from observability_infra.smoke_retention import removal_observation, retained_archive
 from observability_infra.smoke_runtime import event_identities, evidence
 from observability_infra.smoke_samples import record_progress
 from observability_infra.smoke_telemetry import Telemetry
@@ -635,49 +637,49 @@ class Scenario:
             )
             # A new batch must not re-emit the accepted baseline event identity.
             self.flood_instance = str(uuid4())
-        await self.flood(1000000)
-        while True:
-            await self.progress(sandbox)
-            if vector:
-                metrics = await self.telemetry.metrics("vector")
-                occupancy = total(metrics, "vector_buffer_size_bytes")
-                current_drops = (
-                    total(metrics, "vector_buffer_discarded_events_total")
-                    if "vector_buffer_discarded_events_total" in metrics
-                    else 0
-                )
-                if current_drops > drops:
-                    if occupancy < 0.8 * 268435488:
-                        raise RuntimeError("drops without measured full-buffer pressure")
-                    self.observations.update(
-                        buffer_peak_observed=occupancy, discarded_delta=current_drops - drops
-                    )
-                    break
-            else:
-                # Rotation plus size-driven deletion, independently of ENOSPC.
+        async with AsyncExitStack() as held:
+            if not vector:
                 await self.command("journalctl", "--namespace=" + self.root.name, "--rotate")
-                usage = journal_usage(self.root / "journal")
-                self.observations["journal_usage"] = usage
-                size = usage["allocated_bytes"]
-                if size > 100 * 1024**2:
-                    raise RuntimeError("reduced journal size ceiling exceeded")
-                # smoke_flood emits these exact JSON fields in this order. Match both
-                # identities so another batch's operation 1 cannot mask removal.
-                first = await self.command(
-                    "journalctl",
-                    "--directory=" + str(self.root / "journal"),
-                    "--no-pager",
-                    "--output=cat",
-                    "--grep="
-                    + re.escape('"instance_id": "' + baseline_instance + '"')
-                    + ".*"
-                    + re.escape('"operation_id": "' + baseline_operation + '"'),
-                    "--lines=1",
+                retained_fd, retained_identity = await held.enter_async_context(
+                    retained_archive(
+                        self.root / "journal", self.command, baseline_instance, baseline_operation
+                    )
                 )
-                if not first and size >= 32 * 1024**2:
-                    self.observations.update(journal_bytes=size, oldest_event_removed=True)
-                    break
-            await asyncio.sleep(0.5)
+                self.observations["retention_archived_file"] = retained_identity
+            await self.flood(1000000)
+            while True:
+                await self.progress(sandbox)
+                if vector:
+                    metrics = await self.telemetry.metrics("vector")
+                    occupancy = total(metrics, "vector_buffer_size_bytes")
+                    current_drops = (
+                        total(metrics, "vector_buffer_discarded_events_total")
+                        if "vector_buffer_discarded_events_total" in metrics
+                        else 0
+                    )
+                    if current_drops > drops:
+                        if occupancy < 0.8 * 268435488:
+                            raise RuntimeError("drops without measured full-buffer pressure")
+                        self.observations.update(
+                            buffer_peak_observed=occupancy, discarded_delta=current_drops - drops
+                        )
+                        break
+                else:
+                    # Rotation plus size-driven deletion, independently of ENOSPC.
+                    await self.command("journalctl", "--namespace=" + self.root.name, "--rotate")
+                    usage = journal_usage(self.root / "journal")
+                    self.observations["journal_usage"] = usage
+                    size = usage["allocated_bytes"]
+                    if size > 100 * 1024**2:
+                        raise RuntimeError("reduced journal size ceiling exceeded")
+                    removal = removal_observation(
+                        self.root / "journal", retained_fd, retained_identity
+                    )
+                    self.observations["retention_file_removal"] = removal
+                    if removal["removed"] and size >= 32 * 1024**2:
+                        self.observations.update(journal_bytes=size, oldest_event_removed=True)
+                        break
+                await asyncio.sleep(0.5)
 
     async def producer_pipe(self, sandbox: str) -> None:
         control = self.root / "control"

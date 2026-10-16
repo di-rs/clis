@@ -80,6 +80,11 @@ def retention_case(
     scenario.observations = {}
     batches: list[str] = []
     queries: list[str] = []
+    directory = tmp_path / "journal"
+    directory.mkdir()
+    archive = directory / "system@baseline.journal"
+    archive.write_bytes(b"owned baseline archive")
+    progress_count = 0
 
     async def metrics(_: str) -> dict[str, object]:
         return {}
@@ -92,14 +97,19 @@ def retention_case(
         return {str(UUID(int=index)) for index in range(1, 21)}
 
     async def progress(_: str) -> None:
-        pass
+        nonlocal progress_count
+        progress_count += 1
+        if progress_count == 2:
+            archive.unlink()
 
     async def command(*args: str) -> str:
         patterns = [arg.removeprefix("--grep=") for arg in args if arg.startswith("--grep=")]
         if patterns:
             queries.append(patterns[0])
             original = json.dumps({"instance_id": batches[0], "operation_id": str(UUID(int=1))})
-            other = json.dumps({"instance_id": batches[1], "operation_id": str(UUID(int=1))})
+            other = json.dumps(
+                {"instance_id": scenario.flood_instance, "operation_id": str(UUID(int=1))}
+            )
             assert re.search(patterns[0], original)
             assert not re.search(patterns[0], other)
             return original if len(queries) == 1 else ""
@@ -130,7 +140,12 @@ def test_retention_requires_original_disappearance_and_allocated_floor(
     )
     asyncio.run(scenario.pressure("sandbox"))
     assert len(batches) == 2 and batches[0] != batches[1]
-    assert len(queries) == 3
+    assert len(queries) == 1
+    assert scenario.observations["retention_file_removal"] == {
+        "link_count": 0,
+        "inode_present": False,
+        "removed": True,
+    }
     assert scenario.observations["retention_baseline_instance"] == batches[0]
     assert scenario.observations["retention_baseline_operation"] == str(UUID(int=1))
     assert scenario.observations["oldest_event_removed"] is True
@@ -144,7 +159,7 @@ def test_retention_preserves_ceiling_and_evidence_before_failure(
     scenario, _, queries = retention_case(monkeypatch, tmp_path, [101 * 1024**2])
     with pytest.raises(RuntimeError, match="size ceiling"):
         asyncio.run(scenario.pressure("sandbox"))
-    assert not queries
+    assert len(queries) == 1  # Successful baseline read precedes pressure.
     assert scenario.observations["journal_usage"]["allocated_bytes"] == 101 * 1024**2
     assert "oldest_event_removed" not in scenario.observations
 
