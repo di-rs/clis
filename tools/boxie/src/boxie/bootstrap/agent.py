@@ -17,6 +17,12 @@ def _main() -> None:
     from boxie.bootstrap.config import AgentConfig, read_credential
     from boxie.bootstrap.durable import pool_for
     from boxie.observability.logging import RequestLogging
+    from boxie.observability.runtime import (
+        agent_cache,
+        agent_dependencies,
+        background,
+        process_metrics,
+    )
     from boxie.persistence.postgres_artifacts import PostgresArtifactStore
     from boxie.persistence.start_guard import PostgresStartGuard
     from boxie.sandbox.docker import DockerBackend
@@ -35,7 +41,7 @@ def _main() -> None:
 
     async def run() -> None:
         install_asyncio_handler(log_runtime())
-        async with pool_for(dsn_file) as pool:
+        async with process_metrics("agent") as metrics, pool_for(dsn_file) as pool:
             artifacts = PostgresArtifactStore(pool, config.data_dir / "artifacts")
             agent = DurableAgent(
                 config,
@@ -45,6 +51,7 @@ def _main() -> None:
                 lambda: datetime.now(UTC),
                 time.monotonic,
             )
+            agent.diagnostics = metrics.transition
             credential = read_credential(config.credential_file)
             app = create_durable_agent_app(
                 agent,
@@ -53,7 +60,7 @@ def _main() -> None:
                 reporter=ObservationReporter(api_url, credential),
             )
 
-            app.add_middleware(RequestLogging)
+            app.add_middleware(RequestLogging, completed=metrics.http_completed)
 
             def reload_profiles() -> None:
                 try:
@@ -79,7 +86,10 @@ def _main() -> None:
                         log_config=None,
                     )
                 )
-                await server.serve()
+                async with background(
+                    agent_cache(metrics, agent), agent_dependencies(metrics, agent, pool)
+                ):
+                    await server.serve()
             finally:
                 loop.remove_signal_handler(signal.SIGHUP)
 

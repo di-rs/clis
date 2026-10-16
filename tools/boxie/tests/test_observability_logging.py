@@ -60,10 +60,10 @@ assert configure_logging(LogSettings(service="boxie", role="worker")) is runtime
 async def task(number):
     with bind_context(request_id=str(UUID(int=number))):
         await asyncio.sleep(0)
-        runtime.emit("request_completed", duration_ms=number)
+        runtime.emit("request.completed", duration_ms=number)
 async def run(): await asyncio.gather(task(1), task(2))
 asyncio.run(run())
-runtime.emit("request_completed")
+runtime.emit("request.completed")
 assert runtime.stats.configuration_errors == 1
 runtime.close()
 assert configure_logging(runtime.settings) is runtime
@@ -92,7 +92,7 @@ try:
         raise RuntimeError(secret) from e
 except RuntimeError:
     logging.getLogger("uvicorn.error").exception(secret)
-    runtime.emit("request_failed", error=sys.exception(), request_id=secret, token=secret)
+    runtime.emit("request.completed", error=sys.exception(), request_id=secret, token=secret)
 os.write(1, secret.encode()); os.write(2, secret.encode())
 print(secret, end="")
 runtime.close()
@@ -114,7 +114,7 @@ def test_unread_pipe_exit_overflow_and_bounded_async_progress(
 async def run():
     started = time.monotonic()
     for _ in range(20000):
-        runtime.emit("request_completed")
+        runtime.emit("request.completed")
     # HTTP/PTY work must not wait for the collector.
     await asyncio.sleep(0)
     assert time.monotonic() - started < 1.5
@@ -180,7 +180,7 @@ def test_unsupported_sink_is_nonfatal(tmp_path: Path) -> None:
                 "-c",
                 PRELUDE
                 + f"""
-runtime.emit("request_completed")
+runtime.emit("request.completed")
 runtime.close()
 Path({str(evidence)!r}).write_text(json.dumps(asdict(runtime.stats)))
 """,
@@ -229,7 +229,7 @@ async def run():
     install_asyncio_handler(runtime)
     asyncio.get_running_loop().call_exception_handler({{"message":secret,"exception":RuntimeError(secret)}})
 asyncio.run(run())
-structlog.get_logger().info("request_completed", request_id=secret, message=secret, level=secret)
+structlog.get_logger().info("request.completed", request_id=secret, message=secret, level=secret)
 runtime.close()
 """)
     events = records(result)
@@ -237,7 +237,7 @@ runtime.close()
         "thread_failed",
         "unraisable_failed",
         "async_failed",
-        "request_completed",
+        "request.completed",
     }
     assert SECRET not in result.stdout + result.stderr
 
@@ -251,7 +251,7 @@ def test_broken_reader_disables_delivery(tmp_path: Path) -> None:
             PRELUDE
             + f"""
 for _ in range(100):
-    runtime.emit("request_completed")
+    runtime.emit("request.completed")
     if runtime.stats.sink_state == "broken": break
     time.sleep(.01)
 runtime.close()
@@ -293,7 +293,7 @@ ports = Ports()
 app = create_app(ApiConfig("test", {{"one":b"consumer-one-secret"}}), ports, ports, ports)
 async def run():
     async with serve(app) as origin:
-        for _ in range(12000): runtime.emit("request_completed")
+        for _ in range(12000): runtime.emit("request.completed")
         assert runtime.stats.dropped_count > 0
         async with httpx.AsyncClient(base_url=origin) as http:
             response = await asyncio.wait_for(http.get("/healthz?secret={SECRET}", headers={{"X-Request-ID":"{SECRET}"}}), 1)
@@ -375,7 +375,7 @@ with pytest.MonkeyPatch.context() as patch:
     test_runnable_stack_preserves_accounting_and_worker_replacement(
         settings["dsn"], fixture, Path({str(scenario_root)!r}), False, patch, SimpleNamespace(text="")
     )
-runtime.emit("request_completed", outcome="succeeded")
+runtime.emit("request.completed", outcome="succeeded")
 runtime.close()
 """
     result = subprocess.run(
@@ -390,7 +390,7 @@ runtime.close()
     for sentinel in ("SECRET-", "consumer-one-secret", "agent-test-secret"):
         assert sentinel not in logs + exported_history
     assert any(
-        event["event"] == "request_completed" and event.get("outcome") == "succeeded"
+        event["event"] == "request.completed" and event.get("outcome") == "succeeded"
         for event in events
     )
 
@@ -419,7 +419,7 @@ identity = {{
     "inheritable": os.get_inheritable(sink),
     "blocking": os.get_blocking(sink),
 }}
-runtime.emit("request_completed")
+runtime.emit("request.completed")
 runtime.close()
 redirects = {{}}
 for fd in (1, 2):
@@ -436,7 +436,7 @@ Path({str(evidence)!r}).write_text(json.dumps({{"sink":identity,"stats":asdict(r
     assert measured["redirects"] == {"1": True, "2": True}, measured
     events = records(result)
     assert len(events) == measured["stats"]["delivered_count"] == 1
-    assert events[0]["event"] == "request_completed"
+    assert events[0]["event"] == "request.completed"
     assert measured["stats"]["dropped_count"] == 0
     assert measured["stats"]["sink_state"] == "closed"
 
@@ -454,7 +454,7 @@ from pathlib import Path
 from boxie.observability.logging import LogSettings, bootstrap_logging
 for fd in {closed_fds!r}: os.close(fd)
 runtime = bootstrap_logging(LogSettings(service="boxie", role="api"))
-runtime.emit("request_completed")
+runtime.emit("request.completed")
 runtime.close()
 assert all(stat.S_ISCHR(os.fstat(fd).st_mode) for fd in (1, 2))
 os.write(1, b"SENTINEL"); os.write(2, b"SENTINEL")
@@ -528,20 +528,20 @@ async def run():
     await asyncio.gather(*(request(case) for case in ("success", "other", "failure", "cancelled", "websocket")))
     assert len(set(seen.values())) == 4
 asyncio.run(run())
-runtime.emit("request_completed")
+runtime.emit("request.completed")
 runtime.close()
 """
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=5)
     events = records(result)
     assert SECRET not in result.stdout
     assert all(event["service"] == service and event["role"] == role for event in events)
-    assert len(events) == 4  # Two success, one error, one post-request unbound event.
+    assert len(events) == 5  # Successes, failure, cancellation, and an unbound event.
     correlated = [event for event in events if "request_id" in event]
-    assert len(correlated) == len({event["request_id"] for event in correlated}) == 3
+    assert len(correlated) == len({event["request_id"] for event in correlated}) == 4
     assert "request_id" not in events[-1]
-    failures = [event for event in events if event["event"] == "request_failed"]
-    assert len(failures) == 1
-    assert failures[0]["outcome"] == "failed" and failures[0]["error_type"] == "RuntimeError"
+    failures = [event for event in events if event.get("outcome") == "failed"]
+    assert len(failures) == 2
+    assert any(event.get("error_type") == "RuntimeError" for event in failures)
     assert all(
-        "duration_ms" in event for event in correlated if event["event"] == "request_completed"
+        "duration_ms" in event for event in correlated if event["event"] == "request.completed"
     )

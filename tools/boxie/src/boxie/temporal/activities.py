@@ -19,6 +19,7 @@ from boxie.domain.lifecycle import (
 )
 from boxie.domain.models import SandboxState, TerminationReason
 from boxie.observability.context import bind_context
+from boxie.observability.events import Transition, deliver, emit
 from boxie.persistence.postgres import PostgresLifecycle
 from boxie.sandbox.durable_client import DurableAgentClient
 from boxie.temporal.contracts import LifecycleFacts, StopRequest
@@ -54,6 +55,7 @@ class SafeActivityInbound(ActivityInboundInterceptor):
                 }:
                     category = error.type
                     non_retryable = error.non_retryable
+                deliver(emit, Transition("activity.failed", reason=category, outcome="failed"))
                 # Sanitize before SDK logging, including nested context and details.
                 raise ApplicationError(
                     "lifecycle operation pending"

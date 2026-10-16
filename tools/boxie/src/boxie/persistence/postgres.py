@@ -27,6 +27,7 @@ from boxie.domain.models import (
     SandboxView,
     TerminationReason,
 )
+from boxie.observability.events import DiagnosticSink, Transition, deliver, emit
 from boxie.sandbox.protocol import SnapshotWire, SpecWire, ViewWire, spec_wire
 
 Row = dict[str, Any]
@@ -86,8 +87,11 @@ class PostgresLifecycle:
         identity: AgentIdentity,
         dependencies: DependencyCheck,
         readiness: AdmissionReadiness | None = None,
+        *,
+        diagnostics: DiagnosticSink = emit,
     ) -> None:
         self.pool, self.resolver, self.identity = pool, resolver, identity
+        self.diagnostics = diagnostics
         self.dependencies, self.readiness = dependencies, readiness or AdmissionReadiness()
 
     async def _ready(self, conn: psycopg.AsyncConnection[Row]) -> bool:
@@ -191,7 +195,8 @@ class PostgresLifecycle:
                 )
                 await self._enqueue(conn, identifier, "start")
                 assert row is not None
-                return view(row)
+            deliver(self.diagnostics, Transition("sandbox.accepted", identifier))
+            return view(row)
         except TimeoutError:
             raise BoxieError(503, "admission dependency timeout") from None
 
@@ -232,13 +237,17 @@ class PostgresLifecycle:
             row = await (
                 await conn.execute(
                     """UPDATE sandboxes SET desired_stop=true,
-                reason=COALESCE(reason,%s),state='terminating',cleanup_pending=true WHERE id=%s RETURNING *""",
+                reason=COALESCE(reason,%s),state='terminating',cleanup_pending=true,
+                cleanup_pending_since=COALESCE(cleanup_pending_since,clock_timestamp()) WHERE id=%s RETURNING *""",
                     (reason.value, sandbox_id),
                 )
             ).fetchone()
             await self._enqueue(conn, sandbox_id, "stop")
             assert row is not None
-            return view(row)
+        deliver(
+            self.diagnostics, Transition("termination.requested", sandbox_id, reason=row["reason"])
+        )
+        return view(row)
 
     async def load_request(self, sandbox_id: UUID) -> DurableRequest:
         """Activity-side lookup only: spec/snapshot may contain secrets."""
@@ -323,7 +332,7 @@ class PostgresLifecycle:
                 return False
             old = await (
                 await conn.execute(
-                    "SELECT event_version FROM agent_observations WHERE sandbox_id=%s",
+                    "SELECT event_version,ready_at FROM agent_observations WHERE sandbox_id=%s",
                     (item.sandbox_id,),
                 )
             ).fetchone()
@@ -365,23 +374,61 @@ class PostgresLifecycle:
                 if row["desired_stop"] and not item.removal_confirmed
                 else item.state.value
             )
-            await conn.execute(
-                """UPDATE sandboxes SET state=%s,reason=COALESCE(reason,%s),
-                cleanup_pending=%s,cleaned_at=CASE WHEN %s THEN clock_timestamp() ELSE NULL END
-                WHERE id=%s""",
-                (
-                    state,
-                    item.reason.value if item.reason else None,
-                    not item.removal_confirmed
-                    and (
-                        item.cleanup_pending
-                        or row["desired_stop"]
-                        or item.state.value in ("terminating", "terminated", "failed")
-                    ),
-                    item.removal_confirmed,
-                    item.sandbox_id,
-                ),
+            pending = not item.removal_confirmed and (
+                item.cleanup_pending
+                or row["desired_stop"]
+                or item.state.value in ("terminating", "terminated", "failed")
             )
+            outcome = None
+            if row["provisioning_outcome"] is None:
+                if item.ready_at is not None or (old is not None and old["ready_at"] is not None):
+                    outcome = "ready"
+                elif item.removal_confirmed:
+                    outcome = (
+                        "failed"
+                        if (row["reason"] or (item.reason.value if item.reason else None))
+                        == "provisioning_failed"
+                        else "stopped"
+                    )
+            updated = await (
+                await conn.execute(
+                    """UPDATE sandboxes SET state=%s,reason=COALESCE(reason,%s),
+                cleanup_pending=%s,
+                cleanup_pending_since=CASE WHEN %s THEN COALESCE(cleanup_pending_since,statement_timestamp()) ELSE cleanup_pending_since END,
+                cleaned_at=CASE WHEN %s THEN statement_timestamp() ELSE NULL END,
+                provisioning_outcome=COALESCE(provisioning_outcome,%s),
+                provisioning_ready_observed_at=CASE WHEN %s='ready' THEN statement_timestamp() ELSE provisioning_ready_observed_at END
+                WHERE id=%s RETURNING *""",
+                    (
+                        state,
+                        item.reason.value if item.reason else None,
+                        pending,
+                        pending,
+                        item.removal_confirmed,
+                        outcome,
+                        outcome,
+                        item.sandbox_id,
+                    ),
+                )
+            ).fetchone()
+            assert updated is not None
+            events: list[Transition] = []
+            if outcome is not None:
+                duration = (
+                    (updated["provisioning_ready_observed_at"] - row["accepted_at"]).total_seconds()
+                    if outcome == "ready"
+                    else None
+                )
+                events.append(
+                    Transition(
+                        "provisioning.completed",
+                        item.sandbox_id,
+                        outcome=outcome,
+                        duration_seconds=duration,
+                    )
+                )
+                if outcome == "ready":
+                    events.append(Transition("sandbox.ready", item.sandbox_id))
             await conn.execute(
                 """INSERT INTO outbox (id,deduplication_key,sandbox_id,kind)
                 VALUES (%s,%s,%s,'observation') ON CONFLICT DO NOTHING""",
@@ -399,7 +446,9 @@ class PostgresLifecycle:
                 await conn.execute(
                     "DELETE FROM sandbox_artifact_refs WHERE sandbox_id=%s", (item.sandbox_id,)
                 )
-            return True
+                events.append(Transition("cleanup.completed", item.sandbox_id))
+        deliver(self.diagnostics, *events)
+        return True
 
     async def confirm_removed(self, observation: AgentObservation) -> bool:
         if not observation.removal_confirmed:

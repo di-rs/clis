@@ -21,6 +21,7 @@ from boxie.domain.lifecycle import (
 )
 from boxie.domain.models import Principal, SandboxState, TerminationReason
 from boxie.domain.policy import validate_policy
+from boxie.observability.events import DiagnosticSink, Transition, deliver, emit
 from boxie.sandbox.docker import ExecutionDocker
 from boxie.sandbox.execution import ExecutionJournal, ExecutionRecord
 from boxie.sandbox.profiles import ProfileRegistry
@@ -53,6 +54,7 @@ class DurableAgent:
         clock: Callable[[], datetime],
         monotonic: Callable[[], float],
     ) -> None:
+        self.diagnostics: DiagnosticSink = emit
         self.config, self.docker, self.artifact_path, self.guard = (
             config,
             docker,
@@ -316,14 +318,22 @@ class DurableAgent:
                     pass
             create = self.creates.get(record.id)
             try:
-                await reconcile_removal(
+                result = await reconcile_removal(
                     self.docker,
                     record,
                     self._save,
                     self.config.docker_timeout,
                     create is not None and not create.done(),
                 )
+                if result is not None:
+                    deliver(
+                        self.diagnostics, Transition("cleanup.failed", record.id, reason=result)
+                    )
             except Exception:
+                deliver(
+                    self.diagnostics,
+                    Transition("cleanup.failed", record.id, reason="journal_unavailable"),
+                )
                 if self._journal_healthy:
                     raise
                 # Physical deletion may have succeeded, but the failed final save
@@ -383,6 +393,7 @@ class DurableAgent:
             record.attached, record.disconnected_at = True, None
             self.deadlines[ref.id].disconnect = None
             self._changed(record)
+            deliver(self.diagnostics, Transition("terminal.attached", record.id))
             return record.attachment_epoch
 
     async def check_attachment(
@@ -409,6 +420,7 @@ class DurableAgent:
                     self.monotonic() + record.spec.policy.disconnect_seconds
                 )
                 self._changed(record)
+                deliver(self.diagnostics, Transition("terminal.detached", record.id))
 
     async def write(
         self,
@@ -446,9 +458,31 @@ class DurableAgent:
                 return
             reason = record.reason if record.cleanup_pending else self._expiry(record)
             if reason:
-                self._stop(record, reason)
+                try:
+                    self._stop(record, reason)
+                except Exception:
+                    deliver(
+                        self.diagnostics,
+                        Transition("reconciliation.completed", record.id, outcome="failed"),
+                    )
+                    raise
         if reason:
-            await self._cleanup(record)
+            try:
+                await self._cleanup(record)
+            except Exception:
+                deliver(
+                    self.diagnostics,
+                    Transition("reconciliation.completed", record.id, outcome="failed"),
+                )
+                raise
+            deliver(
+                self.diagnostics,
+                Transition(
+                    "reconciliation.completed",
+                    record.id,
+                    outcome="confirmed" if record.removal_confirmed else "pending",
+                ),
+            )
 
     async def _supervised_reconcile(self, record: ExecutionRecord) -> None:
         try:

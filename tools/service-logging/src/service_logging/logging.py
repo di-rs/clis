@@ -52,8 +52,7 @@ _BASE_EVENTS = {
     "thread_failed": "Thread failed",
     "async_failed": "Asynchronous operation failed",
     "unraisable_failed": "Unraisable operation failed",
-    "request_completed": "Request completed",
-    "request_failed": "Request failed",
+    "request.completed": "Request completed",
 }
 _LEVELS = {10: "DEBUG", 20: "INFO", 30: "WARNING", 40: "ERROR", 50: "CRITICAL"}
 _DROP_REASONS = ("queue_full", "disabled", "broken_sink", "oversize", "shutdown", "invalid_event")
@@ -132,7 +131,8 @@ class LogRuntime:
                 key: value
                 for key, value in events.items()
                 if type(key) is str
-                and re.fullmatch(r"[a-z_]{1,64}", key)
+                and len(key) <= 64
+                and re.fullmatch(r"[a-z_]+(?:[.][a-z_]+)*", key)
                 and type(value) is str
                 and len(value) <= 128
             },

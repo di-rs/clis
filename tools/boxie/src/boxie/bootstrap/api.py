@@ -66,6 +66,8 @@ def _main() -> None:
 
     from boxie.api.app import create_app
     from boxie.bootstrap.durable import Dependencies, pool_for, temporal_client
+    from boxie.observability.runtime import api_dependencies, background, process_metrics
+    from boxie.observability.snapshot import refresh_snapshots
     from boxie.persistence.postgres import PostgresLifecycle
     from boxie.sandbox.durable_client import DurableAgentClient
 
@@ -81,13 +83,18 @@ def _main() -> None:
         # only new admission depends on that probe. Worker startup stays eager.
         temporal = await temporal_client(config.durable, lazy=True)
         async with (
+            process_metrics("api") as metrics,
             pool_for(config.durable.postgres_dsn_file) as pool,
             DurableAgentClient(
                 config.agent_url, config.agent_credential, timeout=config.request_timeout
             ) as agent,
         ):
             lifecycle = PostgresLifecycle(
-                pool, agent, config.identity, Dependencies(agent, temporal)
+                pool,
+                agent,
+                config.identity,
+                Dependencies(agent, temporal),
+                diagnostics=metrics.transition,
             )
             app = create_app(
                 config.api,
@@ -96,6 +103,7 @@ def _main() -> None:
                 agent,
                 observations=lifecycle,
                 agent_credential=config.agent_credential,
+                request_completed=metrics.http_completed,
             )
             server = uvicorn.Server(
                 uvicorn.Config(
@@ -110,7 +118,11 @@ def _main() -> None:
                     log_config=None,
                 )
             )
-            await server.serve()
+            async with background(
+                refresh_snapshots(metrics, config.durable.postgres_dsn_file),
+                api_dependencies(metrics, agent, temporal),
+            ):
+                await server.serve()
 
     asyncio.run(run())
 

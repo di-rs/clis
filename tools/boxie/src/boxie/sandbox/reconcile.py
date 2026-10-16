@@ -21,7 +21,7 @@ async def reconcile_removal(
     save: Callable[[], None],
     timeout: float,
     create_pending: bool,
-) -> None:
+) -> str | None:
     """A missing name never resolves a lost create; only its result can do that.
 
     Finding the owned deterministic resource after transport/process loss resolves
@@ -41,12 +41,12 @@ async def reconcile_removal(
                     pass
                 await docker.delete(info.id)
                 if await docker.inspect(info.id) is not None:
-                    return
+                    return "delete_unconfirmed"
                 record.container_id = None
                 if not create_pending:
                     record.creation_uncertain = False
             if create_pending or record.creation_uncertain:
-                return
+                return "create_pending"
             record.container_id = None
             record.cleanup_pending = False
             record.removal_confirmed = True
@@ -57,10 +57,10 @@ async def reconcile_removal(
                 else SandboxState.TERMINATED
             )
     except OSError, RuntimeError, TimeoutError:
-        pass
+        return "dependency_unavailable"
     except Exception:
         # Includes Docker transport/status failures. Never turn them into absence.
-        pass
+        return "dependency_unavailable"
     finally:
         record.event_version += 1
         try:
@@ -72,3 +72,4 @@ async def reconcile_removal(
             record.cleanup_pending = True
             record.removal_confirmed = False
             raise
+    return None

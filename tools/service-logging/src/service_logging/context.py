@@ -33,8 +33,38 @@ def validated(fields: Mapping[str, object]) -> dict[str, str | int | float]:
     if (type(duration) is int or type(duration) is float) and 0 <= duration <= 86400000:
         result["duration_ms"] = duration
     for key, allowed in (
-        ("outcome", ("succeeded", "failed", "pending", "cancelled")),
-        ("reason", ("unavailable", "invalid", "timeout", "cancelled", "unknown")),
+        (
+            "outcome",
+            ("succeeded", "failed", "pending", "cancelled", "ready", "stopped", "confirmed"),
+        ),
+        (
+            "reason",
+            (
+                "unavailable",
+                "invalid",
+                "timeout",
+                "cancelled",
+                "unknown",
+                "requested",
+                "expired",
+                "idle",
+                "disconnected",
+                "output_limit",
+                "exited",
+                "provisioning_failed",
+                "control_plane_lost",
+                "agent_restart",
+                "agent_shutdown",
+                "delete_unconfirmed",
+                "create_pending",
+                "dependency_unavailable",
+                "journal_unavailable",
+                "InvalidRequest",
+                "ProvisioningStopped",
+                "CleanupPending",
+                "DependencyUnavailable",
+            ),
+        ),
     ):
         value = fields.get(key)
         if type(value) is str and value in allowed:

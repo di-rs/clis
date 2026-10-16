@@ -4,8 +4,9 @@ import asyncio
 import os
 
 from service_logging.logging import install_asyncio_handler, run_process
+from service_logging.metrics import MetricsListener
 
-from playground.observability import LogSettings, bootstrap_logging
+from playground.observability import LogSettings, Metrics, bootstrap_logging
 
 
 def main() -> None:
@@ -17,6 +18,11 @@ def main() -> None:
         )
     )
 
+    metrics = Metrics(runtime)
+    listener = MetricsListener(
+        metrics, os.environ.get("PLAYGROUND_METRICS_HOST", "127.0.0.1"), 9104
+    )
+
     def run() -> None:
         import uvicorn
 
@@ -24,7 +30,7 @@ def main() -> None:
 
         async def serve() -> None:
             install_asyncio_handler(runtime)
-            app = create_app()
+            app = create_app(metrics=metrics)
             await uvicorn.Server(
                 uvicorn.Config(
                     app,
@@ -40,7 +46,11 @@ def main() -> None:
 
         asyncio.run(serve())
 
-    run_process(runtime, run)
+    listener.start()
+    try:
+        run_process(runtime, run)
+    finally:
+        listener.close()
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 """Construct an unprivileged private API from injected application ports."""
 
 import hmac
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
@@ -39,6 +39,7 @@ def create_app(
     *,
     observations: ObservationSink | None = None,
     agent_credential: bytes | None = None,
+    request_completed: Callable[[str, str, str, float], None] | None = None,
 ) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     auth = ConsumerAuth(config.consumers)
@@ -99,5 +100,5 @@ def create_app(
         app.include_router(observation_routes(observations))
     app.include_router(routes(service))
     app.include_router(terminal_routes(service, auth))
-    app.add_middleware(RequestLogging)
+    app.add_middleware(RequestLogging, completed=request_completed)
     return app

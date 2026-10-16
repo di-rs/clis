@@ -37,7 +37,7 @@ assert not any(name == "boxie" or name.startswith("boxie.") for name in sys.modu
     event = json.loads(result.stdout)
     assert event["schema_version"] == 1
     assert event["service"] == "cli-playground"
-    assert event["event"] == "request_completed" and "request_id" in event
+    assert event["event"] == "request.completed" and "request_id" in event
     assert "SENTINEL" not in result.stdout
 
 

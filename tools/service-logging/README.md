@@ -5,7 +5,10 @@ Each service owns its templates and assembles its HTTP middleware and process.
 A small neutral ASGI helper owns the common request context/timing/emission. The
 shared producer owns validated context, JSON rendering, bounded transport and
 sanitized process error hooks. The [event schema](../../infra/observability/event.schema.json)
-is the cross-service contract. No metrics dependency or exporter is installed.
+is the cross-service contract. The neutral `metrics` module supplies bounded
+HTTP/log instruments and the owned private listener; importing logging does not
+create instruments or start exporters. Domain instruments and route catalogs
+remain in Boxie and Playground. The historical package name is retained.
 
 `bootstrap_logging(LogSettings(...))` is an explicit process-root operation.
 It duplicates an owned stdout pipe into a descriptor above 2, keeping it separate

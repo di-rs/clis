@@ -5,6 +5,7 @@ from service_logging.asgi import RequestLogging as RequestLogging
 from service_logging.context import bind_context as bind_context
 from service_logging.logging import LogRuntime as LogRuntime
 from service_logging.logging import LogSettings as LogSettings
+from service_logging.metrics import ProcessMetrics
 
 _ROUTES = {
     ("playground.service", "Sandbox stop remains pending"): "sandbox_stop_pending",
@@ -34,3 +35,22 @@ def configure_logging(settings: LogSettings) -> LogRuntime:
 
 def bootstrap_logging(settings: LogSettings) -> LogRuntime:
     return producer.bootstrap_logging(settings, events=_EVENTS, routes=_ROUTES)
+
+
+class Metrics(ProcessMetrics):
+    def __init__(self, logs: LogRuntime | None = None) -> None:
+        super().__init__(
+            "playground",
+            logs=logs,
+            routes=(
+                "/healthz",
+                "/api/environments",
+                "/api/pull-requests/{pr}/build",
+                "/api/pull-requests/{pr}",
+                "/api/pull-requests/{pr}/reopen",
+                "/api/environments/{identifier}",
+                "/p/{identifier}",
+                "/api/environments/{identifier}/sessions",
+                "/api/environments/{identifier}/sessions/{session_id}",
+            ),
+        )

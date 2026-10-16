@@ -35,7 +35,8 @@
     },
     "event": {
       "type": "string",
-      "pattern": "^[a-z_]{1,64}$"
+      "pattern": "^[a-z_]+([.][a-z_]+)*$",
+      "maxLength": 64
     },
     "message": {
       "type": "string",
@@ -121,7 +122,10 @@
         "succeeded",
         "failed",
         "pending",
-        "cancelled"
+        "cancelled",
+        "ready",
+        "stopped",
+        "confirmed"
       ]
     },
     "reason": {
@@ -130,7 +134,25 @@
         "invalid",
         "timeout",
         "cancelled",
-        "unknown"
+        "unknown",
+        "requested",
+        "expired",
+        "idle",
+        "disconnected",
+        "output_limit",
+        "exited",
+        "provisioning_failed",
+        "control_plane_lost",
+        "agent_restart",
+        "agent_shutdown",
+        "delete_unconfirmed",
+        "create_pending",
+        "dependency_unavailable",
+        "journal_unavailable",
+        "InvalidRequest",
+        "ProvisioningStopped",
+        "CleanupPending",
+        "DependencyUnavailable"
       ]
     },
     "error_type": {

@@ -47,6 +47,7 @@ def _main() -> None:
         pool_for,
         temporal_client,
     )
+    from boxie.observability.runtime import process_metrics
     from boxie.persistence.outbox import PostgresOutbox
     from boxie.persistence.postgres import PostgresLifecycle
     from boxie.sandbox.durable_client import DurableAgentClient
@@ -63,6 +64,7 @@ def _main() -> None:
         install_asyncio_handler(log_runtime())
         client = await temporal_client(config)
         async with (
+            process_metrics("worker") as metrics,
             pool_for(config.postgres_dsn_file) as pool,
             DurableAgentClient(
                 settings["agent_url"],
@@ -71,7 +73,11 @@ def _main() -> None:
             ) as agent,
         ):
             repository = PostgresLifecycle(
-                pool, agent, agent_identity(settings["identity"]), Dependencies(agent, client)
+                pool,
+                agent,
+                agent_identity(settings["identity"]),
+                Dependencies(agent, client),
+                diagnostics=metrics.transition,
             )
             activities = LifecycleActivities(repository, agent)
             dispatcher = OutboxDispatcher(PostgresOutbox(pool), client)

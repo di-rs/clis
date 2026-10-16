@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from playground.boxie_client import BoxieClient, HttpBoxieClient
 from playground.config import Settings
-from playground.observability import RequestLogging
+from playground.observability import Metrics, RequestLogging
 from playground.routes import RequestHostBoundary, create_router
 from playground.service import PlaygroundService
 from playground.session_store import SessionStore
@@ -21,7 +21,12 @@ from playground.storage import EnvironmentStore
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
-def create_app(settings: Settings | None = None, *, boxie: BoxieClient | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    boxie: BoxieClient | None = None,
+    metrics: Metrics | None = None,
+) -> FastAPI:
     settings = settings or Settings()
     if boxie is None:
         secret = settings.boxie_credential_file
@@ -56,5 +61,5 @@ def create_app(settings: Settings | None = None, *, boxie: BoxieClient | None = 
     app.state.sessions = service.sessions
     app.mount("/static", StaticFiles(directory=STATIC_DIR, check_dir=False), name="static")
     app.include_router(create_router(service, STATIC_DIR))
-    app.add_middleware(RequestLogging)
+    app.add_middleware(RequestLogging, completed=metrics.http_completed if metrics else None)
     return app
