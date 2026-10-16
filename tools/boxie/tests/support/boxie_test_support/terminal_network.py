@@ -125,7 +125,12 @@ async def network(root: Path, *, shell: str = "/bin/sh") -> AsyncIterator[Any]:
             async with serve(api) as url:
                 async with httpx.AsyncClient(base_url=url, headers=CONSUMER_AUTH) as http:
                     yield SimpleNamespace(
-                        api=http, daemon=daemon, agent=agent, config=config, clock=clock
+                        api=http,
+                        agent_url=origin,
+                        daemon=daemon,
+                        agent=agent,
+                        config=config,
+                        clock=clock,
                     )
 
 

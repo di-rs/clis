@@ -366,3 +366,77 @@ def test_attachment_order_persists_and_preserves_cursor_and_journal_failure_fenc
             await agent.close()
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("boundary", ["api", "agent"])
+@pytest.mark.parametrize("healthy", [False, True])
+def test_attachment_order_requires_json_integer_without_changing_epoch_or_grace(
+    tmp_path: Path, boundary: str, healthy: bool
+) -> None:
+    import json
+    from contextlib import AsyncExitStack
+    from uuid import UUID
+
+    from boxie_test_support.api import CONSUMER_AUTH, artifact, create, ready, terminal_url
+    from boxie_test_support.terminal_network import attach, network
+    from websockets.asyncio.client import connect
+    from websockets.exceptions import ConnectionClosed
+
+    async def exercise() -> None:
+        async with network(tmp_path) as net, AsyncExitStack() as connections:
+            identifier = await create(net.api, await artifact(net.api))
+            await ready(net.api, identifier)
+            url = terminal_url(net.api, identifier)
+            headers = CONSUMER_AUTH
+            if boundary == "agent":
+                url = (
+                    net.agent_url.replace("http:", "ws:")
+                    + f"/v1/sandboxes/{identifier}/terminal?consumer_id=one"
+                )
+                headers = {"Authorization": "Bearer agent-test-secret"}
+            if healthy:
+                current = await connections.enter_async_context(
+                    connect(url, additional_headers=headers)
+                )
+                await attach(current, order=1)
+            net.clock.advance(10)
+            record = net.agent.records[UUID(identifier)]
+            before = record.model_dump()
+            grace = vars(net.agent.deadlines[record.id]).copy()
+            missing = object()
+            for invalid in (True, False, "2", 3.0, None, missing, 0, -1, 2**53):
+                request: dict[str, object] = {
+                    "type": "attach",
+                    "resume_after": 0,
+                    "cols": 80,
+                    "rows": 24,
+                }
+                if invalid is not missing:
+                    request["attachment_order"] = invalid
+                async with connect(url, additional_headers=headers) as rejected:
+                    await rejected.send(json.dumps(request))
+                    with pytest.raises(ConnectionClosed):
+                        await asyncio.wait_for(rejected.recv(), 1)
+                assert record.model_dump() == before
+                assert vars(net.agent.deadlines[record.id]) == grace
+            if healthy:
+                assert current.close_code is None
+                await current.send(
+                    json.dumps(
+                        {
+                            "type": "input",
+                            "epoch": record.attachment_epoch,
+                            "source": "user",
+                            "data": "healthy",
+                        }
+                    )
+                )
+                assert (
+                    await asyncio.wait_for(current.recv(), 1) == (2).to_bytes(8, "big") + b"healthy"
+                )
+            async with connect(url, additional_headers=headers) as maximum:
+                await attach(maximum, order=2**53 - 1)
+                assert record.attachment_order == 2**53 - 1 and record.attached
+                assert record.attachment_epoch == before["attachment_epoch"] + 1
+
+    asyncio.run(exercise())
