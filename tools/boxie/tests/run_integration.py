@@ -69,7 +69,7 @@ class ProductionStack:
         directory = (
             ROOT / "tools/boxie/infra/temporal"
             if package == "temporal"
-            else ROOT / "infra/boxie/postgres"
+            else ROOT / "tools/boxie/infra/postgres"
         )
         return command(
             [

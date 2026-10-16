@@ -93,6 +93,7 @@ tools/boxie/
     observability/   # event schema, contextual logging, metrics
     bootstrap/       # configuration and process composition roots
   infra/             # Boxie components, configuration, manifests and smoke checks
+    postgres/        # Boxie-owned PostgreSQL deployment and persistent storage
     temporal/        # Boxie-owned, independently operated Temporal deployment
   tests/
 tools/cli-playground/
@@ -101,8 +102,6 @@ tools/cli-playground/
   infra/             # product components, manifests, domains, routes and checks
 tools/deploy/        # shared release/configuration/transport commands
 infra/
-  boxie/
-    postgres/        # Boxie-owned PostgreSQL deployment and persistent storage
   host/              # shared host, networks and storage provisioning
   observability/     # independent telemetry deployment package
   ingress/           # shared proxy/tunnel process configuration
@@ -110,10 +109,10 @@ infra/
     single-host/     # thin Pulumi project and deployment composition
 ```
 
-Each service owns its infrastructure. Application deployment packages remain
-beside their code; Boxie’s PostgreSQL package lives under `infra/boxie/postgres`.
-These directories contain provisioning components, validated configuration, Compose
-manifests, deployment documentation, and smoke checks. Infrastructure dependencies
+Each service owns its infrastructure beside its code, including Boxie’s
+PostgreSQL and Temporal deployments. These directories contain provisioning
+components, validated configuration, Compose manifests, deployment documentation,
+and smoke checks. Infrastructure dependencies
 stay out of runtime images. The environment composition chooses which components
 to deploy and connects their inputs/outputs; it does not define service internals.
 There is no second central copy of Boxie or Playground deployment configuration.
@@ -399,7 +398,7 @@ environment per stack. It is a thin composition root over service-owned
 infrastructure and the independently owned shared components. Boxie's provisioning
 components live in `tools/boxie/infra`; Playground's live in
 `tools/cli-playground/infra`. Boxie owns PostgreSQL deployment definitions in
-`infra/boxie/postgres`. Shared host, networking, and storage provisioning
+`tools/boxie/infra/postgres`. Shared host, networking, and storage provisioning
 definitions belong in `infra/host`. Pulumi owns cloud resources,
 host/bootstrap identity, firewall rules, persistent disks, and configured DNS.
 It never provisions individual sandboxes. The existing remote Pulumi

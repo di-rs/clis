@@ -54,7 +54,7 @@ credential or Docker socket. UI backend TLS explicitly verifies the server name.
 
 ## Explicit operations
 
-Start the [Boxie PostgreSQL deployment](../../../../infra/boxie/postgres/README.md) first. From this directory:
+Start the [Boxie PostgreSQL deployment](../postgres/README.md) first. From this directory:
 
 ```sh
 # Empty pre-created databases only:

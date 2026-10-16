@@ -25,7 +25,7 @@ ROOT = Path(__file__).parents[3]
 
 
 def test_private_production_deployment_has_explicit_jobs_and_trust() -> None:
-    postgres_path = ROOT / "infra/boxie/postgres/compose.yml"
+    postgres_path = ROOT / "tools/boxie/infra/postgres/compose.yml"
     assert postgres_path.exists(), "Boxie PostgreSQL deployment missing"
     postgres = yaml.safe_load(postgres_path.read_text())
     temporal = yaml.safe_load((ROOT / "tools/boxie/infra/temporal/compose.yml").read_text())
