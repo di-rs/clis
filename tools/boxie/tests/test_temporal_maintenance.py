@@ -68,3 +68,25 @@ def test_schedule_restrictions_cannot_silently_disable_recovery(restriction: str
             await check_schedules(client, identity)
 
     asyncio.run(exercise())
+
+
+def test_existing_owner_lock_survives_read_only_storage_for_restart_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import errno
+    from typing import Any
+
+    with acquire_owner_lock(tmp_path):
+        pass
+    original = Path.open
+
+    def read_only(path: Path, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
+        if path == tmp_path / "owner.lock" and mode == "a":
+            raise OSError(errno.EROFS, "read-only filesystem")
+        return original(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", read_only)
+    with acquire_owner_lock(tmp_path):
+        with pytest.raises(RuntimeError, match="already owned"):
+            with acquire_owner_lock(tmp_path):
+                pytest.fail("second owner accepted")
