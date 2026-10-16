@@ -127,9 +127,11 @@ for name, mode, owner in (('group', 0o640, int(sys.argv[1])),
                     )
             assert service["read_only"] and service["cap_drop"] == ["ALL"]
             assert service["security_opt"] == ["no-new-privileges:true"]
-            expected = {"/run/secrets/orchestrator", "/run/secrets/postgres-dsn"}
-            if name in {"api"}:
-                expected.add("/run/secrets/temporal-client.key")
+            expected = {
+                "/run/secrets/orchestrator",
+                "/run/secrets/postgres-dsn",
+                "/run/secrets/temporal-client.key",
+            }
             if name == "api":
                 expected.add("/run/secrets/consumer")
             assert set(secrets) == expected
