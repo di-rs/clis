@@ -13,13 +13,13 @@ Generated lockfiles, test fixtures and prose are not implementation modules.
 | `tools/boxie/src/boxie/sandbox/client.py` (300) | Extract WebSocket connection/terminal handling to `client_terminal.py`; keep authenticated HTTP operations in the client. |
 | `tools/boxie/tests/test_agent.py` (550) | Rename and split into orchestrator admission, cleanup, terminal and Docker-adapter suites. Preserve the existing assertions and shared transport support. |
 | `tools/boxie/tests/test_artifacts.py` (358) | Extract ZIP metadata/parser compatibility tests to `test_zip_metadata.py`; retain artifact publication, safety and retirement tests. |
-| `tools/cli-playground/playground/routes.py` (387) | Extract host-boundary middleware and terminal relay to `transport.py`; keep endpoint wiring and HTTP models in routes. |
+| `tools/cli-playground/src/playground/routes.py` (387) | Extract host-boundary middleware and terminal relay to `transport.py`; keep endpoint wiring and HTTP models in routes. |
 
 ## Other files changed by PR 39
 
 | File (lines before cleanup) | Decision and reason |
 | --- | --- |
-| `tools/cli-playground/playground/service.py` (421) | Keep in this change. Upload publication, admission recovery and PR closure coordinate through the same persisted intent store and upload lock. A future split should introduce explicit publication/session services and retain the cross-operation race tests, rather than move methods into mutually dependent files. |
+| `tools/cli-playground/src/playground/service.py` (421) | Keep in this change. Upload publication, admission recovery and PR closure coordinate through the same persisted intent store and upload lock. A future split should introduce explicit publication/session services and retain the cross-operation race tests, rather than move methods into mutually dependent files. |
 | `tools/cli-playground/infra/playground_infra/deploy.py` (309) | Keep for now. Configuration, release validation and deployment form one small operator entry point, and deployment is deliberately disabled during the staged extraction. Revisit the release-validation boundary when production activation is implemented. |
 | `tools/cli-playground/frontend/e2e/playground.spec.ts` (514) | Keep. End-to-end scenarios share browser setup and cover the same preview/terminal journey. Split by build-state and terminal interactions if those suites grow independently. |
 | `tools/cli-playground/frontend/src/terminal/session.test.ts` (358) | Keep. Cohesive state-machine tests with shared fake socket/terminal setup; production session logic is already separate. |

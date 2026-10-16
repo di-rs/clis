@@ -23,7 +23,9 @@ def test_real_isolated_installation(
 
     service = ROOT / "tools" / package
     if package == "cli-playground":
-        assert (service / "playground/static/index.html").is_file(), "Build the real frontend first"
+        assert (service / "src/playground/static/index.html").is_file(), (
+            "Build the real frontend first"
+        )
     wheels = tmp_path / "wheels"
     environment = {
         key: value for key, value in os.environ.items() if key not in {"PYTHONPATH", "VIRTUAL_ENV"}
