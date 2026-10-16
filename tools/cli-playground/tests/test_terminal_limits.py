@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from playground.boxie_client import TerminalPort
 from starlette.websockets import WebSocketDisconnect
 from websockets.asyncio.client import connect
+from websockets.exceptions import ConnectionClosed
 from websockets.typing import Origin
 
 from .boxie_network import admit, boxie_network, product_server, publish, socket_url
@@ -121,3 +122,104 @@ def test_product_defensive_cap_reports_limit_for_misbehaving_peer(
         }
         with pytest.raises(WebSocketDisconnect):
             ws.receive_bytes()
+
+
+@pytest.mark.parametrize(
+    "phase,kind,close_code",
+    [("before", "ack", 1000), ("after", "ack", 1011)]
+    + [
+        (phase, kind, 1000)
+        for phase in ("during", "after")
+        for kind in ("ack", "heartbeat", "input", "resize")
+    ],
+)
+def test_final_control_preserves_buffered_product_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str, kind: str, close_code: int
+) -> None:
+    from urllib.parse import urlsplit
+
+    from boxie_test_support.terminal_completion import CompletionBarrier
+    from playground.boxie_client import HttpTerminal
+
+    async def exercise() -> None:
+        barrier = CompletionBarrier(monkeypatch, HttpTerminal, phase, kind, close_code)
+        async with boxie_network(tmp_path / "agent") as network:
+            profiles = json.loads(network.config.profiles_file.read_text())
+            profiles["shell"]["limits"] = {"output_bytes": 10}
+            network.config.profiles_file.write_text(json.dumps(profiles))
+            network.agent.profiles.reload()
+            async with product_server(tmp_path / "product", str(network.api.base_url)) as product:
+                barrier.port = urlsplit(str(product.http.base_url)).port
+                identifier = (await publish(product, "a" * 40)).json()["id"]
+                binding = await admit(product, identifier, "a" * 40)
+                async with connect(
+                    socket_url(product, identifier, binding),
+                    origin=Origin(str(product.http.base_url).rstrip("/")),
+                ) as ws:
+                    await ws.send(json.dumps({"type": "auth", "credential": binding["credential"]}))
+                    assert json.loads(await ws.recv())["type"] == "authenticated"
+                    epoch, initial = await attach(ws)
+                    assert initial == b"ready\n"
+                    next(iter(network.daemon.terminals.values())).queue.put_nowait(b"last")
+                    assert await asyncio.wait_for(ws.recv(), 1) == (2).to_bytes(8, "big") + b"last"
+                    if close_code != 1000:
+                        with pytest.raises(ConnectionClosed):
+                            await barrier.finish(ws, epoch)
+                        assert ws.close_code == 1011
+                        return
+                    assert json.loads(await barrier.finish(ws, epoch)) == {
+                        "type": "status",
+                        "reason": "output_limit",
+                        "message": "Session ended: output_limit.",
+                    }
+                    await asyncio.wait_for(ws.wait_closed(), 1)
+                    assert ws.close_code == 1000
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "stale-epoch",
+        "future-ack",
+        "backward-ack",
+        "stale-heartbeat",
+        "stale-input",
+        "stale-resize",
+        "flood-stalled",
+        "detach",
+        "malformed",
+        "disconnect",
+        "transport-error",
+        "send-timeout",
+        "missing-status",
+        "stalled-status",
+    ],
+)
+def test_closed_product_control_drain_keeps_abort_and_error_boundaries(
+    monkeypatch: pytest.MonkeyPatch, scenario: str
+) -> None:
+    from boxie_test_support.terminal_completion import failed_drain
+    from playground import routes
+    from playground.boxie_client import BoxieUnavailable, TerminalWriteClosed
+
+    async def exercise() -> None:
+        monkeypatch.setattr(routes, "TERMINAL_DRAIN_TIMEOUT", 0.02)
+        result = await failed_drain(
+            routes.bridge_terminal,
+            TerminalWriteClosed("closed"),
+            BoxieUnavailable("transport failed"),
+            scenario,
+            None,
+        )
+        if scenario == "malformed":
+            assert isinstance(result, ValueError)
+        elif scenario == "disconnect":
+            assert isinstance(result, WebSocketDisconnect)
+        elif scenario in {"send-timeout", "stalled-status", "flood-stalled"}:
+            assert isinstance(result, TimeoutError)
+        else:
+            assert isinstance(result, BoxieUnavailable)
+
+    asyncio.run(exercise())

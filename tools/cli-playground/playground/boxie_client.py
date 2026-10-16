@@ -19,6 +19,10 @@ class BoxieUnavailable(RuntimeError):
     """A bounded private service call failed; credentials never enter public errors."""
 
 
+class TerminalWriteClosed(BoxieUnavailable):
+    """Boxie closed normally while its final response may still be buffered."""
+
+
 SandboxState = Literal["accepted", "provisioning", "ready", "terminating", "terminated", "failed"]
 TerminationReason = Literal[
     "requested",
@@ -99,8 +103,11 @@ class HttpTerminal:
             raise BoxieUnavailable("invalid terminal response") from error
 
     async def send(self, message: str) -> None:
-        async with asyncio.timeout(10):
-            await self.socket.send(message)
+        try:
+            async with asyncio.timeout(10):
+                await self.socket.send(message)
+        except ConnectionClosedOK:
+            raise TerminalWriteClosed("terminal upstream closed") from None
 
 
 class HttpBoxieClient:

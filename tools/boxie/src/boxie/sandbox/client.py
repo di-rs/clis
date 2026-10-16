@@ -11,10 +11,15 @@ from uuid import UUID
 import httpx
 from pydantic import ValidationError
 from websockets.asyncio.client import ClientConnection, connect
-from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidStatus
+from websockets.exceptions import (
+    ConnectionClosed,
+    ConnectionClosedOK,
+    InvalidHandshake,
+    InvalidStatus,
+)
 
 from boxie.application.service import TerminalConnection
-from boxie.domain.errors import BoxieError
+from boxie.domain.errors import BoxieError, TerminalWriteClosed
 from boxie.domain.models import (
     AgentIdentity,
     ArtifactPutResult,
@@ -69,6 +74,8 @@ class AgentTerminal:
         try:
             async with asyncio.timeout(self._timeout):
                 await self._connection.send(data)
+        except ConnectionClosedOK:
+            raise TerminalWriteClosed() from None
         except ConnectionClosed, TimeoutError:
             raise dependency_error() from None
 

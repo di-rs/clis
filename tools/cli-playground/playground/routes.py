@@ -30,6 +30,7 @@ from playground.boxie_client import (
     BoxieUnavailable,
     SandboxState,
     TerminalPort,
+    TerminalWriteClosed,
     TerminationReason,
     validate_sandbox,
 )
@@ -47,8 +48,12 @@ from playground.models import (
 from playground.service import PlaygroundService, UploadBusyError, UploadTooLargeError
 from playground.storage import ArtifactConflictError
 from playground.terminal_protocol import (
+    Ack,
     Attached,
     AttachRequest,
+    Heartbeat,
+    Input,
+    Resize,
     TerminalStatus,
     UpstreamAttach,
     control,
@@ -108,6 +113,7 @@ class RequestHostBoundary:
 
 TERMINAL_SEND_TIMEOUT = 10.0
 TERMINAL_CLOSE_TIMEOUT = 2.0
+TERMINAL_DRAIN_TIMEOUT = 2.0
 
 
 async def close_terminal(websocket: WebSocket, code: int = 1000) -> None:
@@ -122,15 +128,22 @@ async def bridge_terminal(
     attached: Callable[[], None] | None = None,
     prepare_attach: Callable[[AttachRequest], str] | None = None,
 ) -> None:
+    epoch: int | None = None
+    highest = acked = 0
+    last_nonce = -1
+    write_closed: TerminalWriteClosed | None = None
+
     async def output() -> None:
+        nonlocal epoch, highest
         forwarded = 0
-        highest = 0
         while (data := await session.receive()) is not None:
             async with asyncio.timeout(TERMINAL_SEND_TIMEOUT):
                 if isinstance(data, str):
                     message = response.validate_json(data)
-                    if isinstance(message, Attached) and attached is not None:
-                        attached()
+                    if isinstance(message, Attached):
+                        epoch = message.epoch
+                        if attached is not None:
+                            attached()
                     value = message.model_dump()
                     if isinstance(message, TerminalStatus):
                         value["message"] = f"Session ended: {message.reason}."
@@ -159,7 +172,11 @@ async def bridge_terminal(
                     )
                     return
 
+        if write_closed is not None:
+            raise write_closed
+
     async def inputs() -> None:
+        nonlocal highest, acked, last_nonce, write_closed
         while True:
             message = await websocket.receive_text()
             if len(message.encode("utf-8")) > 16384:
@@ -169,12 +186,33 @@ async def bridge_terminal(
                 if prepare_attach is None:
                     raise ValueError("attachment ordering is required")
                 wire = prepare_attach(data)
+                highest = acked = data.resume_after
             else:
                 wire = data.model_dump_json()
-            async with asyncio.timeout(TERMINAL_SEND_TIMEOUT):
-                await session.send(wire)
+            try:
+                async with asyncio.timeout(TERMINAL_SEND_TIMEOUT):
+                    await session.send(wire)
+            except TerminalWriteClosed as error:
+                if not (
+                    isinstance(data, (Ack, Heartbeat, Input, Resize))
+                    and data.epoch == epoch
+                    and (not isinstance(data, Ack) or acked <= data.sequence <= highest)
+                    and (not isinstance(data, Heartbeat) or data.nonce > last_nonce)
+                ):
+                    raise
+                write_closed = error
+                # Preserve final output when a valid late control races the close.
+                # EOF without a terminal status is still an upstream failure.
+                async with asyncio.timeout(TERMINAL_DRAIN_TIMEOUT):
+                    await asyncio.shield(output_task)
+                return
+            if isinstance(data, Ack):
+                acked = data.sequence
+            elif isinstance(data, Heartbeat):
+                last_nonce = data.nonce
 
-    tasks = [asyncio.create_task(output()), asyncio.create_task(inputs())]
+    output_task = asyncio.create_task(output())
+    tasks = [output_task, asyncio.create_task(inputs())]
     try:
         done, _pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in done:

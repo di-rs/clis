@@ -103,3 +103,97 @@ def test_large_output_frame_boundaries_preserve_split_unicode_and_ack_window(
                 assert received == data
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    "phase,kind,close_code",
+    [("before", "ack", 1000), ("after", "ack", 1011)]
+    + [
+        (phase, kind, 1000)
+        for phase in ("during", "after")
+        for kind in ("ack", "heartbeat", "input", "resize")
+    ],
+)
+def test_final_control_preserves_buffered_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str, kind: str, close_code: int
+) -> None:
+    from urllib.parse import urlsplit
+
+    from boxie.sandbox.client import AgentTerminal
+    from boxie_test_support.terminal_completion import CompletionBarrier
+
+    async def exercise() -> None:
+        barrier = CompletionBarrier(monkeypatch, AgentTerminal, phase, kind, close_code)
+        async with network(tmp_path) as net:
+            profiles = json.loads(net.config.profiles_file.read_text())
+            profiles["shell"]["limits"] = {"output_bytes": 10}
+            net.config.profiles_file.write_text(json.dumps(profiles))
+            net.agent.profiles.reload()
+            barrier.port = urlsplit(str(net.api.base_url)).port
+            identifier = await create(net.api, await artifact(net.api))
+            await ready(net.api, identifier)
+            async with connect(
+                terminal_url(net.api, identifier), additional_headers=CONSUMER_AUTH
+            ) as ws:
+                epoch, initial = await attach(ws, order=1)
+                assert initial == b"ready\n"
+                next(iter(net.daemon.streams.values())).queue.put_nowait(b"last")
+                assert await asyncio.wait_for(ws.recv(), 1) == (2).to_bytes(8, "big") + b"last"
+                if close_code != 1000:
+                    with pytest.raises(ConnectionClosed):
+                        await barrier.finish(ws, epoch)
+                    assert ws.close_code == 1011
+                    return
+                assert json.loads(await barrier.finish(ws, epoch)) == {
+                    "type": "status",
+                    "reason": "output_limit",
+                }
+                await asyncio.wait_for(ws.wait_closed(), 1)
+                assert ws.close_code == 1000
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "stale-epoch",
+        "future-ack",
+        "backward-ack",
+        "stale-heartbeat",
+        "stale-input",
+        "stale-resize",
+        "flood-stalled",
+        "detach",
+        "malformed",
+        "disconnect",
+        "transport-error",
+        "send-timeout",
+        "missing-status",
+        "stalled-status",
+    ],
+)
+def test_closed_control_drain_keeps_abort_and_error_boundaries(
+    monkeypatch: pytest.MonkeyPatch, scenario: str
+) -> None:
+    from boxie.api import terminal
+    from boxie.domain.errors import BoxieError, TerminalWriteClosed
+    from boxie_test_support.terminal_completion import failed_drain
+
+    async def exercise() -> None:
+        monkeypatch.setattr(terminal, "DRAIN_TIMEOUT", 0.02)
+        result = await failed_drain(
+            terminal.proxy,
+            TerminalWriteClosed(),
+            BoxieError(503, "transport failed"),
+            scenario,
+            BoxieError(503, "missing status"),
+        )
+        if scenario in {"malformed", "disconnect"}:
+            assert result is None
+        elif scenario in {"send-timeout", "stalled-status", "flood-stalled"}:
+            assert isinstance(result, TimeoutError)
+        else:
+            assert isinstance(result, BoxieError)
+
+    asyncio.run(exercise())
