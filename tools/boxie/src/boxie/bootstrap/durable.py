@@ -16,7 +16,7 @@ from temporalio.service import TLSConfig
 from boxie.bootstrap.config import DurableConfig, read_credential
 from boxie.domain.models import OrchestratorIdentity
 from boxie.persistence.database import SessionFactory, database
-from boxie.sandbox.durable_client import DurableOrchestratorClient
+from boxie.sandbox.transport.client import OrchestratorClient
 from boxie.temporal.contracts import TASK_QUEUE
 
 # Temporal 1.32.0's matching long poll defaults to 60 seconds. Poller access
@@ -56,7 +56,7 @@ async def temporal_client(config: DurableConfig, *, lazy: bool = False) -> Clien
 
 
 class Dependencies:
-    def __init__(self, orchestrator: DurableOrchestratorClient, temporal: Client) -> None:
+    def __init__(self, orchestrator: OrchestratorClient, temporal: Client) -> None:
         self.orchestrator, self.temporal = orchestrator, temporal
 
     async def __call__(self) -> bool:

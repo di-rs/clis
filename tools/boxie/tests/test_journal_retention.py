@@ -41,24 +41,30 @@ def test_final_record_requires_receipt_and_settled_sessions(tmp_path: Path) -> N
         orchestrator, request, _, _, guard = await setup(tmp_path)
         await settled(orchestrator, request.ref, SandboxState.READY)
         await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
-        await asyncio.gather(*orchestrator.workers.values())
+        await asyncio.gather(
+            *(
+                runtime.worker
+                for runtime in orchestrator.runtimes.values()
+                if runtime.worker is not None
+            )
+        )
         await orchestrator.compact()
         assert request.ref.id in orchestrator.records
         guard.receipt = True
-        orchestrator.sessions[request.ref.id] = 1
+        orchestrator.runtimes[request.ref.id].sessions = 1
         await orchestrator.compact()
         assert request.ref.id in orchestrator.records
-        orchestrator.sessions.clear()
+        orchestrator.runtimes[request.ref.id].sessions = 0
         await orchestrator.compact()
-        assert not orchestrator.records and not orchestrator.locks and not orchestrator.workers
+        assert not orchestrator.records and not orchestrator.runtimes
         assert json.loads(orchestrator.journal.path.read_bytes())["records"] == []
         guard.missing = True
         with pytest.raises(BoxieError):
             await orchestrator.ensure(request)
-        assert not orchestrator.records and not orchestrator.locks
+        assert not orchestrator.records and not orchestrator.runtimes
         with pytest.raises(BoxieError):
             await orchestrator.inspect(SandboxRef(uuid4(), 1))
-        assert not orchestrator.locks
+        assert not orchestrator.runtimes
         await orchestrator.close()
 
     asyncio.run(exercise())
@@ -72,7 +78,13 @@ def test_compaction_failure_preserves_barrier_and_readiness(
         orchestrator, request, _, _, guard = await setup(tmp_path)
         await settled(orchestrator, request.ref, SandboxState.READY)
         await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
-        await asyncio.gather(*orchestrator.workers.values())
+        await asyncio.gather(
+            *(
+                runtime.worker
+                for runtime in orchestrator.runtimes.values()
+                if runtime.worker is not None
+            )
+        )
         guard.receipt = True
         save = orchestrator.journal.save
 
@@ -84,14 +96,14 @@ def test_compaction_failure_preserves_barrier_and_readiness(
         monkeypatch.setattr(orchestrator.journal, "save", fail)
         await orchestrator.compact()
         assert request.ref.id in orchestrator.records and not orchestrator.execution_ready
-        from boxie.sandbox.execution import ExecutionJournal
+        from boxie.sandbox.execution.journal import ExecutionJournal
 
         recovered = ExecutionJournal(orchestrator.journal.path, orchestrator.config.identity)
         assert (request.ref.id in recovered.records) is not after_replace
         # An ambiguous successful replacement is safe across process loss: fresh
         # ensure still consults the immutable SQL guard and cannot resurrect it.
         if after_replace:
-            from boxie.sandbox.lifecycle import DurableOrchestrator
+            from boxie.sandbox.execution.orchestrator import DurableOrchestrator
 
             replacement = DurableOrchestrator(
                 orchestrator.config,
@@ -118,7 +130,8 @@ def test_compaction_failure_preserves_barrier_and_readiness(
 def test_admission_ceiling_serializes_live_and_cleanup_headroom(tmp_path: Path) -> None:
     from dataclasses import replace
 
-    from boxie.sandbox.execution import ExecutionRecord
+    from boxie.sandbox.execution.journal import ExecutionRecord
+    from boxie.sandbox.execution.runtime import ExecutionRuntime
 
     async def exercise() -> None:
         orchestrator, request, _, _, guard = await setup(tmp_path)
@@ -131,6 +144,7 @@ def test_admission_ceiling_serializes_live_and_cleanup_headroom(tmp_path: Path) 
             record = ExecutionRecord.model_validate(original.model_dump())
             record.id = uuid4()
             orchestrator.records[record.id] = record
+            orchestrator.runtimes[record.id] = ExecutionRuntime(orchestrator, record)
         orchestrator._save()
         requests = [replace(request, ref=SandboxRef(uuid4(), 1)) for _ in range(10)]
         results = await asyncio.gather(
@@ -145,7 +159,13 @@ def test_admission_ceiling_serializes_live_and_cleanup_headroom(tmp_path: Path) 
         )
         assert len(orchestrator.records) == 136 and not orchestrator.execution_ready
         assert sum(isinstance(r, BoxieError) and r.status == 503 for r in results) == 4
-        await asyncio.gather(*orchestrator.workers.values())
+        await asyncio.gather(
+            *(
+                runtime.worker
+                for runtime in orchestrator.runtimes.values()
+                if runtime.worker is not None
+            )
+        )
         more = replace(request, ref=SandboxRef(uuid4(), 1))
         with pytest.raises(BoxieError) as error:
             await orchestrator.ensure(more)
@@ -157,7 +177,7 @@ def test_admission_ceiling_serializes_live_and_cleanup_headroom(tmp_path: Path) 
 
 def test_report_response_after_forgetting_cannot_recreate_state(tmp_path: Path) -> None:
     import httpx
-    from boxie.sandbox.reporting import ObservationReporter
+    from boxie.sandbox.transport.reporting import ObservationReporter
 
     async def exercise() -> None:
         orchestrator, request, _, _, _ = await setup(tmp_path)
@@ -210,7 +230,7 @@ def test_final_reader_callback_settles_before_forgetting(tmp_path: Path) -> None
     async def exercise() -> None:
         orchestrator, request, daemon, _, guard = await setup(tmp_path)
         await settled(orchestrator, request.ref, SandboxState.READY)
-        terminal = orchestrator.terminals[request.ref.id]
+        terminal = orchestrator.runtimes[request.ref.id].pty
         original = terminal.terminate
         entered, release = asyncio.Event(), asyncio.Event()
 
@@ -243,7 +263,7 @@ def test_active_final_protocol_session_blocks_compaction(
 ) -> None:
     from uuid import UUID
 
-    from boxie.sandbox import terminal_session
+    from boxie.sandbox.terminal import session as terminal_session
     from boxie_test_support.api import CONSUMER_AUTH, artifact, create, ready, terminal_url
     from boxie_test_support.terminal_network import attach, network
     from websockets.asyncio.client import connect
@@ -270,13 +290,16 @@ def test_active_final_protocol_session_blocks_compaction(
                 await net.orchestrator.remove(ref, TerminationReason.REQUESTED)
                 await asyncio.wait_for(entered.wait(), 2)
                 await net.orchestrator.compact()
-                assert ref.id in net.orchestrator.records and net.orchestrator.sessions[ref.id] == 1
+                assert (
+                    ref.id in net.orchestrator.records
+                    and net.orchestrator.runtimes[ref.id].sessions == 1
+                )
                 release.set()
             for _ in range(100):
-                if not net.orchestrator.sessions:
+                if not any(r.sessions for r in net.orchestrator.runtimes.values()):
                     break
                 await asyncio.sleep(0.01)
-            assert not net.orchestrator.sessions
+            assert not any(r.sessions for r in net.orchestrator.runtimes.values())
             await net.orchestrator.compact()
             assert not net.orchestrator.records
 
@@ -288,16 +311,16 @@ def test_unknown_create_deleted_during_failed_save_remains_uncertain_after_resta
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def exercise() -> None:
-        from boxie.sandbox.lifecycle import DurableOrchestrator
+        from boxie.sandbox.execution.orchestrator import DurableOrchestrator
 
         orchestrator, request, daemon, clock, guard = await setup(tmp_path)
         daemon.create_gate = asyncio.Event()
         daemon.lost_ack = True
         await daemon.create_entered.wait()
-        orchestrator.workers[request.ref.id].cancel()
-        await asyncio.gather(orchestrator.workers[request.ref.id], return_exceptions=True)
+        orchestrator.runtimes[request.ref.id].worker.cancel()
+        await asyncio.gather(orchestrator.runtimes[request.ref.id].worker, return_exceptions=True)
         daemon.create_gate.set()
-        await orchestrator.creates[request.ref.id]
+        await orchestrator.runtimes[request.ref.id].create
         assert daemon.resources and not daemon.started
         disk = orchestrator.journal.path.read_bytes()
         assert json.loads(disk)["records"][0]["creation_uncertain"]
@@ -335,7 +358,7 @@ def test_unknown_create_deleted_during_failed_save_remains_uncertain_after_resta
         pending = await recovered.inspect(request.ref)
         assert pending.cleanup_pending and not pending.removal_confirmed
         assert recovered.records[request.ref.id].creation_uncertain
-        assert not recovered.terminals and not daemon.started
+        assert not any(r.terminal for r in recovered.runtimes.values()) and not daemon.started
         await recovered.compact()
         assert request.ref.id in recovered.records
         await recovered.close()
@@ -348,7 +371,13 @@ def test_receipt_error_and_changed_version_never_authorize_forgetting(tmp_path: 
         orchestrator, request, _, _, guard = await setup(tmp_path)
         await settled(orchestrator, request.ref, SandboxState.READY)
         await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
-        await asyncio.gather(*orchestrator.workers.values())
+        await asyncio.gather(
+            *(
+                runtime.worker
+                for runtime in orchestrator.runtimes.values()
+                if runtime.worker is not None
+            )
+        )
 
         async def unavailable(request: Any) -> bool:
             raise OSError("receipt unavailable")
@@ -410,5 +439,38 @@ def test_failed_cleanup_initialization_keeps_pending_without_creating(
         assert (await orchestrator.inspect(request.ref)).removal_confirmed
         assert daemon.creates == 1
         await orchestrator.close()
+
+    asyncio.run(exercise())
+
+
+def test_cancelled_terminal_session_releases_retention_ownership(tmp_path: Path) -> None:
+    """Cancellation must release the session pin without discarding cleanup evidence."""
+    from test_orchestrator_lifecycle import settled, setup
+
+    async def exercise() -> None:
+        orchestrator, request, _, _, guard = await setup(tmp_path)
+        await settled(orchestrator, request.ref, SandboxState.READY)
+        entered = asyncio.Event()
+
+        async def hold() -> None:
+            with orchestrator.terminal_session(request.ref):
+                entered.set()
+                await asyncio.Event().wait()
+
+        task = asyncio.create_task(hold())
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
+            guard.receipt = True
+            await orchestrator.compact()
+            assert request.ref.id in orchestrator.records
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await orchestrator.compact()
+            assert request.ref.id not in orchestrator.records
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await orchestrator.close()
 
     asyncio.run(exercise())

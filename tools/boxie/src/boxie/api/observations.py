@@ -1,15 +1,9 @@
 """Orchestrator-only observation ingress; consumer credentials cannot publish execution facts."""
 
-from typing import Protocol
-
 from fastapi import APIRouter
 
-from boxie.domain.lifecycle import OrchestratorObservation
-from boxie.sandbox.protocol import ObservationWire
-
-
-class ObservationSink(Protocol):
-    async def record_observation(self, observation: OrchestratorObservation) -> bool: ...
+from boxie.application.ports import ObservationSink
+from boxie.contracts.execution import ObservationWire
 
 
 def observation_routes(sink: ObservationSink) -> APIRouter:

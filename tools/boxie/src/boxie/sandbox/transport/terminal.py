@@ -9,8 +9,8 @@ from websockets.exceptions import (
     ConnectionClosedOK,
 )
 
+from boxie.contracts.terminal import TerminalEvent, response
 from boxie.domain.errors import BoxieError, TerminalWriteClosed
-from boxie.sandbox.terminal_protocol import response
 
 
 def dependency_error() -> BoxieError:
@@ -26,11 +26,11 @@ class OrchestratorTerminal:
     def __init__(self, connection: ClientConnection, timeout: float) -> None:
         self._connection, self._timeout = connection, timeout
 
-    async def receive(self) -> bytes | str:
+    async def receive(self) -> bytes | TerminalEvent:
         try:
             message = await self._connection.recv()
             if isinstance(message, str):
-                return response.validate_json(message).model_dump_json()
+                return response.validate_json(message)
             return message
         except ConnectionClosed:
             raise dependency_error() from None

@@ -310,3 +310,27 @@ Docker build, trusted generic profile and installed operator smoke commands.
 `boxie` and `cli-playground` are independent runtime distributions; neither image
 installs an infrastructure package. The root lockfile pins both builds. Production
 activation remains unavailable until PR4.
+
+## Source organization
+
+The consumer API and agent transport share explicit wire contracts under
+`boxie/contracts/`; Playground keeps its own consumer models and has no Boxie
+runtime dependency. `application/ports.py` defines the interfaces consumed by the
+API. Routes receive those interfaces directly.
+
+The agent implementation is grouped by responsibility:
+
+- `sandbox/execution/`: coordination, one runtime owner per sandbox, journal,
+  provisioning, physical reconciliation and retention.
+- `sandbox/terminal/`: PTY reader, bounded replay and WebSocket session delivery.
+- `sandbox/transport/`: authenticated agent client/server and observation reporting.
+- `bootstrap/`: configuration loading, dependency construction, readiness probes
+  and background service startup/shutdown.
+
+Each `ExecutionRuntime` owns its locks, deadlines, tasks, terminal and session
+references. Persisted `ExecutionRecord` values retain the existing journal format.
+A terminal session pins its runtime until WebSocket delivery and closing finish;
+retention requires settled local work, a saved removal confirmation and the
+existing control-plane receipt before removing the record and runtime together.
+Network adapters validate incoming terminal controls once and return typed events
+to relays, which serialize them for the next connection.

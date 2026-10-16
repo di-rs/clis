@@ -163,9 +163,9 @@ def test_workflow_cleanup_preserves_first_termination_cause(
         from uuid import UUID
 
         from boxie.bootstrap.worker import lifecycle_worker
+        from boxie.contracts.execution import ObservationWire
         from boxie.domain.lifecycle import OrchestratorObservation
         from boxie.domain.models import SandboxState, TerminationReason
-        from boxie.sandbox.protocol import ObservationWire
         from boxie.temporal.workflows import SandboxLifecycle
         from boxie_test_support.api import artifact, create
         from temporal_support import durable_stack
@@ -747,9 +747,9 @@ def test_authenticated_observations_are_atomic_and_fenced(
         from datetime import UTC, datetime
         from uuid import UUID
 
+        from boxie.contracts.execution import ObservationWire
         from boxie.domain.lifecycle import OrchestratorObservation
         from boxie.domain.models import SandboxState
-        from boxie.sandbox.protocol import ObservationWire
         from boxie_test_support.api import artifact, create
         from temporal_support import durable_stack
 

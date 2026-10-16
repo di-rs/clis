@@ -16,11 +16,13 @@ from sqlalchemy.exc import TimeoutError as PoolTimeout
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from boxie.application.durable_lifecycle import (
-    AdmissionProfileResolver,
+from boxie.application.admission import (
     AdmissionReadiness,
     DependencyCheck,
 )
+from boxie.application.ports import AdmissionProfileResolver
+from boxie.contracts.consumer import SpecWire, ViewWire, spec_wire
+from boxie.contracts.execution import SnapshotWire
 from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import DurableRequest, OrchestratorObservation
 from boxie.domain.models import (
@@ -39,7 +41,6 @@ from boxie.persistence.models import (
     Sandbox,
     SandboxArtifactRef,
 )
-from boxie.sandbox.protocol import SnapshotWire, SpecWire, ViewWire, spec_wire
 
 
 @asynccontextmanager

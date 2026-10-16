@@ -1,9 +1,7 @@
 """Authenticated SQL-admitted execution transport. No consumer admission routes."""
 
-import asyncio
 import hmac
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict
 from typing import Annotated
 from uuid import UUID
@@ -11,61 +9,35 @@ from uuid import UUID
 from fastapi import FastAPI, Header, Query, Request, Response, WebSocket
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from sqlmodel import select
 from starlette.middleware.base import RequestResponseEndpoint
+from starlette.types import Lifespan
 
-from boxie.domain.errors import BoxieError
-from boxie.domain.lifecycle import ExpiryRequest, SandboxRef
-from boxie.domain.models import Principal, SandboxState
-from boxie.domain.policy import validate_policy
-from boxie.persistence.postgres_artifacts import PostgresArtifactStore
-from boxie.sandbox.lifecycle import DurableOrchestrator
-from boxie.sandbox.protocol import (
+from boxie.application.ports import ArtifactAccess
+from boxie.contracts.common import ConsumerId
+from boxie.contracts.execution import (
     AdmissionProfileRequest,
-    ConsumerId,
     DurableEnsureWire,
     ExecutionControlWire,
     ExecutionExpiryWire,
     ObservationWire,
     SnapshotWire,
 )
-from boxie.sandbox.reporting import ObservationReporter
-from boxie.sandbox.terminal_session import serve_terminal
+from boxie.domain.errors import BoxieError
+from boxie.domain.lifecycle import ExpiryRequest, SandboxRef
+from boxie.domain.models import Principal
+from boxie.domain.policy import validate_policy
+from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+from boxie.sandbox.terminal.session import serve_terminal
 
 
-def create_durable_orchestrator_app(
+def create_orchestrator_app(
     orchestrator: DurableOrchestrator,
-    artifacts: PostgresArtifactStore,
+    artifacts: ArtifactAccess,
     *,
     credential: bytes,
-    reporter: ObservationReporter,
+    readiness: Callable[[], Awaitable[dict[str, bool]]],
+    lifespan: Lifespan[FastAPI],
 ) -> FastAPI:
-    orchestrator.observer = reporter.offer
-    orchestrator.forget_observation = reporter.forget
-
-    async def collect() -> None:
-        while True:
-            try:
-                await artifacts.collect()
-                await artifacts.collect_orphans()
-            except Exception:
-                pass  # SQL intents remain pending; no deletion/absence is inferred.
-            await asyncio.sleep(30)
-
-    @asynccontextmanager
-    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        await orchestrator.start()
-        reporting = asyncio.create_task(reporter.run())
-        collection = asyncio.create_task(collect())
-        try:
-            yield
-        finally:
-            await orchestrator.close()
-            reporting.cancel()
-            collection.cancel()
-            await asyncio.gather(reporting, collection, return_exceptions=True)
-            await reporter.close()
-
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.orchestrator = orchestrator
 
@@ -99,19 +71,7 @@ def create_durable_orchestrator_app(
 
     @app.get("/readyz")
     async def ready() -> JSONResponse:
-        try:
-            async with asyncio.timeout(5):
-                docker_ready = await orchestrator.docker.ready()
-                async with artifacts.sessions() as session:
-                    await session.exec(select(1))
-                sql_ready = True
-        except Exception:
-            docker_ready = sql_ready = False
-        dependencies = {
-            "docker": docker_ready,
-            "postgres": sql_ready,
-            "execution": orchestrator.execution_ready,
-        }
+        dependencies = await readiness()
         return JSONResponse(
             {
                 "identity": {
@@ -209,17 +169,13 @@ def create_durable_orchestrator_app(
                 JSONResponse({"detail": "invalid orchestrator credential"}, status_code=401)
             )
             return
-        record = orchestrator.records.get(identifier)
-        if record is None or record.consumer_id != consumer_id:
+        try:
+            ref = orchestrator.terminal_ref(Principal(consumer_id), identifier)
+        except BoxieError as error:
             await websocket.send_denial_response(
-                JSONResponse({"detail": "execution not found"}, status_code=404)
+                JSONResponse({"detail": str(error)}, status_code=error.status)
             )
             return
-        if record.state != SandboxState.READY or identifier not in orchestrator.terminals:
-            await websocket.send_denial_response(
-                JSONResponse({"detail": "terminal unavailable"}, status_code=409)
-            )
-            return
-        await serve_terminal(websocket, orchestrator, record.ref)
+        await serve_terminal(websocket, orchestrator, ref)
 
     return app

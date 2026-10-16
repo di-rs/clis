@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from boxie.domain.lifecycle import OrchestratorObservation
 from boxie.domain.models import TerminationReason
 from boxie.sandbox.docker import TerminalPort
-from boxie.sandbox.replay import ReplayBuffer
+from boxie.sandbox.terminal.replay import ReplayBuffer
 
 
 class ExecutionTerminal:

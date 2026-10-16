@@ -3,13 +3,11 @@
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 from uuid import UUID, uuid4
 
-from boxie.bootstrap.config import OrchestratorConfig
 from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import (
     EnsureRequest,
@@ -19,15 +17,20 @@ from boxie.domain.lifecycle import (
     SandboxRef,
     StartGuard,
 )
-from boxie.domain.models import Principal, SandboxState, TerminationReason
+from boxie.domain.models import (
+    LifetimePolicy,
+    OrchestratorIdentity,
+    Principal,
+    SandboxState,
+    TerminationReason,
+)
 from boxie.domain.policy import validate_policy
 from boxie.sandbox.docker import ExecutionDocker
-from boxie.sandbox.execution import ExecutionJournal, ExecutionRecord
+from boxie.sandbox.execution.journal import ExecutionJournal, ExecutionRecord
+from boxie.sandbox.execution.reconcile import reconcile_removal
+from boxie.sandbox.execution.retention import MAX_RECORDS, compact
+from boxie.sandbox.execution.runtime import Deadlines, ExecutionRuntime, TerminalSession
 from boxie.sandbox.profiles import ProfileRegistry
-from boxie.sandbox.provision import ProvisionDecisions, provision
-from boxie.sandbox.reconcile import reconcile_removal
-from boxie.sandbox.retention import MAX_RECORDS, compact
-from boxie.sandbox.terminal import ExecutionTerminal
 
 logger = logging.getLogger(__name__)
 
@@ -35,18 +38,27 @@ FINAL = {SandboxState.TERMINATED, SandboxState.FAILED}
 ArtifactPath = Callable[[Principal, UUID], Awaitable[Path]]
 
 
-@dataclass
-class Deadlines:
-    absolute: float
-    lease: float
-    idle: float | None = None
-    disconnect: float | None = None
+class ExecutionConfig(Protocol):
+    """Runtime settings supplied by composition; transport credentials stay outside."""
+
+    @property
+    def data_dir(self) -> Path: ...
+    @property
+    def profiles_file(self) -> Path: ...
+    @property
+    def identity(self) -> OrchestratorIdentity: ...
+    @property
+    def policy_maximum(self) -> LifetimePolicy: ...
+    @property
+    def docker_timeout(self) -> float: ...
+    @property
+    def sweep_seconds(self) -> float: ...
 
 
 class DurableOrchestrator:
     def __init__(
         self,
-        config: OrchestratorConfig,
+        config: ExecutionConfig,
         docker: ExecutionDocker,
         artifact_path: ArtifactPath,
         guard: StartGuard,
@@ -64,25 +76,17 @@ class DurableOrchestrator:
         self.journal = ExecutionJournal(config.data_dir / "execution.json", config.identity)
         self.records = self.journal.records
         self.admission_lock = asyncio.Lock()
-        self.sessions: dict[UUID, int] = {}
-        self.durable_versions = {key: value.event_version for key, value in self.records.items()}
+        self.runtimes = {
+            key: ExecutionRuntime(self, record, durable_version=record.event_version)
+            for key, record in self.records.items()
+        }
         self.forget_observation: Callable[[UUID], None] | None = None
         self._input_flush_at: float | None = None
-        self.deadlines: dict[UUID, Deadlines] = {}
-        self.locks: dict[UUID, asyncio.Lock] = {}
-        self.cleanup_locks: dict[UUID, asyncio.Lock] = {}
-        self.workers: dict[UUID, asyncio.Task[None]] = {}
-        self.creates: dict[UUID, asyncio.Task[None]] = {}
-        self.terminals: dict[UUID, ExecutionTerminal] = {}
-        self.terminal_readers: dict[UUID, asyncio.Task[None]] = {}
-        self.reconciliations: dict[UUID, asyncio.Task[None]] = {}
         self.sweeper: asyncio.Task[None] | None = None
         self.compactor: asyncio.Task[None] | None = None
         self.stopping = False
         self.observer: Callable[[OrchestratorObservation], None] | None = None
-        self._reported: dict[UUID, int] = {}
         self._journal_healthy = True
-        self._failed_reconciliations: set[UUID] = set()
 
     def _record(self, ref: SandboxRef) -> ExecutionRecord:
         record = self.records.get(ref.id)
@@ -92,7 +96,23 @@ class DurableOrchestrator:
 
     def _lock(self, ref: SandboxRef) -> asyncio.Lock:
         self._record(ref)
-        return self.locks.setdefault(ref.id, asyncio.Lock())
+        return self.runtimes[ref.id].lock
+
+    @property
+    def reconciliation_failed(self) -> bool:
+        return any(runtime.reconciliation_failed for runtime in self.runtimes.values())
+
+    def terminal_ref(self, principal: Principal, identifier: UUID) -> SandboxRef:
+        record = self.records.get(identifier)
+        if record is None or record.consumer_id != principal.consumer_id:
+            raise BoxieError(404, "execution not found")
+        if record.state != SandboxState.READY or self.runtimes[identifier].terminal is None:
+            raise BoxieError(409, "terminal unavailable")
+        return record.ref
+
+    def terminal_session(self, ref: SandboxRef) -> TerminalSession:
+        self._record(ref)
+        return TerminalSession(self.runtimes[ref.id])
 
     @property
     def execution_ready(self) -> bool:
@@ -105,7 +125,7 @@ class DurableOrchestrator:
         return (
             not self.stopping
             and self._journal_healthy
-            and not self._failed_reconciliations
+            and not self.reconciliation_failed
             and len(self.records) < MAX_RECORDS
         )
 
@@ -121,12 +141,13 @@ class DurableOrchestrator:
             logger.info("execution journal persistence recovered")
         self._journal_healthy = True
         self._input_flush_at = None
-        self.durable_versions = {key: value.event_version for key, value in self.records.items()}
+        for key, record in self.records.items():
+            self.runtimes[key].durable_version = record.event_version
         if self.observer:
             for record in self.records.values():
-                if self._reported.get(record.id) != record.event_version:
+                if self.runtimes[record.id].reported_version != record.event_version:
                     self.observer(self._observation(record))
-                    self._reported[record.id] = record.event_version
+                    self.runtimes[record.id].reported_version = record.event_version
 
     def _changed(self, record: ExecutionRecord) -> None:
         record.event_version += 1
@@ -192,7 +213,7 @@ class DurableOrchestrator:
             if (
                 self.stopping
                 or not self._journal_healthy
-                or (mode == "execute" and self._failed_reconciliations)
+                or (mode == "execute" and self.reconciliation_failed)
                 or len(self.records) >= limit
             ):
                 raise BoxieError(503, "orchestrator execution unavailable")
@@ -203,9 +224,13 @@ class DurableOrchestrator:
                 record.cleanup_pending = True
                 record.reason = mode
             self.records[record.id] = record
-            self.deadlines[record.id] = Deadlines(
-                self.monotonic() + max(0, (request.absolute_deadline - now).total_seconds()),
-                self.monotonic() + 90,
+            self.runtimes[record.id] = ExecutionRuntime(
+                self,
+                record,
+                deadlines=Deadlines(
+                    self.monotonic() + max(0, (request.absolute_deadline - now).total_seconds()),
+                    self.monotonic() + 90,
+                ),
             )
             try:
                 self._save()
@@ -217,13 +242,13 @@ class DurableOrchestrator:
                 record.reason = TerminationReason.PROVISIONING_FAILED
                 record.event_version += 1
                 raise BoxieError(503, "orchestrator execution unavailable") from None
-            self.workers[record.id] = asyncio.create_task(
-                self._provision(record) if mode == "execute" else self._cleanup(record)
+            self.runtimes[record.id].worker = asyncio.create_task(
+                self.runtimes[record.id].provision() if mode == "execute" else self._cleanup(record)
             )
             return self._observation(record)
 
     def _expiry(self, record: ExecutionRecord) -> TerminationReason | None:
-        timers = self.deadlines.get(record.id)
+        timers = self.runtimes[record.id].deadlines
         if timers is None:
             return TerminationReason.ORCHESTRATOR_RESTART
         choices = [
@@ -241,31 +266,10 @@ class DurableOrchestrator:
         return (
             not self.stopping
             and self._journal_healthy
-            and not self._failed_reconciliations
+            and not self.reconciliation_failed
             and record.boot_id == self.boot_id
             and record.state not in FINAL | {SandboxState.TERMINATING}
             and self._expiry(record) is None
-        )
-
-    async def _provision(self, record: ExecutionRecord) -> None:
-        await provision(
-            record,
-            self.docker,
-            self.artifact_path,
-            self.guard,
-            self.boot_id,
-            self.config.docker_timeout,
-            ProvisionDecisions(
-                self._lock,
-                self._live,
-                self._expiry,
-                self._changed,
-                self.remove,
-                self._cleanup,
-                self._ready,
-                self.creates.__setitem__,
-                self.terminals.__setitem__,
-            ),
         )
 
     async def _ready(self, record: ExecutionRecord) -> bool:
@@ -274,7 +278,8 @@ class DurableOrchestrator:
                 return False
             now = self.clock()
             record.state, record.ready_at, record.disconnected_at = SandboxState.READY, now, now
-            timers = self.deadlines[record.id]
+            timers = self.runtimes[record.id].deadlines
+            assert timers is not None
             timers.idle = self.monotonic() + record.spec.policy.idle_seconds
             timers.disconnect = self.monotonic() + record.spec.policy.disconnect_seconds
             self._changed(record)
@@ -302,19 +307,20 @@ class DurableOrchestrator:
         return await self.inspect(ref)
 
     async def _cleanup(self, record: ExecutionRecord) -> None:
-        async with self.cleanup_locks.setdefault(record.id, asyncio.Lock()):
+        async with self.runtimes[record.id].cleanup_lock:
             if record.state in FINAL:
                 return
-            terminal = self.terminals.pop(record.id, None)
+            runtime = self.runtimes[record.id]
+            terminal, runtime.terminal = runtime.terminal, None
             if terminal:
                 if terminal.reader:
-                    self.terminal_readers[record.id] = terminal.reader
+                    runtime.terminal_reader = terminal.reader
                 try:
                     async with asyncio.timeout(self.config.docker_timeout):
                         await terminal.close()
                 except Exception:
                     pass
-            create = self.creates.get(record.id)
+            create = runtime.create
             try:
                 await reconcile_removal(
                     self.docker,
@@ -354,7 +360,7 @@ class DurableOrchestrator:
             record = self._record(ref)
             if boot_id != self.boot_id or not self._live(record):
                 raise BoxieError(409, "control lease fence expired")
-            self.deadlines[ref.id].lease = self.monotonic() + 90
+            self.runtimes[ref.id].timers.lease = self.monotonic() + 90
             record.control_lease_until = self.clock() + timedelta(seconds=90)
             self._changed(record)
             return self._observation(record)
@@ -377,11 +383,11 @@ class DurableOrchestrator:
             if not record.attachment_order < attachment_order <= 2**53 - 1:
                 raise BoxieError(409, "terminal attachment order superseded")
             if resume_after is not None:
-                self.terminals[ref.id].replay.after(resume_after)
+                self.runtimes[ref.id].pty.replay.after(resume_after)
             record.attachment_order = attachment_order
             record.attachment_epoch += 1
             record.attached, record.disconnected_at = True, None
-            self.deadlines[ref.id].disconnect = None
+            self.runtimes[ref.id].timers.disconnect = None
             self._changed(record)
             return record.attachment_epoch
 
@@ -405,7 +411,7 @@ class DurableOrchestrator:
             ):
                 record.attached = False
                 record.disconnected_at = self.clock()
-                self.deadlines[ref.id].disconnect = (
+                self.runtimes[ref.id].timers.disconnect = (
                     self.monotonic() + record.spec.policy.disconnect_seconds
                 )
                 self._changed(record)
@@ -424,9 +430,11 @@ class DurableOrchestrator:
             record = self._record(ref)
             self._attachment(record, epoch)
             async with asyncio.timeout(self.config.docker_timeout):
-                await self.terminals[ref.id].stream.write(data)
+                await self.runtimes[ref.id].pty.stream.write(data)
             if source == "user" and self._live(record):
-                self.deadlines[ref.id].idle = self.monotonic() + record.spec.policy.idle_seconds
+                self.runtimes[ref.id].timers.idle = (
+                    self.monotonic() + record.spec.policy.idle_seconds
+                )
                 record.last_input_at = self.clock()
                 record.event_version += 1
                 if self._input_flush_at is None:
@@ -438,7 +446,7 @@ class DurableOrchestrator:
         async with self._lock(ref):
             self._attachment(self._record(ref), epoch)
             async with asyncio.timeout(self.config.docker_timeout):
-                await self.terminals[ref.id].resize(columns, rows)
+                await self.runtimes[ref.id].pty.resize(columns, rows)
 
     async def _reconcile_one(self, record: ExecutionRecord) -> None:
         async with self._lock(record.ref):
@@ -454,11 +462,11 @@ class DurableOrchestrator:
         try:
             await self._reconcile_one(record)
         except Exception:
-            if record.id not in self._failed_reconciliations:
+            if not self.runtimes[record.id].reconciliation_failed:
                 logger.error("sandbox reconciliation failed; retry pending: %s", record.id)
-            self._failed_reconciliations.add(record.id)
+            self.runtimes[record.id].reconciliation_failed = True
         else:
-            self._failed_reconciliations.discard(record.id)
+            self.runtimes[record.id].reconciliation_failed = False
 
     async def reconcile(self) -> None:
         await asyncio.gather(
@@ -490,11 +498,11 @@ class DurableOrchestrator:
             for record in list(self.records.values()):
                 if record.state in FINAL:
                     continue
-                previous = self.reconciliations.get(record.id)
+                previous = self.runtimes[record.id].reconciliation
                 if previous is None or previous.done():
                     # The supervisor consumes and records failures. A cancelled
                     # per-record task is also replaced without ending this loop.
-                    self.reconciliations[record.id] = asyncio.create_task(
+                    self.runtimes[record.id].reconciliation = asyncio.create_task(
                         self._supervised_reconcile(record)
                     )
             delay = min(1, self.config.sweep_seconds)
@@ -519,11 +527,18 @@ class DurableOrchestrator:
                 if r.state not in FINAL
             )
         )
-        for worker in self.workers.values():
+        for worker in (r.worker for r in self.runtimes.values() if r.worker is not None):
             worker.cancel()
         # Cancelling transport does not prove a daemon operation aborted: journal remains pending.
-        for create in self.creates.values():
+        for create in (r.create for r in self.runtimes.values() if r.create is not None):
             create.cancel()
-        await asyncio.gather(*self.workers.values(), *self.creates.values(), return_exceptions=True)
-        await asyncio.gather(*self.reconciliations.values(), return_exceptions=True)
+        await asyncio.gather(
+            *(
+                task
+                for runtime in self.runtimes.values()
+                for task in (runtime.worker, runtime.create, runtime.reconciliation)
+                if task is not None
+            ),
+            return_exceptions=True,
+        )
         await self.docker.close()

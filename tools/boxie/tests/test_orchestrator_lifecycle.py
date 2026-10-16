@@ -17,9 +17,11 @@ from boxie_test_support.orchestrator import Clock, FakeTerminal, configuration
 
 
 async def setup(root: Path, **changes: Any) -> tuple[Any, Any, Daemon, Clock, Guard]:
-    assert importlib.util.find_spec("boxie.sandbox.lifecycle"), "durable execution missing"
+    assert importlib.util.find_spec("boxie.sandbox.execution.orchestrator"), (
+        "durable execution missing"
+    )
     from boxie.domain.lifecycle import EnsureRequest, SandboxRef
-    from boxie.sandbox.lifecycle import DurableOrchestrator
+    from boxie.sandbox.execution.orchestrator import DurableOrchestrator
 
     config = configuration(root, **changes)
     clock, daemon, guard = Clock(), Daemon(), Guard()
@@ -195,7 +197,7 @@ def test_restart_does_not_adopt_pty_or_forget_unknown_create(tmp_path: Path) -> 
     async def exercise() -> None:
         orchestrator, request, daemon, clock, guard = await setup(tmp_path)
         await settled(orchestrator, request.ref, SandboxState.READY)
-        from boxie.sandbox.lifecycle import DurableOrchestrator
+        from boxie.sandbox.execution.orchestrator import DurableOrchestrator
 
         replacement = DurableOrchestrator(
             orchestrator.config, daemon, orchestrator.artifact_path, guard, clock, clock.monotonic
@@ -295,10 +297,10 @@ def test_restart_retains_unknown_create_then_reconciles_late_resource(tmp_path: 
         await daemon.create_entered.wait()
         await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
         # Model process loss: preserve the daemon operation but cancel the waiting worker.
-        worker = orchestrator.workers[request.ref.id]
+        worker = orchestrator.runtimes[request.ref.id].worker
         worker.cancel()
         await asyncio.gather(worker, return_exceptions=True)
-        from boxie.sandbox.lifecycle import DurableOrchestrator
+        from boxie.sandbox.execution.orchestrator import DurableOrchestrator
 
         replacement = DurableOrchestrator(
             orchestrator.config, daemon, orchestrator.artifact_path, guard, clock, clock.monotonic
@@ -306,7 +308,7 @@ def test_restart_retains_unknown_create_then_reconciles_late_resource(tmp_path: 
         await replacement.start()
         assert (await replacement.inspect(request.ref)).cleanup_pending
         daemon.create_gate.set()
-        await asyncio.wait_for(orchestrator.creates[request.ref.id], 1)
+        await asyncio.wait_for(orchestrator.runtimes[request.ref.id].create, 1)
         await replacement.reconcile()
         assert (await replacement.inspect(request.ref)).removal_confirmed
         assert not daemon.started
@@ -357,7 +359,7 @@ def test_stop_during_attach_closes_late_stream(tmp_path: Path) -> None:
             await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
         ).removal_confirmed
         release.set()
-        await asyncio.wait_for(orchestrator.workers[request.ref.id], 1)
+        await asyncio.wait_for(orchestrator.runtimes[request.ref.id].worker, 1)
         assert stream.closed, "late attach must not leak a PTY after confirmed removal"
         assert not daemon.started
         await orchestrator.close()
@@ -399,7 +401,7 @@ def test_slow_cleanup_does_not_delay_another_sandbox_deadline(tmp_path: Path) ->
 
 def test_durable_wire_roundtrip_preserves_fences_and_rejects_naive_times(tmp_path: Path) -> None:
     async def exercise() -> None:
-        from boxie.sandbox import protocol
+        from boxie.contracts import execution as protocol
 
         assert hasattr(protocol, "DurableEnsureWire"), "durable request transport schema missing"
         from pydantic import ValidationError
@@ -478,7 +480,7 @@ def test_output_drain_is_active_before_start_acknowledgement(tmp_path: Path) -> 
 
         daemon.start = start  # type: ignore[method-assign]
         await started.wait()
-        terminal = orchestrator.terminals[request.ref.id]
+        terminal = orchestrator.runtimes[request.ref.id].pty
         try:
             await asyncio.wait_for(terminal.replay.changed.wait(), 0.05)
             assert terminal.replay.after(0)[0].data == b"early output"
@@ -663,7 +665,9 @@ def test_journal_failure_fences_an_already_provisioning_final_start(
             assert pending.cleanup_pending and not pending.removal_confirmed
             assert not orchestrator.execution_ready
             release.set()
-            await asyncio.gather(orchestrator.workers[second.ref.id], return_exceptions=True)
+            await asyncio.gather(
+                orchestrator.runtimes[second.ref.id].worker, return_exceptions=True
+            )
             assert len(daemon.started) == 1, "durability failure must fence a pending start"
         finally:
             monkeypatch.setattr(orchestrator.journal, "save", original_save)

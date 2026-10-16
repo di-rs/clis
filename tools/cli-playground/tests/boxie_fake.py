@@ -8,6 +8,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from playground.boxie_client import SandboxRequest, SandboxView, TerminalPort
+from playground.terminal_protocol import TerminalEvent, response
 
 
 class EchoTerminal:
@@ -15,8 +16,9 @@ class EchoTerminal:
         self.queue: asyncio.Queue[bytes | str] = asyncio.Queue()
         self.sequence = 1
 
-    async def receive(self) -> bytes | str:
-        return await self.queue.get()
+    async def receive(self) -> bytes | TerminalEvent:
+        frame = await self.queue.get()
+        return response.validate_json(frame) if isinstance(frame, str) else frame
 
     async def send(self, message: str) -> None:
         import json

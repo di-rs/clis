@@ -12,7 +12,7 @@ from uuid import uuid4
 import pytest
 from boxie.domain.lifecycle import OrchestratorObservation
 from boxie.domain.models import SandboxState, TerminationReason
-from boxie.sandbox.durable_client import DurableOrchestratorClient
+from boxie.sandbox.transport.client import OrchestratorClient
 from boxie.temporal.activities import LifecycleActivities
 from integration.conftest import postgres_dsn as postgres_dsn
 from integration.conftest import postgres_server as postgres_server
@@ -58,7 +58,7 @@ def test_removal_activity_retries_until_terminal_report_is_persisted(
                 boot=AsyncMock(return_value=boot),
                 remove_execution=AsyncMock(side_effect=[stale, replace(stale, event_version=3)]),
             )
-            activities = LifecycleActivities(life, cast(DurableOrchestratorClient, control))
+            activities = LifecycleActivities(life, cast(OrchestratorClient, control))
             with pytest.raises(ApplicationError, match="cleanup pending"):
                 await activities.remove_sandbox(str(sandbox.id))
             assert await counts(sessions) == (1, 1, 1, 2)

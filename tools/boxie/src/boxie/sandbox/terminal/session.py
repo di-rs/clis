@@ -7,12 +7,7 @@ from contextlib import suppress
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
 
-from boxie.domain.errors import BoxieError
-from boxie.domain.lifecycle import SandboxRef
-from boxie.domain.models import SandboxState
-from boxie.sandbox.lifecycle import DurableOrchestrator
-from boxie.sandbox.replay import StreamGap
-from boxie.sandbox.terminal_protocol import (
+from boxie.contracts.terminal import (
     Ack,
     AttachRequest,
     Detach,
@@ -21,6 +16,12 @@ from boxie.sandbox.terminal_protocol import (
     Resize,
     control,
 )
+from boxie.domain.errors import BoxieError
+from boxie.domain.lifecycle import SandboxRef
+from boxie.domain.models import SandboxState
+from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+from boxie.sandbox.execution.runtime import TerminalSession
+from boxie.sandbox.terminal.replay import StreamGap
 
 SEND_TIMEOUT = 10.0
 CLOSE_TIMEOUT = 2.0
@@ -37,9 +38,17 @@ async def close_socket(websocket: WebSocket, code: int = 1000) -> None:
 async def serve_terminal(
     websocket: WebSocket, orchestrator: DurableOrchestrator, ref: SandboxRef
 ) -> None:
-    orchestrator._record(ref)
-    terminal = orchestrator.terminals[ref.id]
-    orchestrator.sessions[ref.id] = orchestrator.sessions.get(ref.id, 0) + 1
+    with orchestrator.terminal_session(ref) as session:
+        await _serve_terminal(websocket, orchestrator, ref, session)
+
+
+async def _serve_terminal(
+    websocket: WebSocket,
+    orchestrator: DurableOrchestrator,
+    ref: SandboxRef,
+    session: TerminalSession,
+) -> None:
+    terminal = session.terminal
     ring = terminal.replay
     epoch: int | None = None
     tasks: list[asyncio.Task[None]] = []
@@ -93,7 +102,7 @@ async def serve_terminal(
                 await orchestrator.check_attachment(ref, epoch, allow_ended=True)
                 # Late input/resize must not cancel final output/status delivery.
                 # Only ACKs and heartbeat still have work while the terminal drains.
-                if orchestrator.records[ref.id].state != SandboxState.READY and not isinstance(
+                if session.state != SandboxState.READY and not isinstance(
                     message, (Ack, Heartbeat)
                 ):
                     continue
@@ -105,7 +114,7 @@ async def serve_terminal(
                             ref, epoch, message.data.encode(), source=message.source
                         )
                     except BoxieError:
-                        if orchestrator.records[ref.id].reason is None:
+                        if session.reason is None:
                             raise
                 elif isinstance(message, Ack):
                     if not acked <= message.sequence <= cursor:
@@ -188,7 +197,7 @@ async def serve_terminal(
                     try:
                         await orchestrator.resize(ref, epoch, size.cols, size.rows)
                     except BoxieError:
-                        if orchestrator.records[ref.id].reason is None:
+                        if session.reason is None:
                             raise
                         continue
                     await send(
@@ -197,7 +206,7 @@ async def serve_terminal(
                     sent_geometry = (size.cols, size.rows)
                     input_ready = True
                 if ring.closed and cursor == ring.tail:
-                    reason = orchestrator.records[ref.id].reason
+                    reason = session.reason
                     await send({"type": "status", "reason": reason.value if reason else "exited"})
                     return
                 await ring.changed.wait()
@@ -219,7 +228,7 @@ async def serve_terminal(
         for task in done:
             await task
     except StreamGap:
-        reason = orchestrator.records[ref.id].reason
+        reason = session.reason
         await send({"type": "status", "reason": reason.value if reason else "stream_gap"})
     except WebSocketDisconnect, BoxieError, ValueError, TimeoutError, RuntimeError, OSError:
         pass
@@ -235,9 +244,4 @@ async def serve_terminal(
                 if epoch is not None:
                     await orchestrator.detach(ref, epoch)
             finally:
-                try:
-                    await close_socket(websocket)
-                finally:
-                    orchestrator.sessions[ref.id] -= 1
-                    if not orchestrator.sessions[ref.id]:
-                        orchestrator.sessions.pop(ref.id)
+                await close_socket(websocket)

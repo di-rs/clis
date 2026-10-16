@@ -73,7 +73,7 @@ async def database(
 ]:
     await asyncio.to_thread(migrate, dsn, MIGRATIONS)
     config = configuration(root)
-    from boxie.sandbox.client import OrchestratorClient
+    from boxie.sandbox.transport.client import OrchestratorClient
 
     async with network(root / "resolver") as harness:
         async with OrchestratorClient(
@@ -152,7 +152,7 @@ def test_identical_retries_old_snapshot_and_conflicting_key(
             data["shell"]["image_digest"] = "example.org/shell@sha256:" + "4" * 64
             config.profiles_file.write_text(json.dumps(data))
             # A fresh trusted resolver reads the operator's new profile file.
-            from boxie.sandbox.client import OrchestratorClient
+            from boxie.sandbox.transport.client import OrchestratorClient
 
             async with network(tmp_path / "reloaded-resolver") as harness:
                 harness.config.profiles_file.write_text(config.profiles_file.read_text())
@@ -690,7 +690,7 @@ def test_durable_orchestrator_and_postgres_release_only_after_reconciled_absence
     async def exercise() -> None:
         from boxie.domain.lifecycle import EnsureRequest
         from boxie.persistence.start_guard import PostgresStartGuard
-        from boxie.sandbox.lifecycle import DurableOrchestrator
+        from boxie.sandbox.execution.orchestrator import DurableOrchestrator
         from test_orchestrator_lifecycle import Daemon, settled
 
         async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
@@ -760,7 +760,7 @@ def test_journal_outage_expires_container_but_retains_sql_accounting_until_durab
     async def exercise() -> None:
         from boxie.domain.lifecycle import EnsureRequest
         from boxie.persistence.start_guard import PostgresStartGuard
-        from boxie.sandbox.lifecycle import DurableOrchestrator
+        from boxie.sandbox.execution.orchestrator import DurableOrchestrator
         from test_orchestrator_lifecycle import Daemon, settled
 
         async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
@@ -819,7 +819,7 @@ def test_terminal_receipt_survives_prior_boot_and_retry_row_purge(
 
     from boxie.domain.lifecycle import EnsureRequest
     from boxie.persistence.start_guard import PostgresStartGuard
-    from boxie.sandbox.lifecycle import DurableOrchestrator
+    from boxie.sandbox.execution.orchestrator import DurableOrchestrator
     from boxie_test_support.durable import Daemon
     from test_orchestrator_lifecycle import settled
 
@@ -872,7 +872,7 @@ def test_terminal_receipt_survives_prior_boot_and_retry_row_purge(
             assert not restarted.records
             with pytest.raises(BoxieError):
                 await restarted.ensure(request)
-            assert not restarted.records and not restarted.locks
+            assert not restarted.records and not restarted.runtimes
             await restarted.close()
 
     asyncio.run(exercise())
@@ -885,12 +885,12 @@ def test_failed_restart_journal_projection_waits_for_authenticated_inspection(
 
     async def exercise() -> None:
         import httpx
+        from boxie.bootstrap.orchestrator import create_orchestrator_app
         from boxie.domain.lifecycle import EnsureRequest
         from boxie.persistence.start_guard import PostgresStartGuard
-        from boxie.sandbox.durable_client import DurableOrchestratorClient
-        from boxie.sandbox.durable_server import create_durable_orchestrator_app
-        from boxie.sandbox.lifecycle import DurableOrchestrator
-        from boxie.sandbox.reporting import ObservationReporter
+        from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+        from boxie.sandbox.transport.client import OrchestratorClient
+        from boxie.sandbox.transport.reporting import ObservationReporter
         from boxie.temporal.activities import LifecycleActivities
         from fastapi import Request, Response
         from starlette.middleware.base import RequestResponseEndpoint
@@ -926,7 +926,7 @@ def test_failed_restart_journal_projection_waits_for_authenticated_inspection(
                     orchestrators.append(orchestrator)
                     monkeypatch.setattr(orchestrator.journal, "save", unavailable)
                     reporter = ObservationReporter("http://api", b"restart-secret")
-                    app = create_durable_orchestrator_app(
+                    app = create_orchestrator_app(
                         orchestrator, artifacts, credential=b"restart-secret", reporter=reporter
                     )
                     entered, release = asyncio.Event(), asyncio.Event()
@@ -959,7 +959,7 @@ def test_failed_restart_journal_projection_waits_for_authenticated_inspection(
                             # This is the native failure's premature visibility assumption.
                             stale = await life.get(OWNER, view.id)
                             assert stale.state == SandboxState.READY and not stale.cleanup_pending
-                        async with DurableOrchestratorClient(
+                        async with OrchestratorClient(
                             "http://orchestrator", b"restart-secret"
                         ) as client:
                             await client._http.aclose()

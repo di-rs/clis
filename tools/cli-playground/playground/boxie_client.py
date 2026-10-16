@@ -12,6 +12,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationErro
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosedOK, WebSocketException
 
+from playground.terminal_protocol import TerminalEvent
 from playground.terminal_protocol import response as terminal_response
 
 
@@ -65,7 +66,7 @@ class SandboxRequest(BaseModel):
 
 
 class TerminalPort(Protocol):
-    async def receive(self) -> bytes | str | None: ...
+    async def receive(self) -> bytes | TerminalEvent | None: ...
     async def send(self, message: str) -> None: ...
 
 
@@ -90,7 +91,7 @@ class HttpTerminal:
     def __init__(self, socket: ClientConnection) -> None:
         self.socket = socket
 
-    async def receive(self) -> bytes | str | None:
+    async def receive(self) -> bytes | TerminalEvent | None:
         try:
             message = await self.socket.recv()
         except ConnectionClosedOK:
@@ -98,7 +99,7 @@ class HttpTerminal:
         if isinstance(message, bytes):
             return message
         try:
-            return terminal_response.validate_json(message).model_dump_json()
+            return terminal_response.validate_json(message)
         except ValueError as error:
             raise BoxieUnavailable("invalid terminal response") from error
 

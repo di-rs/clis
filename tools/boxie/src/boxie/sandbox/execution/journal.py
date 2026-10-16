@@ -6,10 +6,12 @@ from uuid import UUID
 
 from pydantic import Field
 
+from boxie.contracts.common import WireModel
+from boxie.contracts.consumer import SpecWire, spec_wire
+from boxie.contracts.execution import IdentityWire, SnapshotWire
 from boxie.domain.lifecycle import EnsureRequest, SandboxRef
 from boxie.domain.models import OrchestratorIdentity, Principal, SandboxState, TerminationReason
 from boxie.persistence.atomic import atomic_write
-from boxie.sandbox.protocol import IdentityWire, SnapshotWire, SpecWire, WireModel, spec_wire
 
 
 class ExecutionRecord(WireModel):

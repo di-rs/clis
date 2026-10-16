@@ -5,7 +5,7 @@ from collections.abc import Callable
 
 from boxie.domain.models import SandboxState, TerminationReason
 from boxie.sandbox.docker import ContainerInfo, ExecutionDocker
-from boxie.sandbox.execution import ExecutionRecord
+from boxie.sandbox.execution.journal import ExecutionRecord
 
 
 async def owned_container(docker: ExecutionDocker, record: ExecutionRecord) -> ContainerInfo | None:

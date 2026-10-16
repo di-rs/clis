@@ -8,16 +8,16 @@ from fastapi import APIRouter, Header, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
-from boxie.application.service import Service
+from boxie.application.ports import ArtifactAccess, Lifecycle
+from boxie.contracts.consumer import SpecWire, ViewWire
 from boxie.domain.models import Principal, TerminationReason
-from boxie.sandbox.protocol import SpecWire, ViewWire
 
 
 def principal(request: Request) -> Principal:
     return cast(Principal, request.state.principal)
 
 
-def routes(service: Service) -> APIRouter:
+def routes(lifecycle: Lifecycle, artifacts: ArtifactAccess) -> APIRouter:
     router = APIRouter()
 
     @router.put("/v1/artifacts/{artifact_id}")
@@ -26,7 +26,7 @@ def routes(service: Service) -> APIRouter:
         request: Request,
         x_content_sha256: Annotated[str, Header(pattern=r"^[a-f0-9]{64}$")],
     ) -> JSONResponse:
-        result = await service.put(
+        result = await artifacts.put(
             principal(request), artifact_id, x_content_sha256, request.stream()
         )
         return JSONResponse(
@@ -35,7 +35,7 @@ def routes(service: Service) -> APIRouter:
 
     @router.delete("/v1/artifacts/{artifact_id}", status_code=204)
     async def retire(artifact_id: UUID, request: Request) -> Response:
-        await service.artifacts.retire(principal(request), artifact_id)
+        await artifacts.retire(principal(request), artifact_id)
         return Response(status_code=204)
 
     @router.post("/v1/sandboxes", status_code=202)
@@ -45,19 +45,17 @@ def routes(service: Service) -> APIRouter:
         idempotency_key: Annotated[str, Header(min_length=1, max_length=200)],
     ) -> ViewWire:
         return ViewWire.from_domain(
-            await service.lifecycle.submit(principal(request), idempotency_key, body.domain())
+            await lifecycle.submit(principal(request), idempotency_key, body.domain())
         )
 
     @router.get("/v1/sandboxes/{sandbox_id}")
     async def get(sandbox_id: UUID, request: Request) -> ViewWire:
-        return ViewWire.from_domain(await service.lifecycle.get(principal(request), sandbox_id))
+        return ViewWire.from_domain(await lifecycle.get(principal(request), sandbox_id))
 
     @router.delete("/v1/sandboxes/{sandbox_id}")
     async def terminate(sandbox_id: UUID, request: Request) -> ViewWire:
         return ViewWire.from_domain(
-            await service.lifecycle.terminate(
-                principal(request), sandbox_id, TerminationReason.REQUESTED
-            )
+            await lifecycle.terminate(principal(request), sandbox_id, TerminationReason.REQUESTED)
         )
 
     return router

@@ -28,7 +28,6 @@ from playground.terminal_protocol import (
     Resize,
     TerminalStatus,
     control,
-    response,
 )
 
 MAX_TERMINAL_OUTPUT_BYTES = 16 * 1024 * 1024
@@ -108,8 +107,8 @@ async def bridge_terminal(
         forwarded = 0
         while (data := await session.receive()) is not None:
             async with asyncio.timeout(TERMINAL_SEND_TIMEOUT):
-                if isinstance(data, str):
-                    message = response.validate_json(data)
+                if not isinstance(data, bytes):
+                    message = data
                     if isinstance(message, Attached):
                         epoch = message.epoch
                         if attached is not None:

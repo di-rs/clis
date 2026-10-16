@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, TypeAdapter
 
-from boxie.sandbox.protocol import WireModel
+from boxie.contracts.common import WireModel
 
 Cursor = Annotated[int, Field(ge=0, le=2**53 - 1)]
 Epoch = Annotated[int, Field(ge=1, le=2**53 - 1)]
@@ -105,3 +105,6 @@ response = TypeAdapter(
         Field(discriminator="type"),
     ]
 )
+
+
+type TerminalEvent = Attached | ReplayComplete | Resized | Geometry | Heartbeat | TerminalStatus

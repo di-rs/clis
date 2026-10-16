@@ -6,8 +6,8 @@ from uuid import UUID
 
 import httpx
 
+from boxie.contracts.execution import ObservationWire
 from boxie.domain.lifecycle import OrchestratorObservation
-from boxie.sandbox.protocol import ObservationWire
 
 
 def edge(item: OrchestratorObservation) -> tuple[object, ...]:

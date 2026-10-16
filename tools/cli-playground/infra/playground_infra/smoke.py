@@ -97,7 +97,16 @@ async def exercise(binary: Path, url: str, credential_file: Path, profile: str) 
                 raise RuntimeError(f"Sandbox did not become ready: {view.state}")
             inspect_sandbox(str(sandbox_id))
             async with client.terminal(sandbox_id) as terminal:
-                session = Session(terminal.receive, terminal.send)
+
+                async def receive() -> bytes | str | None:
+                    event = await terminal.receive()
+                    return (
+                        event.model_dump_json()
+                        if event is not None and not isinstance(event, bytes)
+                        else event
+                    )
+
+                session = Session(receive, terminal.send)
                 await session.start()
                 shell = Shell(session)
                 await shell.start()

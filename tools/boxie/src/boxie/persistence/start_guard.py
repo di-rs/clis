@@ -9,11 +9,12 @@ from sqlalchemy import func
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from boxie.contracts.consumer import spec_wire
+from boxie.contracts.execution import SnapshotWire
 from boxie.domain.lifecycle import EnsureRequest
 from boxie.domain.models import TerminationReason
 from boxie.persistence.database import SessionFactory
 from boxie.persistence.models import Artifact, CapacitySlot, Sandbox, SandboxArtifactRef
-from boxie.sandbox.protocol import SnapshotWire, spec_wire
 
 
 def matches(row: Sandbox, request: EnsureRequest) -> bool:

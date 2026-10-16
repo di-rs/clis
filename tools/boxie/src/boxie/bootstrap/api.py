@@ -19,10 +19,10 @@ from boxie.bootstrap.durable import (
     orchestrator_identity,
     temporal_client,
 )
+from boxie.contracts.common import ConsumerId
 from boxie.domain.models import OrchestratorIdentity
 from boxie.persistence.postgres import PostgresLifecycle
-from boxie.sandbox.durable_client import DurableOrchestratorClient
-from boxie.sandbox.protocol import ConsumerId
+from boxie.sandbox.transport.client import OrchestratorClient
 
 
 @dataclass(frozen=True)
@@ -76,7 +76,7 @@ def main() -> None:
         temporal = await temporal_client(config.durable, lazy=True)
         async with (
             database_for(config.durable.postgres_dsn_file) as sessions,
-            DurableOrchestratorClient(
+            OrchestratorClient(
                 config.orchestrator_url,
                 config.orchestrator_credential,
                 timeout=config.request_timeout,

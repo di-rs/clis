@@ -9,7 +9,7 @@ import httpx
 import pytest
 from boxie.domain.lifecycle import OrchestratorObservation
 from boxie.domain.models import OrchestratorIdentity, Principal, SandboxState
-from boxie.sandbox.reporting import ObservationReporter
+from boxie.sandbox.transport.reporting import ObservationReporter
 
 
 def test_input_is_coalesced_edges_are_immediate_and_outage_keeps_latest(
@@ -18,7 +18,7 @@ def test_input_is_coalesced_edges_are_immediate_and_outage_keeps_latest(
     async def exercise() -> None:
 
         elapsed = 0.0
-        monkeypatch.setattr("boxie.sandbox.reporting.time.monotonic", lambda: elapsed)
+        monkeypatch.setattr("boxie.sandbox.transport.reporting.time.monotonic", lambda: elapsed)
         delivered: list[int] = []
         unavailable = False
 

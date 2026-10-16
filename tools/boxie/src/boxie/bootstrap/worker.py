@@ -20,7 +20,7 @@ from boxie.bootstrap.durable import (
 )
 from boxie.persistence.outbox import PostgresOutbox
 from boxie.persistence.postgres import PostgresLifecycle
-from boxie.sandbox.durable_client import DurableOrchestratorClient
+from boxie.sandbox.transport.client import OrchestratorClient
 from boxie.temporal.activities import LifecycleActivities, SafeActivityErrors
 from boxie.temporal.contracts import TASK_QUEUE
 from boxie.temporal.dispatcher import OutboxDispatcher
@@ -52,7 +52,7 @@ def main() -> None:
         client = await temporal_client(config)
         async with (
             database_for(config.postgres_dsn_file) as sessions,
-            DurableOrchestratorClient(
+            OrchestratorClient(
                 settings["orchestrator_url"],
                 read_credential(Path(settings["orchestrator_credential_file"])),
                 timeout=settings.get("request_timeout", 20),

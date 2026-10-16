@@ -91,7 +91,7 @@ def test_product_defensive_cap_reports_limit_for_misbehaving_peer(
                 else [(1).to_bytes(8, "big") + b"x" * 16777217]
             )
 
-        async def receive(self) -> bytes | str | None:
+        async def receive(self) -> bytes | None:
             return next(self.frames, None)
 
         async def send(self, message: str) -> None:
@@ -203,6 +203,7 @@ def test_closed_product_control_drain_keeps_abort_and_error_boundaries(
     from boxie_test_support.terminal_completion import failed_drain
     from playground import transport
     from playground.boxie_client import BoxieUnavailable, TerminalWriteClosed
+    from playground.terminal_protocol import response
 
     async def exercise() -> None:
         monkeypatch.setattr(transport, "TERMINAL_DRAIN_TIMEOUT", 0.02)
@@ -212,6 +213,7 @@ def test_closed_product_control_drain_keeps_abort_and_error_boundaries(
             BoxieUnavailable("transport failed"),
             scenario,
             None,
+            decode_event=response.validate_json,
         )
         if scenario == "malformed":
             assert isinstance(result, ValueError)

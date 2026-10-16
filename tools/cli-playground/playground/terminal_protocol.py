@@ -113,3 +113,6 @@ response = TypeAdapter(
         Field(discriminator="type"),
     ]
 )
+
+
+type TerminalEvent = Attached | ReplayComplete | Resized | Geometry | Heartbeat | TerminalStatus

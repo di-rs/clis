@@ -21,7 +21,7 @@ from boxie.domain.lifecycle import (
 from boxie.domain.models import SandboxState, TerminationReason
 from boxie.persistence.models import OrchestratorObservationRecord, Sandbox
 from boxie.persistence.postgres import PostgresLifecycle
-from boxie.sandbox.durable_client import DurableOrchestratorClient
+from boxie.sandbox.transport.client import OrchestratorClient
 from boxie.temporal.contracts import LifecycleFacts, StopRequest
 
 
@@ -70,9 +70,7 @@ class SafeActivityErrors(Interceptor):
 
 
 class LifecycleActivities:
-    def __init__(
-        self, repository: PostgresLifecycle, orchestrator: DurableOrchestratorClient
-    ) -> None:
+    def __init__(self, repository: PostgresLifecycle, orchestrator: OrchestratorClient) -> None:
         self.repository, self.orchestrator = repository, orchestrator
 
     async def _request(self, sandbox_id: str) -> DurableRequest:

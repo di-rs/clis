@@ -13,13 +13,13 @@ from uuid import UUID, uuid4
 
 import httpx
 from boxie.api.app import ApiConfig, create_app
+from boxie.bootstrap.orchestrator import create_orchestrator_app
 from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import EnsureRequest, SandboxRef
 from boxie.domain.models import Principal, SandboxSpec, SandboxView, TerminationReason
-from boxie.sandbox.durable_client import DurableOrchestratorClient
-from boxie.sandbox.durable_server import create_durable_orchestrator_app
-from boxie.sandbox.lifecycle import DurableOrchestrator
-from boxie.sandbox.reporting import ObservationReporter
+from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+from boxie.sandbox.transport.client import OrchestratorClient
+from boxie.sandbox.transport.reporting import ObservationReporter
 
 from boxie_test_support.api import CONSUMER_AUTH, serve
 from boxie_test_support.artifacts import Artifacts
@@ -106,16 +106,14 @@ async def network(root: Path, *, shell: str = "/bin/sh") -> AsyncIterator[Any]:
     orchestrator = DurableOrchestrator(config, daemon, path, Guard(), clock, clock.monotonic)
     # No artifact HTTP route is called on the orchestrator in this terminal-only harness.
     orchestrator_artifacts: Any = SimpleNamespace(collect=noop, collect_orphans=noop)
-    app = create_durable_orchestrator_app(
+    app = create_orchestrator_app(
         orchestrator,
         orchestrator_artifacts,
         credential=b"orchestrator-test-secret",
         reporter=ObservationReporter("http://127.0.0.1:1", b"unused"),
     )
     async with serve(app) as origin:
-        async with DurableOrchestratorClient(
-            origin, b"orchestrator-test-secret", timeout=1
-        ) as client:
+        async with OrchestratorClient(origin, b"orchestrator-test-secret", timeout=1) as client:
             api = create_app(
                 ApiConfig(
                     "terminal-test", {"one": b"consumer-one-secret", "two": b"consumer-two-secret"}

@@ -9,7 +9,7 @@ from uuid import uuid4
 import httpx
 import pytest
 from boxie.api.app import ApiConfig, create_app
-from boxie.sandbox.client import OrchestratorClient
+from boxie.sandbox.transport.client import OrchestratorClient
 from boxie_test_support.api import CONSUMER_AUTH, FOREIGN_AUTH, artifact, create, ready, serve
 from boxie_test_support.orchestrator import bundle, request
 from integration.conftest import postgres_dsn as postgres_dsn

@@ -138,12 +138,12 @@ def test_native_fixture_compose_resolves_owned_fault_boundaries(tmp_path: Path) 
 def test_disconnected_upload_waiter_and_collector_have_one_total_deadline(
     postgres_dsn: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from boxie.bootstrap.orchestrator import create_orchestrator_app
     from boxie.domain.errors import BoxieError
     from boxie.persistence.start_guard import PostgresStartGuard
-    from boxie.sandbox.client import OrchestratorClient
-    from boxie.sandbox.durable_server import create_durable_orchestrator_app
-    from boxie.sandbox.lifecycle import DurableOrchestrator
-    from boxie.sandbox.reporting import ObservationReporter
+    from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+    from boxie.sandbox.transport.client import OrchestratorClient
+    from boxie.sandbox.transport.reporting import ObservationReporter
     from boxie_test_support.api import serve
     from boxie_test_support.durable import Daemon
     from boxie_test_support.orchestrator import Clock
@@ -158,7 +158,7 @@ def test_disconnected_upload_waiter_and_collector_have_one_total_deadline(
                 config, Daemon(), store.path, PostgresStartGuard(sessions), clock, clock.monotonic
             )
             reporter = ObservationReporter("http://127.0.0.1:1", b"unused")
-            app = create_durable_orchestrator_app(
+            app = create_orchestrator_app(
                 orchestrator, store, credential=b"orchestrator-test-secret", reporter=reporter
             )
             async with serve(app) as origin:

@@ -2,16 +2,6 @@
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Protocol
-
-from boxie.domain.models import ProfileSnapshot, SandboxSpec
-
-
-class AdmissionProfileResolver(Protocol):
-    async def resolve_admission(self, spec: SandboxSpec) -> ProfileSnapshot:
-        """Validate operator lifetime maxima and resolve an approved immutable profile."""
-        ...
-
 
 DependencyCheck = Callable[[], Awaitable[bool]]
 

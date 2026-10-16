@@ -1,42 +1,23 @@
-"""Strict private wire schemas. Domain contracts remain ordinary dataclasses."""
+"""Execution wire contracts."""
 
 from dataclasses import asdict
-from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, Field
 
+from boxie.contracts.common import ConsumerId, Positive, WireModel
+from boxie.contracts.consumer import PolicyWire, ProfileRequest, SpecWire, spec_wire
 from boxie.domain.lifecycle import EnsureRequest as DomainEnsureRequest
-from boxie.domain.lifecycle import ExpiryRequest, OrchestratorObservation, SandboxRef
+from boxie.domain.lifecycle import OrchestratorObservation, SandboxRef
 from boxie.domain.models import (
-    ArtifactView,
-    LifetimePolicy,
     OrchestratorIdentity,
     Principal,
     ProfileSnapshot,
     SandboxLimits,
-    SandboxSpec,
     SandboxState,
-    SandboxView,
     TerminationReason,
 )
-
-ConsumerId = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")]
-Positive = Annotated[int, Field(strict=True, gt=0)]
-
-
-class WireModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class PolicyWire(WireModel):
-    max_seconds: Annotated[int, Field(strict=True, gt=0, le=3600)] = 3600
-    idle_seconds: Annotated[int, Field(strict=True, gt=0, le=600)] = 600
-    disconnect_seconds: Annotated[int, Field(strict=True, gt=0, le=120)] = 120
-
-    def domain(self) -> LifetimePolicy:
-        return LifetimePolicy(**self.model_dump())
 
 
 class LimitsWire(WireModel):
@@ -52,24 +33,8 @@ class LimitsWire(WireModel):
         return SandboxLimits(**self.model_dump())
 
 
-class ProfileRequest(WireModel):
-    profile_id: Annotated[str, Field(min_length=1, max_length=128)]
-    command: Annotated[tuple[str, ...], Field(min_length=1, max_length=64)]
-    env: dict[str, str] = Field(default_factory=dict)
-
-
 class AdmissionProfileRequest(ProfileRequest):
     policy: PolicyWire = Field(default_factory=PolicyWire)
-
-
-class SpecWire(ProfileRequest):
-    artifact_id: UUID
-    policy: PolicyWire = Field(default_factory=PolicyWire)
-
-    def domain(self) -> SandboxSpec:
-        return SandboxSpec(
-            self.artifact_id, self.profile_id, self.command, self.env, self.policy.domain()
-        )
 
 
 class SnapshotWire(ProfileRequest):
@@ -116,44 +81,9 @@ class ControlRequest(WireModel):
     generation: Positive
 
 
-class ViewWire(WireModel):
-    id: UUID
-    state: SandboxState
-    created_at: datetime
-    absolute_deadline: datetime
-    reason: TerminationReason | None
-    cleanup_pending: bool
-
-    @classmethod
-    def from_domain(cls, view: SandboxView) -> ViewWire:
-        return cls(**asdict(view))
-
-    def domain(self) -> SandboxView:
-        return SandboxView(**self.model_dump())
-
-
-class ArtifactWire(WireModel):
-    id: UUID
-    sha256: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
-    retired: bool
-
-    def domain(self) -> ArtifactView:
-        return ArtifactView(**self.model_dump())
-
-
 class ReadyWire(WireModel):
     identity: IdentityWire
     dependencies: dict[str, bool]
-
-
-def spec_wire(spec: SandboxSpec) -> SpecWire:
-    return SpecWire(
-        artifact_id=spec.artifact_id,
-        profile_id=spec.profile_id,
-        command=spec.command,
-        env=dict(spec.env),
-        policy=PolicyWire(**asdict(spec.policy)),
-    )
 
 
 class RefWire(WireModel):
@@ -233,18 +163,6 @@ class ObservationWire(WireModel):
         body["principal"] = Principal(body.pop("consumer_id"))
         body["identity"] = self.identity.domain()
         return OrchestratorObservation(**body)
-
-
-class ExpiryWire(WireModel):
-    ref: RefWire
-    reason: TerminationReason
-    observed_event_version: Positive
-    boot_id: UUID
-
-    def domain(self) -> ExpiryRequest:
-        return ExpiryRequest(
-            self.ref.domain(), self.reason, self.observed_event_version, self.boot_id
-        )
 
 
 class BootWire(WireModel):

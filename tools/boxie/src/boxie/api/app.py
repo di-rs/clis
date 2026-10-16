@@ -11,11 +11,10 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import RequestResponseEndpoint
 
 from boxie.api.auth import ConsumerAuth
-from boxie.api.observations import ObservationSink, observation_routes
+from boxie.api.observations import observation_routes
 from boxie.api.routes import routes
 from boxie.api.terminal import terminal_routes
-from boxie.application.ports import ArtifactAccess
-from boxie.application.service import ReadyLifecycle, Service, TerminalAccess
+from boxie.application.ports import ArtifactAccess, ObservationSink, ReadyLifecycle, TerminalAccess
 from boxie.domain.errors import BoxieError
 
 
@@ -41,7 +40,6 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     auth = ConsumerAuth(config.consumers)
-    service = Service(lifecycle, artifacts, terminal)
 
     @app.exception_handler(BoxieError)
     async def application_error(_request: Request, error: BoxieError) -> JSONResponse:
@@ -96,6 +94,6 @@ def create_app(
 
     if observations is not None:
         app.include_router(observation_routes(observations))
-    app.include_router(routes(service))
-    app.include_router(terminal_routes(service, auth))
+    app.include_router(routes(lifecycle, artifacts))
+    app.include_router(terminal_routes(lifecycle, terminal, auth))
     return app

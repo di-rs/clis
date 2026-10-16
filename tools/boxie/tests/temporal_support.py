@@ -13,16 +13,16 @@ from typing import Any
 
 import httpx
 from boxie.api.app import ApiConfig, create_app
+from boxie.bootstrap.orchestrator import create_orchestrator_app
 from boxie.persistence.database import database
 from boxie.persistence.migrate import migrate
 from boxie.persistence.outbox import PostgresOutbox
 from boxie.persistence.postgres import PostgresLifecycle
 from boxie.persistence.postgres_artifacts import PostgresArtifactStore
 from boxie.persistence.start_guard import PostgresStartGuard
-from boxie.sandbox.durable_client import DurableOrchestratorClient
-from boxie.sandbox.durable_server import create_durable_orchestrator_app
-from boxie.sandbox.lifecycle import DurableOrchestrator
-from boxie.sandbox.reporting import ObservationReporter
+from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+from boxie.sandbox.transport.client import OrchestratorClient
+from boxie.sandbox.transport.reporting import ObservationReporter
 from boxie.temporal.activities import LifecycleActivities
 from boxie.temporal.dispatcher import OutboxDispatcher
 from boxie_test_support.api import CONSUMER_AUTH, serve
@@ -53,14 +53,12 @@ async def durable_stack(dsn: str, root: Path, client: Client, queue: str) -> Asy
             time.monotonic,
         )
         reporter = ObservationReporter("http://127.0.0.1:1", b"orchestrator-test-secret")
-        app = create_durable_orchestrator_app(
+        app = create_orchestrator_app(
             orchestrator, artifacts, credential=b"orchestrator-test-secret", reporter=reporter
         )
         async with (
             serve(app) as orchestrator_url,
-            DurableOrchestratorClient(
-                orchestrator_url, b"orchestrator-test-secret", timeout=2
-            ) as control,
+            OrchestratorClient(orchestrator_url, b"orchestrator-test-secret", timeout=2) as control,
         ):
             life = PostgresLifecycle(sessions, control, config.identity, control.ready)
             api = create_app(

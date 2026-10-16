@@ -119,7 +119,7 @@ def test_final_control_preserves_buffered_status(
 ) -> None:
     from urllib.parse import urlsplit
 
-    from boxie.sandbox.client_terminal import OrchestratorTerminal
+    from boxie.sandbox.transport.terminal import OrchestratorTerminal
     from boxie_test_support.terminal_completion import CompletionBarrier
 
     async def exercise() -> None:
@@ -177,6 +177,7 @@ def test_closed_control_drain_keeps_abort_and_error_boundaries(
     monkeypatch: pytest.MonkeyPatch, scenario: str
 ) -> None:
     from boxie.api import terminal
+    from boxie.contracts.terminal import response
     from boxie.domain.errors import BoxieError, TerminalWriteClosed
     from boxie_test_support.terminal_completion import failed_drain
 
@@ -188,6 +189,7 @@ def test_closed_control_drain_keeps_abort_and_error_boundaries(
             BoxieError(503, "transport failed"),
             scenario,
             BoxieError(503, "missing status"),
+            decode_event=response.validate_json,
         )
         if scenario in {"malformed", "disconnect"}:
             assert result is None
