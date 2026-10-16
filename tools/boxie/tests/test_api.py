@@ -3,13 +3,13 @@ import hashlib
 from pathlib import Path
 from uuid import uuid4
 
-from boxie_test_support.agent import bundle, request
 from boxie_test_support.api import FOREIGN_AUTH, artifact, create, ready, stack
+from boxie_test_support.orchestrator import bundle, request
 
 
 def test_api_auth_ownership_idempotency_and_validation(tmp_path: Path) -> None:
     async def exercise() -> None:
-        async with stack(tmp_path) as (client, agent, daemon, _clock):
+        async with stack(tmp_path) as (client, orchestrator, daemon, _clock):
             unauthorized = await client.get(
                 "/v1/sandboxes/" + str(uuid4()), headers={"Authorization": ""}
             )
@@ -26,7 +26,7 @@ def test_api_auth_ownership_idempotency_and_validation(tmp_path: Path) -> None:
             identifier = responses[0].json()["id"]
             assert {response.json()["id"] for response in responses} == {identifier}
             await ready(client, identifier)
-            assert agent.reserved_count == 1 and len(daemon.configs) == 1
+            assert orchestrator.reserved_count == 1 and len(daemon.configs) == 1
             foreign = await client.get(f"/v1/sandboxes/{identifier}", headers=FOREIGN_AUTH)
             assert foreign.status_code == 404
             assert (
@@ -56,14 +56,14 @@ def test_api_auth_ownership_idempotency_and_validation(tmp_path: Path) -> None:
             stopped = await client.delete(f"/v1/sandboxes/{identifier}")
             assert stopped.status_code == 200
             await ready(client, identifier, "terminated")
-            assert not daemon.configs and agent.reserved_count == 0
+            assert not daemon.configs and orchestrator.reserved_count == 0
 
     asyncio.run(exercise())
 
 
 def test_immutable_artifact_status_and_retirement(tmp_path: Path) -> None:
     async def exercise() -> None:
-        async with stack(tmp_path) as (client, _agent, _daemon, _clock):
+        async with stack(tmp_path) as (client, _orchestrator, _daemon, _clock):
             data = bundle()
             identifier = str(uuid4())
             initial = await client.put(
@@ -100,9 +100,9 @@ def test_immutable_artifact_status_and_retirement(tmp_path: Path) -> None:
     asyncio.run(exercise())
 
 
-def test_agent_owns_capacity(tmp_path: Path) -> None:
+def test_orchestrator_owns_capacity(tmp_path: Path) -> None:
     async def exercise() -> None:
-        async with stack(tmp_path, max_sandboxes=1) as (client, _agent, _daemon, _clock):
+        async with stack(tmp_path, max_sandboxes=1) as (client, _orchestrator, _daemon, _clock):
             identifier = await artifact(client)
             await create(client, identifier)
             assert (

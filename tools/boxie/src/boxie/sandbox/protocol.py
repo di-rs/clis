@@ -8,9 +8,9 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from boxie.domain.models import (
-    AgentIdentity,
     ArtifactView,
     LifetimePolicy,
+    OrchestratorIdentity,
     ProfileSnapshot,
     SandboxLimits,
     SandboxSpec,
@@ -105,8 +105,8 @@ class IdentityWire(WireModel):
     installation_id: UUID
     host_id: Annotated[str, Field(min_length=1, max_length=128)]
 
-    def domain(self) -> AgentIdentity:
-        return AgentIdentity(self.installation_id, self.host_id)
+    def domain(self) -> OrchestratorIdentity:
+        return OrchestratorIdentity(self.installation_id, self.host_id)
 
 
 class ControlRequest(WireModel):

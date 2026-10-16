@@ -45,7 +45,7 @@ uv run --locked --package cli-playground uvicorn playground.app:create_app \
 No Docker client, Docker socket or Boxie implementation is installed in the
 Playground image. Its server-side consumer credential is not sent to the browser.
 Production activation is unavailable until PR4; setup currently provisions only.
-PR1's Boxie direct lifecycle and agent-local recovery are transitional until PR2
+PR1's Boxie direct lifecycle and orchestrator-local recovery are transitional until PR2
 adds PostgreSQL/Temporal authority. A page reload offers a fresh sandbox; terminal
 reattachment and output replay are outside PR1.
 

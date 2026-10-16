@@ -10,20 +10,20 @@ from pathlib import Path
 
 import uvicorn
 
-from boxie.bootstrap.config import AgentConfig, read_credential
+from boxie.bootstrap.config import OrchestratorConfig, read_credential
 from boxie.persistence.artifacts import ArtifactStore
 from boxie.sandbox.docker import DockerBackend
-from boxie.sandbox.server import create_agent_app
+from boxie.sandbox.server import create_orchestrator_app
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Boxie private sandbox agent")
+    parser = argparse.ArgumentParser(description="Boxie private sandbox orchestrator")
     parser.add_argument("--config", type=Path, required=True)
     args = parser.parse_args()
-    config = AgentConfig.from_file(args.config)
+    config = OrchestratorConfig.from_file(args.config)
 
     async def run() -> None:
-        app = create_agent_app(
+        app = create_orchestrator_app(
             config,
             DockerBackend(config.docker_timeout),
             ArtifactStore(config.data_dir / "artifacts"),
@@ -34,7 +34,7 @@ def main() -> None:
 
         def reload_profiles() -> None:
             try:
-                app.state.agent.profiles.reload()
+                app.state.orchestrator.profiles.reload()
             except Exception:
                 logging.getLogger(__name__).exception(
                     "profile reload rejected; retaining approved profiles"

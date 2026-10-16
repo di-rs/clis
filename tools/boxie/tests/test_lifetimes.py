@@ -1,4 +1,4 @@
-"""Live lifetime policy through authenticated agent HTTP and terminal input."""
+"""Live lifetime policy through authenticated orchestrator HTTP and terminal input."""
 
 import asyncio
 import json
@@ -10,7 +10,7 @@ from uuid import UUID
 import httpx
 import pytest
 from boxie.domain.models import TerminationReason
-from boxie_test_support.agent import (
+from boxie_test_support.orchestrator import (
     AUTH,
     Clock,
     DockerDaemon,
@@ -35,7 +35,7 @@ def test_never_attached_grace_starts_at_ready_and_releases_resources(tmp_path: P
     async def exercise() -> None:
         clock, daemon = Clock(), DockerDaemon()
         daemon.create_gate = asyncio.Event()
-        async with live(configuration(tmp_path), daemon, clock) as (client, agent):
+        async with live(configuration(tmp_path), daemon, clock) as (client, orchestrator):
             artifact = await upload(client)
             identifier = (await client.post("/v1/sandboxes", json=request(artifact))).json()["id"]
             await daemon.created.wait()
@@ -45,12 +45,12 @@ def test_never_attached_grace_starts_at_ready_and_releases_resources(tmp_path: P
             await client.delete(f"/v1/artifacts/{artifact}", params={"consumer_id": "one"})
             clock.advance(119)
             await asyncio.sleep(0.03)
-            assert agent.reserved_count == 1 and agent.artifact_exists(artifact)
+            assert orchestrator.reserved_count == 1 and orchestrator.artifact_exists(artifact)
             clock.advance(1)
             result = await settled(client, identifier, "terminated")
             assert result["reason"] == "disconnected"
-            assert agent.reserved_count == 0 and not daemon.configs
-            assert not agent.artifact_exists(artifact)
+            assert orchestrator.reserved_count == 0 and not daemon.configs
+            assert not orchestrator.artifact_exists(artifact)
 
     asyncio.run(exercise())
 
@@ -58,7 +58,7 @@ def test_never_attached_grace_starts_at_ready_and_releases_resources(tmp_path: P
 def test_first_attachment_before_grace_clears_it_but_cannot_reattach(tmp_path: Path) -> None:
     async def exercise() -> None:
         clock, daemon = Clock(), DockerDaemon()
-        async with live(configuration(tmp_path), daemon, clock) as (client, _agent):
+        async with live(configuration(tmp_path), daemon, clock) as (client, _orchestrator):
             identifier = (
                 await client.post("/v1/sandboxes", json=request(await upload(client)))
             ).json()["id"]
@@ -87,7 +87,7 @@ def test_late_first_attachment_rejected_even_before_sweep(tmp_path: Path) -> Non
     async def exercise() -> None:
         clock = Clock()
         config = replace(configuration(tmp_path), sweep_seconds=10)
-        async with live(config, DockerDaemon(), clock) as (client, _agent):
+        async with live(config, DockerDaemon(), clock) as (client, _orchestrator):
             identifier = (
                 await client.post("/v1/sandboxes", json=request(await upload(client)))
             ).json()["id"]
@@ -106,13 +106,13 @@ def test_scheduled_idle_expiry_rechecks_input_accepted_over_terminal(
 ) -> None:
     async def exercise() -> None:
         clock, daemon = Clock(), DockerDaemon()
-        async with live(configuration(tmp_path), daemon, clock) as (client, agent):
+        async with live(configuration(tmp_path), daemon, clock) as (client, orchestrator):
             identifier = (
                 await client.post("/v1/sandboxes", json=request(await upload(client)))
             ).json()["id"]
             await settled(client, identifier, "ready")
             selected, resume = asyncio.Event(), asyncio.Event()
-            cleanup = agent._cleanup
+            cleanup = orchestrator._cleanup
 
             async def delayed(record: Any, reason: TerminationReason, **kwargs: Any) -> Any:
                 if reason == TerminationReason.IDLE:
@@ -120,7 +120,7 @@ def test_scheduled_idle_expiry_rechecks_input_accepted_over_terminal(
                     await resume.wait()
                 return await cleanup(record, reason, **kwargs)
 
-            monkeypatch.setattr(agent, "_cleanup", delayed)
+            monkeypatch.setattr(orchestrator, "_cleanup", delayed)
             async with connect(terminal_url(client, identifier), additional_headers=AUTH) as ws:
                 assert await ws.recv() == b"ready\n"
                 clock.advance(600)
@@ -133,12 +133,12 @@ def test_scheduled_idle_expiry_rechecks_input_accepted_over_terminal(
                     )
                 finally:
                     resume.set()
-                await asyncio.wait_for(agent._cleanup_tasks[UUID(identifier)], 1)
+                await asyncio.wait_for(orchestrator._cleanup_tasks[UUID(identifier)], 1)
                 result = await client.get(
                     f"/v1/sandboxes/{identifier}", params={"consumer_id": "one"}
                 )
                 assert result.json()["state"] == "ready"
-                assert agent.reserved_count == 1 and not daemon.removed
+                assert orchestrator.reserved_count == 1 and not daemon.removed
                 clock.advance(599)
                 await asyncio.sleep(0.03)
                 assert not daemon.removed
@@ -153,7 +153,7 @@ def test_scheduled_idle_expiry_rechecks_input_accepted_over_terminal(
 def test_live_deadlines_ignore_wall_steps(tmp_path: Path, wall_step: int, timer: str) -> None:
     async def exercise() -> None:
         clock, daemon = Clock(), DockerDaemon()
-        async with live(configuration(tmp_path), daemon, clock) as (client, agent):
+        async with live(configuration(tmp_path), daemon, clock) as (client, orchestrator):
             identifier = (
                 await client.post("/v1/sandboxes", json=request(await upload(client)))
             ).json()["id"]
@@ -169,10 +169,10 @@ def test_live_deadlines_ignore_wall_steps(tmp_path: Path, wall_step: int, timer:
                     assert websocket is not None
                     await websocket.close()
                     for _ in range(100):
-                        if agent.records[UUID(identifier)].disconnected_at is not None:
+                        if orchestrator.records[UUID(identifier)].disconnected_at is not None:
                             break
                         await asyncio.sleep(0.01)
-                    assert agent.records[UUID(identifier)].disconnected_at is not None
+                    assert orchestrator.records[UUID(identifier)].disconnected_at is not None
                 clock.advance_wall(wall_step)
                 await asyncio.sleep(0.03)
                 assert not daemon.removed, "wall step alone must not expire a live sandbox"
@@ -191,7 +191,7 @@ def test_live_deadlines_ignore_wall_steps(tmp_path: Path, wall_step: int, timer:
                 current = (
                     await client.get(f"/v1/sandboxes/{identifier}", params={"consumer_id": "one"})
                 ).json()
-                persisted = json.loads(agent.path.read_text())["records"][0]
+                persisted = json.loads(orchestrator.path.read_text())["records"][0]
                 for field in ("created_at", "absolute_deadline"):
                     assert current[field] == original[field] == persisted[field]
                 clock.advance_monotonic(1)
@@ -203,7 +203,7 @@ def test_live_deadlines_ignore_wall_steps(tmp_path: Path, wall_step: int, timer:
                     if timer == "idle"
                     else "disconnected"
                 )
-                assert agent.reserved_count == 0 and not daemon.configs
+                assert orchestrator.reserved_count == 0 and not daemon.configs
             finally:
                 if websocket is not None:
                     await websocket.close()

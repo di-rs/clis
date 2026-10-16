@@ -1,4 +1,4 @@
-"""Unprivileged API composition root: secrets and agent origin are operator-owned."""
+"""Unprivileged API composition root: secrets and orchestrator origin are operator-owned."""
 
 import argparse
 import asyncio
@@ -13,15 +13,15 @@ from pydantic import TypeAdapter, ValidationError
 from boxie.api.app import ApiConfig, create_app
 from boxie.application.direct_lifecycle import DirectLifecycle
 from boxie.bootstrap.config import read_credential
-from boxie.sandbox.client import AgentClient
+from boxie.sandbox.client import OrchestratorClient
 from boxie.sandbox.protocol import ConsumerId
 
 
 @dataclass(frozen=True)
 class RuntimeConfig:
     api: ApiConfig
-    agent_url: str
-    agent_credential: bytes = field(repr=False)
+    orchestrator_url: str
+    orchestrator_credential: bytes = field(repr=False)
     bind_host: str = "127.0.0.1"
     bind_port: int = 8090
     request_timeout: float = 20
@@ -29,24 +29,24 @@ class RuntimeConfig:
 
 def load_configuration(path: Path) -> RuntimeConfig:
     data = json.loads(path.read_text())
-    agent = read_credential(Path(data.pop("agent_credential_file")))
+    orchestrator = read_credential(Path(data.pop("orchestrator_credential_file")))
     consumers = {
         consumer: read_credential(Path(secret))
         for consumer, secret in data.pop("consumer_credential_files").items()
     }
     values = list(consumers.values())
-    if any(hmac.compare_digest(agent, value) for value in values) or len(set(values)) != len(
+    if any(hmac.compare_digest(orchestrator, value) for value in values) or len(set(values)) != len(
         values
     ):
-        raise ValueError("agent and consumer credentials must be distinct")
-    # Consumer IDs obey the same wire constraint as the agent's trusted identity field.
+        raise ValueError("orchestrator and consumer credentials must be distinct")
+    # Consumer IDs obey the same wire constraint as the orchestrator's trusted identity field.
     for consumer in consumers:
         try:
             TypeAdapter(ConsumerId).validate_python(consumer)
         except ValidationError:
             raise ValueError("invalid consumer ID") from None
     api = ApiConfig(data.pop("release"), consumers)
-    return RuntimeConfig(api=api, agent_credential=agent, **data)
+    return RuntimeConfig(api=api, orchestrator_credential=orchestrator, **data)
 
 
 def main() -> None:
@@ -56,10 +56,10 @@ def main() -> None:
     config = load_configuration(args.config)
 
     async def run() -> None:
-        async with AgentClient(
-            config.agent_url, config.agent_credential, timeout=config.request_timeout
-        ) as agent:
-            app = create_app(config.api, DirectLifecycle(agent), agent, agent)
+        async with OrchestratorClient(
+            config.orchestrator_url, config.orchestrator_credential, timeout=config.request_timeout
+        ) as orchestrator:
+            app = create_app(config.api, DirectLifecycle(orchestrator), orchestrator, orchestrator)
             server = uvicorn.Server(
                 uvicorn.Config(
                     app,

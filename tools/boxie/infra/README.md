@@ -1,13 +1,13 @@
 # Boxie local infrastructure
 
-Boxie owns its runtime image, private API, privileged agent, artifact data and
+Boxie owns its runtime image, private API, privileged orchestrator, artifact data and
 trusted profile configuration. Both manifests default to Compose project `boxie`;
 set `BOXIE_PROJECT_NAME` in the operator environment file for another installation.
 Playground uses its own project identity, so either unit can perform orphan cleanup
 without owning the other unit's containers. Keep project names distinct, and avoid
 a shared `COMPOSE_PROJECT_NAME` or shared `--project-name` override.
 
-The consumer API has no host port. Only the agent mounts the Docker socket; it joins a separate control network. Playground is an
+The consumer API has no host port. Only the orchestrator mounts the Docker socket; it joins a separate control network. Playground is an
 optional consumer and is not required to configure or start Boxie.
 
 Production activation is unavailable during PR1–PR3. The independently targetable
@@ -33,8 +33,8 @@ docker network create --internal boxie-control
 Choose private operator-owned files outside the repository. Use the names in
 [config.example.env](config.example.env) as an environment-file template. Generate
 two different random printable credentials (at least 16 characters), stored as
-regular files with mode `0600`: one agent credential and one consumer credential.
-Do not put credentials in URLs. The API reads both files; the agent only reads its
+regular files with mode `0600`: one orchestrator credential and one consumer credential.
+Do not put credentials in URLs. The API reads both files; the orchestrator only reads its
 own credential. A consumer receives only its own credential.
 
 Copy [profiles.example.json](profiles.example.json) to the configured profiles
@@ -61,7 +61,7 @@ docker compose --env-file /etc/boxie/local.env \
 
 The configuration generator contains no secret values. `--data-dir` must equal
 `BOXIE_DATA_DIR`: this absolute directory is mounted at the **identical path** in
-the agent. Docker resolves child artifact bind sources on its daemon host, so a
+the orchestrator. Docker resolves child artifact bind sources on its daemon host, so a
 container-only path or a client path on a remote Docker host is invalid. Storage
 is an explicit host bind, not a volume whose opaque mountpoint must be guessed.
 The API receives no artifact storage. Both networks are externally supplied and
@@ -80,7 +80,8 @@ uv run --locked pytest tools/boxie/tests/test_packaging.py -m integration
 ```
 
 The native Linux [sandbox check](../../../.github/workflows/cli-playground-sandbox.yml)
-starts separate API and agent processes bound to loopback, then exercises both
+runs [smoke.sh](smoke.sh), which starts separate API and orchestrator processes
+bound to loopback, then exercises both
 `boxie_infra.smoke` and `playground_infra.smoke` through HTTP and WebSocket. Each
 inspects the actual sandbox's `runsc`, non-root user, no-network mode, read-only
 root/artifact, capabilities, no-new-privileges, resource limits, tmpfs, disabled

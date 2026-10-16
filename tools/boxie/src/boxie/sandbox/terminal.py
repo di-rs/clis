@@ -1,4 +1,4 @@
-"""Agent-owned terminals outlive API connections; bytes are never decoded."""
+"""Orchestrator-owned terminals outlive API connections; bytes are never decoded."""
 
 import asyncio
 from typing import TYPE_CHECKING
@@ -13,12 +13,12 @@ from boxie.sandbox.docker import TerminalPort
 from boxie.sandbox.protocol import ResizeWire
 
 if TYPE_CHECKING:
-    from boxie.sandbox.registry import Agent, Record
+    from boxie.sandbox.registry import Orchestrator, Record
 
 
 class Terminal:
-    def __init__(self, agent: Agent, record: Record, stream: TerminalPort) -> None:
-        self.agent, self.record, self.stream = agent, record, stream
+    def __init__(self, orchestrator: Orchestrator, record: Record, stream: TerminalPort) -> None:
+        self.orchestrator, self.record, self.stream = orchestrator, record, stream
         self.output: asyncio.Queue[bytes | None] = asyncio.Queue()
         self.reader: asyncio.Task[None] | None = None
         self.attached = False
@@ -42,8 +42,8 @@ class Terminal:
             raise
         except Exception:
             pass
-        await self.agent.remove(
-            self.agent.config.identity, self.record.id, self.record.generation, reason
+        await self.orchestrator.remove(
+            self.orchestrator.config.identity, self.record.id, self.record.generation, reason
         )
 
     async def close(self) -> None:
@@ -54,7 +54,7 @@ class Terminal:
             self.reader.cancel()
             await asyncio.gather(self.reader, return_exceptions=True)
         try:
-            async with asyncio.timeout(self.agent.config.docker_timeout):
+            async with asyncio.timeout(self.orchestrator.config.docker_timeout):
                 await self.stream.close()
         finally:
             self.output.put_nowait(None)
@@ -62,7 +62,7 @@ class Terminal:
     async def serve(self, websocket: WebSocket) -> None:
         if self.attached:
             raise BoxieError(409, "terminal is unavailable")
-        self.agent.validate_attachment(self.record)
+        self.orchestrator.validate_attachment(self.record)
         self.attached = True
 
         async def send() -> None:
@@ -83,9 +83,9 @@ class Terminal:
                     if not data or len(data) > 65536:
                         await websocket.close(code=1008)
                         return
-                    async with asyncio.timeout(self.agent.config.docker_timeout):
+                    async with asyncio.timeout(self.orchestrator.config.docker_timeout):
                         await self.stream.write(data)
-                    self.agent.accepted_input(self.record)
+                    self.orchestrator.accepted_input(self.record)
                 elif (text := message.get("text")) is not None:
                     try:
                         if len(text) > 1024:
@@ -94,7 +94,7 @@ class Terminal:
                     except ValueError, ValidationError:
                         await websocket.close(code=1008)
                         return
-                    async with asyncio.timeout(self.agent.config.docker_timeout):
+                    async with asyncio.timeout(self.orchestrator.config.docker_timeout):
                         await self.stream.resize(size.columns, size.rows)
 
         tasks: list[asyncio.Task[None]] = []
@@ -103,7 +103,7 @@ class Terminal:
             # Keep the original READY grace active during the handshake. Failed or
             # cancelled acceptance must neither erase nor renew that deadline.
             await websocket.accept()
-            self.agent.attach(self.record)
+            self.orchestrator.attach(self.record)
             accepted = True
             tasks = [asyncio.create_task(send()), asyncio.create_task(receive())]
             done, _pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -116,4 +116,4 @@ class Terminal:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             if accepted:
-                self.agent.disconnected(self.record)
+                self.orchestrator.disconnected(self.record)

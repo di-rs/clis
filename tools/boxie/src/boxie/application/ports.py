@@ -6,8 +6,8 @@ from typing import Protocol
 from uuid import UUID
 
 from boxie.domain.models import (
-    AgentIdentity,
     ArtifactPutResult,
+    OrchestratorIdentity,
     Principal,
     ProfileSnapshot,
     SandboxSpec,
@@ -33,13 +33,13 @@ class ArtifactAccess(Protocol):
     async def retire(self, principal: Principal, artifact_id: UUID) -> None: ...
 
 
-class AgentControl(Protocol):
+class OrchestratorControl(Protocol):
     def resolve_profile(
         self, profile_id: str, command: tuple[str, ...], env: Mapping[str, str]
     ) -> ProfileSnapshot: ...
     async def ensure(
         self,
-        identity: AgentIdentity,
+        identity: OrchestratorIdentity,
         sandbox_id: UUID,
         generation: int,
         snapshot: ProfileSnapshot,
@@ -47,8 +47,12 @@ class AgentControl(Protocol):
         deadline: datetime,
     ) -> SandboxView: ...
     async def inspect(
-        self, identity: AgentIdentity, sandbox_id: UUID, generation: int
+        self, identity: OrchestratorIdentity, sandbox_id: UUID, generation: int
     ) -> SandboxView: ...
     async def remove(
-        self, identity: AgentIdentity, sandbox_id: UUID, generation: int, reason: TerminationReason
+        self,
+        identity: OrchestratorIdentity,
+        sandbox_id: UUID,
+        generation: int,
+        reason: TerminationReason,
     ) -> SandboxView: ...

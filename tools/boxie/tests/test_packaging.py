@@ -28,10 +28,10 @@ def test_distributions_have_explicit_isolated_modules(relative: str, module: str
 def test_private_compose_units_do_not_share_privileges() -> None:
     boxie = yaml.safe_load((ROOT / "tools/boxie/infra/compose.yml").read_text())
     product = yaml.safe_load((ROOT / "tools/cli-playground/infra/compose.yml").read_text())
-    assert set(boxie["services"]) == {"api", "agent"}
+    assert set(boxie["services"]) == {"api", "orchestrator"}
     for name, service in boxie["services"].items():
         assert not service.get("ports")
-        assert ("docker.sock" in json.dumps(service)) == (name == "agent")
+        assert ("docker.sock" in json.dumps(service)) == (name == "orchestrator")
     assert "docker.sock" not in json.dumps(product)
     assert not product["services"]["gateway"].get("depends_on")
     assert "PLAYGROUND_BOXIE_URL" in product["services"]["gateway"]["environment"]
@@ -121,7 +121,7 @@ for name in ({forbidden!r}, 'boxie_infra', 'playground_infra', 'boxie_test_suppo
     assert importlib.util.find_spec(name) is None, name
 """
     if module == "boxie":
-        probe += "import boxie.bootstrap.api, boxie.bootstrap.agent\n"
+        probe += "import boxie.bootstrap.api, boxie.bootstrap.orchestrator\n"
     else:
         # Real installed assets via ASGI HTTP, without pytest/httpx or source imports.
         probe += """
@@ -172,9 +172,9 @@ def test_resolved_compose_isolated_topology(
     values = {
         "BOXIE_RUNTIME_IMAGE": "boxie:test",
         "BOXIE_API_CONFIG": str(tmp_path / "api.json"),
-        "BOXIE_AGENT_CONFIG": str(tmp_path / "agent.json"),
+        "BOXIE_ORCHESTRATOR_CONFIG": str(tmp_path / "orchestrator.json"),
         "BOXIE_PROFILES_FILE": str(tmp_path / "profiles.json"),
-        "BOXIE_AGENT_CREDENTIAL_FILE": str(tmp_path / "agent.secret"),
+        "BOXIE_ORCHESTRATOR_CREDENTIAL_FILE": str(tmp_path / "orchestrator.secret"),
         "BOXIE_CONSUMER_CREDENTIAL_FILE": str(tmp_path / "consumer.secret"),
         "BOXIE_DATA_DIR": str(tmp_path / "data"),
         "BOXIE_CONSUMER_NETWORK": "test-consumers",
@@ -226,10 +226,10 @@ def test_resolved_compose_isolated_topology(
     assert config["name"] == expected_project
     for name, entry in config["services"].items():
         sockets = [v for v in entry.get("volumes", []) if v["target"] == "/var/run/docker.sock"]
-        assert bool(sockets) == (service == "boxie" and name == "agent")
+        assert bool(sockets) == (service == "boxie" and name == "orchestrator")
         if service == "boxie":
             assert not entry.get("ports")
-        if name == "agent":
+        if name == "orchestrator":
             mount = next(v for v in entry["volumes"] if v["target"] == values["BOXIE_DATA_DIR"])
             assert mount["source"] == mount["target"]
             assert set(entry["networks"]) == {"control"}
@@ -248,12 +248,12 @@ def test_boxie_configuration_cli_is_product_independent(tmp_path: Path) -> None:
     import sys
 
     from boxie.bootstrap.api import load_configuration
-    from boxie.bootstrap.config import AgentConfig
+    from boxie.bootstrap.config import OrchestratorConfig
 
-    agent_secret = tmp_path / "agent.secret"
+    orchestrator_secret = tmp_path / "orchestrator.secret"
     consumer_secret = tmp_path / "consumer.secret"
     for path, value in [
-        (agent_secret, "test-agent-credential"),
+        (orchestrator_secret, "test-orchestrator-credential"),
         (consumer_secret, "test-consumer-credential"),
     ]:
         path.write_text(value)
@@ -273,16 +273,16 @@ def test_boxie_configuration_cli_is_product_independent(tmp_path: Path) -> None:
             "generic-host",
             "--consumer-id",
             "generic-consumer",
-            "--agent-credential",
-            str(agent_secret),
+            "--orchestrator-credential",
+            str(orchestrator_secret),
             "--consumer-credential",
             str(consumer_secret),
         ],
         check=True,
     )
-    agent = AgentConfig.from_file(tmp_path / "agent.json")
+    orchestrator = OrchestratorConfig.from_file(tmp_path / "orchestrator.json")
     api = load_configuration(tmp_path / "api.json")
-    assert agent.max_sandboxes == 8
-    assert api.agent_url == "http://agent:8091"
+    assert orchestrator.max_sandboxes == 8
+    assert api.orchestrator_url == "http://orchestrator:8091"
     assert "playground" not in (tmp_path / "api.json").read_text().lower()
-    assert "playground" not in (tmp_path / "agent.json").read_text().lower()
+    assert "playground" not in (tmp_path / "orchestrator.json").read_text().lower()

@@ -6,7 +6,7 @@ from uuid import UUID
 
 import pytest
 from boxie.domain.errors import BoxieError
-from boxie_test_support.agent import (
+from boxie_test_support.orchestrator import (
     Clock,
     DockerDaemon,
     configuration,
@@ -27,12 +27,12 @@ def test_unsuccessful_first_accept_preserves_original_grace(
 ) -> None:
     async def exercise() -> None:
         clock, daemon = Clock(), DockerDaemon()
-        async with live(configuration(tmp_path), daemon, clock) as (client, agent):
+        async with live(configuration(tmp_path), daemon, clock) as (client, orchestrator):
             artifact = await upload(client)
             identifier = (await client.post("/v1/sandboxes", json=request(artifact))).json()["id"]
             await settled(client, identifier, "ready")
             await client.delete(f"/v1/artifacts/{artifact}", params={"consumer_id": "one"})
-            terminal = agent.terminals[UUID(identifier)]
+            terminal = orchestrator.terminals[UUID(identifier)]
             accepting = asyncio.Event()
 
             async def receive() -> Message:
@@ -63,13 +63,13 @@ def test_unsuccessful_first_accept_preserves_original_grace(
                 assert denial.value.status == 409
                 clock.advance(119 - elapsed)
                 await asyncio.sleep(0.03)
-                assert agent.reserved_count == 1 and agent.artifact_exists(artifact)
+                assert orchestrator.reserved_count == 1 and orchestrator.artifact_exists(artifact)
                 assert not daemon.removed
                 clock.advance(1)
                 result = await settled(client, identifier, "terminated")
                 assert result["reason"] == "disconnected"
-                assert agent.reserved_count == 0 and not daemon.configs
-                assert not agent.artifact_exists(artifact)
+                assert orchestrator.reserved_count == 0 and not daemon.configs
+                assert not orchestrator.artifact_exists(artifact)
                 assert terminal.closed
             finally:
                 serving.cancel()
@@ -84,11 +84,11 @@ def test_exit_after_successful_accept_starts_normal_disconnect_grace(
 ) -> None:
     async def exercise() -> None:
         clock, daemon = Clock(), DockerDaemon()
-        async with live(configuration(tmp_path), daemon, clock) as (client, agent):
+        async with live(configuration(tmp_path), daemon, clock) as (client, orchestrator):
             artifact = await upload(client)
             identifier = (await client.post("/v1/sandboxes", json=request(artifact))).json()["id"]
             await settled(client, identifier, "ready")
-            terminal = agent.terminals[UUID(identifier)]
+            terminal = orchestrator.terminals[UUID(identifier)]
             output_started = asyncio.Event()
             messages: asyncio.Queue[Message] = asyncio.Queue()
             messages.put_nowait({"type": "websocket.connect"})
@@ -119,10 +119,10 @@ def test_exit_after_successful_accept_starts_normal_disconnect_grace(
                     await serving
                 clock.advance(119)
                 await asyncio.sleep(0.03)
-                assert agent.reserved_count == 1 and not daemon.removed
+                assert orchestrator.reserved_count == 1 and not daemon.removed
                 clock.advance(1)
                 assert (await settled(client, identifier, "terminated"))["reason"] == "disconnected"
-                assert agent.reserved_count == 0 and not daemon.configs
+                assert orchestrator.reserved_count == 0 and not daemon.configs
             finally:
                 serving.cancel()
                 await asyncio.gather(serving, return_exceptions=True)

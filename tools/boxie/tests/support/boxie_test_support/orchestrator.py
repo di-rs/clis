@@ -15,13 +15,13 @@ from uuid import uuid4
 
 import httpx
 import uvicorn
-from boxie.bootstrap.config import AgentConfig, read_credential
-from boxie.domain.models import AgentIdentity
+from boxie.bootstrap.config import OrchestratorConfig, read_credential
+from boxie.domain.models import OrchestratorIdentity
 from boxie.persistence.artifacts import ArtifactStore
-from boxie.sandbox.server import create_agent_app
+from boxie.sandbox.server import create_orchestrator_app
 
 IMAGE = "example.org/shell@sha256:" + "1" * 64
-AUTH = {"Authorization": "Bearer agent-test-secret"}
+AUTH = {"Authorization": "Bearer orchestrator-test-secret"}
 
 
 def bundle(files: dict[str, bytes] | None = None) -> bytes:
@@ -123,10 +123,10 @@ class DockerDaemon:
         pass
 
 
-def configuration(root: Path, **changes: Any) -> AgentConfig:
+def configuration(root: Path, **changes: Any) -> OrchestratorConfig:
     root.mkdir(exist_ok=True)
-    secret = root / "agent.secret"
-    secret.write_text("agent-test-secret\n")
+    secret = root / "orchestrator.secret"
+    secret.write_text("orchestrator-test-secret\n")
     secret.chmod(0o600)
     profile = root / "profiles.json"
     profile.write_text(
@@ -141,11 +141,11 @@ def configuration(root: Path, **changes: Any) -> AgentConfig:
             }
         )
     )
-    return AgentConfig(
+    return OrchestratorConfig(
         data_dir=root / "state",
         profiles_file=profile,
         credential_file=secret,
-        identity=AgentIdentity(uuid4(), "host-1"),
+        identity=OrchestratorIdentity(uuid4(), "host-1"),
         sweep_seconds=0.01,
         **changes,
     )
@@ -153,10 +153,10 @@ def configuration(root: Path, **changes: Any) -> AgentConfig:
 
 @asynccontextmanager
 async def live(
-    config: AgentConfig, daemon: DockerDaemon, clock: Clock
+    config: OrchestratorConfig, daemon: DockerDaemon, clock: Clock
 ) -> AsyncIterator[tuple[httpx.AsyncClient, Any]]:
     store = ArtifactStore(config.data_dir / "artifacts")
-    app = create_agent_app(
+    app = create_orchestrator_app(
         config,
         daemon,
         store,
@@ -179,7 +179,7 @@ async def live(
             await asyncio.sleep(0.01)
         assert server.started
         async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}", headers=AUTH) as client:
-            yield client, app.state.agent
+            yield client, app.state.orchestrator
     finally:
         server.should_exit = True
         await asyncio.wait_for(task, 5)

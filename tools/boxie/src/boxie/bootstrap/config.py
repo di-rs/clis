@@ -1,4 +1,4 @@
-"""Agent configuration comes from operator-owned files, never from API consumers."""
+"""Orchestrator configuration comes from operator-owned files, never from API consumers."""
 
 import json
 import os
@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import UUID
 
-from boxie.domain.models import AgentIdentity, LifetimePolicy
+from boxie.domain.models import LifetimePolicy, OrchestratorIdentity
 from boxie.domain.policy import validate_policy
 
 
@@ -27,11 +27,11 @@ def read_credential(path: Path) -> bytes:
 
 
 @dataclass(frozen=True)
-class AgentConfig:
+class OrchestratorConfig:
     data_dir: Path
     profiles_file: Path
     credential_file: Path
-    identity: AgentIdentity
+    identity: OrchestratorIdentity
     max_sandboxes: int = 8
     policy_maximum: LifetimePolicy = field(default_factory=LifetimePolicy)
     docker_timeout: float = 20
@@ -43,18 +43,20 @@ class AgentConfig:
         if not 1 <= self.max_sandboxes <= 8:
             raise ValueError("capacity must be 1..8")
         if not 0 < self.docker_timeout <= 60 or not 0 < self.sweep_seconds <= 10:
-            raise ValueError("invalid agent intervals")
+            raise ValueError("invalid orchestrator intervals")
         validate_policy(self.policy_maximum)
         if not self.identity.host_id or len(self.identity.host_id) > 128:
             raise ValueError("host ID required")
 
     @classmethod
-    def from_file(cls, path: Path) -> AgentConfig:
+    def from_file(cls, path: Path) -> OrchestratorConfig:
         data = json.loads(path.read_text())
         for key in ("data_dir", "profiles_file", "credential_file"):
             data[key] = Path(data[key])
         identity = data.pop("identity")
-        data["identity"] = AgentIdentity(UUID(identity["installation_id"]), identity["host_id"])
+        data["identity"] = OrchestratorIdentity(
+            UUID(identity["installation_id"]), identity["host_id"]
+        )
         if "policy_maximum" in data:
             data["policy_maximum"] = LifetimePolicy(**data["policy_maximum"])
         return cls(**data)

@@ -11,7 +11,7 @@ sandbox without knowing about GitHub, pull requests, CLI bundles, or public doma
 
 Boxie is an independently deployed service, not a Python library embedded into
 CLI Playground. Its internal Python modules and build metadata are implementation
-details. Separate its API, lifecycle orchestration, and privileged sandbox agent
+details. Separate its API, lifecycle orchestration, and privileged sandbox orchestrator
 without turning every adapter into another network service or distribution.
 
 The initial deployment uses one host. Boxie has no public endpoint: only trusted
@@ -33,14 +33,14 @@ where it does not conflict with these decisions.
 | CLI Playground | Svelte UI, preview identity and build status, GitHub publication, CLI selection, sample files, ELF/bundle validation, preview expiry, public routes and product access policy | Docker, Temporal workflows, generic sandbox lifecycle |
 | Boxie API | Private authenticated API, generic artifacts and sandbox requests, status, terminal authorization and relay, explicit stop | GitHub, public hostnames, Docker socket |
 | Boxie workflow worker | Temporal workflows, provisioning/cleanup orchestration, retry and termination policy | Browser presentation, PTY byte streaming |
-| Boxie sandbox agent | Docker/gVisor provisioning adapter, actual resource inspection, PTY ownership, local cleanup enforcement | Preview metadata, public ingress |
+| Boxie sandbox orchestrator | Docker/gVisor provisioning adapter, actual resource inspection, PTY ownership, local cleanup enforcement | Preview metadata, public ingress |
 | Temporal deployment | Upstream server, persistence configuration, schema jobs, namespace bootstrap, private operator UI origin | Boxie's application workflows |
 | Observability deployment | Collection, log and metric storage, provisioned dashboards and alert rules | Terminal transcripts or product state |
 | Platform deployment | Host, firewall, persistent storage, shared networks, component composition | Individual ephemeral sandboxes |
 
-The Boxie processes form one service and release family. The sandbox agent is a
+The Boxie processes form one service and release family. The sandbox orchestrator is a
 separate process/container and the only component with Docker socket access.
-Sandbox creation is a cohesive agent module with a narrow internal protocol;
+Sandbox creation is a cohesive orchestrator module with a narrow internal protocol;
 it is not another responsibility inside API route handlers. Temporal and
 observability each have their own deployment package and lifecycle.
 
@@ -58,9 +58,9 @@ flowchart LR
     API --> DB[(Boxie PostgreSQL)]
     API --> Temporal[Self-hosted Temporal]
     Temporal <--> Worker[Boxie workflow worker]
-    Worker --> Agent[Boxie sandbox agent]
-    API <-->|terminal relay| Agent
-    Agent --> Docker[Docker and gVisor sandboxes]
+    Worker --> Orchestrator[Boxie sandbox orchestrator]
+    API <-->|terminal relay| Orchestrator
+    Orchestrator --> Docker[Docker and gVisor sandboxes]
     Worker --> DB
     Operator[Operator] --> Access[Cloudflare Access and Tunnel]
     Access --> Dashboards[Grafana and Temporal UI]
@@ -68,7 +68,7 @@ flowchart LR
 
 Every arrow between services is an authenticated, explicitly permitted network
 path. Browser terminal traffic always passes through Playground and the Boxie
-API; neither the agent nor the Docker API is browser-accessible. API-to-Temporal
+API; neither the orchestrator nor the Docker API is browser-accessible. API-to-Temporal
 traffic submits requests, while workflow workers poll Temporal task queues.
 
 ## Modules, ports, and dependency injection
@@ -88,7 +88,7 @@ tools/boxie/
     application/     # use cases and semantic ports
     api/             # HTTP/WebSocket protocol and authentication
     temporal/        # workflows and activity implementations
-    sandbox/         # agent protocol, PTY ownership, Docker/gVisor adapter
+    sandbox/         # orchestrator protocol, PTY ownership, Docker/gVisor adapter
     persistence/     # concrete PostgreSQL and local artifact implementation
     observability/   # event schema, contextual logging, metrics
     bootstrap/       # configuration and process composition roots
@@ -202,8 +202,8 @@ sandbox. Transient errors have bounded attempts/timeouts and backoff; invalid
 requests fail without retry. Temporal's [Python failure handling guidance](https://docs.temporal.io/develop/python/best-practices/error-handling)
 informs these contracts.
 
-PTY ownership and terminal output belong to the agent, outside short-lived
-provisioning activities and browser sockets. The agent attaches before starting
+PTY ownership and terminal output belong to the orchestrator, outside short-lived
+provisioning activities and browser sockets. The orchestrator attaches before starting
 the container and keeps draining output even when the browser disconnects.
 Workflow code never streams terminal bytes through Temporal history.
 
@@ -211,17 +211,17 @@ On restart, reconcile only resources owned by this Boxie installation. Remove th
 current delete-all-on-start behavior. Preserve resources only when ownership,
 generation, and deadlines can be established; otherwise terminate them through
 the recorded cleanup path. API or workflow-worker restarts must not automatically
-destroy healthy agent-owned sandboxes. An agent/host restart may end terminals;
+destroy healthy orchestrator-owned sandboxes. An orchestrator/host restart may end terminals;
 preserving their process state or restoring them is outside this scope.
 
-The agent also enforces absolute deadlines and a bounded control-plane lease
+The orchestrator also enforces absolute deadlines and a bounded control-plane lease
 locally, so a Temporal outage alone does not permit unlimited sandbox lifetime.
-Renewal cannot move the absolute deadline. Deadline/lease data must survive agent
+Renewal cannot move the absolute deadline. Deadline/lease data must survive orchestrator
 restart or be recovered before a surviving resource is allowed to continue. Use
 a monotonic clock for live timers and persisted absolute timestamps for restart
 reconciliation. Cleanup tolerates repeated requests and missing containers.
 
-Deadline enforcement requires a functioning agent and Docker control path. If
+Deadline enforcement requires a functioning orchestrator and Docker control path. If
 either is unavailable, record termination as pending, retain the reservation and
 artifact references, expose the failure, and reconcile immediately when control
 returns. Do not claim a stopped container or guaranteed cleanup deadline during
@@ -243,16 +243,16 @@ polling, window resizing, and command output do not count as user activity. A
 long command with no further input can therefore hit the inactivity limit; this
 is an interactive playground policy, not a noninteractive job guarantee.
 
-Use one validated policy contract across the API, workflow, and agent. Replace
+Use one validated policy contract across the API, workflow, and orchestrator. Replace
 the existing shell's independent 900-second kill so it cannot terminate a session
 before the agreed policy. Display the absolute expiry and an explicit termination
 reason in Playground. Operator-configured maxima constrain consumer overrides.
 Bound and coalesce activity updates; do not emit a Temporal event per keystroke.
 
-The agent owns live input/attachment timestamps and serializes renewal against
+The orchestrator owns live input/attachment timestamps and serializes renewal against
 expiry decisions. An idle/disconnect termination request carries the observed
 generation and is conditional on that deadline still being expired. A stale
-timer cannot kill a renewed attachment; the workflow records the agent's result
+timer cannot kill a renewed attachment; the workflow records the orchestrator's result
 and reschedules. Explicit stop and absolute expiry are unconditional. This keeps
 coalesced activity reports from racing valid input or reconnect at a deadline.
 
@@ -270,7 +270,7 @@ Keep its existing xterm instance and scoped session identity. If the sandbox is
 still alive and the disconnect grace has not elapsed, reattach to its existing
 PTY. Files and running processes remain because the sandbox was never stopped.
 
-Use a bounded in-memory output replay buffer in the agent, sequence cursors, and
+Use a bounded in-memory output replay buffer in the orchestrator, sequence cursors, and
 acknowledgment after output is applied by xterm. Resume from the browser's last
 applied sequence retained in page memory, not the server's last received ACK.
 Serialize pending xterm writes across reconnect, ignore duplicate sequences, and
@@ -287,7 +287,7 @@ different terminal width after a resize while offline.
 
 **Page reload recovery is excluded.** Reload creates a new session; the old one
 expires under its disconnect policy. Do not add browser persistence, terminal
-screen snapshots, filesystem checkpoints, or recovery after agent/host failure.
+screen snapshots, filesystem checkpoints, or recovery after orchestrator/host failure.
 The reconnect guarantee ends when the old PTY or output continuity is lost.
 
 ## Self-hosted Temporal and persistence
@@ -315,7 +315,7 @@ alone and default authorization do not. Consult
 [Temporal security guidance](https://docs.temporal.io/self-hosted-guide/security).
 Expose only its operator UI through the protected dashboard ingress. Use a
 shared task queue for the initial single-host worker pool, with explicit host
-ownership in agent requests. Do not build multi-host placement now.
+ownership in orchestrator requests. Do not build multi-host placement now.
 
 Workflow changes must be replay-compatible with active histories. Add replay
 coverage and drain/version workers deliberately when a change cannot be made
@@ -333,7 +333,7 @@ fifth PR or supported production mode without Temporal.
 ## Operational visibility
 
 Emit JSON logs to stdout using stdlib logging integrated with structlog, including
-Uvicorn and unhandled errors. Set context at request, workflow/activity, and agent
+Uvicorn and unhandled errors. Set context at request, workflow/activity, and orchestrator
 boundaries. Useful fields include service, process role, release, event name,
 severity, timestamp, request ID, sandbox ID, workflow/run ID, activity attempt,
 termination reason, duration, and exception details. Use context propagation
@@ -347,7 +347,7 @@ authorization headers, or capability tokens. High-cardinality IDs are searchable
 fields, not stream labels or metric dimensions. Redact at emission and test it.
 Keep sensitive values out of Temporal arguments, results, failure details,
 search attributes, and propagated context as well. Pass opaque references for
-agent-resolved sensitive configuration; do not serialize raw credentials inside
+orchestrator-resolved sensitive configuration; do not serialize raw credentials inside
 command/environment workflow parameters. Test persisted workflow history and
 logs with sentinel secrets. See [Temporal data handling](https://docs.temporal.io/dataconversion).
 
@@ -358,7 +358,7 @@ Vector buffers have separate bounded disk budgets defined in deployment
 configuration. The seven-day window describes searchable storage, not guaranteed
 delivery of buffered logs. Do not mount Docker's socket into the collector or
 tail the private binary files of Docker's local
-logging driver. Sandboxes keep their logging driver disabled; the agent owns their
+logging driver. Sandboxes keep their logging driver disabled; the orchestrator owns their
 PTY output. See [Docker journald](https://docs.docker.com/engine/logging/drivers/journald/),
 [Vector journald](https://vector.dev/docs/reference/configuration/sources/journald/),
 and [VictoriaLogs ingestion](https://docs.victoriametrics.com/victorialogs/data-ingestion/vector/).
@@ -376,7 +376,7 @@ Grafana queries it alongside VictoriaLogs. Configure both time and size retentio
 with headroom for its write-ahead log and compaction; see [Prometheus storage](https://prometheus.io/docs/prometheus/latest/storage/).
 Track active/reserved capacity,
 provisioning latency/failures, dependency readiness, workflow/task-queue health,
-cleanup age/backlog, agent leases, disk pressure, and telemetry drops. Dashboards
+cleanup age/backlog, orchestrator leases, disk pressure, and telemetry drops. Dashboards
 must support finding a failed request, following its sandbox lifecycle, and
 distinguishing workflow retries from duplicate resources. Alert rules cover
 overdue cleanup, exhausted capacity, unavailable workers, and low disk space.
@@ -436,7 +436,7 @@ or become a second home for their deployment logic.
 
 Platform ingress owns the dashboard tunnel, Access configuration, and operator
 DNS. Playground owns its product hostname and public routes. One release manifest
-versions Boxie's API, workflow worker, and agent together. Independently released
+versions Boxie's API, workflow worker, and orchestrator together. Independently released
 components declare their dependency/schema compatibility; an application release
 never reconciles shared resources owned by another component.
 
@@ -476,7 +476,7 @@ Use immutable release/image identities, bounded SSH/health deadlines that fit
 inside CI timeouts, and readiness that verifies the intended release and required
 dependencies. Retain the previous application release for an explicit failed
 activation rollback where schemas permit it. Do not blindly roll back Temporal
-schemas or claim terminal/process restoration during deployment. Agent updates
+schemas or claim terminal/process restoration during deployment. Orchestrator updates
 drain existing sessions or explicitly terminate them; no seamless PTY handover
 is promised. A failed release must not delete persistent state.
 
@@ -492,8 +492,8 @@ PR. Each stage updates its documentation and runs affected checks.
 
 | PR | Title | Reviewable result and acceptance |
 | --- | --- | --- |
-| 1 | ♻️ Separate Boxie from CLI Playground | Extract independently runnable Boxie API/agent and generic contracts; inject adapters; keep product policy in Playground; replace direct imports with HTTP/WebSocket client. Establish each service's own `infra/` directory and deployment contract now. A generic consumer can create/attach/stop without PR/SHA/domain fields. Existing Playground E2E behavior works across the service boundary. |
-| 2 | ✨ Add durable Boxie lifecycle with Temporal | Add independent Temporal/PostgreSQL deployment, workflow worker, outbox, reservations, idempotent agent operations, deadlines, cleanup/reconciliation, and same-page reconnect. Retries and worker restarts do not duplicate resources; timeout/disconnect/stop behavior is verified. |
+| 1 | ♻️ Separate Boxie from CLI Playground | Extract independently runnable Boxie API/orchestrator and generic contracts; inject adapters; keep product policy in Playground; replace direct imports with HTTP/WebSocket client. Establish each service's own `infra/` directory and deployment contract now. A generic consumer can create/attach/stop without PR/SHA/domain fields. Existing Playground E2E behavior works across the service boundary. |
+| 2 | ✨ Add durable Boxie lifecycle with Temporal | Add independent Temporal/PostgreSQL deployment, workflow worker, outbox, reservations, idempotent orchestrator operations, deadlines, cleanup/reconciliation, and same-page reconnect. Retries and worker restarts do not duplicate resources; timeout/disconnect/stop behavior is verified. |
 | 3 | ✨ Add Boxie operational visibility | Add JSON event/correlation schema, collector, VictoriaLogs, Prometheus, Grafana, Access-protected operator routes, dashboards and alert rules. A deliberately failed lifecycle can be diagnosed without terminal contents entering logs. |
 | 4 | ♻️ Compose deployment and harden operations | Wire the service-owned infrastructure into the thin single-host Pulumi environment, finish shared platform components and split CI responsibilities, validate release identity/deadlines, verify fresh installation and independent updates/failure handling, finish operator runbooks and security/resource checks. No migration or full backup system. |
 
@@ -525,11 +525,11 @@ to their owning component; do not rewrite everything to mirror new classes.
   lost acknowledgments, pending xterm writes, resize while offline, buffer overflow,
   no replayed input, and page reload creating a new session while the abandoned
   one expires. Include input/reattachment racing an idle/disconnect timeout.
-- Failure containment: Temporal unavailable, outbox dispatch interrupted, agent
+- Failure containment: Temporal unavailable, outbox dispatch interrupted, orchestrator
   lost, host restart with surviving metadata, orphan resources, and collector
-  outage. Prove bounded failure detection and cleanup when the agent/Docker are
+  outage. Prove bounded failure detection and cleanup when the orchestrator/Docker are
   available, and truthful pending-cleanup status otherwise.
-- Security: private API/agent/Temporal network reachability, consumer ownership,
+- Security: private API/orchestrator/Temporal network reachability, consumer ownership,
   archive containment, approved profiles, no credential leakage, and dashboard
   Access/origin bypass prevention.
 - Deployment: Pulumi component tests/preview, manifest/config validation, failed
@@ -553,7 +553,7 @@ does not establish a performance improvement.
 - [Off-host backups and tested restore: issue #38](https://github.com/di-rs/clis/issues/38).
   Persistent volumes and restart safety do not claim protection from host loss.
 - Page reload restoration, terminal snapshots, sandbox checkpoint/restore,
-  filesystem rollback, and seamless agent/host restart continuity.
+  filesystem rollback, and seamless orchestrator/host restart continuity.
 - Multi-host scheduling, high availability, autoscaling, public Boxie access,
   alternate storage/export adapters, a custom operator UI, and SvelteKit migration.
 

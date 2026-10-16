@@ -10,15 +10,22 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from boxie_test_support.agent import Clock, DockerDaemon, bundle, configuration, live, request
 from boxie_test_support.api import CONSUMER_AUTH, api_server, artifact, create, ready, terminal_url
+from boxie_test_support.orchestrator import (
+    Clock,
+    DockerDaemon,
+    bundle,
+    configuration,
+    live,
+    request,
+)
 from websockets.asyncio.client import connect
 
 
-def test_api_restart_preserves_agent_resource_capacity_and_draining(tmp_path: Path) -> None:
+def test_api_restart_preserves_orchestrator_resource_capacity_and_draining(tmp_path: Path) -> None:
     async def exercise() -> None:
         config, daemon, clock = configuration(tmp_path, max_sandboxes=1), DockerDaemon(), Clock()
-        async with live(config, daemon, clock) as (control, agent):
+        async with live(config, daemon, clock) as (control, orchestrator):
             async with api_server(str(control.base_url)) as client:
                 artifact_id = await artifact(client)
                 identifier = await create(client, artifact_id)
@@ -31,7 +38,7 @@ def test_api_restart_preserves_agent_resource_capacity_and_draining(tmp_path: Pa
                 assert readiness.status_code == 200
                 assert readiness.json() == {
                     "release": "test-release",
-                    "dependencies": {"agent": True},
+                    "dependencies": {"orchestrator": True},
                 }
             await ws.wait_closed()
             resource = next(iter(daemon.configs))
@@ -49,7 +56,7 @@ def test_api_restart_preserves_agent_resource_capacity_and_draining(tmp_path: Pa
                         headers={"Idempotency-Key": "other"},
                     )
                 ).status_code == 429
-            assert list(daemon.configs) == [resource] and agent.reserved_count == 1
+            assert list(daemon.configs) == [resource] and orchestrator.reserved_count == 1
 
     asyncio.run(exercise())
 
@@ -59,7 +66,7 @@ def test_cancelled_upload_cleans_both_proxy_hops(
 ) -> None:
     async def exercise() -> None:
         config = configuration(tmp_path)
-        async with live(config, DockerDaemon(), Clock()) as (control, _agent):
+        async with live(config, DockerDaemon(), Clock()) as (control, _orchestrator):
             async with api_server(str(control.base_url)) as client:
                 identifier = str(uuid4())
                 started, release = asyncio.Event(), asyncio.Event()
@@ -109,20 +116,20 @@ def test_standalone_api_reads_distinct_private_credentials(tmp_path: Path) -> No
         consumer = tmp_path / "consumer.secret"
         consumer.write_text("consumer-one-secret\n")
         consumer.chmod(0o600)
-        # A subprocess runs the actual API composition root and real agent client.
+        # A subprocess runs the actual API composition root and real orchestrator client.
         import socket
 
         sock = socket.socket()
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
         sock.close()
-        async with live(config, daemon, Clock()) as (control, _agent):
+        async with live(config, daemon, Clock()) as (control, _orchestrator):
             path = tmp_path / "api.json"
             path.write_text(
                 json.dumps(
                     {
-                        "agent_url": str(control.base_url),
-                        "agent_credential_file": str(config.credential_file),
+                        "orchestrator_url": str(control.base_url),
+                        "orchestrator_credential_file": str(config.credential_file),
                         "consumer_credential_files": {"one": str(consumer)},
                         "release": "process-release",
                         "bind_port": port,
@@ -159,7 +166,9 @@ def test_standalone_api_reads_distinct_private_credentials(tmp_path: Path) -> No
                 output, _ = await asyncio.wait_for(process.communicate(), 5)
             assert process.returncode == -signal.SIGTERM, output.decode()
             assert b"Application shutdown complete" in output and b"ERROR" not in output
-            assert b"consumer-one-secret" not in output and b"agent-test-secret" not in output
+            assert (
+                b"consumer-one-secret" not in output and b"orchestrator-test-secret" not in output
+            )
 
     asyncio.run(exercise())
 
@@ -170,7 +179,10 @@ def test_dependency_failure_is_bounded_and_readiness_reports_release() -> None:
             assert (await client.get("/healthz", headers={"Authorization": ""})).status_code == 200
             readiness = await client.get("/readyz")
             assert readiness.status_code == 503
-            assert readiness.json() == {"release": "test-release", "dependencies": {"agent": False}}
+            assert readiness.json() == {
+                "release": "test-release",
+                "dependencies": {"orchestrator": False},
+            }
             response = await client.get(f"/v1/sandboxes/{uuid4()}")
             assert response.status_code == 503
             assert "secret" not in response.text and "127.0.0.1" not in response.text
@@ -182,14 +194,14 @@ def test_api_configuration_rejects_reused_or_public_secret_files(tmp_path: Path)
     from boxie.bootstrap.api import load_configuration
 
     secret = tmp_path / "secret"
-    secret.write_text("agent-test-secret")
+    secret.write_text("orchestrator-test-secret")
     secret.chmod(0o600)
     path = tmp_path / "api.json"
     path.write_text(
         json.dumps(
             {
-                "agent_url": "http://127.0.0.1:8091",
-                "agent_credential_file": str(secret),
+                "orchestrator_url": "http://127.0.0.1:8091",
+                "orchestrator_credential_file": str(secret),
                 "consumer_credential_files": {"one": str(secret)},
                 "release": "test",
             }
@@ -202,24 +214,24 @@ def test_api_configuration_rejects_reused_or_public_secret_files(tmp_path: Path)
         load_configuration(path)
 
 
-def test_agent_client_control_protocol_and_bounded_readiness(
+def test_orchestrator_client_control_protocol_and_bounded_readiness(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from uuid import UUID
 
     from boxie.domain.errors import BoxieError
     from boxie.domain.models import Principal, TerminationReason
-    from boxie.sandbox.client import AgentClient
+    from boxie.sandbox.client import OrchestratorClient
 
     async def exercise() -> None:
         config, daemon = configuration(tmp_path, docker_timeout=0.05), DockerDaemon()
-        async with live(config, daemon, Clock()) as (control, _agent):
+        async with live(config, daemon, Clock()) as (control, _orchestrator):
             async with api_server(str(control.base_url)) as client:
                 artifact_id = UUID(await artifact(client))
                 identifier = UUID(await create(client, str(artifact_id)))
                 view = await ready(client, str(identifier))
-                async with AgentClient(
-                    str(control.base_url), b"agent-test-secret", timeout=0.5
+                async with OrchestratorClient(
+                    str(control.base_url), b"orchestrator-test-secret", timeout=0.5
                 ) as network:
                     principal = Principal("one")
                     snapshot = await network.resolve_profile(
@@ -252,7 +264,7 @@ def test_agent_client_control_protocol_and_bounded_readiness(
                     async with asyncio.timeout(0.4):
                         readiness = await client.get("/readyz")
                     assert readiness.status_code == 503
-                    assert readiness.json()["dependencies"] == {"agent": False}
+                    assert readiness.json()["dependencies"] == {"orchestrator": False}
                     result = await network.remove(
                         principal, config.identity, identifier, 1, TerminationReason.REQUESTED
                     )
@@ -264,21 +276,21 @@ def test_agent_client_control_protocol_and_bounded_readiness(
 @pytest.mark.parametrize(
     "frame",
     [
-        '{"type":"status","reason":"agent-test-secret"}',
-        '{"type":"status","reason":"requested","secret":"agent-test-secret"}',
+        '{"type":"status","reason":"orchestrator-test-secret"}',
+        '{"type":"status","reason":"requested","secret":"orchestrator-test-secret"}',
         "not json",
     ],
 )
-def test_agent_client_rejects_malformed_status_without_leaking_payload(frame: str) -> None:
+def test_orchestrator_client_rejects_malformed_status_without_leaking_payload(frame: str) -> None:
     from boxie.domain.errors import BoxieError
     from boxie.domain.models import Principal
-    from boxie.sandbox.client import AgentClient
+    from boxie.sandbox.client import OrchestratorClient
     from boxie_test_support.api import serve
     from fastapi import FastAPI, WebSocket
 
     async def exercise() -> None:
         # A deliberately malformed peer characterizes the network adapter, while
-        # the E2E suite above always runs the real agent and replaces Docker only.
+        # the E2E suite above always runs the real orchestrator and replaces Docker only.
         peer = FastAPI()
 
         @peer.websocket("/v1/sandboxes/{identifier}/terminal")
@@ -288,10 +300,12 @@ def test_agent_client_rejects_malformed_status_without_leaking_payload(frame: st
             await websocket.close()
 
         async with serve(peer) as url:
-            async with AgentClient(url, b"agent-test-secret") as client:
+            async with OrchestratorClient(url, b"orchestrator-test-secret") as client:
                 with pytest.raises(BoxieError) as error:
                     async with client.attach(Principal("one"), uuid4()) as terminal:
                         await terminal.receive()
-                assert error.value.status == 503 and "agent-test-secret" not in str(error.value)
+                assert error.value.status == 503 and "orchestrator-test-secret" not in str(
+                    error.value
+                )
 
     asyncio.run(exercise())

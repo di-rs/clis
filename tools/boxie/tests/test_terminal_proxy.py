@@ -18,7 +18,7 @@ from websockets.exceptions import ConnectionClosed, InvalidStatus
 
 def test_terminal_json_input_binary_output_resize_and_stop(tmp_path: Path) -> None:
     async def exercise() -> None:
-        async with stack(tmp_path) as (client, _agent, daemon, _clock):
+        async with stack(tmp_path) as (client, _orchestrator, daemon, _clock):
             identifier = await create(client, await artifact(client))
             await ready(client, identifier)
             url = terminal_url(client, identifier)
@@ -29,7 +29,7 @@ def test_terminal_json_input_binary_output_resize_and_stop(tmp_path: Path) -> No
                 assert error.value.response.status_code == status
             async with connect(url, additional_headers=CONSUMER_AUTH) as ws:
                 assert await ws.recv() == b"ready\n"
-                # The public lookup succeeds, but agent admission rejects a second attachment.
+                # The public lookup succeeds, but orchestrator admission rejects a second attachment.
                 with pytest.raises(InvalidStatus) as conflict:
                     async with connect(url, additional_headers=CONSUMER_AUTH):
                         pytest.fail("duplicate attachment accepted")
@@ -49,36 +49,39 @@ def test_terminal_json_input_binary_output_resize_and_stop(tmp_path: Path) -> No
     asyncio.run(exercise())
 
 
-def test_agent_handshake_denials_are_typed_and_invalid_secret_is_dependency_failure(
+def test_orchestrator_handshake_denials_are_typed_and_invalid_secret_is_dependency_failure(
     tmp_path: Path,
 ) -> None:
     from uuid import UUID, uuid4
 
     from boxie.domain.errors import BoxieError
     from boxie.domain.models import Principal
-    from boxie.sandbox.client import AgentClient
-    from boxie_test_support.agent import Clock, DockerDaemon, configuration, live
+    from boxie.sandbox.client import OrchestratorClient
+    from boxie_test_support.orchestrator import Clock, DockerDaemon, configuration, live
 
     async def exercise() -> None:
-        async with live(configuration(tmp_path), DockerDaemon(), Clock()) as (control, _agent):
+        async with live(configuration(tmp_path), DockerDaemon(), Clock()) as (
+            control,
+            _orchestrator,
+        ):
             from boxie_test_support.api import api_server
 
             async with api_server(str(control.base_url)) as api:
                 identifier = UUID(await create(api, await artifact(api)))
                 await ready(api, str(identifier))
                 for secret, principal, selected, status in (
-                    (b"incorrect-agent-secret", Principal("one"), identifier, 503),
-                    (b"agent-test-secret", Principal("two"), identifier, 404),
-                    (b"agent-test-secret", Principal("one"), uuid4(), 404),
-                    (b"agent-test-secret", Principal("!invalid"), identifier, 503),
+                    (b"incorrect-orchestrator-secret", Principal("one"), identifier, 503),
+                    (b"orchestrator-test-secret", Principal("two"), identifier, 404),
+                    (b"orchestrator-test-secret", Principal("one"), uuid4(), 404),
+                    (b"orchestrator-test-secret", Principal("!invalid"), identifier, 503),
                 ):
-                    async with AgentClient(str(control.base_url), secret) as network:
+                    async with OrchestratorClient(str(control.base_url), secret) as network:
                         with pytest.raises(BoxieError) as denial:
                             async with network.attach(principal, selected):
                                 pytest.fail("denied attachment opened")
                         assert denial.value.status == status
                         assert "secret" not in str(denial.value)
-            async with api_server(str(control.base_url), b"incorrect-agent-secret") as api:
+            async with api_server(str(control.base_url), b"incorrect-orchestrator-secret") as api:
                 assert (await api.get(f"/v1/sandboxes/{identifier}")).status_code == 503
                 with pytest.raises(InvalidStatus) as upstream:
                     async with connect(
@@ -104,7 +107,7 @@ def test_agent_handshake_denials_are_typed_and_invalid_secret_is_dependency_fail
 )
 def test_malformed_or_oversized_terminal_control_closes(tmp_path: Path, frame: str | bytes) -> None:
     async def exercise() -> None:
-        async with stack(tmp_path) as (client, _agent, _daemon, _clock):
+        async with stack(tmp_path) as (client, _orchestrator, _daemon, _clock):
             identifier = await create(client, await artifact(client))
             await ready(client, identifier)
             async with connect(
@@ -119,9 +122,9 @@ def test_malformed_or_oversized_terminal_control_closes(tmp_path: Path, frame: s
     asyncio.run(exercise())
 
 
-def test_large_agent_output_is_chunked_without_unicode_loss(tmp_path: Path) -> None:
+def test_large_orchestrator_output_is_chunked_without_unicode_loss(tmp_path: Path) -> None:
     async def exercise() -> None:
-        async with stack(tmp_path) as (client, _agent, daemon, _clock):
+        async with stack(tmp_path) as (client, _orchestrator, daemon, _clock):
             identifier = await create(client, await artifact(client))
             await ready(client, identifier)
             async with connect(
@@ -138,13 +141,13 @@ def test_large_agent_output_is_chunked_without_unicode_loss(tmp_path: Path) -> N
     asyncio.run(exercise())
 
 
-def test_disconnect_cancels_proxy_but_agent_drains_until_grace(tmp_path: Path) -> None:
+def test_disconnect_cancels_proxy_but_orchestrator_drains_until_grace(tmp_path: Path) -> None:
     async def exercise() -> None:
         errors: list[dict[str, object]] = []
         asyncio.get_running_loop().set_exception_handler(
             lambda _loop, context: errors.append(context)
         )
-        async with stack(tmp_path) as (client, agent, daemon, clock):
+        async with stack(tmp_path) as (client, orchestrator, daemon, clock):
             identifier = await create(client, await artifact(client))
             await ready(client, identifier)
             async with connect(
@@ -155,13 +158,15 @@ def test_disconnect_cancels_proxy_but_agent_drains_until_grace(tmp_path: Path) -
             terminal = next(iter(daemon.terminals.values()))
             terminal.queue.put_nowait(b"still draining")
             await asyncio.sleep(0.03)
-            assert terminal.queue.empty() and not terminal.closed and agent.reserved_count == 1
+            assert (
+                terminal.queue.empty() and not terminal.closed and orchestrator.reserved_count == 1
+            )
             clock.advance(119)
             await asyncio.sleep(0.03)
-            assert agent.reserved_count == 1
+            assert orchestrator.reserved_count == 1
             clock.advance(1)
             assert (await ready(client, identifier, "terminated"))["reason"] == "disconnected"
-            assert terminal.closed and agent.reserved_count == 0
+            assert terminal.closed and orchestrator.reserved_count == 0
         assert errors == []
 
     asyncio.run(exercise())

@@ -1,4 +1,4 @@
-"""PR1 delegates admission and resource ownership to the persistent agent."""
+"""PR1 delegates admission and resource ownership to the persistent orchestrator."""
 
 from uuid import UUID
 
@@ -7,21 +7,21 @@ from boxie.domain.models import Principal, SandboxSpec, SandboxView, Termination
 
 
 class DirectLifecycle:
-    def __init__(self, agent: ReadyLifecycle) -> None:
-        self.agent = agent
+    def __init__(self, orchestrator: ReadyLifecycle) -> None:
+        self.orchestrator = orchestrator
 
     async def ready(self) -> bool:
-        return await self.agent.ready()
+        return await self.orchestrator.ready()
 
     async def submit(
         self, principal: Principal, idempotency_key: str, spec: SandboxSpec
     ) -> SandboxView:
-        return await self.agent.submit(principal, idempotency_key, spec)
+        return await self.orchestrator.submit(principal, idempotency_key, spec)
 
     async def get(self, principal: Principal, sandbox_id: UUID) -> SandboxView:
-        return await self.agent.get(principal, sandbox_id)
+        return await self.orchestrator.get(principal, sandbox_id)
 
     async def terminate(
         self, principal: Principal, sandbox_id: UUID, reason: TerminationReason
     ) -> SandboxView:
-        return await self.agent.terminate(principal, sandbox_id, reason)
+        return await self.orchestrator.terminate(principal, sandbox_id, reason)

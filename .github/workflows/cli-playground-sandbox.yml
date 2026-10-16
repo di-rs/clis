@@ -2,17 +2,10 @@ name: CLI playground sandbox
 
 on:
   pull_request:
-    branches: [master, refactor/boxie-service, feat/boxie-temporal, feat/boxie-observability]
+    branches: [master]
     paths:
       - '.github/workflows/cli-playground-sandbox.yml'
-      - 'tools/cli-playground/playground/**'
-      - 'tools/cli-playground/frontend/**'
-      - 'tools/cli-playground/pyproject.toml'
-      - 'tools/cli-playground/Sandbox.Dockerfile*'
-      - 'tools/cli-playground/shell.sh'
-      - 'tools/cli-playground/fixtures/**'
-      - 'tools/cli-playground/infra/bootstrap.sh'
-      - 'tools/cli-playground/infra/**'
+      - 'tools/cli-playground/**'
       - 'tools/boxie/**'
       - 'coreutils/echor/**'
       - 'utils/**'
@@ -67,49 +60,4 @@ jobs:
       - name: Exercise private generic and product terminals through real gVisor
         run: |
           uv sync --locked --all-packages
-          docker pull busybox:1.37.0
-          smoke_dir=$(mktemp -d)
-          export SMOKE_DIR="$smoke_dir"
-          trap 'kill "${api_pid:-}" "${agent_pid:-}" 2>/dev/null || true' EXIT
-          uv run --locked python - <<'PYTHON'
-          import json, os, pathlib, secrets, subprocess
-          root = pathlib.Path(os.environ["SMOKE_DIR"])
-          for name in ("agent", "consumer"):
-              path = root / f"{name}.secret"
-              path.write_text(secrets.token_hex(32))
-              path.chmod(0o600)
-          header = root / "consumer.headers"
-          header.write_text("Authorization: Bearer " + (root / "consumer.secret").read_text())
-          header.chmod(0o600)
-          generic = json.loads(pathlib.Path("tools/boxie/infra/profiles.example.json").read_text())
-          product = json.loads(pathlib.Path("tools/cli-playground/infra/profiles/playground.json").read_text())
-          for profile, image in [(generic["smoke"], "busybox:1.37.0"), (product["playground"], "clis-playground-sandbox:smoke")]:
-              profile["image_digest"] = subprocess.check_output(["docker", "image", "inspect", image, "--format", "{{.Id}}"], text=True).strip()
-          (root / "profiles.json").write_text(json.dumps({**generic, **product}))
-          PYTHON
-          uv run --locked python -m boxie_infra.config --output "$smoke_dir" \
-            --data-dir "$smoke_dir/data" --installation-id "$(cat /proc/sys/kernel/random/uuid)" \
-            --host-id ci --consumer-id smoke --agent-url http://127.0.0.1:8091 --bind-host 127.0.0.1 \
-            --profiles "$smoke_dir/profiles.json" --agent-credential "$smoke_dir/agent.secret" \
-            --consumer-credential "$smoke_dir/consumer.secret"
-          .venv/bin/boxie-agent --config "$smoke_dir/agent.json" >"$smoke_dir/agent.log" 2>&1 &
-          agent_pid=$!
-          .venv/bin/boxie-api --config "$smoke_dir/api.json" >"$smoke_dir/api.log" 2>&1 &
-          api_pid=$!
-          for _attempt in $(seq 1 60); do
-            if curl --fail --silent --header "@$smoke_dir/consumer.headers" http://127.0.0.1:8090/readyz >/dev/null; then break; fi
-            if ! kill -0 "$agent_pid" "$api_pid"; then cat "$smoke_dir/agent.log" "$smoke_dir/api.log"; exit 1; fi
-            sleep 1
-          done
-          curl --fail --silent --header "@$smoke_dir/consumer.headers" http://127.0.0.1:8090/readyz
-          uv run --locked python -m boxie_infra.smoke \
-            --boxie-url http://127.0.0.1:8090 --credential-file "$smoke_dir/consumer.secret"
-          uv run --locked python -m playground_infra.smoke --binary "$PWD/target/release/echor" \
-            --boxie-url http://127.0.0.1:8090 --credential-file "$smoke_dir/consumer.secret"
-          uv run --locked python - <<'PYTHON'
-          import json, os, pathlib
-          registry = json.loads((pathlib.Path(os.environ["SMOKE_DIR"]) / "data/registry.json").read_text())
-          assert len(registry["records"]) == 2
-          assert all(record["state"] in {"terminated", "failed"} and not record["cleanup_pending"] and not record["creation_uncertain"] for record in registry["records"])
-          print("PASS: no active reservations or uncertain cleanup remain")
-          PYTHON
+          bash tools/boxie/infra/smoke.sh

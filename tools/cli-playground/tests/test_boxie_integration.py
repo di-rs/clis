@@ -26,7 +26,9 @@ def test_page_admission_returns_a_private_credential_and_exact_revision(
     assert binding["absolute_deadline"] and binding["id"]
 
 
-def test_separate_product_api_agent_publish_terminal_reset_and_pr_close(tmp_path: Path) -> None:
+def test_separate_product_api_orchestrator_publish_terminal_reset_and_pr_close(
+    tmp_path: Path,
+) -> None:
     import asyncio
     import json
     import socket
@@ -35,10 +37,10 @@ def test_separate_product_api_agent_publish_terminal_reset_and_pr_close(tmp_path
 
     import httpx
     import uvicorn
-    from boxie_test_support.agent import Clock, DockerDaemon, configuration, live
 
     # Reuse Boxie's daemon-boundary fixture; every application hop uses loopback HTTP/WS.
     from boxie_test_support.api import api_server
+    from boxie_test_support.orchestrator import Clock, DockerDaemon, configuration, live
     from playground.app import create_app
     from playground.boxie_client import HttpBoxieClient
     from playground.config import Settings
@@ -48,13 +50,13 @@ def test_separate_product_api_agent_publish_terminal_reset_and_pr_close(tmp_path
     from .helpers import binary_bundle, elf_binary
 
     async def exercise() -> None:
-        config, daemon, clock = configuration(tmp_path / "agent"), DockerDaemon(), Clock()
+        config, daemon, clock = configuration(tmp_path / "orchestrator"), DockerDaemon(), Clock()
         clock.now = datetime.now(UTC)
         profiles = json.loads(config.profiles_file.read_text())
         profiles["shell"]["commands"] = [["/opt/playground/shell.sh"]]
         config.profiles_file.write_text(json.dumps(profiles))
-        async with live(config, daemon, clock) as (agent_http, agent):
-            async with api_server(str(agent_http.base_url)) as api:
+        async with live(config, daemon, clock) as (orchestrator_http, orchestrator):
+            async with api_server(str(orchestrator_http.base_url)) as api:
                 sock = socket.socket()
                 sock.bind(("127.0.0.1", 0))
                 url = f"http://127.0.0.1:{sock.getsockname()[1]}"
@@ -149,12 +151,12 @@ def test_separate_product_api_agent_publish_terminal_reset_and_pr_close(tmp_path
                         assert (
                             await api.get(f"/v1/sandboxes/{sibling_binding.sandbox.id}")
                         ).json()["state"] in {"accepted", "provisioning", "ready"}
-                        assert agent.reserved_count == 1
+                        assert orchestrator.reserved_count == 1
                 finally:
                     server.should_exit = True
                     await asyncio.wait_for(task, 5)
                     sock.close()
-                    assert agent.reserved_count == 1
+                    assert orchestrator.reserved_count == 1
 
     asyncio.run(exercise())
 
@@ -177,7 +179,7 @@ def test_authenticated_readiness_wait_is_not_an_abandoned_page_response(
     from .helpers import binary_bundle, elf_binary
 
     async def exercise() -> None:
-        async with boxie_network(tmp_path / "agent") as network:
+        async with boxie_network(tmp_path / "orchestrator") as network:
             gate = asyncio.Event()
             network.daemon.create_gate = gate
             async with product_server(tmp_path / "product", str(network.api.base_url)) as product:

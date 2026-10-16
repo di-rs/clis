@@ -72,7 +72,7 @@ def create_app(
     async def readiness() -> JSONResponse:
         ready = await lifecycle.ready()
         return JSONResponse(
-            {"release": config.release, "dependencies": {"agent": ready}},
+            {"release": config.release, "dependencies": {"orchestrator": ready}},
             status_code=200 if ready else 503,
         )
 

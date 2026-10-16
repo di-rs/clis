@@ -74,8 +74,8 @@ class TerminationReason(StrEnum):
     OUTPUT_LIMIT = "output_limit"
     EXITED = "exited"
     PROVISIONING_FAILED = "provisioning_failed"
-    AGENT_RESTART = "agent_restart"
-    AGENT_SHUTDOWN = "agent_shutdown"
+    ORCHESTRATOR_RESTART = "orchestrator_restart"
+    ORCHESTRATOR_SHUTDOWN = "orchestrator_shutdown"
 
 
 @dataclass(frozen=True)
@@ -102,6 +102,6 @@ class ArtifactPutResult:
 
 
 @dataclass(frozen=True)
-class AgentIdentity:
+class OrchestratorIdentity:
     installation_id: UUID
     host_id: str

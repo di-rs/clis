@@ -94,7 +94,7 @@ checks also accept the intermediate bases `refactor/boxie-service`,
 runs only affected or explicitly requested suites. Privileged publication and
 deployment retain their trusted default-branch boundaries.
 
-PR1 uses a transitional direct lifecycle with agent-local admission and recovery.
+PR1 uses a transitional direct lifecycle with orchestrator-local admission and recovery.
 PR2 replaces this authority with PostgreSQL and Temporal; begin it only after
 PR1's required checks, including native Linux amd64/runsc, pass. Mocked checks,
 isolated package installs and local Compose health checks do not establish cloud

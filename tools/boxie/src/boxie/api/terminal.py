@@ -1,4 +1,4 @@
-"""Translate bounded consumer JSON input into the byte-preserving agent stream."""
+"""Translate bounded consumer JSON input into the byte-preserving orchestrator stream."""
 
 import asyncio
 import json
@@ -55,7 +55,7 @@ async def proxy(websocket: WebSocket, connection: TerminalConnection) -> None:
                     try:
                         status = StatusWire.model_validate_json(message)
                     except ValidationError:
-                        raise BoxieError(503, "invalid agent terminal status") from None
+                        raise BoxieError(503, "invalid orchestrator terminal status") from None
                     await websocket.send_json(status.model_dump(mode="json"))
                     await websocket.close()
                     return

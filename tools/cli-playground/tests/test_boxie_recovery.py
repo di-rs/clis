@@ -1,4 +1,4 @@
-"""Failure and restart contracts across actual product/API/agent servers."""
+"""Failure and restart contracts across actual product/API/orchestrator servers."""
 
 import asyncio
 import json
@@ -24,7 +24,7 @@ def test_failed_publication_preserves_ready_revision_and_recovers_exact_upload(
     failure: str,
 ) -> None:
     async def exercise() -> None:
-        async with boxie_network(tmp_path / "agent") as network:
+        async with boxie_network(tmp_path / "orchestrator") as network:
             async with product_server(tmp_path / "product", str(network.api.base_url)) as product:
                 first = await publish(product, "a" * 40)
                 assert first.status_code == 201
@@ -63,7 +63,7 @@ def test_failed_publication_preserves_ready_revision_and_recovers_exact_upload(
                     assert await ws.recv() == b"ready\n"
                 (pending,) = product.service.sessions.uploads()
                 artifact_id = pending.artifact.artifact_id
-                # Both failures occur after the real agent has accepted these bytes.
+                # Both failures occur after the real orchestrator has accepted these bytes.
                 assert (network.config.data_dir / "artifacts" / str(artifact_id)).exists()
             async with product_server(tmp_path / "product", str(network.api.base_url)) as restarted:
                 recovered = restarted.service.store.get(identifier)
@@ -82,7 +82,7 @@ def test_capability_failures_and_restart_preserve_claimed_session_while_cleaning
     tmp_path: Path,
 ) -> None:
     async def exercise() -> None:
-        async with boxie_network(tmp_path / "agent") as network:
+        async with boxie_network(tmp_path / "orchestrator") as network:
             async with product_server(tmp_path / "product", str(network.api.base_url)) as product:
                 first = await publish(product, "a" * 40)
                 sibling = await publish(product, "b" * 40, 456)
@@ -143,7 +143,7 @@ def test_capability_failures_and_restart_preserve_claimed_session_while_cleaning
                 assert response.json()["absolute_deadline"] == healthy["absolute_deadline"]
                 retained = restarted.service.sessions.get(UUID(healthy["id"]))
                 assert retained is not None and retained.attached and not retained.pending_stop
-                assert network.agent.reserved_count == 1
+                assert network.orchestrator.reserved_count == 1
 
     asyncio.run(exercise())
 
@@ -153,7 +153,7 @@ def test_malformed_stop_reply_keeps_the_original_durable_binding_for_restart(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def exercise() -> None:
-        async with boxie_network(tmp_path / "agent") as network:
+        async with boxie_network(tmp_path / "orchestrator") as network:
             async with product_server(tmp_path / "product", str(network.api.base_url)) as product:
                 identifier = (await publish(product, "a" * 40)).json()["id"]
                 admitted = await admit(product, identifier, "a" * 40)
