@@ -27,6 +27,31 @@ RUN = f"repos/{REPO}/actions/runs/500"
 PR = f"repos/{REPO}/pulls/7"
 
 
+def test_build_script_runs_without_installed_workspace_packages(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-S",
+            str(Path(preview_ci.__file__).resolve()),
+            "build",
+            "--base",
+            "HEAD",
+            "--head",
+            "HEAD",
+            "--output",
+            str(tmp_path / "artifact"),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "CLI playground builds: none\n"
+    assert not (tmp_path / "artifact").exists()
+
+
 def archive(
     names: str | list[str] = "echor",
     *,

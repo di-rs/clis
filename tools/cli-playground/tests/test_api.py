@@ -246,7 +246,7 @@ def test_preview_resolves_built_assets_under_static_prefix(api_client: TestClien
 
 
 def test_subdomain_urls_bind_http_and_websocket_to_the_same_preview(
-    api_client: TestClient, tmp_path: Path
+    static_dir: Path, tmp_path: Path
 ) -> None:
     settings = Settings(
         data_dir=tmp_path / "domains",
@@ -257,7 +257,7 @@ def test_subdomain_urls_bind_http_and_websocket_to_the_same_preview(
         boxie_credential_file=tmp_path / "boxie.secret",
     )
     with TestClient(
-        create_app(settings, boxie=FakeBoxie()), base_url=settings.public_url
+        create_app(settings, boxie=FakeBoxie(), static_dir=static_dir), base_url=settings.public_url
     ) as client:
         current, sibling = upload(client), upload(client, cli="catr", pr=456)
         authority = "pr-123.play.example"

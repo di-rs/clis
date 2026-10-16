@@ -25,13 +25,20 @@ def boxie(clock: MutableClock) -> FakeBoxie:
 
 
 @pytest.fixture
-def api_client(tmp_path: Path, clock: MutableClock, boxie: FakeBoxie) -> Iterator[TestClient]:
+def static_dir(tmp_path: Path) -> Path:
     static_dir = tmp_path / "frontend" / "dist"
     (static_dir / "assets").mkdir(parents=True)
     (static_dir / "index.html").write_text(
         '<html><script type="module" src="/static/assets/app-test.js"></script></html>'
     )
     (static_dir / "assets" / "app-test.js").write_text("document.title = 'Playground';")
+    return static_dir
+
+
+@pytest.fixture
+def api_client(
+    tmp_path: Path, clock: MutableClock, boxie: FakeBoxie, static_dir: Path
+) -> Iterator[TestClient]:
     settings = Settings(
         data_dir=tmp_path / "data",
         public_url="https://play.example",

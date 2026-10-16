@@ -20,6 +20,7 @@ from typing import Protocol
 
 # Keep direct script invocation usable from any working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 from ci.github import GitHub, PaginationLimit, array, table  # noqa: E402
 from playground.artifacts import CLI_PATTERN, MAX_ARCHIVE, MAX_CLIS, binary_archive  # noqa: E402
 
