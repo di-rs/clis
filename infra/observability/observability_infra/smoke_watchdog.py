@@ -18,6 +18,20 @@ def process_identity(pid: int) -> str:
     return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[19]
 
 
+def journal_identity(root: Path, commands: Commands) -> dict[str, Any]:
+    # Late import avoids the Resources -> process_identity import cycle.
+    from observability_infra.smoke_resources import Resources, require_ephemeral_runner
+
+    require_ephemeral_runner()
+    resources = Resources(root, commands)
+    unit = resources.journal_unit
+    if not resources.manifest.is_file() or resources.state["journal_unit"] != unit:
+        raise RuntimeError("foreign registered journal unit")
+    cgroup = resources.owned_cgroup(unit)
+    pid = int(commands.run(["systemctl", "show", unit, "--property=MainPID", "--value"]))
+    return {"unit": unit, "pid": pid, "start": process_identity(pid), "cgroup": cgroup}
+
+
 def resume(pid: int, identity: str) -> bool:
     try:
         if process_identity(pid) != identity:
@@ -46,6 +60,24 @@ def restore_once(manifest: Path, commands: Commands) -> dict[str, bool]:
             results["filler_removed"] &= not path.exists()
         except OSError, ValueError:
             results["filler_removed"] = False
+    if "journal_restart" in data:
+        results["journal_restarted"] = False
+        try:
+            expected = data["journal_restart"]
+            if not results.get("filler_removed"):
+                raise RuntimeError("journal filler remains")
+            before = journal_identity(manifest.parent, commands)
+            if before != expected:
+                raise RuntimeError("registered journal process identity changed")
+            commands.run(["systemctl", "restart", before["unit"]])
+            after = journal_identity(manifest.parent, commands)
+            results["journal_restarted"] = (
+                after["unit"] == before["unit"]
+                and after["cgroup"] == before["cgroup"]
+                and (after["pid"], after["start"]) != (before["pid"], before["start"])
+            )
+        except RuntimeError, TimeoutError, ValueError, OSError, KeyError:
+            pass
     if "sink" in data:
         results["sink_started"] = False
         try:
@@ -68,6 +100,7 @@ def restoration_valid(data: dict[str, Any], result: dict[str, Any]) -> bool:
     expected = {"journal_resumed"} if "pid" in data else set()
     expected |= {"filler_removed"} if "fillers" in data else set()
     expected |= {"sink_started"} if "sink" in data else set()
+    expected |= {"journal_restarted"} if "journal_restart" in data else set()
     return (
         bool(expected)
         and set(result) == expected

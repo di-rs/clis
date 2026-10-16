@@ -3,6 +3,7 @@
 import asyncio
 import errno
 import json
+import math
 import os
 import re
 import signal
@@ -22,7 +23,7 @@ from observability_infra.smoke_runtime import event_identities, evidence
 from observability_infra.smoke_samples import record_progress
 from observability_infra.smoke_telemetry import Telemetry
 from observability_infra.smoke_units import transient_command, unit_name
-from observability_infra.smoke_watchdog import process_identity, restoration_valid
+from observability_infra.smoke_watchdog import journal_identity, process_identity, restoration_valid
 
 SCENARIOS = (
     "lifecycle-failure",
@@ -179,6 +180,13 @@ class Scenario:
                 - before["persistent"]["bytes"],
                 "runtime_is_collected": False,
             }
+        if self.name == "journal-enospc" and self.watch:
+            self.observations["journal_restored_identity"] = await asyncio.to_thread(
+                journal_identity, self.root, self.commands
+            )
+            # Separate fresh delivery proof from the preceding fault-time observations.
+            # A namespace restart does not flush its old runtime fallback entries.
+            await self.journal_recovery_probe()
         self.app.stack.fault("fail_start", False)
         if self.name == "producer-pipe":
             for name in ("blocked-stdout", "stop-api"):
@@ -207,7 +215,7 @@ class Scenario:
                     self.commands.deadline.remaining(restoring=True)
                 await asyncio.sleep(0.1)
 
-    async def flood(self, limit: int) -> None:
+    async def flood(self, limit: int, *, recovery: bool = False) -> None:
         self.observations["synthetic_pressure"] = True
         name = self.root.name + "-flood-" + self.name
         # Register exact unique name before creation; retain actual ID immediately.
@@ -246,10 +254,14 @@ class Scenario:
             "/flood.py",
             self.flood_instance,
             str(limit),
-            *([self.probe_instance] if self.name in ("journal-stopped", "journal-enospc") else []),
+            *(
+                [self.probe_instance]
+                if self.name in ("journal-stopped", "journal-enospc") and not recovery
+                else []
+            ),
         )
         self.observations["flood_id"] = self.flood_id
-        if self.name in ("journal-stopped", "journal-enospc"):
+        if self.name in ("journal-stopped", "journal-enospc") and not recovery:
             while True:
                 path = self.root / "control/emitted.json"
                 counter = json.loads(path.read_text()) if path.exists() else {}
@@ -260,6 +272,48 @@ class Scenario:
                     break
                 self.commands.deadline.remaining()
                 await asyncio.sleep(0.1)
+
+    async def journal_recovery_probe(self) -> None:
+        if self.flood_id is not None:
+            raise RuntimeError("fault flood not removed before recovery probe")
+        previous_instance = self.flood_instance
+        previous: dict[str, Any] = {
+            key: self.observations[key]
+            for key in ("flood_id", "flood_name")
+            if key in self.observations
+        }
+        self.flood_instance = str(uuid4())
+        operation = str(UUID(int=1))
+        proof: dict[str, Any] = {
+            "instance_id": self.flood_instance,
+            "operation_id": operation,
+            "persistent_observed": False,
+            "collector_observed": False,
+            "old_runtime_entries_recovered": False,
+        }
+        self.observations["journal_delivery_recovery"] = proof
+        try:
+            await self.flood(1, recovery=True)
+            proof["flood_id"] = self.flood_id
+            while operation not in await self.accepted():
+                await asyncio.sleep(0.1)
+            proof["persistent_observed"] = True
+            records = await self.telemetry.wait_logs(
+                f'instance_id:"{self.flood_instance}" AND operation_id:"{operation}"'
+            )
+            if not any(item.get("operation_id") == operation for item in records):
+                raise RuntimeError("fresh journal recovery marker missing from collector")
+            proof["collector_observed"] = True
+        finally:
+            try:
+                if self.flood_id is not None:
+                    await self.command("docker", "rm", "--force", self.flood_id)
+                    self.flood_id = None
+            finally:
+                self.flood_instance = previous_instance
+                for key in ("flood_id", "flood_name"):
+                    self.observations.pop(key, None)
+                self.observations.update(previous)
 
     async def progress(self, sandbox: str) -> None:
         progress = await self.app.progress(sandbox)
@@ -551,6 +605,10 @@ class Scenario:
         with filler.open("xb"):
             pass
         data: dict[str, Any] = {"fillers": [{"path": str(filler), "inode": filler.stat().st_ino}]}
+        if not vector:
+            data["journal_restart"] = await asyncio.to_thread(
+                journal_identity, self.root, self.commands
+            )
         if vector:
             data["sink"] = await asyncio.to_thread(self.telemetry.container, "victorialogs")
         await self.arm(data)
@@ -610,6 +668,75 @@ class Scenario:
             os.statvfs(directory).f_bavail * os.statvfs(directory).f_frsize
         )
 
+    async def buffer_pressure(
+        self, metrics: dict[str, list[dict[str, Any]]], baseline_drops: float
+    ) -> tuple[float, float]:
+        occupancy = total(metrics, "vector_buffer_size_bytes")
+        drops = (
+            total(metrics, "vector_buffer_discarded_events_total")
+            if "vector_buffer_discarded_events_total" in metrics
+            else 0
+        )
+        if not all(math.isfinite(value) and value >= 0 for value in (occupancy, drops)):
+            raise RuntimeError("invalid buffer pressure metric")
+        info = json.loads(await self.command("docker", "inspect", str(self.flood_id)))[0]
+        if (
+            info["Id"] != self.flood_id
+            or info["Name"] != "/" + self.root.name + "-flood-" + self.name
+            or info["Config"]["Labels"].get("io.boxie.test.owner") != self.root.name
+        ):
+            raise RuntimeError("foreign pressure flood identity")
+        state = info["State"]
+        if (
+            type(state["Running"]) is not bool
+            or type(state["OOMKilled"]) is not bool
+            or type(state["ExitCode"]) is not int
+            or state["Status"]
+            not in {"created", "running", "exited", "restarting", "dead", "paused"}
+        ):
+            raise RuntimeError("invalid pressure flood state")
+        emitted: int | None = None
+        path = self.root / "control/emitted.json"
+        if path.exists():
+            with path.open("rb") as stream:
+                raw = stream.read(4097)
+            if len(raw) > 4096:
+                raise RuntimeError("pressure emission evidence exceeded bound")
+            counter = json.loads(raw)
+            if counter.get("instance") == self.flood_instance:
+                value = counter["emitted"]
+                if type(value) is not int or not 0 <= value <= 1000000:
+                    raise RuntimeError("invalid pressure emission counter")
+                emitted = value
+        current = {
+            "buffer_bytes": occupancy,
+            "discarded_delta": drops - baseline_drops,
+            "discarded_counter_present": "vector_buffer_discarded_events_total" in metrics,
+            "emitted_lower_bound": emitted,
+            "flood_state": {
+                "running": state["Running"],
+                "status": state["Status"],
+                "exit_code": state["ExitCode"],
+                "oom_killed": state["OOMKilled"],
+            },
+        }
+        prior = self.observations.get("vector_pressure", {})
+        self.observations["vector_pressure"] = {
+            "samples": prior.get("samples", 0) + 1,
+            "baseline_discarded": baseline_drops,
+            "first": prior.get("first", current),
+            "latest": current,
+            "peak_buffer_bytes": max(occupancy, prior.get("peak_buffer_bytes", occupancy)),
+            "peak_discarded_delta": max(
+                drops - baseline_drops, prior.get("peak_discarded_delta", 0)
+            ),
+        }
+        if state["OOMKilled"] or (not state["Running"] and state["ExitCode"] != 0):
+            raise RuntimeError("pressure flood failed")
+        if drops < baseline_drops:
+            raise RuntimeError("pressure drop counter reset")
+        return occupancy, drops
+
     async def pressure(self, sandbox: str) -> None:
         vector = self.name == "vector-full"
         baseline = await self.telemetry.metrics("vector")
@@ -651,12 +778,7 @@ class Scenario:
                 await self.progress(sandbox)
                 if vector:
                     metrics = await self.telemetry.metrics("vector")
-                    occupancy = total(metrics, "vector_buffer_size_bytes")
-                    current_drops = (
-                        total(metrics, "vector_buffer_discarded_events_total")
-                        if "vector_buffer_discarded_events_total" in metrics
-                        else 0
-                    )
+                    occupancy, current_drops = await self.buffer_pressure(metrics, drops)
                     if current_drops > drops:
                         if occupancy < 0.8 * 268435488:
                             raise RuntimeError("drops without measured full-buffer pressure")

@@ -159,6 +159,15 @@ all-boots input and the selected source's `.message`/`CONTAINER_TAG` envelope.
 Runtime-only fallback journals are omitted from searchable ingestion but remain
 bounded and locally inspectable.
 
+For systemd 255 journal namespaces, filesystem exhaustion can leave the receiver
+writing to runtime storage after persistent space is released. Namespace flushing
+is unsupported in that version. Recovery requires an operator to release the
+pressure, verify the affected namespace's ownership, restart only that namespace
+unit, and verify a fresh event in both persistent storage and the collector.
+Restarting does not flush or automatically recover old runtime entries. Inspect
+those locally under the retention policy; do not infer lossless recovery from a
+successful restart or from delivery of a new event.
+
 The renderer compiles the owned v1 schema into VRL checks: object shape, required
 fields, field allowlist, types, ranges, enums, UUIDs, UTC timestamp, tag/service/role
 agreement, and length bounds. Trusted environment/host are added only afterwards.
@@ -443,7 +452,11 @@ reboot, genuine two-boot, boot mount ordering or power-loss claim follows.
 
 An independent file-based watchdog records the journal PID/start identity, exact
 filler inode and owned sink container before faults, then resumes/releases/starts
-those resources before teardown. Cleanup continues after individual errors,
+those resources before teardown. After journal ENOSPC, it also verifies the
+registered namespace process before restarting that exact owned unit and checking
+its resulting cgroup. A separate fresh marker must reach persistent storage and
+the collector before the next case; fault-time runtime observations stay separate
+and are not reported as recovered delivery. Cleanup continues after individual errors,
 validates mount and loop ownership, and reports failures instead of counting runner
 recycling as restoration. CI uploads only the explicit bounded JSON evidence
 allowlist: ownership, setup/preflight, collector provenance, per-case reports,
