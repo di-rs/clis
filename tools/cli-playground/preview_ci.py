@@ -390,7 +390,7 @@ def publish(
         or run.get("status")
         not in {"queued", "in_progress", "completed", "waiting", "pending", "requested"}
         or run.get("path") != WORKFLOW
-        or run.get("name") != "CLI playground build"
+        or run.get("name") != "🏗️ Playground PR binary builds"
         or table(run.get("repository")).get("full_name") != repo
     ):
         return None

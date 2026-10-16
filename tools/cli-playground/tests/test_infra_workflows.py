@@ -81,7 +81,7 @@ def test_auto_release_is_opt_in_and_does_not_restart_runtime_for_ordinary_cli_ch
 def test_preview_controller_keeps_privileged_code_on_the_default_branch() -> None:
     preview = workflow("preview")
     assert preview["on"]["workflow_run"] == {
-        "workflows": ["CLI playground build"],
+        "workflows": ["🏗️ Playground PR binary builds"],
         "types": ["in_progress", "completed"],
     }
     assert preview["on"]["pull_request_target"] == {

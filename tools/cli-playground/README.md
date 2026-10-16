@@ -73,11 +73,11 @@ split runtime independently.
 
 | Workflow | Responsibility |
 | --- | --- |
-| [CLI playground build](../../.github/workflows/cli-playground.yml) | Compile affected PR binaries without deployment credentials |
-| [CLI playground previews](../../.github/workflows/cli-playground-preview.yml) | Trusted build-state updates, artifact publication and PR close/reopen reconciliation |
-| [CLI playground release](../../.github/workflows/cli-playground-release.yml) | Fails explicitly until split-service release support in PR4 |
-| [CLI playground setup](../../.github/workflows/cli-playground-setup.yml) | Manually provision infrastructure only |
-| [Boxie lifecycle](../../.github/workflows/boxie-lifecycle.yml) | Verify PostgreSQL/Temporal recovery and native Linux/gVisor lifecycle and browser faults |
+| [🏗️ Playground PR binary builds](../../.github/workflows/cli-playground.yml) | Compile affected PR binaries without deployment credentials |
+| [🌐 Playground PR previews](../../.github/workflows/cli-playground-preview.yml) | Trusted build-state updates, artifact publication and PR close/reopen reconciliation |
+| [🚀 Playground runtime release](../../.github/workflows/cli-playground-release.yml) | Fails explicitly until split-service release support in PR4 |
+| [☁️ Playground infrastructure setup](../../.github/workflows/cli-playground-setup.yml) | Manually provision infrastructure only |
+| [🧪 Boxie lifecycle integration](../../.github/workflows/boxie-lifecycle.yml) | Verify PostgreSQL/Temporal recovery and native Linux/gVisor lifecycle and browser faults |
 
 PR publication stores a binary batch and preview metadata. It does not deploy
 the runtime or start a sandbox; each browser terminal starts its own sandbox.
@@ -85,5 +85,5 @@ The build and preview workflows remain separate because they execute with
 different trust and credentials.
 
 See [Testing](../../docs/testing.md) for Python, frontend and browser checks,
-and the [Boxie lifecycle workflow](../../.github/workflows/boxie-lifecycle.yml)
+and the [🧪 Boxie lifecycle integration workflow](../../.github/workflows/boxie-lifecycle.yml)
 for real PostgreSQL/Temporal recovery and native Linux/gVisor browser checks.

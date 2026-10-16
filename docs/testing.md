@@ -8,9 +8,10 @@ matrix, and [prek.toml](../prek.toml) defines local hooks. The
 
 ## Draft pull requests
 
-Draft PRs skip automatic checks, CodeQL, Git policy, benchmarks, playground
-builds and preview publication. Jobs are skipped before allocating a runner;
-GitHub may still display skipped workflow entries. Marking a PR ready for review
+Draft PRs skip automatic checks, CodeQL, Git policy, benchmarks, Boxie lifecycle
+checks, playground builds and preview publication. Jobs are skipped before
+allocating a runner; GitHub may still display skipped workflow entries.
+Marking a PR ready for review
 starts the usual checks, subject to each workflow's existing path filters.
 
 To run CI while keeping a PR in draft, add the `run-ci` label. Adding it starts
@@ -33,6 +34,19 @@ the draft override was enabled. Pushes to `master`, schedules and runtime releas
 or setup workflows retain their existing behavior. Trusted benchmark reporting
 and preview publication use the new skip policy after their workflow definitions
 reach `master`.
+
+## CI display names
+
+Give workflows, jobs and steps descriptive names starting with an emoji.
+Describe the check or operation, and include the platform, language or toolchain
+in matrix job names. Name action steps explicitly so CI shows their purpose
+instead of an action reference and commit hash.
+
+When renaming a workflow or job, update dependent workflow triggers, publisher
+identity checks, benchmark timing lookups and required status checks together.
+The Gitmoji job keeps its required `git-policy` check name so existing branch
+protection and other open PRs continue to work. Its workflow and steps have
+descriptive emoji names.
 
 ## Choose checks by changed area
 
