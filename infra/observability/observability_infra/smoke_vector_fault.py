@@ -68,7 +68,12 @@ class VectorDiagnostics:
                         if not chunk:
                             if pending:
                                 raise RuntimeError("Vector diagnostic line incomplete")
-                            code = self.process.wait(timeout=self.deadline.remaining())
+                            # EOF does not imply process exit. A client may close
+                            # its streams and remain alive; context cancellation
+                            # must still reach the group-kill/reap finally promptly.
+                            while (code := self.process.poll()) is None:
+                                if self.stop.wait(min(0.05, self.deadline.remaining())):
+                                    return
                             if code != 0:
                                 raise RuntimeError("Vector diagnostic command failed")
                             with self.lock:

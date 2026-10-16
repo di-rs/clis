@@ -1,9 +1,12 @@
 """Real bounded diagnostic subprocesses and exact restart identity contracts."""
 
+import asyncio
 import json
 import os
 import sys
 import time
+from contextlib import nullcontext
+from pathlib import Path
 
 import pytest
 from observability_infra.smoke_runtime import Deadline
@@ -163,3 +166,37 @@ def test_follower_scope_reaps_when_fault_is_cancelled() -> None:
             asyncio.run(case.exhaustion("sandbox"))
     assert created[0].snapshot()["reaped"] is True
     assert case.observations["vector_fault_diagnostics"]["reaped"] is True
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_closed_streams_live_child_is_reaped_on_context_exit(
+    tmp_path: Path, cancelled: bool
+) -> None:
+    from observability_infra.smoke_vector_fault import VectorDiagnostics
+
+    ready = tmp_path / "ready"
+    code = (
+        "import os,sys,time; from pathlib import Path; "
+        "os.close(1); os.close(2); Path(sys.argv[1]).touch(); time.sleep(30)"
+    )
+    reader = VectorDiagnostics([sys.executable, "-c", code, str(ready)], {}, Deadline(5, reserve=1))
+    try:
+        with pytest.raises(asyncio.CancelledError) if cancelled else nullcontext():
+            with reader:
+                until = time.monotonic() + 1
+                while not ready.exists():
+                    assert time.monotonic() < until
+                    time.sleep(0.01)
+                # Let the selector observe EOF and enter the exited-stream child wait.
+                time.sleep(0.1)
+                closing = time.monotonic()
+                if cancelled:
+                    raise asyncio.CancelledError
+        assert time.monotonic() - closing < 1
+        assert reader.snapshot()["reaped"] is True
+        assert not reader.thread.is_alive()
+        with pytest.raises(ProcessLookupError):
+            os.kill(reader.process.pid, 0)
+    finally:
+        # Keep the RED test bounded and do not leave its failing reader behind.
+        reader.thread.join(timeout=5)
