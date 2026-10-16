@@ -60,7 +60,11 @@ class SmokeReport:
 def run_smoke(config: SmokeConfig, timeout_seconds: float = 180) -> SmokeReport:
     require_ephemeral_runner()
     driver_memory = unit_memory(config.root, config.scenario, watchdog=False)
-    deadline = Deadline(timeout_seconds, reserve=min(45, timeout_seconds / 3))
+    deadline = Deadline(
+        timeout_seconds,
+        reserve=min(45, timeout_seconds / 3),
+        report_reserve=min(5, timeout_seconds / 36),
+    )
     commands = Commands(deadline)
     application = Application(config.root, commands)
     telemetry = Telemetry(config.root, commands, application.stack)
@@ -68,6 +72,13 @@ def run_smoke(config: SmokeConfig, timeout_seconds: float = 180) -> SmokeReport:
     scenario.observations["driver_memory_before"] = driver_memory
     cleanup_errors: list[str] = []
     errors: list[str] = []
+
+    def checkpoint(phase: str) -> None:
+        try:
+            scenario.enospc_checkpoint(phase)
+        except Exception as error:
+            # Evidence failure is fatal, but must never suppress restoration.
+            errors.append("checkpoint_" + type(error).__name__)
 
     async def exercise() -> None:
         try:
@@ -80,15 +91,24 @@ def run_smoke(config: SmokeConfig, timeout_seconds: float = 180) -> SmokeReport:
                 {"file": Path(frame.filename).name, "function": frame.name, "line": frame.lineno}
                 for frame in traceback.extract_tb(error.__traceback__)[-8:]
             ]
+            scenario.observations["exercise_errors"] = errors.copy()
+            checkpoint("exercise_failed")
         finally:
             commands.restoring = True
             # Independent restore always precedes application/Docker cleanup.
             for operation in (scenario.restore, application.close):
+                checkpoint(
+                    "restoration_started"
+                    if operation == scenario.restore
+                    else "application_cleanup_started"
+                )
                 try:
                     async with asyncio.timeout(deadline.remaining(restoring=True)):
                         await operation()
                 except Exception as error:
                     cleanup_errors.append(type(error).__name__)
+            scenario.observations["checkpoint_cleanup_errors"] = cleanup_errors.copy()
+            checkpoint("cleanup_completed")
         if not cleanup_errors:
             try:
                 # Same production client and query endpoints must be usable again.
@@ -347,6 +367,8 @@ def export_evidence(
         "cleanup.json",
         "cleanup-progress.json",
         "scenario-step.json",
+        "enospc-checkpoint-journal-enospc.json",
+        "enospc-checkpoint-vector-enospc.json",
         *("scenario-" + name + ".json" for name in SCENARIOS),
         *("watch-" + name + ".result.json" for name in SCENARIOS),
         *("watch-" + name + ".unit.json" for name in SCENARIOS),

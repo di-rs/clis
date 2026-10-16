@@ -412,7 +412,8 @@ uv run --locked python -m observability_infra.smoke --help
 ```
 
 Setup has a 1,200-second budget. Each of the nine separately invoked scenarios
-has a 180-second monotonic budget including a 45-second restoration reserve;
+has a 180-second monotonic budget: 135 seconds for exercise, 40 for restoration
+and five for final reporting/process reaping;
 final teardown has a separate 180-second bound. Installation, setup, scenarios,
 cleanup and artifact export fit within the workflow's 65-minute hard job limit.
 Reports retain measured setup and scenario elapsed times; CI supplies job duration.
@@ -511,3 +512,6 @@ incomplete, retains observed identities as a lower bound, and leaves missing jou
 counts unknown. A positively observed fresh recovery marker proves its existence,
 not complete history or recovery of old runtime entries. Other diagnostics,
 malformed records and command errors still fail; ordinary reads remain strict.
+ENOSPC checkpoints retain only fixed phases and bounded progress/fault observations
+before restoration. They are explicitly nonfinal and cannot establish successful
+restoration or cleanup; the final report and independent cleanup evidence do that.

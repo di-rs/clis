@@ -26,7 +26,7 @@ from observability_infra.smoke_runtime import (
     event_identities,
     evidence,
 )
-from observability_infra.smoke_samples import record_progress
+from observability_infra.smoke_samples import bounded, record_progress
 from observability_infra.smoke_telemetry import Telemetry
 from observability_infra.smoke_units import transient_command, unit_name
 from observability_infra.smoke_watchdog import journal_identity, process_identity, restoration_valid
@@ -665,6 +665,59 @@ class Scenario:
         self.observations["receiver_stopped_through_probes"] = True
         self.observations["docker_drop_counter"] = "not exported; no invented drop metric"
 
+    def enospc_checkpoint(self, phase: str) -> None:
+        if self.name not in ("journal-enospc", "vector-enospc"):
+            return
+        fault_phases = {
+            "allocation_started",
+            "allocation_progress",
+            "allocation_completed",
+            "flood_launch",
+            "flood_started",
+            "diagnostic_wait",
+            "release_started",
+            "restart_started",
+            "restart_completed",
+        }
+        if phase not in fault_phases | {
+            "exercise_failed",
+            "restoration_started",
+            "application_cleanup_started",
+            "cleanup_completed",
+        }:
+            raise ValueError("unknown ENOSPC checkpoint")
+        fault_phase = phase if phase in fault_phases else self.observations.get("enospc_phase")
+        selected = {
+            key: self.observations[key]
+            for key in (
+                "enospc_observed",
+                "allocation",
+                "progress",
+                "vector_pressure",
+                "vector_fault_state",
+                "vector_fault_metrics",
+                "vector_fault_diagnostics",
+                "vector_enospc_diagnostic_observed",
+                "exercise_errors",
+                "checkpoint_cleanup_errors",
+            )
+            if key in self.observations
+        }
+        data = bounded(
+            {
+                "scenario": self.name,
+                "status": "in_progress",
+                "final": False,
+                "phase": phase,
+                "fault_phase": fault_phase,
+                "elapsed_seconds": self.commands.deadline.elapsed,
+                **selected,
+            },
+            16384,
+        )
+        evidence(self.root / ("enospc-checkpoint-" + self.name + ".json"), data)
+        self.observations["enospc_phase"] = fault_phase
+
     async def exhaustion(self, sandbox: str) -> None:
         vector = self.name == "vector-enospc"
         if not vector:
@@ -683,6 +736,7 @@ class Scenario:
         await self.arm(data)
         if vector:
             await self.command("docker", "stop", "--time=3", data["sink"])
+        self.enospc_checkpoint("allocation_started")
         # This operation fills only the independently mounted small ext4 filesystem.
         observed = False
         with filler.open("r+b", buffering=0) as stream:
@@ -693,6 +747,13 @@ class Scenario:
                         raise RuntimeError("Linux allocation required")
                     os.posix_fallocate(stream.fileno(), stream.tell(), 1024 * 1024)
                     stream.seek(1024 * 1024, 1)
+                    if stream.tell() % (64 * 1024**2) == 0:
+                        self.observations["allocation"] = {
+                            "filler_offset": stream.tell(),
+                            "free_bytes": os.statvfs(directory).f_bavail
+                            * os.statvfs(directory).f_frsize,
+                        }
+                        self.enospc_checkpoint("allocation_progress")
                 except OSError as error:
                     if error.errno != errno.ENOSPC:
                         raise
@@ -705,13 +766,51 @@ class Scenario:
         if not observed:
             raise RuntimeError("filesystem exhaustion precondition unavailable")
         self.observations["enospc_observed"] = True
+        self.enospc_checkpoint("allocation_completed")
+        self.enospc_checkpoint("flood_launch")
         await self.flood(500000)
+        self.enospc_checkpoint("flood_started")
         await self.progress(sandbox)
         if vector:
             while True:
+                self.enospc_checkpoint("diagnostic_wait")
                 diagnostics = await asyncio.to_thread(
                     self.telemetry.compose, "logs", "--no-color", "--tail=100", "vector"
                 )
+                self.observations["vector_fault_diagnostics"] = {
+                    "errno_text_observed": "No space left on device" in diagnostics
+                    or "os error 28" in diagnostics,
+                    "writer_unrecoverable_observed": "Disk buffer writer has encountered an unrecoverable error."
+                    in diagnostics,
+                }
+                self.enospc_checkpoint("diagnostic_wait")
+                identifier = await asyncio.to_thread(self.telemetry.container, "vector")
+                info = json.loads(await self.command("docker", "inspect", identifier))[0]
+                if info["Id"] != identifier:
+                    raise RuntimeError("Vector fault container identity differs")
+                self.observations["vector_fault_state"] = {
+                    key: info["State"][key] for key in ("Running", "ExitCode", "OOMKilled")
+                }
+                self.enospc_checkpoint("diagnostic_wait")
+                try:
+                    metrics = await self.telemetry.metrics("vector")
+                except Exception as error:
+                    self.observations["vector_fault_metrics"] = {
+                        "available": False,
+                        "error_type": type(error).__name__,
+                    }
+                    self.commands.deadline.remaining()
+                else:
+                    self.observations["vector_fault_metrics"] = {"available": True}
+                    try:
+                        await self.buffer_pressure(metrics, None)
+                    except Exception as error:
+                        self.observations["vector_fault_metrics"].update(
+                            observation_valid=False, error_type=type(error).__name__
+                        )
+                        self.enospc_checkpoint("diagnostic_wait")
+                        raise
+                self.enospc_checkpoint("diagnostic_wait")
                 if "No space left on device" in diagnostics or "os error 28" in diagnostics:
                     self.observations["vector_enospc_diagnostic_observed"] = True
                     break
@@ -725,14 +824,17 @@ class Scenario:
             )
         if not vector:
             self.observations["journal_during"] = await self.journal_observation()
+        self.enospc_checkpoint("release_started")
         filler.unlink()
         if vector:
+            self.enospc_checkpoint("restart_started")
             identifier = await asyncio.to_thread(self.telemetry.container, "vector")
             await self.command("docker", "restart", "--time=3", identifier)
             await self.command("docker", "start", data["sink"])
             for service in ("vector", "victorialogs"):
                 await asyncio.to_thread(self.telemetry.refresh_endpoint, service)
             self.observations["same_state_restart_id"] = identifier
+            self.enospc_checkpoint("restart_completed")
         self.observations["free_after_release"] = (
             os.statvfs(directory).f_bavail * os.statvfs(directory).f_frsize
         )

@@ -14,15 +14,16 @@ from typing import Any
 
 
 class Deadline:
-    def __init__(self, seconds: float, *, reserve: float = 30) -> None:
-        if not 0 < reserve < seconds:
+    def __init__(self, seconds: float, *, reserve: float = 30, report_reserve: float = 0) -> None:
+        if not 0 <= report_reserve < reserve < seconds:
             raise ValueError("deadline must include a positive restoration reserve")
         self.started = time.monotonic()
         self.end = self.started + seconds
         self.reserve = reserve
+        self.report_reserve = report_reserve
 
     def remaining(self, *, restoring: bool = False) -> float:
-        value = self.end - time.monotonic() - (0 if restoring else self.reserve)
+        value = self.end - time.monotonic() - (self.report_reserve if restoring else self.reserve)
         if value <= 0:
             raise TimeoutError("smoke deadline")
         return value
