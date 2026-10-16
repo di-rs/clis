@@ -106,5 +106,6 @@ jobs:
           uv run --locked pytest -m integration tools/boxie/tests/test_temporal_deployment.py tools/boxie/tests/test_outbox.py tools/boxie/tests/integration/test_artifact_commit.py
       - name: Native full lifecycle and browser fault proof
         run: |
-          uv run --locked pytest -m integration tools/boxie/tests/test_native_permissions.py
+          uv run --locked pytest -m integration tools/boxie/tests/test_native_permissions.py tools/boxie/tests/test_native_scenarios.py
+          uv run --locked pytest -m integration tools/boxie/tests/test_postgres.py -k failed_restart_journal
           uv run --locked python tools/boxie/tests/run_integration.py --runtime runsc --browser

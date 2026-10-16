@@ -4,7 +4,7 @@ services:
     extends: {file: compose.yml, service: api}
     user: ${BOXIE_TEST_USER:?Set fixture owner UID:GID}
     restart: "no"
-    ports: ["127.0.0.1::8090"]
+    ports: ["127.0.0.1:${BOXIE_TEST_API_PORT}:8090"]
   worker:
     extends: {file: compose.yml, service: worker}
     user: ${BOXIE_TEST_USER:?Set fixture owner UID:GID}

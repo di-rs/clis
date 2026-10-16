@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
 import { expect, test } from "@playwright/test";
+import { nativeArchive } from "./archive";
 
 test("native shell and same-page reconnect preserve the admitted session", async ({
   page,
@@ -9,11 +9,7 @@ test("native shell and same-page reconnect preserve the admitted session", async
   const token = process.env.BOXIE_NATIVE_DEPLOY_TOKEN;
   if (!binary || !token)
     throw new Error("native binary and fixture deployment credential required");
-  const archive = execFileSync("python3", [
-    "-c",
-    "import io,sys,zipfile; b=io.BytesIO(); z=zipfile.ZipFile(b,'w'); z.write(sys.argv[1],'echor'); z.close(); sys.stdout.buffer.write(b.getvalue())",
-    binary,
-  ]);
+  const archive = nativeArchive(binary);
   const published = await request.post("/api/environments?pr=43210&sha=" + "a".repeat(40), {
     headers: { Authorization: "Bearer " + token, "Content-Type": "application/zip" },
     data: archive,

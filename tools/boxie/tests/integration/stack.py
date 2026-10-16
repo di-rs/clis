@@ -133,7 +133,11 @@ class LifecycleStack(ProductionStack):
             ],
             env=self.env,
         )
-        with socket.socket() as reservation:
+        # Explicit host bindings survive Docker kill/start; an omitted published
+        # port is reassigned on restart and invalidates long-lived test clients.
+        with socket.socket() as api_reservation, socket.socket() as reservation:
+            api_reservation.bind(("127.0.0.1", 0))
+            self.env["BOXIE_TEST_API_PORT"] = str(api_reservation.getsockname()[1])
             reservation.bind(("127.0.0.1", 0))
             port = reservation.getsockname()[1]
         self.env["BOXIE_TEST_PRODUCT_PORT"] = str(port)
@@ -154,22 +158,54 @@ class LifecycleStack(ProductionStack):
         (self.root / "evidence.json").write_text(json.dumps(self.evidence, indent=2))
 
     def wait_ready(self) -> None:
+        last = "no response"
         with httpx.Client(timeout=2, trust_env=False) as client:
             for _ in range(120):
                 try:
-                    if (
-                        client.get(
-                            self.api_url + "/readyz",
-                            headers={"Authorization": "Bearer " + self.consumer},
-                        ).status_code
-                        == 200
-                    ):
+                    response = client.get(
+                        self.api_url + "/readyz",
+                        headers={"Authorization": "Bearer " + self.consumer},
+                    )
+                    last = f"HTTP {response.status_code}: {response.text[:1024]}"
+                    if response.status_code == 200:
                         return
-                except httpx.HTTPError:
-                    pass
+                except httpx.HTTPError as error:
+                    last = f"transport {type(error).__name__}"
                 time.sleep(0.5)
         raise RuntimeError(
-            "lifecycle API did not become ready\n" + self.runtime_command("logs", "--tail", "80")
+            f"lifecycle API {self.api_url} did not become ready: {last}; "
+            f"published={self.runtime_command('port', 'api', '8090')}\n"
+            + self.runtime_command("logs", "--tail", "80")
+        )
+
+    def agent_boot(self) -> UUID:
+        """Read the running agent's authenticated identity after startup reconciliation."""
+        return UUID(
+            self.runtime_command(
+                "exec",
+                "-T",
+                "agent",
+                "python",
+                "-c",
+                """
+import time
+from pathlib import Path
+import httpx
+credential = Path('/run/secrets/agent').read_text().strip()
+with httpx.Client(headers={'Authorization': 'Bearer ' + credential}, timeout=1, trust_env=False) as client:
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        try:
+            response = client.get('http://127.0.0.1:8091/v1/identity')
+            response.raise_for_status()
+            print(response.json()['boot_id'])
+            break
+        except httpx.HTTPError:
+            time.sleep(0.2)
+    else:
+        raise RuntimeError('restarted agent identity unavailable')
+""",
+            )
         )
 
     def fault(self, name: str, enabled: bool) -> None:

@@ -799,3 +799,160 @@ def test_terminal_receipt_survives_prior_boot_and_retry_row_purge(
             await restarted.close()
 
     asyncio.run(exercise())
+
+
+def test_failed_restart_journal_projection_waits_for_authenticated_inspection(
+    postgres_dsn: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed save emits no push; the next worker inspection repairs SQL truth."""
+
+    async def exercise() -> None:
+        from datetime import UTC, datetime
+
+        import httpx
+        from boxie.domain.lifecycle import EnsureRequest
+        from boxie.persistence.start_guard import PostgresStartGuard
+        from boxie.sandbox.durable_client import DurableAgentClient
+        from boxie.sandbox.durable_server import create_durable_agent_app
+        from boxie.sandbox.lifecycle import DurableAgent
+        from boxie.sandbox.reporting import ObservationReporter
+        from boxie.temporal.activities import LifecycleActivities
+        from fastapi import Request, Response
+        from starlette.middleware.base import RequestResponseEndpoint
+        from temporalio.exceptions import ApplicationError
+        from test_agent_lifecycle import Daemon, settled
+
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
+            view = await life.submit(OWNER, "restart-journal", await upload(artifacts))
+            clock, daemon = Clock(), Daemon()
+            clock.now = datetime.now(UTC)
+            guard = PostgresStartGuard(pool)
+            original = DurableAgent(config, daemon, artifacts.path, guard, clock, clock.monotonic)
+            await life.bind_agent_boot(OWNER, config.identity, view.id, 1, None, original.boot_id)
+            request = EnsureRequest.from_durable(await life.load_request(view.id))
+            await original.ensure(request)
+            ready = await settled(original, request.ref, SandboxState.READY)
+            assert await life.record_observation(ready)
+            journal = original.journal.path.read_bytes()
+
+            def unavailable() -> None:
+                raise OSError("persistent journal storage outage")
+
+            agents = [original]
+            try:
+                for restart in range(2):
+                    agent = DurableAgent(
+                        config, daemon, artifacts.path, guard, clock, clock.monotonic
+                    )
+                    agents.append(agent)
+                    monkeypatch.setattr(agent.journal, "save", unavailable)
+                    reporter = ObservationReporter("http://api", b"restart-secret")
+                    app = create_durable_agent_app(
+                        agent, artifacts, credential=b"restart-secret", reporter=reporter
+                    )
+                    entered, release = asyncio.Event(), asyncio.Event()
+
+                    @app.middleware("http")
+                    async def gate_removal(
+                        request: Request,
+                        next: RequestResponseEndpoint,
+                        entered: asyncio.Event = entered,
+                        release: asyncio.Event = release,
+                    ) -> Response:
+                        if request.url.path.endswith("/remove"):
+                            entered.set()
+                            await release.wait()
+                        return await next(request)
+
+                    try:
+                        # start() reconciles before serving; omit its periodic sweep to
+                        # place the worker inspection deterministically after the assertion.
+                        await agent.reconcile()
+                        assert not daemon.resources and len(daemon.deleted_ids) == 1
+                        assert not agent.execution_ready
+                        assert original.journal.path.read_bytes() == journal
+                        pending = await agent.inspect(request.ref)
+                        assert pending.cleanup_pending and not pending.removal_confirmed
+                        assert pending.boot_id != ready.boot_id
+                        assert not reporter.latest  # Failed saves cannot publish finality.
+                        assert await counts(pool) == (1, 1, 1, restart + 1)
+                        if restart == 0:
+                            # This is the native failure's premature visibility assumption.
+                            stale = await life.get(OWNER, view.id)
+                            assert stale.state == SandboxState.READY and not stale.cleanup_pending
+                        async with DurableAgentClient("http://agent", b"restart-secret") as client:
+                            await client._http.aclose()
+                            client._http = httpx.AsyncClient(
+                                transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+                                base_url="http://agent",
+                                headers={"Authorization": "Bearer restart-secret"},
+                            )
+                            activities = LifecycleActivities(life, client)
+                            if restart == 0:
+                                facts = await activities.inspect_and_renew(str(view.id))
+                                assert facts.desired_stop and not facts.cleaned
+                            else:
+                                # Binding commits before removal returns. SQL's
+                                # durable stop is authoritative even in this interval.
+                                removal = asyncio.create_task(
+                                    activities.remove_sandbox(str(view.id))
+                                )
+                                try:
+                                    await asyncio.wait_for(entered.wait(), 5)
+                                    assert (
+                                        await life.load_request(view.id)
+                                    ).agent_boot_id == agent.boot_id
+                                    in_flight = await life.get(OWNER, view.id)
+                                    assert (
+                                        in_flight.state == SandboxState.TERMINATING
+                                        and in_flight.cleanup_pending
+                                    )
+                                    async with pool.connection() as conn:
+                                        row = await (
+                                            await conn.execute(
+                                                "SELECT * FROM agent_observations WHERE sandbox_id=%s",
+                                                (view.id,),
+                                            )
+                                        ).fetchone()
+                                    assert row is None
+                                    assert await counts(pool) == (1, 1, 1, 2)
+                                finally:
+                                    release.set()
+                                with pytest.raises(ApplicationError) as error:
+                                    await removal
+                                assert error.value.type == "CleanupPending"
+                        projected = await life.get(OWNER, view.id)
+                        assert (
+                            projected.state == SandboxState.TERMINATING
+                            and projected.cleanup_pending
+                        )
+                        assert (await life.load_request(view.id)).agent_boot_id == agent.boot_id
+                        assert not await life.record_observation(ready)
+                        assert await counts(pool) == (1, 1, 1, restart + 1)
+                        print(
+                            f"restart {restart + 1}: authenticated boot, pending SQL, slot/ref retained; {'inspection repair' if restart == 0 else 'cleanup retry with no observation while RPC in flight'}"
+                        )
+                        if restart == 0:
+                            await life.terminate(OWNER, view.id, TerminationReason.AGENT_RESTART)
+                    finally:
+                        await reporter.close()
+                recovered = DurableAgent(
+                    config, daemon, artifacts.path, guard, clock, clock.monotonic
+                )
+                agents.append(recovered)
+                await recovered.reconcile()
+                removed = await recovered.inspect(request.ref)
+                assert removed.removal_confirmed
+                prior = await life.load_request(view.id)
+                assert await life.bind_agent_boot(
+                    OWNER, config.identity, view.id, 1, prior.agent_boot_id, recovered.boot_id
+                )
+                assert await life.confirm_removed(removed)
+                assert await counts(pool) == (1, 0, 0, 2)
+            finally:
+                # Restore saves only during teardown, after every accounting assertion.
+                monkeypatch.undo()
+                for agent in agents:
+                    await agent.close()
+
+    asyncio.run(exercise())

@@ -77,6 +77,7 @@ for name, mode, owner in (('group', 0o640, int(sys.argv[1])),
         stack.env.update(
             BOXIE_RUNTIME_IMAGE=image,
             BOXIE_TEST_PRODUCT_PORT="18000",
+            BOXIE_TEST_API_PORT="18090",
             BOXIE_TEST_DATA_MODE=data_mode,
         )
         config = json.loads(stack.runtime_command("config", "--format", "json"))

@@ -79,6 +79,35 @@ def accounting(stack: LifecycleStack, identifier: str, count: int) -> None:
     assert rows == [{"slots": count, "refs": count}]
 
 
+async def pending_after_restart(
+    stack: LifecycleStack, client: httpx.AsyncClient, identifier: str
+) -> None:
+    boot = await asyncio.to_thread(stack.agent_boot)
+    # Failed journal saves deliberately suppress push reports. The workflow's
+    # 30s authenticated inspection (or cleanup retry) binds the new boot and
+    # repairs SQL; startup or a fixed 3s delay is not a projection barrier.
+    # Cleanup may bind then fail its RPC before an observation can be saved.
+    # Its durable SQL stop remains authoritative even with no observation row.
+    async with asyncio.timeout(90):
+        while True:
+            accounting(stack, identifier, 1)
+            rows = stack.rows(
+                """SELECT s.agent_boot_id, s.state, s.cleanup_pending, o.removal_confirmed
+                FROM sandboxes s LEFT JOIN agent_observations o
+                ON o.sandbox_id=s.id AND o.boot_id=s.agent_boot_id WHERE s.id=%s""",
+                (identifier,),
+            )
+            if rows and rows[0]["agent_boot_id"] == boot:
+                assert not rows[0]["removal_confirmed"]
+                if rows[0]["state"] != "terminating" or not rows[0]["cleanup_pending"]:
+                    await asyncio.sleep(0.2)
+                    continue
+                result = (await client.get(f"/v1/sandboxes/{identifier}")).json()
+                assert result["cleanup_pending"] and result["state"] == "terminating"
+                return
+            await asyncio.sleep(0.2)
+
+
 def test_process_loss_failed_delete_and_history_replay(lifecycle_stack: LifecycleStack) -> None:
     async def exercise() -> None:
         stack = lifecycle_stack
@@ -261,10 +290,7 @@ def test_sustained_journal_failure_across_agent_restart(
             assert "execution journal persistence failed" in logs
             await asyncio.to_thread(stack.process, "agent", "kill")
             await asyncio.to_thread(stack.process, "agent", "start")
-            await asyncio.sleep(3)
-            accounting(stack, identifier, 1)
-            result = (await client.get(f"/v1/sandboxes/{identifier}")).json()
-            assert result["cleanup_pending"] and result["state"] == "terminating"
+            await pending_after_restart(stack, client, identifier)
             assert (await client.get("/readyz")).status_code == 503
             stack.env["BOXIE_TEST_DATA_MODE"] = "rw"
             await asyncio.to_thread(
@@ -273,9 +299,7 @@ def test_sustained_journal_failure_across_agent_restart(
             if unknown_create:
                 # Discovery/deletion during a failed save was never durable. A new
                 # boot sees unknown create + absence and must retain the reservation.
-                await asyncio.sleep(3)
-                result = (await client.get(f"/v1/sandboxes/{identifier}")).json()
-                assert result["cleanup_pending"] and result["state"] == "terminating"
+                await pending_after_restart(stack, client, identifier)
                 accounting(stack, identifier, 1)
                 assert not stack.children()
                 # Only fixture teardown disposes of this entire owned environment.

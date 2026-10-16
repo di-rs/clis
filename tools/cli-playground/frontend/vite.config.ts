@@ -19,5 +19,5 @@ export default defineConfig(({ command }) => ({
     },
   },
   lint: { options: { typeAware: true, typeCheck: true } },
-  test: { include: ["src/**/*.test.ts"] },
+  test: { include: ["src/**/*.test.ts", "e2e-native/*.test.ts"] },
 }));

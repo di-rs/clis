@@ -9,6 +9,7 @@ import json
 import os
 import secrets
 import shutil
+import socket
 import subprocess
 import time
 from pathlib import Path
@@ -156,8 +157,11 @@ class ProductionStack:
         for name in ("internode", "client"):
             shutil.copy(ca / f"{name}.pem", self.root / "server" / f"{name}-ca.pem")
 
-    def start(self) -> None:
-        self.certificates()
+    def write_overrides(self) -> None:
+        # The host Temporal client survives process kill/start in native scenarios.
+        with socket.socket() as reservation:
+            reservation.bind(("127.0.0.1", 0))
+            temporal_port = reservation.getsockname()[1]
         (self.root / "platform-override.yml").write_text(
             yaml.safe_dump(
                 {
@@ -170,12 +174,16 @@ class ProductionStack:
             yaml.safe_dump(
                 {
                     "services": {
-                        "temporal": {"ports": ["127.0.0.1::7233"]},
+                        "temporal": {"ports": [f"127.0.0.1:{temporal_port}:7233"]},
                         "ui": {"ports": ["127.0.0.1::8080"]},
                     }
                 }
             )
         )
+
+    def start(self) -> None:
+        self.certificates()
+        self.write_overrides()
         self.compose("platform", "up", "--detach", "--wait", "--wait-timeout", "90")
         self.pg_port = self.compose("platform", "port", "postgres", "5432").rsplit(":", 1)[1]
         self.compose("temporal", "build", "bootstrap")
