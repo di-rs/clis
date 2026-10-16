@@ -40,6 +40,8 @@ test("native shell and same-page reconnect preserve the admitted session", async
     await page.evaluate(() =>
       (window as unknown as { nativeSockets: WebSocket[] }).nativeSockets.at(-1)!.close(),
     );
+    await expect(page.locator("#connection-status")).toHaveText("Disconnected");
+    await page.getByRole("button", { name: "Reconnect", exact: true }).click();
     await expect
       .poll(() =>
         page.evaluate(
