@@ -26,14 +26,20 @@ from boxie.persistence.database import database as session_database
 from boxie.persistence.migrate import migrate
 from boxie.persistence.models import (
     Artifact,
-    OrchestratorObservationRecord,
     Outbox,
     Sandbox,
     SandboxArtifactRef,
 )
+from boxie.persistence.postgres import PostgresLifecycle
+from boxie_test_support.dependencies import postgres_dsn as postgres_dsn
+from boxie_test_support.dependencies import postgres_server as postgres_server
+from boxie_test_support.durable import launch_execution
 from boxie_test_support.orchestrator import Clock, bundle
 from boxie_test_support.terminal_network import network
-from database_support import MIGRATIONS, OWNER, add_check, counts, database, upload
+from database_support import add_check
+from database_support import counts as counts
+from database_support import database as database
+from database_support import upload as upload
 from sqlalchemy import (
     Column,
     Integer,
@@ -52,6 +58,8 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 pytestmark = pytest.mark.integration
+MIGRATIONS = Path(__file__).parents[1] / "src/boxie/persistence/migrations"
+OWNER = Principal("one")
 
 
 def test_nine_concurrent_creates_reserve_exactly_eight(postgres_dsn: str, tmp_path: Path) -> None:
@@ -641,7 +649,7 @@ def test_durable_orchestrator_and_postgres_release_only_after_reconciled_absence
                 OWNER, config.identity, view.id, 1, None, orchestrator.boot_id
             )
             request = EnsureRequest.from_durable(await life.load_request(view.id))
-            await orchestrator.ensure(request)
+            await launch_execution(orchestrator, request)
             observation = await settled(orchestrator, request.ref, SandboxState.READY)
             assert await life.record_observation(observation)
             assert await counts(sessions) == (1, 1, 1, 1)
@@ -712,7 +720,7 @@ def test_journal_outage_expires_container_but_retains_sql_accounting_until_durab
                 OWNER, config.identity, view.id, 1, None, orchestrator.boot_id
             )
             request = EnsureRequest.from_durable(await life.load_request(view.id))
-            await orchestrator.ensure(request)
+            await launch_execution(orchestrator, request)
             ready = await settled(orchestrator, request.ref, SandboxState.READY)
             assert await life.record_observation(ready)
             await orchestrator.start()
@@ -773,7 +781,7 @@ def test_terminal_receipt_survives_prior_boot_and_retry_row_purge(
                 OWNER, config.identity, view.id, 1, None, orchestrator.boot_id
             )
             request = EnsureRequest.from_durable(await life.load_request(view.id))
-            await orchestrator.ensure(request)
+            await launch_execution(orchestrator, request)
             await settled(orchestrator, request.ref, SandboxState.READY)
             await life.terminate(OWNER, view.id, TerminationReason.REQUESTED)
             observation = await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
@@ -808,33 +816,24 @@ def test_terminal_receipt_survives_prior_boot_and_retry_row_purge(
             await restarted.compact()
             assert not restarted.records
             with pytest.raises(BoxieError):
-                await restarted.ensure(request)
+                await launch_execution(restarted, request)
             assert not restarted.records and not restarted.runtimes
             await restarted.close()
 
     asyncio.run(exercise())
 
 
-def test_failed_restart_journal_projection_waits_for_authenticated_inspection(
+def test_failed_restart_journal_projection_waits_for_local_inspection(
     postgres_dsn: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A failed save emits no push; the next worker inspection repairs SQL truth."""
+    from boxie.domain.lifecycle import EnsureRequest
+    from boxie.persistence.start_guard import PostgresStartGuard
+    from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+    from boxie.temporal.activities import LifecycleActivities
+    from boxie_test_support.durable import Daemon
+    from temporalio.exceptions import ApplicationError
 
     async def exercise() -> None:
-        import httpx
-        from boxie.bootstrap.orchestrator import create_orchestrator_app
-        from boxie.domain.lifecycle import EnsureRequest
-        from boxie.persistence.start_guard import PostgresStartGuard
-        from boxie.sandbox.execution.orchestrator import DurableOrchestrator
-        from boxie.sandbox.transport.client import OrchestratorClient
-        from boxie.sandbox.transport.reporting import ObservationReporter
-        from boxie.temporal.activities import LifecycleActivities
-        from boxie_test_support.durable import Daemon
-        from fastapi import Request, Response
-        from lifecycle_support import settled
-        from starlette.middleware.base import RequestResponseEndpoint
-        from temporalio.exceptions import ApplicationError
-
         async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
             view = await life.submit(OWNER, "restart-journal", await upload(artifacts))
             clock, daemon = Clock(), Daemon()
@@ -843,137 +842,58 @@ def test_failed_restart_journal_projection_waits_for_authenticated_inspection(
             original = DurableOrchestrator(
                 config, daemon, artifacts.path, guard, clock, clock.monotonic
             )
-            await life.bind_orchestrator_boot(
-                OWNER, config.identity, view.id, 1, None, original.boot_id
+            first = LifecycleActivities(life, original)
+            await first.ensure_sandbox(str(view.id))
+            old = await original.inspect(
+                EnsureRequest.from_durable(await life.load_request(view.id)).ref
             )
-            request = EnsureRequest.from_durable(await life.load_request(view.id))
-            await original.ensure(request)
-            ready = await settled(original, request.ref, SandboxState.READY)
-            assert await life.record_observation(ready)
-            journal = original.journal.path.read_bytes()
+            replacement = DurableOrchestrator(
+                config, daemon, artifacts.path, guard, clock, clock.monotonic
+            )
+            save = replacement.journal.save
 
             def unavailable() -> None:
-                raise OSError("persistent journal storage outage")
+                raise OSError("journal unavailable")
 
-            orchestrators = [original]
             try:
-                for restart in range(2):
-                    orchestrator = DurableOrchestrator(
-                        config, daemon, artifacts.path, guard, clock, clock.monotonic
-                    )
-                    orchestrators.append(orchestrator)
-                    monkeypatch.setattr(orchestrator.journal, "save", unavailable)
-                    reporter = ObservationReporter("http://api", b"restart-secret")
-                    app = create_orchestrator_app(
-                        orchestrator, artifacts, credential=b"restart-secret", reporter=reporter
-                    )
-                    entered, release = asyncio.Event(), asyncio.Event()
-
-                    @app.middleware("http")
-                    async def gate_removal(
-                        request: Request,
-                        next: RequestResponseEndpoint,
-                        entered: asyncio.Event = entered,
-                        release: asyncio.Event = release,
-                    ) -> Response:
-                        if request.url.path.endswith("/remove"):
-                            entered.set()
-                            await release.wait()
-                        return await next(request)
-
-                    try:
-                        # start() reconciles before serving; omit its periodic sweep to
-                        # place the worker inspection deterministically after the assertion.
-                        await orchestrator.reconcile()
-                        assert not daemon.resources and len(daemon.deleted_ids) == 1
-                        assert not orchestrator.execution_ready
-                        assert original.journal.path.read_bytes() == journal
-                        pending = await orchestrator.inspect(request.ref)
-                        assert pending.cleanup_pending and not pending.removal_confirmed
-                        assert pending.boot_id != ready.boot_id
-                        assert not reporter.latest  # Failed saves cannot publish finality.
-                        assert await counts(sessions) == (1, 1, 1, restart + 1)
-                        if restart == 0:
-                            # This is the native failure's premature visibility assumption.
-                            stale = await life.get(OWNER, view.id)
-                            assert stale.state == SandboxState.READY and not stale.cleanup_pending
-                        async with OrchestratorClient(
-                            "http://orchestrator",
-                            b"restart-secret",
-                            transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
-                        ) as client:
-                            activities = LifecycleActivities(life, client)
-                            if restart == 0:
-                                facts = await activities.inspect_and_renew(str(view.id))
-                                assert facts.desired_stop and not facts.cleaned
-                            else:
-                                # Binding commits before removal returns. SQL's
-                                # durable stop is authoritative even in this interval.
-                                removal = asyncio.create_task(
-                                    activities.remove_sandbox(str(view.id))
-                                )
-                                try:
-                                    await asyncio.wait_for(entered.wait(), 5)
-                                    assert (
-                                        await life.load_request(view.id)
-                                    ).orchestrator_boot_id == orchestrator.boot_id
-                                    in_flight = await life.get(OWNER, view.id)
-                                    assert (
-                                        in_flight.state == SandboxState.TERMINATING
-                                        and in_flight.cleanup_pending
-                                    )
-                                    async with sessions.begin() as session:
-                                        row = await session.get(
-                                            OrchestratorObservationRecord, view.id
-                                        )
-                                    assert row is None
-                                    assert await counts(sessions) == (1, 1, 1, 2)
-                                finally:
-                                    release.set()
-                                with pytest.raises(ApplicationError) as error:
-                                    await removal
-                                assert error.value.type == "CleanupPending"
-                        projected = await life.get(OWNER, view.id)
-                        assert (
-                            projected.state == SandboxState.TERMINATING
-                            and projected.cleanup_pending
-                        )
-                        assert (
-                            await life.load_request(view.id)
-                        ).orchestrator_boot_id == orchestrator.boot_id
-                        assert not await life.record_observation(ready)
-                        assert await counts(sessions) == (1, 1, 1, restart + 1)
-                        print(
-                            f"restart {restart + 1}: authenticated boot, pending SQL, slot/ref retained; {'inspection repair' if restart == 0 else 'cleanup retry with no observation while RPC in flight'}"
-                        )
-                        if restart == 0:
-                            await life.terminate(
-                                OWNER, view.id, TerminationReason.ORCHESTRATOR_RESTART
-                            )
-                    finally:
-                        await reporter.close()
-                recovered = DurableOrchestrator(
-                    config, daemon, artifacts.path, guard, clock, clock.monotonic
-                )
-                orchestrators.append(recovered)
-                await recovered.reconcile()
-                removed = await recovered.inspect(request.ref)
-                assert removed.removal_confirmed
-                prior = await life.load_request(view.id)
-                assert await life.bind_orchestrator_boot(
-                    OWNER,
-                    config.identity,
-                    view.id,
-                    1,
-                    prior.orchestrator_boot_id,
-                    recovered.boot_id,
-                )
-                assert await life.confirm_removed(removed)
-                assert await counts(sessions) == (1, 0, 0, 2)
+                monkeypatch.setattr(replacement.journal, "save", unavailable)
+                await replacement.reconcile()
+                assert not daemon.resources
+                assert (await life.get(OWNER, view.id)).state == SandboxState.READY
+                activities = LifecycleActivities(life, replacement)
+                facts = await activities.inspect_and_renew(str(view.id))
+                assert facts.desired_stop and not facts.cleaned
+                assert not await life.record_observation(old)
+                with pytest.raises(ApplicationError, match="cleanup pending"):
+                    await activities.remove_sandbox(str(view.id))
+                assert (await counts(sessions))[1:3] == (1, 1)
+                monkeypatch.setattr(replacement.journal, "save", save)
+                await activities.remove_sandbox(str(view.id))
+                assert (await counts(sessions))[1:3] == (0, 0)
             finally:
-                # Restore saves only during teardown, after every accounting assertion.
-                monkeypatch.undo()
-                for orchestrator in orchestrators:
-                    await orchestrator.close()
+                monkeypatch.setattr(replacement.journal, "save", save)
+                await replacement.close()
+                await original.close()
+
+    asyncio.run(exercise())
+
+
+def test_command_recovery_is_scoped_to_the_physical_owner(
+    postgres_dsn: str, tmp_path: Path
+) -> None:
+    from boxie.persistence.outbox import PostgresOutbox
+
+    async def exercise() -> None:
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
+            spec = await upload(artifacts)
+            first = await life.submit(OWNER, "owner-one", spec)
+            foreign_identity = replace(config.identity, host_id="another-host")
+            foreign = PostgresLifecycle(
+                sessions, life.resolver, foreign_identity, life.dependencies
+            )
+            second = await foreign.submit(OWNER, "owner-two", spec)
+            pending = await PostgresOutbox(sessions, config.identity).pending()
+            assert [event.sandbox_id for event in pending] == [first.id]
+            assert not await PostgresOutbox(sessions, config.identity).pending(second.id)
 
     asyncio.run(exercise())

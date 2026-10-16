@@ -1,934 +1,180 @@
-"""Outbox acceptance/acknowledgment ambiguity on production Temporal and real SQL."""
+"""Durable handoff and embedded execution against production Temporal and SQL."""
 
 import asyncio
-import importlib
-import json
-from datetime import timedelta
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
-from boxie.persistence.models import OrchestratorObservationRecord, Outbox
-from boxie_test_support.terminal_network import attach
-from database_support import OWNER, add_check, database, upload
+from boxie.bootstrap.runtime import embedded_workers
+from boxie.bootstrap.schedules import check_schedules, schedule_definitions
+from boxie.domain.lifecycle import OrchestratorObservation
+from boxie.domain.models import SandboxState, TerminationReason
+from boxie.persistence.models import Outbox
+from boxie.temporal.contracts import LifecycleResult
+from boxie.temporal.workflows import SandboxLifecycle
+from boxie_test_support.api import artifact, create, ready
+from boxie_test_support.dependencies import postgres_dsn as postgres_dsn
+from boxie_test_support.dependencies import postgres_server as postgres_server
+from boxie_test_support.dependencies import temporal_stack as temporal_stack
+from database_support import OWNER, counts, database, upload
 from sqlalchemy import func, insert, update
-from sqlmodel import col, select
-from temporal_support import tls
+from sqlmodel import col
+from temporal_support import durable_stack, tls
 from temporalio.client import Client
+from temporalio.worker import Replayer
 
 pytestmark = pytest.mark.integration
 
 
-def test_accepted_before_ack_is_redelivered_to_one_run(
-    postgres_dsn: str, temporal_stack: Any, tmp_path: Path
-) -> None:
-    async def exercise() -> None:
-        module = importlib.import_module("boxie.temporal.dispatcher")
-        from boxie.persistence.outbox import PostgresOutbox
-
-        client = await Client.connect(
-            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-worker")
-        )
-        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, _config):
-            sandbox = await life.submit(OWNER, "once", await upload(artifacts))
-            store = PostgresOutbox(sessions)
-            dispatcher = module.OutboxDispatcher(store, client, "outbox-" + uuid4().hex)
-            event = (await store.claim("first"))[0]
-            await dispatcher.deliver(event)  # dispatcher dies here: no acknowledgment
-            handle = client.get_workflow_handle(f"boxie/sandbox/{sandbox.id}")
-            first = (await handle.describe()).run_id
-            async with sessions.begin() as session:
-                await session.exec(
-                    update(Outbox).values(
-                        lease_expires_at=func.clock_timestamp() - timedelta(seconds=1)
-                    )
-                )
-            retried = (await store.claim("replacement"))[0]
-            assert not await store.acknowledge(event)
-            await dispatcher.deliver(retried)
-            assert await store.acknowledge(retried)
-            assert (await handle.describe()).run_id == first
-            assert await store.claim("third") == []
-            await handle.terminate(reason="test fixture cleanup")
-
-    asyncio.run(exercise())
-
-
-def test_idle_worker_presence_survives_long_poll_then_expires(
-    postgres_dsn: str, temporal_stack: Any, tmp_path: Path
-) -> None:
-    """Production 1.32.0 poller access refreshes at the end of idle long polls."""
-
-    async def exercise() -> None:
-        import time
-        from datetime import UTC, datetime, timedelta
-
-        from boxie.bootstrap.durable import Dependencies
-        from boxie.bootstrap.worker import lifecycle_worker
-        from boxie.temporal.contracts import TASK_QUEUE
-        from temporal_support import durable_stack
-        from temporalio.api.enums.v1 import TaskQueueType
-        from temporalio.api.taskqueue.v1 import TaskQueue
-        from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
-
-        client = await Client.connect(
-            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-worker")
-        )
-        kinds = (TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW, TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY)
-
-        async def timestamps() -> dict[int, datetime]:
-            result: dict[int, datetime] = {}
-            for kind in kinds:
-                info = await client.workflow_service.describe_task_queue(
-                    DescribeTaskQueueRequest(
-                        namespace=client.namespace,
-                        task_queue=TaskQueue(name=TASK_QUEUE),
-                        task_queue_type=kind,
-                    ),
-                    timeout=timedelta(seconds=5),
-                )
-                if info.pollers:
-                    result[kind] = max(
-                        p.last_access_time.ToDatetime(tzinfo=UTC) for p in info.pollers
-                    )
-            return result
-
-        async with durable_stack(postgres_dsn, tmp_path, client, TASK_QUEUE) as stack:
-            activities = stack[5]
-            dependencies = Dependencies(activities.orchestrator, client)
-            async with lifecycle_worker(client, activities):
-                async with asyncio.timeout(10):
-                    while len(initial := await timestamps()) != 2 or not await dependencies():
-                        await asyncio.sleep(0.1)
-                started = time.monotonic()
-                largest_age = 0.0
-                async with asyncio.timeout(125):
-                    while True:
-                        current = await timestamps()
-                        largest_age = max(
-                            largest_age,
-                            max(
-                                (datetime.now(UTC) - value).total_seconds()
-                                for value in current.values()
-                            ),
-                        )
-                        assert await dependencies(), current
-                        # Both queues must refresh after a full idle cycle.
-                        if all(
-                            (current[kind] - initial[kind]).total_seconds() >= 50 for kind in kinds
-                        ):
-                            break
-                        await asyncio.sleep(2)
-                print(
-                    json.dumps(
-                        {
-                            "idle_seconds": round(time.monotonic() - started, 2),
-                            "largest_poller_age_seconds": round(largest_age, 2),
-                            "initial": {str(k): v.isoformat() for k, v in initial.items()},
-                            "refreshed": {str(k): v.isoformat() for k, v in current.items()},
-                        }
-                    ),
-                    flush=True,
-                )
-            stopped = time.monotonic()
-            async with asyncio.timeout(100):
-                while await dependencies():
-                    await asyncio.sleep(2)
-            print(
-                json.dumps(
-                    {"rejected_after_worker_stop_seconds": round(time.monotonic() - stopped, 2)}
-                ),
-                flush=True,
-            )
-
-    asyncio.run(exercise())
-
-
-# Preserve every observed cause and both precedence paths without a Cartesian product.
-@pytest.mark.parametrize(
-    "cause,requested_first",
-    [("idle", False), ("expired", False), ("control_plane_lost", True)],
-)
-def test_workflow_cleanup_preserves_first_termination_cause(
+@pytest.mark.parametrize("stop_first", [False, True])
+def test_committed_command_recovers_without_api_delivery(
     postgres_dsn: str,
     temporal_stack: Any,
     tmp_path: Path,
-    cause: str,
-    requested_first: bool,
+    stop_first: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def exercise() -> None:
-        from datetime import UTC, datetime
-        from uuid import UUID
-
-        from boxie.bootstrap.worker import lifecycle_worker
-        from boxie.contracts.execution import ObservationWire
-        from boxie.domain.lifecycle import OrchestratorObservation
-        from boxie.domain.models import SandboxState, TerminationReason
-        from boxie.temporal.workflows import SandboxLifecycle
-        from boxie_test_support.api import artifact, create
-        from database_support import counts
-        from temporal_support import durable_stack
-
         client = await Client.connect(
-            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-worker")
+            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-orchestrator")
         )
-        queue = "first-cause-" + uuid4().hex
-        async with durable_stack(postgres_dsn, tmp_path, client, queue) as (
-            http,
-            life,
-            orchestrator,
-            daemon,
-            sessions,
-            activities,
-            _dispatcher,
-        ):
-            sid = UUID(await create(http, await artifact(http)))
-            request = await life.load_request(sid)
-            assert await life.bind_orchestrator_boot(
-                OWNER, request.identity, sid, 1, None, orchestrator.boot_id
-            )
+        async with durable_stack(postgres_dsn, tmp_path, client) as stack:
+            spec = await upload(stack.artifacts)
+            view = await stack.life.submit(OWNER, "lost-api", spec)
+            if stop_first:
+                await stack.life.terminate(OWNER, view.id, TerminationReason.REQUESTED)
+            stack.daemon.lost_ack = True
+            from boxie.persistence.outbox import PostgresOutbox
+
+            acknowledge = PostgresOutbox.acknowledge
+            lost_sql_ack = False
+
+            async def fail_ack_once(store: PostgresOutbox, event: Any) -> bool:
+                nonlocal lost_sql_ack
+                if event.sandbox_id == view.id and not lost_sql_ack:
+                    lost_sql_ack = True
+                    raise OSError("delivery committed to Temporal, SQL acknowledgement unavailable")
+                return await acknowledge(store, event)
+
+            monkeypatch.setattr(PostgresOutbox, "acknowledge", fail_ack_once)
+            async with embedded_workers(client, stack.life, stack.orchestrator, stack.artifacts):
+                async with asyncio.timeout(15):
+                    while (await stack.life.get(OWNER, view.id)).state != (
+                        "terminated" if stop_first else "ready"
+                    ):
+                        await asyncio.sleep(0.1)
+                assert lost_sql_ack
+                first_run = (
+                    await client.get_workflow_handle(f"boxie/sandbox/{view.id}").describe()
+                ).run_id
+                await stack.delivery.recover_once()
+                assert (
+                    await client.get_workflow_handle(f"boxie/sandbox/{view.id}").describe()
+                ).run_id == first_run
+                if not stop_first:
+                    assert len(stack.daemon.started) == 1
+                    # Redelivery after a lost SQL delivery acknowledgement is harmless.
+                    await stack.delivery.recover_once()
+                    assert (await stack.http.delete(f"/v1/sandboxes/{view.id}")).status_code == 200
+                handle = client.get_workflow_handle(
+                    f"boxie/sandbox/{view.id}", result_type=LifecycleResult
+                )
+                assert (await asyncio.wait_for(handle.result(), 40)).cleaned
+                assert not stack.daemon.resources
+                assert stack.daemon.creates == (0 if stop_first else 1)
+                assert (await counts(stack.sessions))[1:3] == (0, 0)
+                history = await handle.fetch_history()
+                assert all(b"SECRET-" not in event.SerializeToString() for event in history.events)
+                await Replayer(workflows=[SandboxLifecycle]).replay_workflow(history)
+                await check_schedules(client, stack.orchestrator.config.identity)
+                for identifier in schedule_definitions(stack.orchestrator.config.identity):
+                    await client.get_schedule_handle(identifier).delete()
+
+    asyncio.run(exercise())
+
+
+def test_cancelled_activity_retains_late_create_and_accounting(
+    postgres_dsn: str, temporal_stack: Any, tmp_path: Path
+) -> None:
+    async def exercise() -> None:
+        client = await Client.connect(
+            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-orchestrator")
+        )
+        async with durable_stack(postgres_dsn, tmp_path, client) as stack:
+            stack.daemon.create_gate = asyncio.Event()
+            async with embedded_workers(client, stack.life, stack.orchestrator, stack.artifacts):
+                identifier = await create(stack.http, await artifact(stack.http))
+                await asyncio.wait_for(stack.daemon.create_entered.wait(), 5)
+                handle = client.get_workflow_handle(
+                    f"boxie/sandbox/{identifier}", result_type=LifecycleResult
+                )
+                await handle.cancel()
+                for _ in range(500):
+                    if (await stack.life.load_request(UUID(identifier))).desired_stop:
+                        break
+                    await asyncio.sleep(0.02)
+                assert (await stack.life.load_request(UUID(identifier))).desired_stop
+                assert (await counts(stack.sessions))[1:3] == (1, 1)
+                assert not stack.orchestrator.records[UUID(identifier)].removal_confirmed
+                stack.daemon.create_gate.set()
+                assert (await asyncio.wait_for(handle.result(), 40)).cleaned
+                assert not stack.daemon.started and not stack.daemon.resources
+                assert (await counts(stack.sessions))[1:3] == (0, 0)
+                await Replayer(workflows=[SandboxLifecycle]).replay_workflow(
+                    await handle.fetch_history()
+                )
+                for schedule in schedule_definitions(stack.orchestrator.config.identity):
+                    await client.get_schedule_handle(schedule).delete()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    "cause,requested_first", [("idle", False), ("disconnected", False), ("idle", True)]
+)
+def test_cleanup_preserves_first_termination_cause(
+    postgres_dsn: str, temporal_stack: Any, tmp_path: Path, cause: str, requested_first: bool
+) -> None:
+    async def exercise() -> None:
+        client = await Client.connect(
+            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-orchestrator")
+        )
+        async with durable_stack(postgres_dsn, tmp_path, client) as stack:
+            view = await stack.life.submit(OWNER, "first-cause", await upload(stack.artifacts))
+            identity, boot = stack.orchestrator.config.identity, stack.orchestrator.boot_id
+            assert await stack.life.bind_orchestrator_boot(OWNER, identity, view.id, 1, None, boot)
             if requested_first:
-                await life.terminate(OWNER, sid, TerminationReason.REQUESTED)
+                await stack.life.terminate(OWNER, view.id, TerminationReason.REQUESTED)
             observation = OrchestratorObservation(
-                sid,
+                view.id,
                 OWNER,
-                request.identity,
+                identity,
                 1,
-                orchestrator.boot_id,
+                boot,
                 1,
                 datetime.now(UTC),
                 SandboxState.TERMINATING,
                 True,
                 cleanup_pending=True,
                 reason=TerminationReason(cause),
-                absolute_deadline=request.absolute_deadline,
             )
-            expected = TerminationReason.REQUESTED if requested_first else TerminationReason(cause)
-            for item, accepted in ((observation, True), (observation, False)):
-                response = await http.put(
-                    "/internal/observations",
-                    json=ObservationWire.from_domain(item).model_dump(mode="json"),
-                    headers={"Authorization": "Bearer orchestrator-test-secret"},
+            assert await stack.life.record_observation(observation)
+            assert not await stack.life.record_observation(replace(observation, boot_id=uuid4()))
+            async with embedded_workers(client, stack.life, stack.orchestrator, stack.artifacts):
+                await stack.delivery.recover_once()
+                handle = client.get_workflow_handle(
+                    f"boxie/sandbox/{view.id}", result_type=LifecycleResult
                 )
-                assert response.status_code == 200
-                assert response.json() == {"accepted": accepted}
-                assert (await life.get(OWNER, sid)).reason == expected
-            assert (await counts(sessions))[1:3] == (1, 1)
-            async with lifecycle_worker(client, activities, task_queue=queue):
-                handle = await client.start_workflow(
-                    SandboxLifecycle.run,
-                    str(sid),
-                    id=f"boxie/sandbox/{sid}",
-                    task_queue=queue,
+                assert (await asyncio.wait_for(handle.result(), 40)).cleaned
+                assert (await stack.life.get(OWNER, view.id)).reason == (
+                    "requested" if requested_first else cause
                 )
-                assert (await asyncio.wait_for(handle.result(), 30)).cleaned
-            final = await life.get(OWNER, sid)
-            assert final.reason == expected
-            assert final.state == SandboxState.TERMINATED and not final.cleanup_pending
-            assert (await life.load_request(sid)).desired_stop
-            assert await counts(sessions) == (1, 0, 0, 2)
-            assert daemon.creates == 0 and not daemon.resources
-
-    asyncio.run(exercise())
-
-
-@pytest.mark.parametrize("stop_first", [True, False])
-def test_runnable_stack_preserves_accounting_and_worker_replacement(
-    postgres_dsn: str,
-    temporal_stack: Any,
-    tmp_path: Path,
-    stop_first: bool,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    async def exercise() -> None:
-        from boxie.bootstrap.worker import lifecycle_worker
-        from boxie.domain.errors import BoxieError
-        from boxie.domain.models import TerminationReason
-        from boxie.temporal.workflows import SandboxLifecycle
-        from boxie_test_support.api import ready, terminal_url
-        from database_support import counts
-        from temporal_support import durable_stack
-        from temporalio.worker import Replayer
-        from websockets.asyncio.client import connect
-
-        client = await Client.connect(
-            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-worker")
-        )
-        queue = "real-lifecycle-" + uuid4().hex
-        async with durable_stack(postgres_dsn, tmp_path, client, queue) as (
-            http,
-            life,
-            orchestrator,
-            daemon,
-            sessions,
-            activities,
-            dispatcher,
-        ):
-            import hashlib
-
-            from boxie_test_support.orchestrator import bundle
-
-            artifact_id = str(uuid4())
-            content = bundle({"file.txt": b"SECRET-ARTIFACT-BYTES"})
-            assert (
-                await http.put(
-                    f"/v1/artifacts/{artifact_id}",
-                    content=content,
-                    headers={"X-Content-SHA256": hashlib.sha256(content).hexdigest()},
-                )
-            ).status_code == 201
-            response = await http.post(
-                "/v1/sandboxes",
-                headers={"Idempotency-Key": "private-history"},
-                json={
-                    "artifact_id": artifact_id,
-                    "profile_id": "shell",
-                    "command": ["/bin/sh", "-c", "SECRET-COMMAND"],
-                    "env": {"PRIVATE": "SECRET-ENV-SNAPSHOT"},
-                },
-            )
-            assert response.status_code == 202
-            identifier = response.json()["id"]
-            from uuid import UUID
-
-            sid = UUID(identifier)
-            if stop_first:
-                await life.terminate(OWNER, sid, TerminationReason.REQUESTED)
-            else:
-                daemon.lost_ack = True  # Daemon creates, then loses the create response.
-                original = activities.orchestrator.ensure_execution
-                lost = False
-
-                async def lose_ensure_response(request: Any, boot: Any) -> Any:
-                    nonlocal lost
-                    result = await original(request, boot)
-                    if not lost:
-                        lost = True
-                        raise BoxieError(503, "lost RPC response SECRET-TRANSPORT")
-                    return result
-
-                monkeypatch.setattr(
-                    activities.orchestrator, "ensure_execution", lose_ensure_response
-                )
-            delivery = asyncio.create_task(dispatcher.run())
-            try:
-                async with lifecycle_worker(client, activities, task_queue=queue):
-                    if not stop_first:
-                        await ready(http, identifier)
-                        assert daemon.creates == 1 and len(daemon.started) == 1
-                        ws = await connect(
-                            terminal_url(http, identifier),
-                            additional_headers={"Authorization": "Bearer consumer-one-secret"},
-                        )
-                        epoch, _ = await attach(ws, order=1)
-                        await ws.send(
-                            json.dumps(
-                                {
-                                    "type": "input",
-                                    "epoch": epoch,
-                                    "source": "user",
-                                    "data": "SECRET-PTY-INPUT",
-                                }
-                            )
-                        )
-                        assert (
-                            await asyncio.wait_for(ws.recv(), 3)
-                            == (1).to_bytes(8, "big") + b"SECRET-PTY-INPUT"
-                        )
-                    else:
-                        await ready(http, identifier, "terminated")
-                # Worker replacement must not close an orchestrator-owned live terminal.
-                if not stop_first:
-                    assert len(daemon.resources) == 1
-                    await ws.send(
-                        json.dumps(
-                            {
-                                "type": "input",
-                                "epoch": epoch,
-                                "source": "user",
-                                "data": "SECRET-PTY-INPUT-REPLACEMENT",
-                            }
-                        )
-                    )
-                    daemon.unreachable = True
-                    await life.terminate(OWNER, sid, TerminationReason.REQUESTED)
-                async with lifecycle_worker(client, activities, task_queue=queue):
-                    if not stop_first:
-                        for _ in range(100):
-                            if orchestrator.records[sid].cleanup_pending:
-                                break
-                            await asyncio.sleep(0.02)
-                        assert orchestrator.records[sid].cleanup_pending
-                        assert (await counts(sessions))[1:3] == (1, 1)
-                        daemon.unreachable = False
-                        await ws.close()
-                    handle = client.get_workflow_handle(
-                        f"boxie/sandbox/{identifier}",
-                        result_type=__import__(
-                            "boxie.temporal.contracts", fromlist=["LifecycleResult"]
-                        ).LifecycleResult,
-                    )
-                    result = await asyncio.wait_for(handle.result(), 40)
-                    assert result.cleaned
-                    assert (await counts(sessions))[1:3] == (0, 0)
-                    assert not daemon.resources
-                    assert daemon.creates == (0 if stop_first else 1)
-                    history = await handle.fetch_history()
-                    (tmp_path / "production-history.json").write_text(history.to_json())
-                    for event in history.events:
-                        # Wire bytes include decoded JSON payload data, unlike JSON
-                        # history export's base64 representation of those same bytes.
-                        encoded = event.SerializeToString()
-                        assert b"SECRET-" not in encoded
-                        assert (
-                            b"consumer-one-secret" not in encoded
-                            and b"orchestrator-test-secret" not in encoded
-                        )
-                    await Replayer(workflows=[SandboxLifecycle]).replay_workflow(history)
-                    assert "SECRET-" not in caplog.text
-            finally:
-                delivery.cancel()
-                await asyncio.gather(delivery, return_exceptions=True)
-
-    asyncio.run(exercise())
-
-
-def test_actual_api_worker_processes_recover_worker_loss(
-    postgres_dsn: str,
-    temporal_stack: Any,
-    tmp_path: Path,
-) -> None:
-    async def exercise() -> None:
-        import json
-        import socket
-        import sys
-
-        import httpx
-        from boxie_test_support.api import CONSUMER_AUTH, artifact, create, terminal_url
-        from temporal_support import durable_stack
-        from websockets.asyncio.client import connect
-
-        client = await Client.connect(
-            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-worker")
-        )
-        async with durable_stack(postgres_dsn, tmp_path, client, "unused-process-fixture") as (
-            _,
-            life,
-            orchestrator,
-            daemon,
-            sessions,
-            activities,
-            _dispatcher,
-        ):
-            dsn = tmp_path / "postgres.secret"
-            dsn.write_text(postgres_dsn)
-            dsn.chmod(0o600)
-            consumer = tmp_path / "consumer.secret"
-            consumer.write_text("consumer-one-secret")
-            consumer.chmod(0o600)
-            with socket.socket() as sock:
-                sock.bind(("127.0.0.1", 0))
-                port = sock.getsockname()[1]
-            common = {
-                "identity": {
-                    "installation_id": str(orchestrator.config.identity.installation_id),
-                    "host_id": orchestrator.config.identity.host_id,
-                },
-                "orchestrator_url": activities.orchestrator._base_url,
-                "orchestrator_credential_file": str(orchestrator.config.credential_file),
-                "durable": {
-                    "postgres_dsn_file": str(dsn),
-                    "temporal_address": temporal_stack.address,
-                    "temporal_server_name": "temporal",
-                    "temporal_ca_file": str(temporal_stack.root / "clients/frontend-ca.pem"),
-                    "temporal_cert_file": str(temporal_stack.root / "clients/boxie-api.pem"),
-                    "temporal_key_file": str(temporal_stack.root / "clients/boxie-api.key"),
-                },
-            }
-            api_path = tmp_path / "api.json"
-            api_path.write_text(
-                json.dumps(
-                    {
-                        **common,
-                        "release": "process-test",
-                        "consumer_credential_files": {"one": str(consumer)},
-                        "bind_port": port,
-                    }
-                )
-            )
-            common["durable"]["temporal_cert_file"] = str(
-                temporal_stack.root / "clients/boxie-worker.pem"
-            )
-            common["durable"]["temporal_key_file"] = str(
-                temporal_stack.root / "clients/boxie-worker.key"
-            )
-            worker_path = tmp_path / "worker.json"
-            worker_path.write_text(json.dumps(common))
-            processes: list[asyncio.subprocess.Process] = []
-
-            async def start(module: str, config: Path) -> asyncio.subprocess.Process:
-                process = await asyncio.create_subprocess_exec(
-                    sys.executable,
-                    "-m",
-                    module,
-                    "--config",
-                    str(config),
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.STDOUT,
-                )
-                processes.append(process)
-                return process
-
-            await start("boxie.bootstrap.api", api_path)
-            worker = await start("boxie.bootstrap.worker", worker_path)
-            try:
-                async with httpx.AsyncClient(
-                    base_url=f"http://127.0.0.1:{port}", headers=CONSUMER_AUTH
-                ) as http:
-                    for _ in range(300):
-                        try:
-                            response = await http.get("/readyz")
-                            if response.status_code == 200:
-                                break
-                        except httpx.ConnectError:
-                            pass
-                        await asyncio.sleep(0.1)
-                    else:
-                        raise AssertionError("real API/worker did not become ready")
-                    assert response.json()["dependencies"] == {"orchestration": True}
-                    identifier = await create(http, await artifact(http))
-                    for _ in range(300):
-                        view = await http.get(f"/v1/sandboxes/{identifier}")
-                        if view.json()["state"] == "ready":
-                            break
-                        await asyncio.sleep(0.1)
-                    else:
-                        raise AssertionError("real worker did not provision")
-                    async with connect(
-                        terminal_url(http, identifier), additional_headers=CONSUMER_AUTH
-                    ) as ws:
-                        epoch, _ = await attach(ws, order=1)
-                        await ws.send(
-                            json.dumps(
-                                {
-                                    "type": "input",
-                                    "epoch": epoch,
-                                    "source": "user",
-                                    "data": "PROCESS-PTY-SENTINEL",
-                                }
-                            )
-                        )
-                        assert (
-                            await asyncio.wait_for(ws.recv(), 3)
-                            == (1).to_bytes(8, "big") + b"PROCESS-PTY-SENTINEL"
-                        )
-                        worker.kill()
-                        await asyncio.wait_for(worker.wait(), 5)
-                        assert len(daemon.resources) == 1
-                        await ws.send(
-                            json.dumps(
-                                {
-                                    "type": "input",
-                                    "epoch": epoch,
-                                    "source": "user",
-                                    "data": "PROCESS-PTY-SENTINEL-after-crash",
-                                }
-                            )
-                        )
-                        assert (
-                            await asyncio.wait_for(ws.recv(), 3)
-                            == (2).to_bytes(8, "big") + b"PROCESS-PTY-SENTINEL-after-crash"
-                        )
-                        await start("boxie.bootstrap.worker", worker_path)
-                        assert (await http.delete(f"/v1/sandboxes/{identifier}")).status_code == 200
-                        for _ in range(300):
-                            view = await http.get(f"/v1/sandboxes/{identifier}")
-                            if view.json()["state"] == "terminated":
-                                break
-                            await asyncio.sleep(0.1)
-                        else:
-                            raise AssertionError("replacement worker did not clean")
-                    assert daemon.creates == 1 and not daemon.resources
-            finally:
-                for process in reversed(processes):
-                    if process.returncode is None:
-                        process.terminate()
-                    try:
-                        output, _ = await asyncio.wait_for(process.communicate(), 30)
-                    except TimeoutError:
-                        process.kill()
-                        output, _ = await process.communicate()
-                        raise AssertionError("process failed to shut down") from None
-                    assert b"PROCESS-PTY-SENTINEL" not in output
-                    assert (
-                        b"consumer-one-secret" not in output
-                        and b"orchestrator-test-secret" not in output
-                    )
-
-    asyncio.run(exercise())
-
-
-def test_api_starts_during_temporal_outage_and_recovers(
-    postgres_dsn: str, temporal_stack: Any, tmp_path: Path
-) -> None:
-    async def exercise() -> None:
-        import json
-        import socket
-        import sys
-        from contextlib import AsyncExitStack
-
-        import httpx
-        from boxie.bootstrap.worker import lifecycle_worker
-        from boxie_test_support.api import CONSUMER_AUTH, artifact, create, ready
-        from boxie_test_support.orchestrator import request
-        from temporal_support import durable_stack
-
-        client = await Client.connect(
-            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-worker")
-        )
-        available = asyncio.Event()
-        connections: set[asyncio.Task[None]] = set()
-
-        async def proxy(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-            # TCP transport gate preserves the actual end-to-end mTLS handshake.
-            current = asyncio.current_task()
-            assert current is not None
-            connections.add(current)
-            remote: asyncio.StreamWriter | None = None
-            pumps: list[asyncio.Task[None]] = []
-            try:
-                if not available.is_set():
-                    return
-                host, port = temporal_stack.address.rsplit(":", 1)
-                upstream, remote = await asyncio.open_connection(host, int(port))
-
-                async def copy(source: asyncio.StreamReader, target: asyncio.StreamWriter) -> None:
-                    while data := await source.read(65536):
-                        target.write(data)
-                        await target.drain()
-
-                pumps = [
-                    asyncio.create_task(copy(reader, remote)),
-                    asyncio.create_task(copy(upstream, writer)),
-                ]
-                await asyncio.wait(pumps, return_when=asyncio.FIRST_COMPLETED)
-            finally:
-                for pump in pumps:
-                    pump.cancel()
-                await asyncio.gather(*pumps, return_exceptions=True)
-                writer.close()
-                if remote:
-                    remote.close()
-                connections.remove(current)
-
-        async with (
-            await asyncio.start_server(proxy, "127.0.0.1", 0) as frontend,
-            durable_stack(postgres_dsn, tmp_path, client, "boxie-lifecycle") as stack,
-        ):
-            fixture_http, _, orchestrator, daemon, _, activities, dispatcher = stack
-            artifact_id = await artifact(fixture_http)
-            existing = await create(fixture_http, artifact_id, "outage-retry")
-            for name, value in (("postgres", postgres_dsn), ("consumer", "consumer-one-secret")):
-                path = tmp_path / f"{name}.secret"
-                path.write_text(value)
-                path.chmod(0o600)
-            with socket.socket() as sock:
-                sock.bind(("127.0.0.1", 0))
-                api_port = sock.getsockname()[1]
-            config = tmp_path / "outage-api.json"
-            config.write_text(
-                json.dumps(
-                    {
-                        "release": "outage-test",
-                        "bind_port": api_port,
-                        "consumer_credential_files": {"one": str(tmp_path / "consumer.secret")},
-                        "identity": {
-                            "installation_id": str(orchestrator.config.identity.installation_id),
-                            "host_id": orchestrator.config.identity.host_id,
-                        },
-                        "orchestrator_url": activities.orchestrator._base_url,
-                        "orchestrator_credential_file": str(orchestrator.config.credential_file),
-                        "durable": {
-                            "postgres_dsn_file": str(tmp_path / "postgres.secret"),
-                            "temporal_address": f"127.0.0.1:{frontend.sockets[0].getsockname()[1]}",
-                            "temporal_server_name": "temporal",
-                            "temporal_ca_file": str(
-                                temporal_stack.root / "clients/frontend-ca.pem"
-                            ),
-                            "temporal_cert_file": str(
-                                temporal_stack.root / "clients/boxie-api.pem"
-                            ),
-                            "temporal_key_file": str(temporal_stack.root / "clients/boxie-api.key"),
-                        },
-                    }
-                )
-            )
-            process = await asyncio.create_subprocess_exec(
-                sys.executable,
-                "-m",
-                "boxie.bootstrap.api",
-                "--config",
-                str(config),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            delivery: asyncio.Task[None] | None = None
-            try:
-                async with (
-                    httpx.AsyncClient(
-                        base_url=f"http://127.0.0.1:{api_port}", headers=CONSUMER_AUTH, timeout=10
-                    ) as http,
-                    AsyncExitStack() as running,
-                ):
-                    for _ in range(100):
-                        try:
-                            if (await http.get("/healthz")).status_code == 200:
-                                break
-                        except httpx.ConnectError:
-                            pass
-                        assert process.returncode is None, "API exited before serving during outage"
-                        await asyncio.sleep(0.05)
-                    else:
-                        raise AssertionError("API did not start during Temporal outage")
-                    assert (await http.get(f"/v1/sandboxes/{existing}")).status_code == 200
-                    assert await create(http, artifact_id, "outage-retry") == existing
-                    assert (await http.get("/readyz")).status_code == 503
-                    assert (
-                        await http.post(
-                            "/v1/sandboxes",
-                            json=request(artifact_id)["spec"],
-                            headers={"Idempotency-Key": "outage-new"},
-                        )
-                    ).status_code == 503
-                    assert (await http.delete(f"/v1/sandboxes/{existing}")).status_code == 200
-                    assert (await http.get(f"/v1/sandboxes/{existing}")).json()[
-                        "state"
-                    ] == "terminating"
-                    available.set()
-                    await running.enter_async_context(lifecycle_worker(client, activities))
-                    delivery = asyncio.create_task(dispatcher.run())
-                    for _ in range(100):
-                        if (await http.get("/readyz")).status_code == 200:
-                            break
-                        await asyncio.sleep(0.05)
-                    else:
-                        raise AssertionError("API readiness did not recover")
-                    admitted = await create(http, artifact_id, "outage-new")
-                    assert (await http.delete(f"/v1/sandboxes/{admitted}")).status_code == 200
-                    await ready(http, existing, "terminated")
-                    await ready(http, admitted, "terminated")
-                    assert not daemon.resources
-            finally:
-                if delivery:
-                    delivery.cancel()
-                    await asyncio.gather(delivery, return_exceptions=True)
-                if process.returncode is None:
-                    process.terminate()
-                output, _ = await asyncio.wait_for(process.communicate(), 10)
-                assert (
-                    b"consumer-one-secret" not in output
-                    and b"orchestrator-test-secret" not in output
-                )
-                for connection in list(connections):
-                    connection.cancel()
-                await asyncio.gather(*connections, return_exceptions=True)
-
-    asyncio.run(exercise())
-
-
-def test_authenticated_observations_are_atomic_and_fenced(
-    postgres_dsn: str, temporal_stack: Any, tmp_path: Path
-) -> None:
-    async def exercise() -> None:
-        from dataclasses import replace
-        from datetime import UTC, datetime
-        from uuid import UUID
-
-        from boxie.contracts.execution import ObservationWire
-        from boxie.domain.lifecycle import OrchestratorObservation
-        from boxie.domain.models import SandboxState
-        from boxie_test_support.api import artifact, create
-        from temporal_support import durable_stack
-
-        client = await Client.connect(
-            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-worker")
-        )
-        async with durable_stack(postgres_dsn, tmp_path, client, "unused-observation-queue") as (
-            http,
-            life,
-            orchestrator,
-            _daemon,
-            sessions,
-            _activities,
-            _dispatcher,
-        ):
-            sid = UUID(await create(http, await artifact(http)))
-            await life.bind_orchestrator_boot(
-                OWNER, orchestrator.config.identity, sid, 1, None, orchestrator.boot_id
-            )
-            observation = OrchestratorObservation(
-                sid,
-                OWNER,
-                orchestrator.config.identity,
-                1,
-                orchestrator.boot_id,
-                10,
-                datetime.now(UTC),
-                SandboxState.READY,
-                True,
-            )
-            body = ObservationWire.from_domain(observation).model_dump(mode="json")
-            assert (await http.put("/internal/observations", json=body)).status_code == 401
-            orchestrator_headers = {"Authorization": "Bearer orchestrator-test-secret"}
-            response = await http.put(
-                "/internal/observations", json=body, headers=orchestrator_headers
-            )
-            assert response.json() == {"accepted": True}
-            for stale in (
-                replace(observation, event_version=9),
-                replace(observation, event_version=11, boot_id=uuid4()),
-                replace(observation, event_version=12, generation=2),
-            ):
-                response = await http.put(
-                    "/internal/observations",
-                    json=ObservationWire.from_domain(stale).model_dump(mode="json"),
-                    headers=orchestrator_headers,
-                )
-                assert response.json() == {"accepted": False}
-            async with sessions() as session:
-                observation_record = await session.get(OrchestratorObservationRecord, sid)
-                assert observation_record is not None and observation_record.event_version == 10
-                assert (
-                    await session.scalar(
-                        select(func.count())
-                        .select_from(Outbox)
-                        .where(col(Outbox.sandbox_id) == sid, col(Outbox.kind) == "observation")
-                    )
-                    == 1
-                )
-            # Transaction rollback must also roll back the projected fact.
-            await add_check(
-                sessions, col(Outbox.kind) != "observation", "reject_reports", not_valid=True
-            )
-            response = await http.put(
-                "/internal/observations",
-                json=ObservationWire.from_domain(replace(observation, event_version=11)).model_dump(
-                    mode="json"
-                ),
-                headers=orchestrator_headers,
-            )
-            assert response.status_code == 500
-            async with sessions() as session:
-                observation_record = await session.get(OrchestratorObservationRecord, sid)
-                assert observation_record is not None and observation_record.event_version == 10
-
-    asyncio.run(exercise())
-
-
-def test_timeout_closed_delivery_and_bounded_claims(
-    postgres_dsn: str, temporal_stack: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async def exercise() -> None:
-        import time
-        from datetime import UTC, datetime
-
-        from boxie.domain.lifecycle import OrchestratorObservation
-        from boxie.domain.models import SandboxState
-        from boxie.persistence.outbox import PostgresOutbox
-        from boxie.temporal.dispatcher import OutboxDispatcher
-
-        client = await Client.connect(
-            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-worker")
-        )
-        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
-            sandbox = await life.submit(OWNER, "timeout", await upload(artifacts))
-            store = PostgresOutbox(sessions)
-            dispatcher = OutboxDispatcher(store, client, "no-worker-" + uuid4().hex)
-            event = (await store.claim("timeout"))[0]
-            original = client.start_workflow
-
-            async def lose_response(*args: Any, **kwargs: Any) -> Any:
-                await original(*args, **kwargs)
-                await asyncio.sleep(10)
-
-            with monkeypatch.context() as patch:
-                patch.setattr(client, "start_workflow", lose_response)
-                started = time.monotonic()
-                with pytest.raises(TimeoutError):
-                    await dispatcher.deliver(event)
-                assert 4.5 < time.monotonic() - started < 6
-            handle = client.get_workflow_handle(f"boxie/sandbox/{sandbox.id}")
-            run_id = (await handle.describe()).run_id
-            await dispatcher.deliver(event)
-            assert (await handle.describe()).run_id == run_id
-            await handle.terminate(reason="intentional unexpected closure test")
-            with pytest.raises(RuntimeError, match="cleanup obligation"):
-                await dispatcher.deliver(event)
-            assert not await store.confirmed_terminal(sandbox.id)
-            boot = uuid4()
-            await life.bind_orchestrator_boot(OWNER, config.identity, sandbox.id, 1, None, boot)
-            await life.confirm_removed(
-                OrchestratorObservation(
-                    sandbox.id,
-                    OWNER,
-                    config.identity,
-                    1,
-                    boot,
-                    1,
-                    datetime.now(UTC),
-                    SandboxState.TERMINATED,
-                    False,
-                    removal_confirmed=True,
-                )
-            )
-            await dispatcher.deliver(event)
-            assert await store.acknowledge(event)
-            assert (await handle.describe()).run_id == run_id
-            # Use another retained request for bounded claims and slow RPC concurrency.
-            live = await life.submit(OWNER, "batch", await upload(artifacts))
-            async with sessions.begin() as session:
-                for index in range(34):
-                    await session.exec(
-                        insert(Outbox).values(
-                            id=uuid4(),
-                            deduplication_key=f"batch-{index}",
-                            sandbox_id=live.id,
-                            kind="observation",
-                        )
-                    )
-            active = maximum = calls = 0
-
-            async def delayed(*args: Any, **kwargs: Any) -> Any:
-                nonlocal active, maximum, calls
-                active += 1
-                maximum = max(maximum, active)
-                calls += 1
-                try:
-                    await asyncio.sleep(0.05)
-                    return await original(*args, **kwargs)
-                finally:
-                    active -= 1
-
-            with monkeypatch.context() as patch:
-                patch.setattr(client, "start_workflow", delayed)
-                await dispatcher.poll()
-            assert 1 < maximum <= 8 and calls <= 32
-            claimed = await store.claim("expired")
-            assert 1 <= len(claimed) <= 32
-            async with sessions.begin() as session:
-                await session.exec(
-                    update(Outbox)
-                    .where(col(Outbox.lease_owner) == "expired")
-                    .values(lease_expires_at=func.clock_timestamp() - timedelta(seconds=1))
-                )
-            with pytest.raises(RuntimeError, match="claim expired"):
-                await dispatcher.deliver(claimed[0])
-            assert not await store.acknowledge(claimed[0])
-            await client.get_workflow_handle(f"boxie/sandbox/{live.id}").terminate(
-                reason="test fixture cleanup"
-            )
+                assert not stack.daemon.resources and stack.daemon.creates == 0
+                for schedule in schedule_definitions(identity):
+                    await client.get_schedule_handle(schedule).delete()
 
     asyncio.run(exercise())
 
@@ -946,7 +192,7 @@ def test_production_cancel_during_concurrent_inspection(
         from workflow_support import Decisions
 
         client = await Client.connect(
-            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-worker")
+            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-orchestrator")
         )
         decisions = Decisions(mode)
         queue = "production-cancel-" + uuid4().hex
@@ -1031,63 +277,179 @@ def test_backlog_threshold_preserves_matching_retry_status_and_stop(
     asyncio.run(exercise())
 
 
-def test_workflow_cancel_retains_uncertain_create_until_actual_removal(
+def test_actual_api_process_accepts_status_and_stop_during_temporal_outage(
     postgres_dsn: str, temporal_stack: Any, tmp_path: Path
 ) -> None:
+    import json
+    import socket
+    import sys
+
+    import httpx
+
     async def exercise() -> None:
-        from uuid import UUID
-
-        from boxie.bootstrap.worker import lifecycle_worker
-        from boxie.temporal.contracts import LifecycleResult
-        from boxie.temporal.workflows import SandboxLifecycle
-        from boxie_test_support.api import artifact, create
-        from database_support import counts
-        from temporal_support import durable_stack
-        from temporalio.worker import Replayer
-
         client = await Client.connect(
-            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-worker")
+            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-orchestrator")
         )
-        queue = "cancel-accounting-" + uuid4().hex
-        async with durable_stack(postgres_dsn, tmp_path, client, queue) as (
-            http,
-            life,
-            orchestrator,
-            daemon,
-            sessions,
-            activities,
-            dispatcher,
-        ):
-            gate = asyncio.Event()
-            daemon.create_gate = gate
-            identifier = await create(http, await artifact(http))
-            sid = UUID(identifier)
-            delivery = asyncio.create_task(dispatcher.run())
-            try:
-                async with lifecycle_worker(client, activities, task_queue=queue):
-                    await asyncio.wait_for(daemon.create_entered.wait(), 5)
-                    handle = client.get_workflow_handle(
-                        f"boxie/sandbox/{identifier}", result_type=LifecycleResult
+        async with durable_stack(postgres_dsn, tmp_path, client) as stack:
+            view = await stack.life.submit(OWNER, "api-outage", await upload(stack.artifacts))
+            dsn_path = tmp_path / "dsn.secret"
+            dsn_path.write_text(postgres_dsn)
+            dsn_path.chmod(0o600)
+            consumer = tmp_path / "consumer.secret"
+            consumer.write_text("consumer-one-secret")
+            consumer.chmod(0o600)
+            with socket.socket() as reservation:
+                reservation.bind(("127.0.0.1", 0))
+                port = reservation.getsockname()[1]
+            configuration = {
+                "release": "outage",
+                "bind_port": port,
+                "identity": {
+                    "installation_id": str(stack.orchestrator.config.identity.installation_id),
+                    "host_id": stack.orchestrator.config.identity.host_id,
+                },
+                "orchestrator_url": str(stack.life.resolver._http.base_url),
+                "orchestrator_credential_file": str(stack.orchestrator.config.credential_file),
+                "consumer_credential_files": {"one": str(consumer)},
+                "durable": {
+                    "postgres_dsn_file": str(dsn_path),
+                    "temporal_address": "127.0.0.1:1",
+                    "temporal_server_name": "temporal",
+                    "temporal_ca_file": str(temporal_stack.root / "clients/frontend-ca.pem"),
+                    "temporal_cert_file": str(temporal_stack.root / "clients/boxie-api.pem"),
+                    "temporal_key_file": str(temporal_stack.root / "clients/boxie-api.key"),
+                },
+            }
+            path = tmp_path / "api.json"
+            path.write_text(json.dumps(configuration))
+            with (tmp_path / "api.log").open("wb") as output:
+                process = await asyncio.create_subprocess_exec(
+                    sys.executable,
+                    "-m",
+                    "boxie.bootstrap.api",
+                    "--config",
+                    str(path),
+                    stdout=output,
+                    stderr=output,
+                )
+                try:
+                    async with httpx.AsyncClient(
+                        base_url=f"http://127.0.0.1:{port}",
+                        headers={"Authorization": "Bearer consumer-one-secret"},
+                        timeout=10,
+                    ) as http:
+                        async with asyncio.timeout(10):
+                            while True:
+                                try:
+                                    if (await http.get("/healthz")).status_code == 200:
+                                        break
+                                except httpx.HTTPError:
+                                    pass
+                                await asyncio.sleep(0.05)
+                        assert (await http.get(f"/v1/sandboxes/{view.id}")).status_code == 200
+                        assert (await http.get("/readyz")).status_code == 503
+                        assert (await http.delete(f"/v1/sandboxes/{view.id}")).status_code == 200
+                        assert (await stack.life.load_request(view.id)).desired_stop
+                        assert (await counts(stack.sessions))[1:3] == (1, 1)
+                finally:
+                    process.terminate()
+                    await asyncio.wait_for(process.wait(), 5)
+
+    asyncio.run(exercise())
+
+
+def test_busy_maintenance_preserves_terminal_and_lease_and_cleanup_history(
+    postgres_dsn: str, temporal_stack: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from boxie.temporal.contracts import maintenance_queue
+    from boxie.temporal.maintenance import Maintenance
+    from boxie_test_support.api import CONSUMER_AUTH, terminal_url
+    from boxie_test_support.terminal_network import attach
+    from temporalio.api.enums.v1 import EventType
+    from websockets.asyncio.client import connect
+
+    async def exercise() -> None:
+        client = await Client.connect(
+            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-orchestrator")
+        )
+        async with durable_stack(postgres_dsn, tmp_path, client) as stack:
+            gate, saturated = asyncio.Event(), asyncio.Event()
+            active = 0
+            original_collect = stack.artifacts.collect
+
+            async def held_collect(limit: int = 100) -> int:
+                nonlocal active
+                active += 1
+                if active >= 4:
+                    saturated.set()
+                try:
+                    await gate.wait()
+                    return int(await original_collect(limit))
+                finally:
+                    active -= 1
+
+            monkeypatch.setattr(stack.artifacts, "collect", held_collect)
+            async with embedded_workers(client, stack.life, stack.orchestrator, stack.artifacts):
+                identifier = await create(stack.http, await artifact(stack.http))
+                await ready(stack.http, identifier)
+                sid = UUID(identifier)
+                first_lease = stack.orchestrator.records[sid].control_lease_until
+                tasks = [
+                    await client.start_workflow(
+                        Maintenance.run,
+                        "artifacts",
+                        id="busy-" + uuid4().hex,
+                        task_queue=maintenance_queue(stack.orchestrator.config.identity),
                     )
-                    await handle.cancel()
-                    for _ in range(1500):
-                        if (await life.load_request(sid)).desired_stop:
-                            break
-                        await asyncio.sleep(0.01)
-                    else:
-                        raise AssertionError("cancellation stop not persisted")
-                    assert (await counts(sessions))[1:3] == (1, 1)
-                    assert not orchestrator.records[sid].removal_confirmed
-                    gate.set()  # Earlier 404s cannot settle this still-running create.
-                    assert (await asyncio.wait_for(handle.result(), 30)).cleaned
-                    assert daemon.creates == 1 and not daemon.started and not daemon.resources
-                    assert (await counts(sessions))[1:3] == (0, 0)
-                    history = await handle.fetch_history()
-                    (tmp_path / "cancel-accounting.json").write_text(history.to_json())
-                    await Replayer(workflows=[SandboxLifecycle]).replay_workflow(history)
-            finally:
-                gate.set()
-                delivery.cancel()
-                await asyncio.gather(delivery, return_exceptions=True)
+                    for _ in range(4)
+                ]
+                try:
+                    await asyncio.wait_for(saturated.wait(), 5)
+                    async with connect(
+                        terminal_url(stack.http, identifier), additional_headers=CONSUMER_AUTH
+                    ) as terminal:
+                        epoch, _ = await attach(terminal, order=1)
+                        await terminal.send(
+                            json.dumps(
+                                {
+                                    "type": "input",
+                                    "epoch": epoch,
+                                    "source": "user",
+                                    "data": "responsive",
+                                }
+                            )
+                        )
+                        assert (await asyncio.wait_for(terminal.recv(), 2))[8:] == b"responsive"
+                        async with asyncio.timeout(40):
+                            while (
+                                stack.orchestrator.records[sid].control_lease_until <= first_lease
+                            ):
+                                await asyncio.sleep(0.1)
+                        stack.daemon.unreachable = True
+                        assert (
+                            await stack.http.delete(f"/v1/sandboxes/{identifier}")
+                        ).status_code == 200
+                        await asyncio.sleep(5)
+                        handle = client.get_workflow_handle(
+                            f"boxie/sandbox/{identifier}", result_type=LifecycleResult
+                        )
+                        history = await handle.fetch_history()
+                        signals = [
+                            event
+                            for event in history.events
+                            if event.event_type == EventType.EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED
+                        ]
+                        assert len(signals) <= 2, "cleanup retries keep appending workflow signals"
+                        assert (await counts(stack.sessions))[1:3] == (1, 1)
+                        stack.daemon.unreachable = False
+                        assert (await asyncio.wait_for(handle.result(), 30)).cleaned
+                finally:
+                    stack.daemon.unreachable = False
+                    gate.set()
+                    await asyncio.gather(*(task.result() for task in tasks))
+                    for schedule in schedule_definitions(stack.orchestrator.config.identity):
+                        await client.get_schedule_handle(schedule).delete()
 
     asyncio.run(exercise())

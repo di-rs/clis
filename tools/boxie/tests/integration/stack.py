@@ -39,7 +39,6 @@ class LifecycleStack(ProductionStack):
             BOXIE_DATA_DIR=str(root / "data"),
             BOXIE_ORCHESTRATOR_CONFIG=str(root / "orchestrator.json"),
             BOXIE_API_CONFIG=str(root / "api.json"),
-            BOXIE_WORKER_CONFIG=str(root / "worker.json"),
             BOXIE_PROFILES_FILE=str(root / "profiles.json"),
             BOXIE_ORCHESTRATOR_CREDENTIAL_FILE=str(root / "orchestrator.secret"),
             BOXIE_CONSUMER_CREDENTIAL_FILE=str(root / "consumer.secret"),
@@ -47,8 +46,8 @@ class LifecycleStack(ProductionStack):
             BOXIE_TEMPORAL_CA_FILE=str(root / "clients/frontend-ca.pem"),
             BOXIE_API_TEMPORAL_CERT_FILE=str(root / "clients/boxie-api.pem"),
             BOXIE_API_TEMPORAL_KEY_FILE=str(root / "clients/boxie-api.key"),
-            BOXIE_WORKER_TEMPORAL_CERT_FILE=str(root / "clients/boxie-worker.pem"),
-            BOXIE_WORKER_TEMPORAL_KEY_FILE=str(root / "clients/boxie-worker.key"),
+            BOXIE_ORCHESTRATOR_TEMPORAL_CERT_FILE=str(root / "clients/boxie-orchestrator.pem"),
+            BOXIE_ORCHESTRATOR_TEMPORAL_KEY_FILE=str(root / "clients/boxie-orchestrator.key"),
             BOXIE_CONSUMER_NETWORK=self.name + "-consumer",
             PLAYGROUND_DEPLOY_TOKEN=self.deploy,
             PLAYGROUND_PUBLIC_URL="http://127.0.0.1:1",
@@ -144,9 +143,7 @@ class LifecycleStack(ProductionStack):
         self.product_url = f"http://127.0.0.1:{port}"
         self.env["PLAYGROUND_PUBLIC_URL"] = self.product_url
         self.runtime_started = True
-        self.runtime_command(
-            "up", "--detach", "faults", "orchestrator", "api", "worker", "playground"
-        )
+        self.runtime_command("up", "--detach", "faults", "orchestrator", "api", "playground")
         self.api_url = "http://" + self.runtime_command("port", "api", "8090")
         self.product_url = "http://" + self.runtime_command("port", "playground", "8000")
         self.env["PLAYGROUND_PUBLIC_URL"] = self.product_url
@@ -220,7 +217,7 @@ with httpx.Client(headers={'Authorization': 'Bearer ' + credential}, timeout=1, 
             path.unlink(missing_ok=True)
 
     def process(self, service: str, action: str) -> None:
-        if service not in {"api", "worker", "orchestrator", "temporal"} or action not in {
+        if service not in {"api", "orchestrator", "temporal"} or action not in {
             "kill",
             "start",
         }:

@@ -115,20 +115,6 @@ class EnsureRequest:
         )
 
 
-@dataclass(frozen=True)
-class ExpiryRequest:
-    ref: SandboxRef
-    reason: TerminationReason
-    observed_event_version: int
-    boot_id: UUID
-
-
-@dataclass(frozen=True)
-class ExpiryDecision:
-    applied: bool
-    observation: OrchestratorObservation
-
-
 class StartGuard(Protocol):
     """Orchestrator-owned guard. The callback is only the bounded final Docker start.
 

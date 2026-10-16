@@ -121,7 +121,7 @@ def test_native_fixture_compose_resolves_owned_fault_boundaries(tmp_path: Path) 
             (port["host_ip"], port["published"], port["target"], port["protocol"])
             for port in services[service]["ports"]
         ] == [("127.0.0.1", published, target, "tcp")]
-    for name in ("api", "worker", "playground"):
+    for name in ("api", "playground"):
         assert not any("docker.sock" in str(mount) for mount in services[name].get("volumes", []))
     assert services["orchestrator"]["environment"]["DOCKER_HOST"] == "unix:///faults/docker.sock"
     assert not any(
@@ -143,7 +143,6 @@ def test_disconnected_upload_waiter_and_collector_have_one_total_deadline(
     from boxie.persistence.start_guard import PostgresStartGuard
     from boxie.sandbox.execution.orchestrator import DurableOrchestrator
     from boxie.sandbox.transport.client import OrchestratorClient
-    from boxie.sandbox.transport.reporting import ObservationReporter
     from boxie_test_support.api import serve
     from boxie_test_support.durable import Daemon
     from boxie_test_support.orchestrator import Clock
@@ -157,9 +156,9 @@ def test_disconnected_upload_waiter_and_collector_have_one_total_deadline(
             orchestrator = DurableOrchestrator(
                 config, Daemon(), store.path, PostgresStartGuard(sessions), clock, clock.monotonic
             )
-            reporter = ObservationReporter("http://127.0.0.1:1", b"unused")
+
             app = create_orchestrator_app(
-                orchestrator, store, credential=b"orchestrator-test-secret", reporter=reporter
+                orchestrator, store, credential=b"orchestrator-test-secret"
             )
             async with serve(app) as origin:
                 await store._files_lock.acquire()

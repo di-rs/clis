@@ -12,6 +12,7 @@ from boxie.domain.errors import BoxieError
 from boxie.domain.models import Principal, SandboxState, TerminationReason
 from boxie_test_support.durable import Daemon as Daemon
 from boxie_test_support.durable import Guard as Guard
+from boxie_test_support.durable import launch_execution
 from boxie_test_support.orchestrator import FakeTerminal
 from lifecycle_support import settled, setup
 
@@ -19,43 +20,28 @@ from lifecycle_support import settled, setup
 def test_input_and_attachment_fences_and_absolute_deadline(tmp_path: Path) -> None:
     async def exercise() -> None:
         orchestrator, request, daemon, clock, _ = await setup(tmp_path)
-        from boxie.domain.lifecycle import ExpiryRequest
 
-        ready = await settled(orchestrator, request.ref, SandboxState.READY)
+        await settled(orchestrator, request.ref, SandboxState.READY)
         epoch = await orchestrator.attach(request.ref, attachment_order=1)
-        stale = ExpiryRequest(
-            request.ref, TerminationReason.IDLE, ready.event_version, orchestrator.boot_id
-        )
         for _ in range(19):
             clock.advance(30)
             await orchestrator.renew_control_lease(request.ref, orchestrator.boot_id)
         clock.advance(29)
-        current = await orchestrator.inspect(request.ref)
-        stale = replace(stale, observed_event_version=current.event_version)
         await orchestrator.write(request.ref, epoch, b"alive")
         clock.advance(1)
-        assert not (await orchestrator.expire_if_current(stale)).applied
+        assert orchestrator._expiry(orchestrator.records[request.ref.id]) is None
         await orchestrator.detach(request.ref, epoch)
-        detached = await orchestrator.inspect(request.ref)
-        stale_detach = ExpiryRequest(
-            request.ref,
-            TerminationReason.DISCONNECTED,
-            detached.event_version,
-            orchestrator.boot_id,
-        )
         for _ in range(3):
             clock.advance(30)
             await orchestrator.renew_control_lease(request.ref, orchestrator.boot_id)
         clock.advance(29)
-        current = await orchestrator.inspect(request.ref)
-        stale_detach = replace(stale_detach, observed_event_version=current.event_version)
         newer = await orchestrator.attach(request.ref, attachment_order=2)
         assert newer > epoch
         await orchestrator.detach(request.ref, epoch)
         with pytest.raises(BoxieError):
             await orchestrator.write(request.ref, epoch, b"stale")
         clock.advance(1)
-        assert not (await orchestrator.expire_if_current(stale_detach)).applied
+        assert orchestrator._expiry(orchestrator.records[request.ref.id]) is None
         while clock.elapsed < 3570:
             clock.advance(30)
             await orchestrator.renew_control_lease(request.ref, orchestrator.boot_id)
@@ -65,10 +51,9 @@ def test_input_and_attachment_fences_and_absolute_deadline(tmp_path: Path) -> No
         clock.advance(1)
         observation = await orchestrator.inspect(request.ref)
         assert observation.absolute_deadline == request.accepted_at + timedelta(seconds=3600)
-        expired = await orchestrator.expire_if_current(
-            replace(stale, reason=TerminationReason.EXPIRED)
-        )
-        assert expired.applied and expired.observation.removal_confirmed
+        await orchestrator.reconcile()
+        expired = await orchestrator.inspect(request.ref)
+        assert expired.removal_confirmed and expired.reason == TerminationReason.EXPIRED
         assert len(daemon.deleted_ids) == 1
         await orchestrator.close()
 
@@ -78,10 +63,10 @@ def test_input_and_attachment_fences_and_absolute_deadline(tmp_path: Path) -> No
 def test_exact_ensure_boot_generation_and_snapshot_fences(tmp_path: Path) -> None:
     async def exercise() -> None:
         orchestrator, request, daemon, clock, _ = await setup(tmp_path)
-        from boxie.domain.lifecycle import ExpiryRequest, SandboxRef
+        from boxie.domain.lifecycle import SandboxRef
 
-        await asyncio.gather(*(orchestrator.ensure(request) for _ in range(10)))
-        ready = await settled(orchestrator, request.ref, SandboxState.READY)
+        await asyncio.gather(*(launch_execution(orchestrator, request) for _ in range(10)))
+        await settled(orchestrator, request.ref, SandboxState.READY)
         assert daemon.creates == 1
         for bad in (
             replace(request, identity=replace(request.identity, host_id="wrong-host")),
@@ -96,14 +81,9 @@ def test_exact_ensure_boot_generation_and_snapshot_fences(tmp_path: Path) -> Non
             replace(request, absolute_deadline=request.absolute_deadline + timedelta(seconds=1)),
         ):
             with pytest.raises(BoxieError):
-                await orchestrator.ensure(bad)
+                await launch_execution(orchestrator, bad)
         with pytest.raises(BoxieError):
             await orchestrator.renew_control_lease(request.ref, uuid4())
-        assert not (
-            await orchestrator.expire_if_current(
-                ExpiryRequest(request.ref, TerminationReason.IDLE, ready.event_version, uuid4())
-            )
-        ).applied
         with pytest.raises(BoxieError):
             await orchestrator.remove(SandboxRef(request.ref.id, 2), TerminationReason.REQUESTED)
         clock.advance_wall(100000)
@@ -131,7 +111,7 @@ def test_stop_during_late_create_never_confirms_early_absence(tmp_path: Path) ->
         daemon.create_gate.set()
         await settled(orchestrator, request.ref, SandboxState.TERMINATED)
         assert not daemon.started and len(daemon.deleted_ids) == 1
-        await orchestrator.ensure(request)
+        await launch_execution(orchestrator, request)
         assert daemon.creates == 1
         await orchestrator.close()
 
@@ -168,7 +148,7 @@ def test_restart_does_not_adopt_pty_or_forget_unknown_create(tmp_path: Path) -> 
         observation = await replacement.inspect(request.ref)
         assert observation.reason == TerminationReason.ORCHESTRATOR_RESTART
         assert observation.removal_confirmed and observation.boot_id != orchestrator.boot_id
-        await replacement.ensure(request)
+        await launch_execution(replacement, request)
         assert daemon.creates == 1
         await replacement.close()
         await orchestrator.close()
@@ -259,7 +239,7 @@ def test_restart_retains_unknown_create_then_reconciles_late_resource(tmp_path: 
         await daemon.create_entered.wait()
         await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
         # Model process loss: preserve the daemon operation but cancel the waiting worker.
-        worker = orchestrator.runtimes[request.ref.id].worker
+        worker = orchestrator.runtimes[request.ref.id].activity
         assert worker is not None
         worker.cancel()
         await asyncio.gather(worker, return_exceptions=True)
@@ -325,7 +305,7 @@ def test_stop_during_attach_closes_late_stream(tmp_path: Path) -> None:
             await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
         ).removal_confirmed
         release.set()
-        worker = orchestrator.runtimes[request.ref.id].worker
+        worker = orchestrator.runtimes[request.ref.id].activity
         assert worker is not None
         await asyncio.wait_for(worker, 1)
         assert stream.closed, "late attach must not leak a PTY after confirmed removal"
@@ -342,7 +322,7 @@ def test_slow_cleanup_does_not_delay_another_sandbox_deadline(tmp_path: Path) ->
 
         ready = await settled(orchestrator, first.ref, SandboxState.READY)
         second = replace(first, ref=SandboxRef(uuid4(), 1))
-        await orchestrator.ensure(second)
+        await launch_execution(orchestrator, second)
         await settled(orchestrator, second.ref, SandboxState.READY)
         await orchestrator.start()
         original = daemon.delete
@@ -367,34 +347,6 @@ def test_slow_cleanup_does_not_delay_another_sandbox_deadline(tmp_path: Path) ->
     asyncio.run(exercise())
 
 
-def test_durable_wire_roundtrip_preserves_fences_and_rejects_naive_times(tmp_path: Path) -> None:
-    async def exercise() -> None:
-        from boxie.contracts import execution as protocol
-
-        assert hasattr(protocol, "DurableEnsureWire"), "durable request transport schema missing"
-        from pydantic import ValidationError
-
-        orchestrator, request, _, _, _ = await setup(tmp_path)
-        wire = protocol.DurableEnsureWire.from_domain(request)
-        assert (
-            protocol.DurableEnsureWire.model_validate_json(wire.model_dump_json()).domain()
-            == request
-        )
-        body = wire.model_dump(mode="json")
-        body["accepted_at"] = "2026-10-15T00:00:00"
-        with pytest.raises(ValidationError):
-            protocol.DurableEnsureWire.model_validate(body)
-        ready = await settled(orchestrator, request.ref, SandboxState.READY)
-        observation = protocol.ObservationWire.from_domain(ready)
-        assert (
-            protocol.ObservationWire.model_validate_json(observation.model_dump_json()).domain()
-            == ready
-        )
-        await orchestrator.close()
-
-    asyncio.run(exercise())
-
-
 def test_ready_grace_does_not_restart_on_retry_or_failed_acceptance(tmp_path: Path) -> None:
     async def exercise() -> None:
         orchestrator, request, daemon, clock, _ = await setup(tmp_path)
@@ -402,7 +354,7 @@ def test_ready_grace_does_not_restart_on_retry_or_failed_acceptance(tmp_path: Pa
         for _ in range(3):
             clock.advance(30)
             await orchestrator.renew_control_lease(request.ref, orchestrator.boot_id)
-            await orchestrator.ensure(request)
+            await launch_execution(orchestrator, request)
         # A failed handshake never invokes attach; inspect/ensure do not reset grace.
         clock.advance(30)
         await orchestrator.reconcile()
@@ -424,7 +376,7 @@ def test_delayed_request_uses_original_acceptance_and_approved_snapshot(tmp_path
         await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
         clock.advance(3601)
         delayed = replace(request, ref=SandboxRef(uuid4(), 1))
-        await orchestrator.ensure(delayed)
+        await launch_execution(orchestrator, delayed)
         expired = await settled(orchestrator, delayed.ref, SandboxState.TERMINATED)
         assert expired.reason == TerminationReason.EXPIRED
         assert expired.absolute_deadline == request.absolute_deadline
@@ -487,7 +439,7 @@ def test_transient_journal_failure_does_not_disable_unrelated_expiry(
         orchestrator, first, daemon, clock, _ = await setup(tmp_path)
         await settled(orchestrator, first.ref, SandboxState.READY)
         second = replace(first, ref=SandboxRef(uuid4(), 1))
-        await orchestrator.ensure(second)
+        await launch_execution(orchestrator, second)
         await settled(orchestrator, second.ref, SandboxState.READY)
         clock.advance(30)
         await orchestrator.renew_control_lease(second.ref, orchestrator.boot_id)
@@ -545,7 +497,7 @@ def test_unhealthy_journal_blocks_new_execution_and_recovers_autonomously(
             assert hasattr(orchestrator, "execution_ready"), "durability readiness missing"
             assert not orchestrator.execution_ready
             with pytest.raises(BoxieError) as denied:
-                await orchestrator.ensure(blocked)
+                await launch_execution(orchestrator, blocked)
             assert denied.value.status == 503
             assert daemon.creates == 1
             assert "journal" in caplog.text
@@ -557,7 +509,7 @@ def test_unhealthy_journal_blocks_new_execution_and_recovers_autonomously(
                     break
                 await asyncio.sleep(0.001)
             assert orchestrator.execution_ready
-            await orchestrator.ensure(blocked)
+            await launch_execution(orchestrator, blocked)
             await settled(orchestrator, blocked.ref, SandboxState.READY)
             assert daemon.creates == 2
         finally:
@@ -585,7 +537,7 @@ def test_failed_initial_journal_write_never_strands_an_unscheduled_acceptance(
         monkeypatch.setattr(orchestrator.journal, "save", unavailable)
         try:
             with pytest.raises(BoxieError) as failure:
-                await orchestrator.ensure(broken)
+                await launch_execution(orchestrator, broken)
             assert failure.value.status == 503
             assert not orchestrator.execution_ready
             assert daemon.creates == 1
@@ -620,7 +572,7 @@ def test_journal_failure_fences_an_already_provisioning_final_start(
             return await original_guard(request, boot, start)
 
         monkeypatch.setattr(guard, "run_start_if_allowed", delayed_guard)
-        await orchestrator.ensure(second)
+        await launch_execution(orchestrator, second)
         await asyncio.wait_for(entered.wait(), 1)
         original_save = orchestrator.journal.save
 
@@ -633,7 +585,7 @@ def test_journal_failure_fences_an_already_provisioning_final_start(
             assert pending.cleanup_pending and not pending.removal_confirmed
             assert not orchestrator.execution_ready
             release.set()
-            worker = orchestrator.runtimes[second.ref.id].worker
+            worker = orchestrator.runtimes[second.ref.id].activity
             assert worker is not None
             await asyncio.gather(worker, return_exceptions=True)
             assert len(daemon.started) == 1, "durability failure must fence a pending start"
@@ -660,7 +612,7 @@ def test_sustained_journal_outage_deletes_owned_resources_but_keeps_cleanup_unco
         daemon.create_gate = asyncio.Event()
         daemon.create_entered.clear()
         second = replace(first, ref=SandboxRef(uuid4(), 1))
-        await orchestrator.ensure(second)
+        await launch_execution(orchestrator, second)
         await asyncio.wait_for(daemon.create_entered.wait(), 1)
         await orchestrator.start()
         original_save = orchestrator.journal.save

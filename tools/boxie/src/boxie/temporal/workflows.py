@@ -120,11 +120,18 @@ class SandboxLifecycle:
                 )
                 if workflow.now().timestamp() >= deadline:
                     try:
-                        facts = await self._facts(LifecycleActivities.expire_if_current, sandbox_id)
+                        await workflow.execute_activity_method(
+                            LifecycleActivities.request_stop,
+                            StopRequest(sandbox_id, "expired"),
+                            start_to_close_timeout=timedelta(seconds=20),
+                            retry_policy=CLEANUP_RETRY,
+                        )
+                        facts = await self._facts(LifecycleActivities.load_request, sandbox_id)
                         if facts.desired_stop:
                             break
-                    except ActivityError:
-                        pass
+                    except ActivityError as error:
+                        if is_cancelled_exception(error):
+                            raise asyncio.CancelledError from None
                 if workflow.now().timestamp() >= next_inspection:
                     next_inspection = workflow.now().timestamp() + 30
                     try:

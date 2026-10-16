@@ -1,9 +1,9 @@
 """Construct an unprivileged private API from injected application ports."""
 
-import hmac
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
+from uuid import UUID
 
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -11,10 +11,9 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import RequestResponseEndpoint
 
 from boxie.api.auth import ConsumerAuth
-from boxie.api.observations import observation_routes
 from boxie.api.routes import routes
 from boxie.api.terminal import terminal_routes
-from boxie.application.ports import ArtifactAccess, ObservationSink, ReadyLifecycle, TerminalAccess
+from boxie.application.ports import ArtifactAccess, ReadyLifecycle, TerminalAccess
 from boxie.domain.errors import BoxieError
 
 
@@ -35,8 +34,7 @@ def create_app(
     artifacts: ArtifactAccess,
     terminal: TerminalAccess,
     *,
-    observations: ObservationSink | None = None,
-    orchestrator_credential: bytes | None = None,
+    deliver: Callable[[UUID], Awaitable[None]] | None = None,
 ) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     auth = ConsumerAuth(config.consumers)
@@ -54,19 +52,9 @@ def create_app(
         request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
         try:
-            if request.url.path == "/internal/observations":
-                if (
-                    observations is None
-                    or orchestrator_credential is None
-                    or not hmac.compare_digest(
-                        request.headers.get("Authorization", "").encode(),
-                        b"Bearer " + orchestrator_credential,
-                    )
-                ):
-                    raise BoxieError(401, "invalid orchestrator credential")
-            elif request.url.path != "/healthz":
+            if request.url.path != "/healthz":
                 request.state.principal = auth.resolve(request.headers.get("Authorization", ""))
-            if request.method == "POST" or request.url.path == "/internal/observations":
+            if request.method == "POST":
                 body = bytearray()
                 async for chunk in request.stream():
                     if len(body) + len(chunk) > 65536:
@@ -87,13 +75,11 @@ def create_app(
         return JSONResponse(
             {
                 "release": config.release,
-                "dependencies": {"orchestration" if observations else "orchestrator": ready},
+                "dependencies": {"orchestration": ready},
             },
             status_code=200 if ready else 503,
         )
 
-    if observations is not None:
-        app.include_router(observation_routes(observations))
-    app.include_router(routes(lifecycle, artifacts))
+    app.include_router(routes(lifecycle, artifacts, deliver))
     app.include_router(terminal_routes(lifecycle, terminal, auth))
     return app

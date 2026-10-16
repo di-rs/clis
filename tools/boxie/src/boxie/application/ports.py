@@ -6,7 +6,6 @@ from typing import Protocol
 from uuid import UUID
 
 from boxie.contracts.terminal import TerminalEvent
-from boxie.domain.lifecycle import OrchestratorObservation
 from boxie.domain.models import (
     ArtifactPutResult,
     Principal,
@@ -51,7 +50,3 @@ class TerminalAccess(Protocol):
 
 class AdmissionProfileResolver(Protocol):
     async def resolve_admission(self, spec: SandboxSpec) -> ProfileSnapshot: ...
-
-
-class ObservationSink(Protocol):
-    async def record_observation(self, observation: OrchestratorObservation) -> bool: ...

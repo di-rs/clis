@@ -35,5 +35,3 @@ async def compact(orchestrator: DurableOrchestrator) -> None:
                 orchestrator.records[record.id] = record
                 continue
             orchestrator.runtimes.pop(record.id)
-            if orchestrator.forget_observation:
-                orchestrator.forget_observation(record.id)

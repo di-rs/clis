@@ -34,16 +34,17 @@ class ExecutionRuntime:
     record: ExecutionRecord
     deadlines: Deadlines | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    provision_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     cleanup_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    worker: asyncio.Task[None] | None = None
+    activity: asyncio.Task[object] | None = None
     create: asyncio.Task[None] | None = None
     terminal: ExecutionTerminal | None = None
     terminal_reader: asyncio.Task[None] | None = None
     reconciliation: asyncio.Task[None] | None = None
     sessions: int = 0
     durable_version: int = 0
-    reported_version: int | None = None
     reconciliation_failed: bool = False
+    safety_required: bool = False
 
     @property
     def timers(self) -> Deadlines:
@@ -70,7 +71,7 @@ class ExecutionRuntime:
             and self.sessions == 0
             and all(
                 task is None or task.done()
-                for task in (self.create, self.worker, self.reconciliation, self.terminal_reader)
+                for task in (self.create, self.activity, self.reconciliation, self.terminal_reader)
             )
             and not self.lock.locked()
             and not self.cleanup_lock.locked()
@@ -115,7 +116,7 @@ class ExecutionRuntime:
                 except TimeoutError:
                     await owner.remove(record.ref, TerminationReason.PROVISIONING_FAILED)
                     # Retain the handle: caller timeout does not cancel daemon execution.
-                    await create
+                    await asyncio.shield(create)
                     await owner._cleanup(record)
                     return
                 async with asyncio.timeout(timeout):
@@ -130,20 +131,28 @@ class ExecutionRuntime:
             if not owner._live(record):
                 await owner.remove(record.ref, owner._expiry(record) or TerminationReason.REQUESTED)
                 return
-            async with asyncio.timeout(timeout):
-                stream = await docker.attach(info.id)
-            terminal = ExecutionTerminal(
-                stream,
-                record.snapshot.limits.output_bytes,
-                lambda reason: owner.remove(record.ref, reason),
-            )
-            if not owner._live(record):
+            terminal = self.terminal
+            if terminal is None:
                 async with asyncio.timeout(timeout):
-                    await terminal.close()
-                await owner.remove(record.ref, owner._expiry(record) or TerminationReason.REQUESTED)
-                return
-            self.terminal = terminal
-            terminal.start()
+                    stream = await docker.attach(info.id)
+                terminal = ExecutionTerminal(
+                    stream,
+                    record.snapshot.limits.output_bytes,
+                    lambda reason: owner.remove(record.ref, reason),
+                )
+                if not owner._live(record):
+                    async with asyncio.timeout(timeout):
+                        await terminal.close()
+                    await owner.remove(
+                        record.ref, owner._expiry(record) or TerminationReason.REQUESTED
+                    )
+                    return
+                self.terminal = terminal
+                terminal.start()
+            # A cancelled start may have reached Docker. Reconcile physical state;
+            # never issue a second start based on an uncertain acknowledgement.
+            if record.start_uncertain and not info.running:
+                raise RuntimeError("Docker start outcome uncertain")
 
             async def start() -> None:
                 async with self.lock:
@@ -158,7 +167,12 @@ class ExecutionRuntime:
                     owner._changed(record)
 
             async with asyncio.timeout(timeout + 1):
-                allowed = await guard.run_start_if_allowed(request, boot_id, start)
+                if info.running:
+                    record.start_uncertain = False
+                    owner._changed(record)
+                    allowed = await guard.start_allowed(request, boot_id)
+                else:
+                    allowed = await guard.run_start_if_allowed(request, boot_id, start)
                 allowed = allowed and await guard.start_allowed(request, boot_id)
             if allowed:
                 allowed = await owner._ready(record)

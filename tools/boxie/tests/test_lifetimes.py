@@ -48,3 +48,25 @@ def test_live_deadlines_ignore_wall_steps(tmp_path: Path, wall_step: int, timer:
         await orchestrator.close()
 
     asyncio.run(exercise())
+
+
+def test_watchdog_does_not_schedule_normal_cleanup_or_retention(tmp_path: Path) -> None:
+    from boxie.domain.models import TerminationReason
+
+    async def exercise() -> None:
+        orchestrator, request, daemon, _, _ = await setup(tmp_path)
+        await settled(orchestrator, request.ref, SandboxState.READY)
+        daemon.unreachable = True
+        await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
+        daemon.unreachable = False
+        await orchestrator.start()
+        try:
+            await asyncio.sleep(0.04)
+            assert daemon.resources, "normal cleanup belongs to Temporal retries"
+            assert request.ref.id in orchestrator.records
+            await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
+            assert not daemon.resources
+        finally:
+            await orchestrator.close()
+
+    asyncio.run(exercise())

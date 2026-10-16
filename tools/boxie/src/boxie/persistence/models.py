@@ -112,35 +112,20 @@ class SandboxArtifactRef(SQLModel, table=True):
 class Outbox(SQLModel, table=True):
     __tablename__ = "outbox"
     __table_args__ = (
-        CheckConstraint(column("kind").in_(["start", "stop", "observation"]), name="outbox_kind"),
-        CheckConstraint(
-            column("lease_owner").is_(None) == column("lease_expires_at").is_(None),
-            name="outbox_lease",
-        ),
-        Index(
-            "outbox_pending", "next_attempt_at", postgresql_where=column("delivered_at").is_(None)
-        ),
+        CheckConstraint(column("kind").in_(["start", "stop"]), name="outbox_kind"),
+        Index("outbox_pending", "created_at", postgresql_where=column("delivered_at").is_(None)),
     )
 
     id: UUID = Field(primary_key=True)
     deduplication_key: str = Field(unique=True)
     sandbox_id: UUID = Field(foreign_key="sandboxes.id", ondelete="RESTRICT")
     kind: str
-    attempts: int = Field(default=0, sa_column_kwargs={"server_default": literal(0)})
     created_at: datetime = Field(
         default=None,
         nullable=False,
         sa_type=DateTime(timezone=True),
         sa_column_kwargs={"server_default": func.clock_timestamp()},
     )
-    next_attempt_at: datetime = Field(
-        default=None,
-        nullable=False,
-        sa_type=DateTime(timezone=True),
-        sa_column_kwargs={"server_default": func.clock_timestamp()},
-    )
-    lease_owner: str | None = None
-    lease_expires_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
     delivered_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
 
 

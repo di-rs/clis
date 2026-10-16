@@ -1,4 +1,4 @@
-# Durable API, worker and orchestrator; only orchestrator receives Docker and artifact storage.
+# Durable API and orchestrator with embedded Temporal workers; only orchestrator receives Docker and artifact storage.
 name: ${BOXIE_PROJECT_NAME:-boxie}
 services:
   api:
@@ -47,32 +47,9 @@ services:
     - ${BOXIE_PROFILES_FILE:?Set approved profiles file}:/etc/boxie/profiles.json:ro
     - ${BOXIE_ORCHESTRATOR_CREDENTIAL_FILE}:/run/secrets/orchestrator:ro
     - ${BOXIE_POSTGRES_DSN_FILE:?Set Boxie database DSN file}:/run/secrets/postgres-dsn:ro
-    networks:
-    - control
-    read_only: true
-    tmpfs:
-    - /tmp
-    cap_drop:
-    - ALL
-    security_opt:
-    - no-new-privileges:true
-    init: true
-  worker:
-    image: ${BOXIE_RUNTIME_IMAGE:-boxie:local}
-    build:
-      context: ../../..
-      dockerfile: tools/boxie/infra/Runtime.Dockerfile
-    command:
-    - boxie-worker
-    - --config
-    - /etc/boxie/worker.json
-    volumes:
-    - ${BOXIE_WORKER_CONFIG:?Set worker config file}:/etc/boxie/worker.json:ro
-    - ${BOXIE_ORCHESTRATOR_CREDENTIAL_FILE}:/run/secrets/orchestrator:ro
-    - ${BOXIE_POSTGRES_DSN_FILE}:/run/secrets/postgres-dsn:ro
     - ${BOXIE_TEMPORAL_CA_FILE:?Set Temporal frontend CA}:/run/secrets/temporal-ca.pem:ro
-    - ${BOXIE_WORKER_TEMPORAL_CERT_FILE:?Set dedicated Temporal client certificate}:/run/secrets/temporal-client.pem:ro
-    - ${BOXIE_WORKER_TEMPORAL_KEY_FILE:?Set dedicated Temporal client key}:/run/secrets/temporal-client.key:ro
+    - ${BOXIE_ORCHESTRATOR_TEMPORAL_CERT_FILE:?Set dedicated Temporal client certificate}:/run/secrets/temporal-client.pem:ro
+    - ${BOXIE_ORCHESTRATOR_TEMPORAL_KEY_FILE:?Set dedicated Temporal client key}:/run/secrets/temporal-client.key:ro
     networks:
     - control
     read_only: true
@@ -83,6 +60,7 @@ services:
     security_opt:
     - no-new-privileges:true
     init: true
+
 networks:
   consumer:
     external: true

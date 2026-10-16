@@ -65,7 +65,7 @@ operators may separately approve the
 immutable product sandbox image digest. Profiles are never consumer uploads.
 
 Complete the required [durable runtime prerequisites](durable-runtime.md) first,
-including explicit Alembic revisions, namespace setup, and API/worker mTLS identities.
+including explicit Alembic revisions, namespace setup, and API/orchestrator mTLS identities.
 Generate all three process JSON files (substitute your installation UUID and paths):
 
 ```sh
@@ -99,7 +99,7 @@ uv run --locked pytest tools/boxie/tests/test_packaging.py -m integration
 ```
 
 The native Linux [sandbox check](../../../.github/workflows/boxie-lifecycle.yml)
-starts isolated PostgreSQL, Temporal, API, worker, orchestrator and Playground services,
+starts isolated PostgreSQL, Temporal, API, orchestrator and Playground services,
 then exercises process faults, browser recovery and both
 `boxie_infra.smoke` and `playground_infra.smoke` through HTTP and WebSocket. Each
 inspects the actual sandbox's `runsc`, non-root user, no-network mode, read-only
@@ -108,7 +108,7 @@ Docker logs and confirmed container deletion. The product smoke also checks the
 native Rust CLI, fixtures, pipes/redirection, resize and Ctrl-C. Ordinary Docker
 image builds or fake-daemon E2Es do not count as this platform check.
 
-The lifecycle fixture runs API, worker and orchestrator as the runner's numeric UID:GID
+The lifecycle fixture runs API and orchestrator as the runner's numeric UID:GID
 so its private files and writable storage share one owner. Its Linux-volume DAC
 regression resolves the actual test Compose mounts and checks readable private
 credentials, immutable secret mounts, writable data/profiles and rejected unsafe
@@ -122,7 +122,7 @@ This probe can verify Linux ownership on an arm64 Docker host, but only the nati
 amd64/runsc lifecycle workflow proves the full lifecycle. The existing disposable
 Temporal server/operator/UI fixture keys remain mode `0644` to support their
 unchanged UID-1000 images and host-side test readers; this is a fixture limitation,
-not the production provisioning policy. API/worker and host-only client fixture
+not the production provisioning policy. API/orchestrator and host-only client fixture
 keys are mode `0600`.
 
 A consumer-network operator can run `python -m boxie_infra.smoke --boxie-url

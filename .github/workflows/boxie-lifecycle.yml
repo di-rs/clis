@@ -73,7 +73,7 @@ jobs:
           pnpm --dir tools/cli-playground/frontend exec playwright install --with-deps chromium
       - name: Verify interpreter imports and pinned time-skipping server
         run: |
-          uv run --locked python -c 'import temporalio.bridge.temporal_sdk_bridge; import boxie.bootstrap.worker'
+          uv run --locked python -c 'import temporalio.bridge.temporal_sdk_bridge; import boxie.bootstrap.runtime'
           uv run --locked python - <<'PYTHON'
           import hashlib, io, json, os, pathlib, tarfile, urllib.request
           pins = json.loads(pathlib.Path("tools/boxie/tests/test-server-pins.json").read_text())

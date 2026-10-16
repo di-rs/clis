@@ -1,6 +1,8 @@
 import asyncio
 from pathlib import Path
 
+from boxie_test_support.durable import launch_execution
+
 
 def test_durable_provision_preserves_approved_isolation_and_entrypoint(tmp_path: Path) -> None:
     from typing import Any
@@ -20,7 +22,7 @@ def test_durable_provision_preserves_approved_isolation_and_entrypoint(tmp_path:
 
         daemon.create = create  # type: ignore[method-assign]
         ready = await settled(orchestrator, request.ref, SandboxState.READY)
-        await orchestrator.ensure(request)
+        await launch_execution(orchestrator, request)
         assert daemon.creates == 1 and ready.container_id in daemon.streams
         payload = captured[0]
         assert payload["Image"] == IMAGE

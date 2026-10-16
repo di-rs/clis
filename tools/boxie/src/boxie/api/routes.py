@@ -1,5 +1,6 @@
 """Consumer schemas exclude all orchestrator ownership and privileged configuration."""
 
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict
 from typing import Annotated, cast
 from uuid import UUID
@@ -17,7 +18,11 @@ def principal(request: Request) -> Principal:
     return cast(Principal, request.state.principal)
 
 
-def routes(lifecycle: Lifecycle, artifacts: ArtifactAccess) -> APIRouter:
+def routes(
+    lifecycle: Lifecycle,
+    artifacts: ArtifactAccess,
+    deliver: Callable[[UUID], Awaitable[None]] | None = None,
+) -> APIRouter:
     router = APIRouter()
 
     @router.put("/v1/artifacts/{artifact_id}")
@@ -44,9 +49,10 @@ def routes(lifecycle: Lifecycle, artifacts: ArtifactAccess) -> APIRouter:
         request: Request,
         idempotency_key: Annotated[str, Header(min_length=1, max_length=200)],
     ) -> ViewWire:
-        return ViewWire.from_domain(
-            await lifecycle.submit(principal(request), idempotency_key, body.domain())
-        )
+        view = await lifecycle.submit(principal(request), idempotency_key, body.domain())
+        if deliver is not None:
+            await deliver(view.id)
+        return ViewWire.from_domain(view)
 
     @router.get("/v1/sandboxes/{sandbox_id}")
     async def get(sandbox_id: UUID, request: Request) -> ViewWire:
@@ -54,8 +60,11 @@ def routes(lifecycle: Lifecycle, artifacts: ArtifactAccess) -> APIRouter:
 
     @router.delete("/v1/sandboxes/{sandbox_id}")
     async def terminate(sandbox_id: UUID, request: Request) -> ViewWire:
-        return ViewWire.from_domain(
-            await lifecycle.terminate(principal(request), sandbox_id, TerminationReason.REQUESTED)
+        view = await lifecycle.terminate(
+            principal(request), sandbox_id, TerminationReason.REQUESTED
         )
+        if deliver is not None:
+            await deliver(view.id)
+        return ViewWire.from_domain(view)
 
     return router

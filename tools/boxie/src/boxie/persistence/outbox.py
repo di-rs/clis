@@ -1,14 +1,12 @@
-"""Short SKIP LOCKED transactions with owner-fenced acknowledgements."""
+"""Transactional command handoff; duplicate deliveries are safe."""
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import cast
 from uuid import UUID
 
-from sqlalchemy import func, or_
+from sqlalchemy import func
 from sqlmodel import col, select
-from sqlmodel.ext.asyncio.session import AsyncSession
 
+from boxie.domain.models import OrchestratorIdentity
 from boxie.persistence.database import SessionFactory
 from boxie.persistence.models import CapacitySlot, Outbox, Sandbox, SandboxArtifactRef
 
@@ -17,90 +15,39 @@ from boxie.persistence.models import CapacitySlot, Outbox, Sandbox, SandboxArtif
 class OutboxEvent:
     id: UUID
     sandbox_id: UUID
-    lease_owner: str
-    lease_expires_at: datetime
-    attempts: int
 
 
 class PostgresOutbox:
-    def __init__(self, sessions: SessionFactory) -> None:
-        self.sessions = sessions
+    def __init__(
+        self, sessions: SessionFactory, identity: OrchestratorIdentity | None = None
+    ) -> None:
+        self.sessions, self.identity = sessions, identity
 
-    async def claim(self, owner: str) -> list[OutboxEvent]:
-        async with self.sessions() as session, session.begin():
-            rows = (
-                await session.exec(
-                    select(Outbox)
-                    .where(
-                        col(Outbox.delivered_at).is_(None),
-                        Outbox.next_attempt_at <= func.clock_timestamp(),
-                        or_(
-                            col(Outbox.lease_expires_at).is_(None),
-                            col(Outbox.lease_expires_at) <= func.clock_timestamp(),
-                        ),
-                    )
-                    .order_by(col(Outbox.created_at), col(Outbox.id))
-                    .with_for_update(skip_locked=True)
-                    .limit(32)
-                )
-            ).all()
-            now = cast(datetime, await session.scalar(select(func.clock_timestamp())))
-            events = []
-            for row in rows:
-                row.lease_owner, row.lease_expires_at = owner, now + timedelta(seconds=30)
-                row.attempts += 1
-                events.append(
-                    OutboxEvent(row.id, row.sandbox_id, owner, row.lease_expires_at, row.attempts)
-                )
-            return events
-
-    @staticmethod
-    async def _owned(session: AsyncSession, event: OutboxEvent) -> Outbox | None:
-        return (
-            await session.exec(
-                select(Outbox)
-                .where(
-                    Outbox.id == event.id,
-                    Outbox.lease_owner == event.lease_owner,
-                    col(Outbox.lease_expires_at) > func.clock_timestamp(),
-                    col(Outbox.delivered_at).is_(None),
-                )
-                .with_for_update()
-            )
-        ).one_or_none()
-
-    async def valid(self, event: OutboxEvent) -> bool:
+    async def pending(self, sandbox_id: UUID | None = None) -> list[OutboxEvent]:
         async with self.sessions() as session:
-            return (
-                await session.exec(
-                    select(Outbox.id).where(
-                        Outbox.id == event.id,
-                        Outbox.lease_owner == event.lease_owner,
-                        col(Outbox.lease_expires_at)
-                        > func.clock_timestamp() + timedelta(seconds=5),
-                        col(Outbox.delivered_at).is_(None),
-                    )
+            query = select(Outbox).where(col(Outbox.delivered_at).is_(None))
+            if self.identity is not None:
+                query = query.join(Sandbox, col(Outbox.sandbox_id) == col(Sandbox.id)).where(
+                    Sandbox.installation_id == self.identity.installation_id,
+                    Sandbox.host_id == self.identity.host_id,
                 )
-            ).first() is not None
+            if sandbox_id is not None:
+                query = query.where(Outbox.sandbox_id == sandbox_id)
+            rows = (
+                await session.exec(query.order_by(col(Outbox.created_at), col(Outbox.id)).limit(32))
+            ).all()
+            return [OutboxEvent(row.id, row.sandbox_id) for row in rows]
 
     async def acknowledge(self, event: OutboxEvent) -> bool:
         async with self.sessions() as session, session.begin():
-            row = await self._owned(session, event)
+            row = (
+                await session.exec(select(Outbox).where(Outbox.id == event.id).with_for_update())
+            ).one_or_none()
             if row is None:
                 return False
-            row.delivered_at = cast(datetime, await session.scalar(select(func.clock_timestamp())))
-            row.lease_owner, row.lease_expires_at = None, None
+            if row.delivered_at is None:
+                row.delivered_at = await session.scalar(select(func.clock_timestamp()))
             return True
-
-    async def retry(self, event: OutboxEvent) -> None:
-        async with self.sessions() as session, session.begin():
-            row = await self._owned(session, event)
-            if row is not None:
-                now = cast(datetime, await session.scalar(select(func.clock_timestamp())))
-                row.lease_owner, row.lease_expires_at = None, None
-                row.next_attempt_at = now + timedelta(
-                    seconds=min(30, 2 ** min(5, event.attempts - 1))
-                )
 
     async def confirmed_terminal(self, sandbox_id: UUID) -> bool:
         async with self.sessions() as session:

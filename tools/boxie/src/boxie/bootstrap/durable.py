@@ -1,7 +1,7 @@
 """Shared explicit SQL/mTLS construction. Deployment migrations remain operator jobs."""
 
 import asyncio
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -22,7 +22,7 @@ from temporalio.service import TLSConfig
 from boxie.bootstrap.config import DurableConfig, read_credential
 from boxie.domain.models import OrchestratorIdentity
 from boxie.persistence.database import SessionFactory, database
-from boxie.temporal.contracts import TASK_QUEUE
+from boxie.temporal.contracts import TASK_QUEUE, lifecycle_queue
 
 # Temporal 1.32.0's matching long poll defaults to 60 seconds. Poller access
 # timestamps refresh between polls, so allow another 30 seconds for scheduling
@@ -87,8 +87,15 @@ class TemporalReadiness(Protocol):
 
 
 class Dependencies:
-    def __init__(self, orchestrator: OrchestratorReadiness, temporal: TemporalReadiness) -> None:
+    def __init__(
+        self,
+        orchestrator: OrchestratorReadiness,
+        temporal: TemporalReadiness,
+        identity: OrchestratorIdentity | None = None,
+        schedules: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
         self.orchestrator, self.temporal = orchestrator, temporal
+        self.identity, self.schedules = identity, schedules
 
     async def __call__(self) -> bool:
         async with asyncio.timeout(5):
@@ -108,7 +115,9 @@ class Dependencies:
                 queue = await self.temporal.workflow_service.describe_task_queue(
                     DescribeTaskQueueRequest(
                         namespace=self.temporal.namespace,
-                        task_queue=TaskQueue(name=TASK_QUEUE),
+                        task_queue=TaskQueue(
+                            name=lifecycle_queue(self.identity) if self.identity else TASK_QUEUE
+                        ),
                         task_queue_type=kind,
                     ),
                     timeout=timedelta(seconds=5),
@@ -120,4 +129,6 @@ class Dependencies:
                     for p in queue.pollers
                 ):
                     return False
+            if self.schedules is not None:
+                await self.schedules()
             return True

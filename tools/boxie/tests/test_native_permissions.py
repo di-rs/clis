@@ -14,7 +14,11 @@ from run_integration import ProductionStack, command
 def test_temporal_client_fixture_keys_are_private(tmp_path: Path) -> None:
     ProductionStack(tmp_path).certificates()
     keys = list((tmp_path / "clients").glob("*.key"))
-    assert {path.name for path in keys} == {"boxie-api.key", "boxie-worker.key", "untrusted.key"}
+    assert {path.name for path in keys} == {
+        "boxie-api.key",
+        "boxie-orchestrator.key",
+        "untrusted.key",
+    }
     for path in keys:
         assert path.stat().st_uid == os.getuid()
         assert stat.S_ISREG(path.lstat().st_mode)
@@ -48,13 +52,13 @@ import os, sys
 from pathlib import Path
 root = Path('/owned')
 for name in ('orchestrator.secret', 'consumer.secret', 'postgres-dsn', 'orchestrator-dsn',
-             'clients/boxie-api.key', 'clients/boxie-worker.key'):
+             'clients/boxie-api.key', 'clients/boxie-orchestrator.key'):
     path = root / name
     path.parent.mkdir(exist_ok=True)
     path.write_text('private-fixture-credential')
     path.chmod(0o600)
-for name in ('api.json', 'worker.json', 'orchestrator.json', 'profiles.json',
-             'clients/frontend-ca.pem', 'clients/boxie-api.pem', 'clients/boxie-worker.pem'):
+for name in ('api.json', 'orchestrator.json', 'profiles.json',
+             'clients/frontend-ca.pem', 'clients/boxie-api.pem', 'clients/boxie-orchestrator.pem'):
     (root / name).write_text('{}')
 for name in ('data', 'data/profiles', 'faults', 'negative'):
     (root / name).mkdir(exist_ok=True)
@@ -82,7 +86,7 @@ for name, mode, owner in (('group', 0o640, int(sys.argv[1])),
         )
         config = json.loads(stack.runtime_command("config", "--format", "json"))
         data_dir = stack.env["BOXIE_DATA_DIR"]
-        for name in ("api", "worker", "orchestrator"):
+        for name in ("api", "orchestrator"):
             service = config["services"][name]
             args = [
                 "docker",
@@ -124,7 +128,7 @@ for name, mode, owner in (('group', 0o640, int(sys.argv[1])),
             assert service["read_only"] and service["cap_drop"] == ["ALL"]
             assert service["security_opt"] == ["no-new-privileges:true"]
             expected = {"/run/secrets/orchestrator", "/run/secrets/postgres-dsn"}
-            if name in {"api", "worker"}:
+            if name in {"api"}:
                 expected.add("/run/secrets/temporal-client.key")
             if name == "api":
                 expected.add("/run/secrets/consumer")

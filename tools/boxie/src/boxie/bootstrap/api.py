@@ -19,10 +19,14 @@ from boxie.bootstrap.durable import (
     orchestrator_identity,
     temporal_client,
 )
+from boxie.bootstrap.schedules import check_schedules
 from boxie.contracts.common import ConsumerId
 from boxie.domain.models import OrchestratorIdentity
+from boxie.persistence.outbox import PostgresOutbox
 from boxie.persistence.postgres import PostgresLifecycle
 from boxie.sandbox.transport.client import OrchestratorClient
+from boxie.temporal.contracts import lifecycle_queue
+from boxie.temporal.dispatcher import CommandDelivery
 
 
 @dataclass(frozen=True)
@@ -83,15 +87,26 @@ def main() -> None:
             ) as orchestrator,
         ):
             lifecycle = PostgresLifecycle(
-                sessions, orchestrator, config.identity, Dependencies(orchestrator, temporal)
+                sessions,
+                orchestrator,
+                config.identity,
+                Dependencies(
+                    orchestrator,
+                    temporal,
+                    config.identity,
+                    lambda: check_schedules(temporal, config.identity),
+                ),
             )
             app = create_app(
                 config.api,
                 lifecycle,
                 orchestrator,
                 orchestrator,
-                observations=lifecycle,
-                orchestrator_credential=config.orchestrator_credential,
+                deliver=CommandDelivery(
+                    PostgresOutbox(sessions, config.identity),
+                    temporal,
+                    lifecycle_queue(config.identity),
+                ).deliver_pending,
             )
             server = uvicorn.Server(
                 uvicorn.Config(

@@ -24,7 +24,7 @@ from websockets.asyncio.client import ClientConnection
 
 from boxie_test_support.api import CONSUMER_AUTH, serve
 from boxie_test_support.artifacts import Artifacts
-from boxie_test_support.durable import Daemon, Guard
+from boxie_test_support.durable import Daemon, Guard, launch_execution
 from boxie_test_support.orchestrator import Clock, FakeTerminal, configuration
 
 
@@ -60,7 +60,7 @@ class Admission:
             self.orchestrator.clock(),
             self.orchestrator.clock() + timedelta(seconds=spec.policy.max_seconds),
         )
-        await self.orchestrator.ensure(request)
+        await launch_execution(self.orchestrator, request)
         self.keys[principal, key] = identifier
         return await self.get(principal, identifier)
 

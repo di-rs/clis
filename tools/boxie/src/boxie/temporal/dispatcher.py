@@ -1,63 +1,29 @@
-"""At-least-once notification delivery; durable requests are the sole authority."""
+"""Idempotent post-commit command delivery and bounded Temporal recovery."""
 
 import asyncio
 import logging
-import time
-from collections.abc import Sequence
 from datetime import timedelta
-from typing import Protocol
-from uuid import UUID, uuid4
+from uuid import UUID
 
+from temporalio.client import Client
 from temporalio.common import WorkflowIDConflictPolicy, WorkflowIDReusePolicy
 from temporalio.exceptions import WorkflowAlreadyStartedError
-from temporalio.types import MethodAsyncSingleParam
 
-from boxie.persistence.outbox import OutboxEvent
-from boxie.temporal.contracts import TASK_QUEUE, LifecycleResult
+from boxie.persistence.outbox import OutboxEvent, PostgresOutbox
+from boxie.temporal.contracts import TASK_QUEUE
 from boxie.temporal.workflows import SandboxLifecycle
 
 logger = logging.getLogger(__name__)
 
 
-class OutboxStore(Protocol):
-    async def claim(self, owner: str) -> list[OutboxEvent]: ...
-    async def confirmed_terminal(self, sandbox_id: UUID) -> bool: ...
-    async def valid(self, event: OutboxEvent) -> bool: ...
-    async def acknowledge(self, event: OutboxEvent) -> bool: ...
-    async def retry(self, event: OutboxEvent) -> None: ...
-
-
-class WorkflowStarter(Protocol):
-    async def start_workflow(
-        self,
-        workflow: MethodAsyncSingleParam[SandboxLifecycle, str, LifecycleResult],
-        arg: str,
-        *,
-        id: str,
-        task_queue: str,
-        id_conflict_policy: WorkflowIDConflictPolicy,
-        id_reuse_policy: WorkflowIDReusePolicy,
-        start_signal: str,
-        start_signal_args: Sequence[object],
-        rpc_timeout: timedelta,
-    ) -> object: ...
-
-
-class OutboxDispatcher:
-    def __init__(
-        self, store: OutboxStore, client: WorkflowStarter, task_queue: str = TASK_QUEUE
-    ) -> None:
+class CommandDelivery:
+    def __init__(self, store: PostgresOutbox, client: Client, task_queue: str = TASK_QUEUE) -> None:
         self.store, self.client, self.task_queue = store, client, task_queue
-        self.owner = str(uuid4())
-        self._poll_lock = asyncio.Lock()
 
     async def deliver(self, event: OutboxEvent) -> None:
         # Safe even after Temporal retention removes the old closed execution.
         if await self.store.confirmed_terminal(event.sandbox_id):
             return
-        checked = time.monotonic()
-        if not await self.store.valid(event) or time.monotonic() - checked >= 5:
-            raise RuntimeError("outbox claim expired")
         try:
             async with asyncio.timeout(5):
                 await self.client.start_workflow(
@@ -81,25 +47,20 @@ class OutboxDispatcher:
                 await self.deliver(event)
                 await self.store.acknowledge(event)
             except Exception:
-                # Never log upstream exception objects: they may include credentials.
-                logger.warning("outbox delivery pending: %s", event.id)
-                await self.store.retry(event)
+                logger.warning("command delivery pending: %s", event.id)
 
-    async def poll(self) -> None:
-        async with self._poll_lock:
-            events = await self.store.claim(self.owner)
-            semaphore = asyncio.Semaphore(8)
-            # Retry persistence can fail too. Cancel and settle the whole batch
-            # before another poll can claim work with a fresh concurrency budget.
-            # Unacknowledged events remain eligible after their SQL lease expires.
-            async with asyncio.TaskGroup() as batch:
-                for event in events:
-                    batch.create_task(self._one(event, semaphore))
+    async def recover_once(self) -> None:
+        events = await self.store.pending()
+        semaphore = asyncio.Semaphore(8)
+        async with asyncio.TaskGroup() as batch:
+            for event in events:
+                batch.create_task(self._one(event, semaphore))
 
-    async def run(self) -> None:
-        while True:
-            try:
-                await self.poll()
-            except Exception:
-                logger.warning("outbox persistence unavailable")
-            await asyncio.sleep(0.25)
+    async def deliver_pending(self, sandbox_id: UUID) -> None:
+        try:
+            async with asyncio.timeout(1):
+                for event in await self.store.pending(sandbox_id):
+                    await self.deliver(event)
+                    await self.store.acknowledge(event)
+        except Exception:
+            pass  # Acceptance is already durable; scheduled recovery repairs delivery.

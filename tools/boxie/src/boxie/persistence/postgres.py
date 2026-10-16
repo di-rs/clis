@@ -352,16 +352,6 @@ class PostgresLifecycle:
                 if item.removal_confirmed
                 else None
             )
-            # The unique stop notification already wakes the workflow. Cleanup's
-            # native retrying activity reads SQL itself; further observations must
-            # not append signals forever during a prolonged removal outage.
-            if not row.desired_stop:
-                await self._enqueue(
-                    session,
-                    item.sandbox_id,
-                    "observation",
-                    key=f"{item.sandbox_id}:{item.boot_id}:{item.event_version}",
-                )
             if item.removal_confirmed:
                 slot = (
                     await session.exec(

@@ -5,8 +5,8 @@ import asyncio
 import logging
 import signal
 import time
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -15,12 +15,14 @@ from fastapi import FastAPI
 from sqlmodel import select
 
 from boxie.bootstrap.config import OrchestratorConfig, read_credential
-from boxie.bootstrap.durable import database_for
+from boxie.bootstrap.durable import database_for, temporal_client
+from boxie.bootstrap.runtime import embedded_workers
+from boxie.persistence.postgres import PostgresLifecycle
 from boxie.persistence.postgres_artifacts import PostgresArtifactStore
 from boxie.persistence.start_guard import PostgresStartGuard
 from boxie.sandbox.docker import DockerBackend
 from boxie.sandbox.execution.orchestrator import DurableOrchestrator
-from boxie.sandbox.transport.reporting import ObservationReporter
+from boxie.sandbox.execution.ownership import acquire_owner_lock
 from boxie.sandbox.transport.server import create_orchestrator_app as create_transport_app
 
 
@@ -29,20 +31,9 @@ def create_orchestrator_app(
     artifacts: PostgresArtifactStore,
     *,
     credential: bytes,
-    reporter: ObservationReporter,
+    runtime: Callable[[], AbstractAsyncContextManager[None]] | None = None,
 ) -> FastAPI:
     """Compose process services; the HTTP adapter receives only its required ports."""
-    orchestrator.observer = reporter.offer
-    orchestrator.forget_observation = reporter.forget
-
-    async def collect() -> None:
-        while True:
-            try:
-                await artifacts.collect()
-                await artifacts.collect_orphans()
-            except Exception:
-                pass  # Retain unresolved collection intents for retry.
-            await asyncio.sleep(30)
 
     async def readiness() -> dict[str, bool]:
         try:
@@ -62,18 +53,11 @@ def create_orchestrator_app(
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await orchestrator.start()
-        reporting = asyncio.create_task(reporter.run())
-        collection = asyncio.create_task(collect())
         try:
-            yield
+            async with runtime() if runtime is not None else nullcontext():
+                yield
         finally:
-            try:
-                await orchestrator.close()
-            finally:
-                reporting.cancel()
-                collection.cancel()
-                await asyncio.gather(reporting, collection, return_exceptions=True)
-                await reporter.close()
+            await orchestrator.close()
 
     return create_transport_app(
         orchestrator, artifacts, credential=credential, readiness=readiness, lifespan=lifespan
@@ -86,11 +70,16 @@ def main() -> None:
     args = parser.parse_args()
     config = OrchestratorConfig.from_file(args.config)
 
-    if config.postgres_dsn_file is None or config.api_url is None:
-        raise ValueError("durable orchestrator requires postgres_dsn_file and api_url")
-    dsn_file, api_url = config.postgres_dsn_file, config.api_url
+    if config.durable is None:
+        raise ValueError("orchestrator requires durable Temporal configuration")
+    durable = config.durable
+    dsn_file = durable.postgres_dsn_file
 
     async def run() -> None:
+        with acquire_owner_lock(config.data_dir):
+            await run_owned()
+
+    async def run_owned() -> None:
         async with database_for(dsn_file) as sessions:
             artifacts = PostgresArtifactStore(sessions, config.data_dir / "artifacts")
             orchestrator = DurableOrchestrator(
@@ -101,12 +90,18 @@ def main() -> None:
                 lambda: datetime.now(UTC),
                 time.monotonic,
             )
+
+            async def local_ready() -> bool:
+                return orchestrator.execution_ready
+
+            repository = PostgresLifecycle(sessions, orchestrator, config.identity, local_ready)
+            client = await temporal_client(durable, lazy=True)
             credential = read_credential(config.credential_file)
             app = create_orchestrator_app(
                 orchestrator,
                 artifacts,
                 credential=credential,
-                reporter=ObservationReporter(api_url, credential),
+                runtime=lambda: embedded_workers(client, repository, orchestrator, artifacts),
             )
 
             def reload_profiles() -> None:

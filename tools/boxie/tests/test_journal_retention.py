@@ -10,7 +10,7 @@ import pytest
 from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import SandboxRef
 from boxie.domain.models import SandboxState, TerminationReason
-from boxie_test_support.durable import Guard
+from boxie_test_support.durable import Guard, launch_execution
 from lifecycle_support import settled, setup
 
 
@@ -44,9 +44,9 @@ def test_final_record_requires_receipt_and_settled_sessions(tmp_path: Path) -> N
         await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
         await asyncio.gather(
             *(
-                runtime.worker
+                runtime.activity
                 for runtime in orchestrator.runtimes.values()
-                if runtime.worker is not None
+                if runtime.activity is not None
             )
         )
         await orchestrator.compact()
@@ -61,7 +61,7 @@ def test_final_record_requires_receipt_and_settled_sessions(tmp_path: Path) -> N
         assert json.loads(orchestrator.journal.path.read_bytes())["records"] == []
         guard.missing = True
         with pytest.raises(BoxieError):
-            await orchestrator.ensure(request)
+            await launch_execution(orchestrator, request)
         assert not orchestrator.records and not orchestrator.runtimes
         with pytest.raises(BoxieError):
             await orchestrator.inspect(SandboxRef(uuid4(), 1))
@@ -81,9 +81,9 @@ def test_compaction_failure_preserves_barrier_and_readiness(
         await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
         await asyncio.gather(
             *(
-                runtime.worker
+                runtime.activity
                 for runtime in orchestrator.runtimes.values()
-                if runtime.worker is not None
+                if runtime.activity is not None
             )
         )
         guard.receipt = True
@@ -116,7 +116,7 @@ def test_compaction_failure_preserves_barrier_and_readiness(
             )
             guard.missing = True
             with pytest.raises(BoxieError):
-                await replacement.ensure(request)
+                await launch_execution(replacement, request)
             assert not replacement.records
             await replacement.close()
         monkeypatch.setattr(orchestrator.journal, "save", save)
@@ -149,58 +149,28 @@ def test_admission_ceiling_serializes_live_and_cleanup_headroom(tmp_path: Path) 
         orchestrator._save()
         requests = [replace(request, ref=SandboxRef(uuid4(), 1)) for _ in range(10)]
         results = await asyncio.gather(
-            *(orchestrator.ensure(r) for r in requests), return_exceptions=True
+            *(launch_execution(orchestrator, r) for r in requests), return_exceptions=True
         )
         assert len(orchestrator.records) == 128
         assert sum(isinstance(r, BoxieError) and r.status == 503 for r in results) == 8
         guard.stopped = True
         cleanup = [replace(request, ref=SandboxRef(uuid4(), 1)) for _ in range(12)]
         results = await asyncio.gather(
-            *(orchestrator.ensure(r) for r in cleanup), return_exceptions=True
+            *(launch_execution(orchestrator, r) for r in cleanup), return_exceptions=True
         )
         assert len(orchestrator.records) == 136 and not orchestrator.execution_ready
         assert sum(isinstance(r, BoxieError) and r.status == 503 for r in results) == 4
         await asyncio.gather(
             *(
-                runtime.worker
+                runtime.activity
                 for runtime in orchestrator.runtimes.values()
-                if runtime.worker is not None
+                if runtime.activity is not None
             )
         )
         more = replace(request, ref=SandboxRef(uuid4(), 1))
         with pytest.raises(BoxieError) as error:
-            await orchestrator.ensure(more)
+            await launch_execution(orchestrator, more)
         assert error.value.status == 503 and len(orchestrator.records) == 136
-        await orchestrator.close()
-
-    asyncio.run(exercise())
-
-
-def test_report_response_after_forgetting_cannot_recreate_state(tmp_path: Path) -> None:
-    import httpx
-    from boxie.sandbox.transport.reporting import ObservationReporter
-
-    async def exercise() -> None:
-        orchestrator, request, _, _, _ = await setup(tmp_path)
-        await settled(orchestrator, request.ref, SandboxState.READY)
-        entered, release = asyncio.Event(), asyncio.Event()
-
-        async def reply(message: httpx.Request) -> httpx.Response:
-            entered.set()
-            await release.wait()
-            return httpx.Response(204)
-
-        reporter = ObservationReporter(
-            "http://owned", b"unused", transport=httpx.MockTransport(reply)
-        )
-        reporter.offer(await orchestrator.inspect(request.ref))
-        task = asyncio.create_task(reporter.flush())
-        await entered.wait()
-        reporter.forget(request.ref.id)
-        release.set()
-        await task
-        assert not reporter.latest and not reporter.sent
-        await reporter.close()
         await orchestrator.close()
 
     asyncio.run(exercise())
@@ -317,7 +287,7 @@ def test_unknown_create_deleted_during_failed_save_remains_uncertain_after_resta
         daemon.create_gate = asyncio.Event()
         daemon.lost_ack = True
         await daemon.create_entered.wait()
-        worker = orchestrator.runtimes[request.ref.id].worker
+        worker = orchestrator.runtimes[request.ref.id].activity
         assert worker is not None
         worker.cancel()
         await asyncio.gather(worker, return_exceptions=True)
@@ -377,9 +347,9 @@ def test_receipt_error_and_changed_version_never_authorize_forgetting(tmp_path: 
         await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
         await asyncio.gather(
             *(
-                runtime.worker
+                runtime.activity
                 for runtime in orchestrator.runtimes.values()
-                if runtime.worker is not None
+                if runtime.activity is not None
             )
         )
 
@@ -430,7 +400,7 @@ def test_failed_cleanup_initialization_keeps_pending_without_creating(
 
         monkeypatch.setattr(orchestrator.journal, "save", unavailable)
         with pytest.raises(BoxieError) as error:
-            await orchestrator.ensure(request)
+            await launch_execution(orchestrator, request)
         assert error.value.status == 503
         pending = await orchestrator.inspect(request.ref)
         assert pending.cleanup_pending and not pending.removal_confirmed

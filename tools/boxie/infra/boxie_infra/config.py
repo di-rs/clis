@@ -1,4 +1,4 @@
-"""Write explicit operator configuration for the three private Boxie processes."""
+"""Write explicit operator configuration for the two private Boxie processes."""
 
 import argparse
 import json
@@ -18,7 +18,6 @@ def main() -> None:
     parser.add_argument("--orchestrator-credential", default="/run/secrets/orchestrator")
     parser.add_argument("--consumer-credential", default="/run/secrets/consumer")
     parser.add_argument("--profiles", default="/etc/boxie/profiles.json")
-    parser.add_argument("--api-url", default="http://api:8090")
     parser.add_argument("--postgres-dsn", default="/run/secrets/postgres-dsn")
     parser.add_argument("--temporal-address", default="temporal:7233")
     parser.add_argument("--temporal-server-name", default="temporal")
@@ -41,7 +40,7 @@ def main() -> None:
         "orchestrator.json": {
             "data_dir": str(args.data_dir),
             "postgres_dsn_file": args.postgres_dsn,
-            "api_url": args.api_url,
+            "durable": durable,
             "profiles_file": args.profiles,
             "credential_file": args.orchestrator_credential,
             "identity": {"installation_id": str(args.installation_id), "host_id": args.host_id},
@@ -56,12 +55,6 @@ def main() -> None:
             "consumer_credential_files": {args.consumer_id: args.consumer_credential},
             "bind_host": args.bind_host,
         },
-    }
-    configurations["worker.json"] = {
-        "identity": identity,
-        "durable": durable,
-        "orchestrator_url": args.orchestrator_url,
-        "orchestrator_credential_file": args.orchestrator_credential,
     }
     for name, value in configurations.items():
         (args.output / name).write_text(json.dumps(value, indent=2) + "\n")

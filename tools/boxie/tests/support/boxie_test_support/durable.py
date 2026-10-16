@@ -80,3 +80,18 @@ class Guard:
 
     async def start_allowed(self, request: Any, boot: Any) -> bool:
         return not self.stopped
+
+
+async def launch_execution(orchestrator: Any, request: Any) -> Any:
+    """Launch an activity-shaped call for tests that manipulate in-flight Docker I/O."""
+    from boxie.domain.models import SandboxState
+
+    observation = await orchestrator.initialize(request)
+    runtime = orchestrator.runtimes[request.ref.id]
+    if runtime.activity is None and observation.state not in {
+        SandboxState.READY,
+        SandboxState.TERMINATED,
+        SandboxState.FAILED,
+    }:
+        runtime.activity = asyncio.create_task(orchestrator.ensure_ready(request))
+    return observation

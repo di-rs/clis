@@ -11,8 +11,6 @@ from uuid import UUID, uuid4
 from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import (
     EnsureRequest,
-    ExpiryDecision,
-    ExpiryRequest,
     OrchestratorObservation,
     SandboxRef,
     StartGuard,
@@ -21,6 +19,8 @@ from boxie.domain.models import (
     LifetimePolicy,
     OrchestratorIdentity,
     Principal,
+    ProfileSnapshot,
+    SandboxSpec,
     SandboxState,
     TerminationReason,
 )
@@ -30,6 +30,7 @@ from boxie.sandbox.execution.journal import ExecutionJournal, ExecutionRecord
 from boxie.sandbox.execution.reconcile import reconcile_removal
 from boxie.sandbox.execution.retention import MAX_RECORDS, compact
 from boxie.sandbox.execution.runtime import Deadlines, ExecutionRuntime, TerminalSession
+from boxie.sandbox.execution.safety import ExecutionSafety
 from boxie.sandbox.profiles import ProfileRegistry
 
 logger = logging.getLogger(__name__)
@@ -80,13 +81,15 @@ class DurableOrchestrator:
             key: ExecutionRuntime(self, record, durable_version=record.event_version)
             for key, record in self.records.items()
         }
-        self.forget_observation: Callable[[UUID], None] | None = None
         self._input_flush_at: float | None = None
         self.sweeper: asyncio.Task[None] | None = None
-        self.compactor: asyncio.Task[None] | None = None
+        self.safety = ExecutionSafety(self)
         self.stopping = False
-        self.observer: Callable[[OrchestratorObservation], None] | None = None
+        self.observer: Callable[[OrchestratorObservation], Awaitable[None]] | None = None
         self._journal_healthy = True
+
+    async def resolve_admission(self, spec: SandboxSpec) -> ProfileSnapshot:
+        return self.profiles.resolve_profile(spec.profile_id, spec.command, spec.env)
 
     def _record(self, ref: SandboxRef) -> ExecutionRecord:
         record = self.records.get(ref.id)
@@ -143,11 +146,6 @@ class DurableOrchestrator:
         self._input_flush_at = None
         for key, record in self.records.items():
             self.runtimes[key].durable_version = record.event_version
-        if self.observer:
-            for record in self.records.values():
-                if self.runtimes[record.id].reported_version != record.event_version:
-                    self.observer(self._observation(record))
-                    self.runtimes[record.id].reported_version = record.event_version
 
     def _changed(self, record: ExecutionRecord) -> None:
         record.event_version += 1
@@ -176,11 +174,19 @@ class DurableOrchestrator:
             record.container_id,
         )
 
+    async def publish(self, ref: SandboxRef) -> None:
+        if self.observer is not None:
+            try:
+                async with asyncio.timeout(5):
+                    await self.observer(await self.inspect(ref))
+            except Exception:
+                pass  # Durable activity inspection repairs a lost live notification.
+
     async def inspect(self, ref: SandboxRef) -> OrchestratorObservation:
         async with self._lock(ref):
             return self._observation(self._record(ref))
 
-    async def ensure(self, request: EnsureRequest) -> OrchestratorObservation:
+    async def initialize(self, request: EnsureRequest) -> OrchestratorObservation:
         if request.identity != self.config.identity:
             raise BoxieError(404, "orchestrator identity not found")
         validate_policy(request.spec.policy, self.config.policy_maximum)
@@ -240,12 +246,31 @@ class DurableOrchestrator:
                 record.state = SandboxState.TERMINATING
                 record.cleanup_pending = True
                 record.reason = TerminationReason.PROVISIONING_FAILED
+                self.runtimes[record.id].safety_required = True
                 record.event_version += 1
                 raise BoxieError(503, "orchestrator execution unavailable") from None
-            self.runtimes[record.id].worker = asyncio.create_task(
-                self.runtimes[record.id].provision() if mode == "execute" else self._cleanup(record)
-            )
             return self._observation(record)
+
+    async def ensure_ready(self, request: EnsureRequest) -> OrchestratorObservation:
+        await self.initialize(request)
+        runtime = self.runtimes[request.ref.id]
+        async with runtime.provision_lock:
+            record = runtime.record
+            if record.state == SandboxState.READY or record.state in FINAL:
+                return await self.inspect(request.ref)
+            pending = runtime.create
+            if pending is not None and not pending.done():
+                # A timed-out/cancelled activity does not cancel a Docker create.
+                await asyncio.shield(pending)
+            runtime.activity = asyncio.current_task()
+            try:
+                if record.cleanup_pending:
+                    await self._cleanup(record)
+                else:
+                    await runtime.provision()
+            finally:
+                runtime.activity = None
+            return await self.inspect(request.ref)
 
     def _expiry(self, record: ExecutionRecord) -> TerminationReason | None:
         timers = self.runtimes[record.id].deadlines
@@ -297,13 +322,14 @@ class DurableOrchestrator:
             # A full disk must not defeat expiry. The prior execution/create intent
             # is already durable; retain the in-memory stop latch and attempt only
             # ownership-checked removal. Confirmation still requires a final save.
-            pass
+            self.runtimes[record.id].safety_required = True
 
     async def remove(self, ref: SandboxRef, reason: TerminationReason) -> OrchestratorObservation:
         async with self._lock(ref):
             record = self._record(ref)
             self._stop(record, reason)
         await self._cleanup(record)
+        await self.publish(ref)
         return await self.inspect(ref)
 
     async def _cleanup(self, record: ExecutionRecord) -> None:
@@ -334,26 +360,6 @@ class DurableOrchestrator:
                     raise
                 # Physical deletion may have succeeded, but the failed final save
                 # leaves a pending, unconfirmed record for autonomous retry.
-
-    async def expire_if_current(self, request: ExpiryRequest) -> ExpiryDecision:
-        async with self._lock(request.ref):
-            record = self._record(request.ref)
-            unconditional = request.reason in {
-                TerminationReason.EXPIRED,
-                TerminationReason.REQUESTED,
-            }
-            if record.state in FINAL or (
-                not unconditional
-                and (
-                    request.boot_id != self.boot_id
-                    or request.observed_event_version != record.event_version
-                    or self._expiry(record) != request.reason
-                )
-            ):
-                return ExpiryDecision(False, self._observation(record))
-            self._stop(record, request.reason)
-        await self._cleanup(record)
-        return ExpiryDecision(True, await self.inspect(request.ref))
 
     async def renew_control_lease(self, ref: SandboxRef, boot_id: UUID) -> OrchestratorObservation:
         async with self._lock(ref):
@@ -389,7 +395,9 @@ class DurableOrchestrator:
             record.attached, record.disconnected_at = True, None
             self.runtimes[ref.id].timers.disconnect = None
             self._changed(record)
-            return record.attachment_epoch
+            epoch = record.attachment_epoch
+        await self.publish(ref)
+        return epoch
 
     async def check_attachment(
         self, ref: SandboxRef, epoch: int, *, allow_ended: bool = False
@@ -415,6 +423,7 @@ class DurableOrchestrator:
                     self.monotonic() + record.spec.policy.disconnect_seconds
                 )
                 self._changed(record)
+        await self.publish(ref)
 
     async def write(
         self,
@@ -476,50 +485,18 @@ class DurableOrchestrator:
     async def start(self) -> None:
         # Missing process-local deadlines identify previous-boot sessions. Their
         # stop/save is supervised too, so a startup write fault remains retryable.
-        await self.reconcile()
-        self.sweeper = asyncio.create_task(self._sweep())
+        await self.safety.inspect()
+        self.safety.start()
+        self.sweeper = self.safety.task
 
     async def compact(self) -> None:
         await compact(self)
-
-    async def _sweep(self) -> None:
-        while True:
-            if not self._journal_healthy or (
-                self._input_flush_at is not None and self.monotonic() >= self._input_flush_at
-            ):
-                try:
-                    # Flush all in-memory pending decisions, including a failed
-                    # final removal save, before advertising recovered durability.
-                    self._save()
-                except Exception:
-                    pass
-            if self.compactor is None or self.compactor.done():
-                self.compactor = asyncio.create_task(self.compact())
-            for record in list(self.records.values()):
-                if record.state in FINAL:
-                    continue
-                previous = self.runtimes[record.id].reconciliation
-                if previous is None or previous.done():
-                    # The supervisor consumes and records failures. A cancelled
-                    # per-record task is also replaced without ending this loop.
-                    self.runtimes[record.id].reconciliation = asyncio.create_task(
-                        self._supervised_reconcile(record)
-                    )
-            delay = min(1, self.config.sweep_seconds)
-            if self._input_flush_at is not None:
-                remaining = self._input_flush_at - self.monotonic()
-                if remaining > 0:
-                    delay = min(delay, remaining)
-            await asyncio.sleep(delay)
 
     async def close(self) -> None:
         self.stopping = True
         if self.sweeper:
             self.sweeper.cancel()
             await asyncio.gather(self.sweeper, return_exceptions=True)
-        if self.compactor:
-            self.compactor.cancel()
-            await asyncio.gather(self.compactor, return_exceptions=True)
         await asyncio.gather(
             *(
                 self.remove(r.ref, TerminationReason.ORCHESTRATOR_SHUTDOWN)
@@ -527,7 +504,7 @@ class DurableOrchestrator:
                 if r.state not in FINAL
             )
         )
-        for worker in (r.worker for r in self.runtimes.values() if r.worker is not None):
+        for worker in (r.activity for r in self.runtimes.values() if r.activity is not None):
             worker.cancel()
         # Cancelling transport does not prove a daemon operation aborted: journal remains pending.
         for create in (r.create for r in self.runtimes.values() if r.create is not None):
@@ -536,7 +513,7 @@ class DurableOrchestrator:
             *(
                 task
                 for runtime in self.runtimes.values()
-                for task in (runtime.worker, runtime.create, runtime.reconciliation)
+                for task in (runtime.activity, runtime.create, runtime.reconciliation)
                 if task is not None
             ),
             return_exceptions=True,

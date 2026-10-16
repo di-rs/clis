@@ -83,7 +83,7 @@ for name in ({forbidden!r}, 'boxie_infra', 'playground_infra', 'boxie_test_suppo
 """
     if module == "boxie":
         probe += (
-            "import boxie.bootstrap.api, boxie.bootstrap.orchestrator, boxie.bootstrap.worker\n"
+            "import boxie.bootstrap.api, boxie.bootstrap.orchestrator, boxie.bootstrap.runtime\n"
             "from io import StringIO\n"
             "from alembic import command\n"
             "from boxie.persistence.migrate import migration_config\n"
@@ -144,13 +144,12 @@ def test_resolved_compose_isolated_topology(
     values = {
         "BOXIE_RUNTIME_IMAGE": "boxie:test",
         "BOXIE_API_CONFIG": str(tmp_path / "api.json"),
-        "BOXIE_WORKER_CONFIG": str(tmp_path / "worker.json"),
         "BOXIE_POSTGRES_DSN_FILE": str(tmp_path / "postgres-dsn.secret"),
         "BOXIE_TEMPORAL_CA_FILE": str(tmp_path / "ca.pem"),
         "BOXIE_API_TEMPORAL_CERT_FILE": str(tmp_path / "api.pem"),
         "BOXIE_API_TEMPORAL_KEY_FILE": str(tmp_path / "api.key"),
-        "BOXIE_WORKER_TEMPORAL_CERT_FILE": str(tmp_path / "worker.pem"),
-        "BOXIE_WORKER_TEMPORAL_KEY_FILE": str(tmp_path / "worker.key"),
+        "BOXIE_ORCHESTRATOR_TEMPORAL_CERT_FILE": str(tmp_path / "orchestrator.pem"),
+        "BOXIE_ORCHESTRATOR_TEMPORAL_KEY_FILE": str(tmp_path / "orchestrator.key"),
         "BOXIE_ORCHESTRATOR_CONFIG": str(tmp_path / "orchestrator.json"),
         "BOXIE_PROFILES_FILE": str(tmp_path / "profiles.json"),
         "BOXIE_ORCHESTRATOR_CREDENTIAL_FILE": str(tmp_path / "orchestrator.secret"),

@@ -111,7 +111,7 @@ class ProductionStack:
             ("operator", "client", "operator", "clientAuth", "operator"),
             ("ui-client", "client", "ui", "clientAuth", "ui"),
             ("boxie-api", "client", "boxie-api", "clientAuth", "clients"),
-            ("boxie-worker", "client", "boxie-worker", "clientAuth", "clients"),
+            ("boxie-orchestrator", "client", "boxie-orchestrator", "clientAuth", "clients"),
             ("untrusted", "untrusted", "untrusted", "clientAuth", "clients"),
         ):
             target = self.root / directory

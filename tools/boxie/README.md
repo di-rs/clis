@@ -2,8 +2,8 @@
 
 Boxie is an independently deployed private sandbox service. PostgreSQL owns
 admission, idempotency, eight capacity slots and artifact references. The API
-commits requests and an outbox; a separate Temporal worker drives the durable
-lifecycle. Only the sandbox orchestrator receives Docker access and owns artifact bytes,
+commits requests and a minimal start/stop outbox. Temporal SDK workers embedded
+in the orchestrator drive lifecycle activities directly against its runtime. Only the sandbox orchestrator receives Docker access and owns artifact bytes,
 PTYs and the execution journal. Consumers select approved profiles and upload ZIP
 files; they cannot supply images, host paths or isolation settings. Boxie does not
 inspect executable formats or depend on Playground.
@@ -28,7 +28,14 @@ An operator configuration file contains:
 {
   "data_dir": "/var/lib/boxie",
   "postgres_dsn_file": "/run/secrets/postgres-dsn",
-  "api_url": "http://boxie-api:8090",
+  "durable": {
+    "postgres_dsn_file": "/run/secrets/postgres-dsn",
+    "temporal_address": "temporal:7233",
+    "temporal_server_name": "temporal",
+    "temporal_ca_file": "/run/secrets/temporal-ca.pem",
+    "temporal_cert_file": "/run/secrets/temporal-client.pem",
+    "temporal_key_file": "/run/secrets/temporal-client.key"
+  },
   "profiles_file": "/etc/boxie/profiles.json",
   "credential_file": "/run/secrets/boxie-orchestrator",
   "identity": {
@@ -192,8 +199,6 @@ opaque resource IDs. Wire schemas reject extra object fields and invalid bounds.
 | Upload artifact | `PUT /v1/artifacts/{uuid}?consumer_id=...`, raw ZIP body, `X-Content-SHA256` header |
 | Retire artifact | `DELETE /v1/artifacts/{uuid}?consumer_id=...` |
 | Resolve profile | `POST /v1/profiles/resolve`, `{profile_id, command, env}` |
-| Execute admitted request | `POST /v1/sandboxes/{uuid}/ensure`, complete immutable SQL request and `X-Orchestrator-Boot` |
-| Inspect/renew/remove/expire | `POST /v1/sandboxes/{uuid}/{operation}`, consumer, installation, host, generation and boot fences |
 | Terminal | `WS /v1/sandboxes/{uuid}/terminal?consumer_id=...` |
 | Readiness | `GET /readyz`, orchestrator identity and dependency results |
 
@@ -305,7 +310,7 @@ exercises Linux amd64/runsc, process loss, SQL accounting and browser reconnecti
 
 ## Independent distribution and topology
 
-[Local infrastructure](infra/README.md) owns the private API/worker/orchestrator Compose unit,
+[Local infrastructure](infra/README.md) owns the private API/orchestrator Compose unit,
 Docker build, trusted generic profile and installed operator smoke commands.
 `boxie` and `cli-playground` are independent runtime distributions; neither image
 installs an infrastructure package. The root lockfile pins both builds. Production
@@ -313,17 +318,17 @@ activation remains unavailable until PR4.
 
 ## Source organization
 
-The consumer API and agent transport share explicit wire contracts under
+The consumer API and orchestrator transport share explicit wire contracts under
 `boxie/contracts/`; Playground keeps its own consumer models and has no Boxie
 runtime dependency. `application/ports.py` defines the interfaces consumed by the
 API. Routes receive those interfaces directly.
 
-The agent implementation is grouped by responsibility:
+The orchestrator implementation is grouped by responsibility:
 
 - `sandbox/execution/`: coordination, one runtime owner per sandbox, journal,
   provisioning, physical reconciliation and retention.
 - `sandbox/terminal/`: PTY reader, bounded replay and WebSocket session delivery.
-- `sandbox/transport/`: authenticated agent client/server and observation reporting.
+- `sandbox/transport/`: authenticated orchestrator client/server and terminal relay.
 - `bootstrap/`: configuration loading, dependency construction, readiness probes
   and background service startup/shutdown.
 
@@ -334,3 +339,23 @@ retention requires settled local work, a saved removal confirmation and the
 existing control-plane receipt before removing the record and runtime together.
 Network adapters validate incoming terminal controls once and return typed events
 to relays, which serialize them for the next connection.
+
+## Embedded Temporal execution
+
+Boxie runs two processes: API and orchestrator. The orchestrator embeds SDK
+workers on installation/host-specific lifecycle and maintenance queues. Its OS
+owner lock excludes a second process using the same data directory. An
+orchestrator restart also restarts its workers and ends existing terminals.
+
+Provisioning activities await the local runtime. Normal cleanup retries,
+30-second inspection, command recovery, artifact collection, journal compaction
+and SQL retention are driven by Temporal. Local safety enforcement and journal
+flushes remain independent of Temporal availability. SQL admission/stop and the
+final Docker start share the existing durable row guard.
+
+Attachment and termination facts publish directly to SQL; there is no observation
+HTTP callback or lifecycle control HTTP protocol. Input remains local, with SQL
+facts repaired by the next 30-second workflow inspection. No input or PTY output
+is stored in workflow history. The start/stop outbox protects the commit-to-Temporal
+handoff; native scheduled recovery handles pending commands without custom leases
+or application retry clocks.

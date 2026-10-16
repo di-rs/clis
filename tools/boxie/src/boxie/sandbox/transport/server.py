@@ -16,14 +16,9 @@ from boxie.application.ports import ArtifactAccess
 from boxie.contracts.common import ConsumerId
 from boxie.contracts.execution import (
     AdmissionProfileRequest,
-    DurableEnsureWire,
-    ExecutionControlWire,
-    ExecutionExpiryWire,
-    ObservationWire,
     SnapshotWire,
 )
 from boxie.domain.errors import BoxieError
-from boxie.domain.lifecycle import ExpiryRequest, SandboxRef
 from boxie.domain.models import Principal
 from boxie.domain.policy import validate_policy
 from boxie.sandbox.execution.orchestrator import DurableOrchestrator
@@ -108,57 +103,6 @@ def create_orchestrator_app(
     async def retire(artifact_id: UUID, consumer_id: Annotated[ConsumerId, Query()]) -> Response:
         await artifacts.retire(Principal(consumer_id), artifact_id)
         return Response(status_code=204)
-
-    def boot(expected: UUID) -> None:
-        if expected != orchestrator.boot_id:
-            raise BoxieError(409, "orchestrator boot changed")
-
-    async def owned(identifier: UUID, body: ExecutionControlWire) -> SandboxRef:
-        boot(body.boot_id)
-        ref = SandboxRef(identifier, body.generation)
-        item = await orchestrator.inspect(ref)
-        if item.principal != Principal(body.consumer_id) or item.identity != body.identity.domain():
-            raise BoxieError(404, "execution not found")
-        return ref
-
-    @app.post("/v1/sandboxes/{identifier}/ensure")
-    async def ensure(
-        identifier: UUID, body: DurableEnsureWire, x_orchestrator_boot: Annotated[UUID, Header()]
-    ) -> ObservationWire:
-        boot(x_orchestrator_boot)
-        if body.ref.id != identifier:
-            raise BoxieError(422, "execution identity differs")
-        return ObservationWire.from_domain(await orchestrator.ensure(body.domain()))
-
-    @app.post("/v1/sandboxes/{identifier}/inspect")
-    async def inspect(identifier: UUID, body: ExecutionControlWire) -> ObservationWire:
-        return ObservationWire.from_domain(
-            await orchestrator.inspect(await owned(identifier, body))
-        )
-
-    @app.post("/v1/sandboxes/{identifier}/renew")
-    async def renew(identifier: UUID, body: ExecutionControlWire) -> ObservationWire:
-        return ObservationWire.from_domain(
-            await orchestrator.renew_control_lease(await owned(identifier, body), body.boot_id)
-        )
-
-    @app.post("/v1/sandboxes/{identifier}/remove")
-    async def remove(identifier: UUID, body: ExecutionControlWire) -> ObservationWire:
-        return ObservationWire.from_domain(
-            await orchestrator.remove(await owned(identifier, body), body.reason)
-        )
-
-    @app.post("/v1/sandboxes/{identifier}/expire")
-    async def expire(identifier: UUID, body: ExecutionExpiryWire) -> ObservationWire:
-        decision = await orchestrator.expire_if_current(
-            ExpiryRequest(
-                await owned(identifier, body),
-                body.reason,
-                body.observed_event_version,
-                body.boot_id,
-            )
-        )
-        return ObservationWire.from_domain(decision.observation)
 
     @app.websocket("/v1/sandboxes/{identifier}/terminal")
     async def terminal(

@@ -151,7 +151,7 @@ def test_process_loss_failed_delete_and_history_replay(lifecycle_stack: Lifecycl
             timeout=30,
         ) as client:
             artifact = await publish(client)
-            for service in ("api", "worker", "temporal", "orchestrator"):
+            for service in ("api", "temporal", "orchestrator"):
                 key = uuid4().hex
                 identifier = await create(client, artifact, key)
                 original = await until(client, identifier, "ready")

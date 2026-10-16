@@ -9,7 +9,7 @@ from uuid import uuid4
 import pytest
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
-from workflow_support import Decisions
+from workflow_support import Decisions as Decisions
 
 pytestmark = pytest.mark.integration
 

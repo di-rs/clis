@@ -4,15 +4,18 @@ import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
-import httpx
 import pytest
-from boxie.contracts.execution import BootWire, IdentityWire, ObservationWire
 from boxie.domain.lifecycle import OrchestratorObservation
 from boxie.domain.models import SandboxState, TerminationReason
-from boxie.sandbox.transport.client import OrchestratorClient
+from boxie.sandbox.execution.orchestrator import DurableOrchestrator
 from boxie.temporal.activities import LifecycleActivities
+from boxie_test_support.dependencies import postgres_dsn as postgres_dsn
+from boxie_test_support.dependencies import postgres_server as postgres_server
 from database_support import OWNER, counts, database, upload
 from temporalio.exceptions import ApplicationError
 
@@ -51,38 +54,18 @@ def test_removal_activity_retries_until_terminal_report_is_persisted(
                 cleanup_pending=False,
                 removal_confirmed=True,
             )
-            removals = iter([stale, replace(stale, event_version=3)])
-
-            def reply(request: httpx.Request) -> httpx.Response:
-                assert request.headers["Authorization"] == "Bearer cleanup-secret"
-                if request.url.path == "/v1/identity":
-                    return httpx.Response(
-                        200,
-                        json=BootWire(
-                            identity=IdentityWire(
-                                installation_id=config.identity.installation_id,
-                                host_id=config.identity.host_id,
-                            ),
-                            boot_id=boot,
-                        ).model_dump(mode="json"),
-                    )
-                assert request.url.path == f"/v1/sandboxes/{sandbox.id}/remove"
-                assert request.method == "POST"
-                return httpx.Response(
-                    200, json=ObservationWire.from_domain(next(removals)).model_dump(mode="json")
-                )
-
-            async with OrchestratorClient(
-                "http://orchestrator.invalid",
-                b"cleanup-secret",
-                transport=httpx.MockTransport(reply),
-            ) as control:
-                activities = LifecycleActivities(life, control)
-                with pytest.raises(ApplicationError, match="cleanup pending"):
-                    await activities.remove_sandbox(str(sandbox.id))
-                assert await counts(sessions) == (1, 1, 1, 2)
+            control = SimpleNamespace(
+                boot_id=boot,
+                config=config,
+                initialize=AsyncMock(),
+                remove=AsyncMock(side_effect=[stale, replace(stale, event_version=3)]),
+            )
+            activities = LifecycleActivities(life, cast(DurableOrchestrator, control))
+            with pytest.raises(ApplicationError, match="cleanup pending"):
                 await activities.remove_sandbox(str(sandbox.id))
-                assert await counts(sessions) == (1, 0, 0, 2)
+            assert await counts(sessions) == (1, 1, 1, 2)
+            await activities.remove_sandbox(str(sandbox.id))
+            assert await counts(sessions) == (1, 0, 0, 2)
 
     asyncio.run(exercise())
 

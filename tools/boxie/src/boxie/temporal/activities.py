@@ -1,11 +1,10 @@
 """Activity-owned I/O: sensitive requests never cross the workflow boundary."""
 
 import asyncio
-from datetime import UTC, datetime, timedelta
-from typing import Any, Protocol
+from typing import Any
 from uuid import UUID
 
-from sqlmodel import col, select
+from sqlmodel import select
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 from temporalio.worker import ActivityInboundInterceptor, ExecuteActivityInput, Interceptor
@@ -14,13 +13,13 @@ from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import (
     DurableRequest,
     EnsureRequest,
-    ExpiryRequest,
     OrchestratorObservation,
     SandboxRef,
 )
-from boxie.domain.models import OrchestratorIdentity, SandboxState, TerminationReason
-from boxie.persistence.models import OrchestratorObservationRecord, Sandbox
+from boxie.domain.models import SandboxState, TerminationReason
+from boxie.persistence.models import Sandbox
 from boxie.persistence.postgres import PostgresLifecycle
+from boxie.sandbox.execution.orchestrator import DurableOrchestrator
 from boxie.temporal.contracts import LifecycleFacts, StopRequest
 
 
@@ -68,34 +67,17 @@ class SafeActivityErrors(Interceptor):
         return SafeActivityInbound(next)
 
 
-class LifecycleControl(Protocol):
-    async def boot(self, expected: OrchestratorIdentity) -> UUID: ...
-    async def ensure_execution(
-        self, request: EnsureRequest, boot: UUID
-    ) -> OrchestratorObservation: ...
-    async def inspect_execution(
-        self, request: DurableRequest, boot: UUID
-    ) -> OrchestratorObservation: ...
-    async def renew_execution(
-        self, request: DurableRequest, boot: UUID
-    ) -> OrchestratorObservation: ...
-    async def expire_execution(
-        self, request: DurableRequest, expiry: ExpiryRequest
-    ) -> OrchestratorObservation: ...
-    async def remove_execution(
-        self, request: DurableRequest, boot: UUID
-    ) -> OrchestratorObservation: ...
-
-
 class LifecycleActivities:
-    def __init__(self, repository: PostgresLifecycle, orchestrator: LifecycleControl) -> None:
+    def __init__(self, repository: PostgresLifecycle, orchestrator: DurableOrchestrator) -> None:
         self.repository, self.orchestrator = repository, orchestrator
 
     async def _request(self, sandbox_id: str) -> DurableRequest:
         return await self.repository.load_request(UUID(sandbox_id))
 
     async def _bind(self, request: DurableRequest) -> UUID:
-        boot = await self.orchestrator.boot(request.identity)
+        if request.identity != self.orchestrator.config.identity:
+            raise BoxieError(404, "orchestrator identity not found")
+        boot = self.orchestrator.boot_id
         if not await self.repository.bind_orchestrator_boot(
             request.principal,
             request.identity,
@@ -114,32 +96,13 @@ class LifecycleActivities:
     async def load_request(self, sandbox_id: str) -> LifecycleFacts:
         request = await self._request(sandbox_id)
         async with self.repository.sessions() as session:
-            row, observation = (
-                await session.exec(
-                    select(Sandbox, OrchestratorObservationRecord)
-                    .outerjoin(
-                        OrchestratorObservationRecord,
-                        col(OrchestratorObservationRecord.sandbox_id) == col(Sandbox.id),
-                    )
-                    .where(Sandbox.id == request.sandbox_id)
-                )
+            row = (
+                await session.exec(select(Sandbox).where(Sandbox.id == request.sandbox_id))
             ).one()
-        deadlines = [request.absolute_deadline]
-        if observation is not None and observation.ready_at:
-            deadlines.append(
-                (observation.last_input_at or observation.ready_at)
-                + timedelta(seconds=request.spec.policy.idle_seconds)
-            )
-        if observation is not None and observation.disconnected_at:
-            deadlines.append(
-                observation.disconnected_at
-                + timedelta(seconds=request.spec.policy.disconnect_seconds)
-            )
         return LifecycleFacts(
             request.absolute_deadline.timestamp(),
             request.desired_stop or row.state in ("terminating", "terminated", "failed"),
             row.cleaned_at is not None,
-            min(deadlines).timestamp(),
         )
 
     @activity.defn
@@ -147,16 +110,9 @@ class LifecycleActivities:
         request = await self._request(sandbox_id)
         if request.desired_stop:
             return
-        boot = await self._bind(request)
-        observation = await self.orchestrator.ensure_execution(
-            EnsureRequest.from_durable(request), boot
-        )
+        await self._bind(request)
+        observation = await self.orchestrator.ensure_ready(EnsureRequest.from_durable(request))
         await self._record(observation)
-        while observation.state in (SandboxState.ACCEPTED, SandboxState.PROVISIONING):
-            activity.heartbeat()
-            await asyncio.sleep(1)
-            observation = await self.orchestrator.inspect_execution(request, boot)
-            await self._record(observation)
         if observation.state != SandboxState.READY:
             raise ApplicationError(
                 "provisioning stopped", type="ProvisioningStopped", non_retryable=True
@@ -165,71 +121,37 @@ class LifecycleActivities:
     @activity.defn
     async def inspect_and_renew(self, sandbox_id: str) -> LifecycleFacts:
         request = await self._request(sandbox_id)
-        if (await self.load_request(sandbox_id)).cleaned:
-            return await self.load_request(sandbox_id)
+        facts = await self.load_request(sandbox_id)
+        if facts.cleaned:
+            return facts
         boot = await self._bind(request)
+        ref = SandboxRef(request.sandbox_id, request.generation)
         try:
-            observation = await self.orchestrator.inspect_execution(request, boot)
+            observation = await self.orchestrator.inspect(ref)
         except BoxieError as error:
             if error.status != 404:
                 raise
-            # Provision has not registered yet; only ensure may initiate it.
-            return await self.load_request(sandbox_id)
+            return facts
+        record = self.orchestrator.records[ref.id]
+        if self.orchestrator._expiry(record) is not None:
+            await self.orchestrator._supervised_reconcile(record)
+            observation = await self.orchestrator.inspect(ref)
         if not request.desired_stop and observation.state in (
             SandboxState.ACCEPTED,
             SandboxState.PROVISIONING,
             SandboxState.READY,
         ):
             try:
-                observation = await self.orchestrator.renew_execution(request, boot)
+                observation = await self.orchestrator.renew_control_lease(ref, boot)
             except BoxieError as error:
                 if error.status != 409:
                     raise
-                observation = await self.orchestrator.inspect_execution(request, boot)
-        await self._record(observation)
-        return await self.load_request(sandbox_id)
-
-    @activity.defn
-    async def expire_if_current(self, sandbox_id: str) -> LifecycleFacts:
-        request = await self._request(sandbox_id)
-        now = datetime.now(UTC)
-        if now >= request.absolute_deadline:
+                observation = await self.orchestrator.inspect(ref)
+        if observation.reason is not None:
             await self.repository.terminate(
-                request.principal, request.sandbox_id, TerminationReason.EXPIRED
+                request.principal, request.sandbox_id, observation.reason
             )
-        else:
-            boot = await self._bind(request)
-            observation = await self.orchestrator.inspect_execution(request, boot)
-            choices: list[tuple[datetime, TerminationReason]] = []
-            if observation.ready_at:
-                choices.append(
-                    (
-                        (observation.last_input_at or observation.ready_at)
-                        + timedelta(seconds=request.spec.policy.idle_seconds),
-                        TerminationReason.IDLE,
-                    )
-                )
-            if observation.disconnected_at:
-                choices.append(
-                    (
-                        observation.disconnected_at
-                        + timedelta(seconds=request.spec.policy.disconnect_seconds),
-                        TerminationReason.DISCONNECTED,
-                    )
-                )
-            if choices:
-                deadline, reason = min(choices, key=lambda item: item[0])
-                if now >= deadline:
-                    observation = await self.orchestrator.expire_execution(
-                        request,
-                        ExpiryRequest(
-                            SandboxRef(request.sandbox_id, request.generation),
-                            reason,
-                            observation.event_version,
-                            boot,
-                        ),
-                    )
-            await self._record(observation)
+        await self._record(observation)
         return await self.load_request(sandbox_id)
 
     @activity.defn
@@ -246,16 +168,12 @@ class LifecycleActivities:
         request = await self._request(sandbox_id)
         if not request.desired_stop:
             raise BoxieError(409, "durable stop required before removal")
-        boot = await self._bind(request)
-        try:
-            observation = await self.orchestrator.remove_execution(request, boot)
-        except BoxieError as error:
-            if error.status != 404:
-                raise
-            # Initialize a fenced absent identity. Durable stop is already committed;
-            # the orchestrator-owned SQL guard forbids create/start even if this RPC is lost.
-            await self.orchestrator.ensure_execution(EnsureRequest.from_durable(request), boot)
-            observation = await self.orchestrator.remove_execution(request, boot)
+        await self._bind(request)
+        await self.orchestrator.initialize(EnsureRequest.from_durable(request))
+        observation = await self.orchestrator.remove(
+            SandboxRef(request.sandbox_id, request.generation),
+            request.reason or TerminationReason.REQUESTED,
+        )
         await self._record(observation)
         # A racing boot transition or newer observation can reject the report.
         # Activity completion must prove committed SQL finality, not only RPC success.
@@ -267,7 +185,6 @@ class LifecycleActivities:
             self.load_request,
             self.ensure_sandbox,
             self.inspect_and_renew,
-            self.expire_if_current,
             self.request_stop,
             self.remove_sandbox,
         ]

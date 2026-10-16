@@ -75,6 +75,9 @@ class Decisions:
     @activity.defn(name="request_stop")
     async def stop(self, request: dict[str, str]) -> None:
         self.stops += 1
+        if self.mode == "cancel_expire" and self.stops == 1:
+            self.entered.set()
+            await self.release.wait()
         if self.mode.startswith("terminal_stop_") and self.stops == 1:
             self.cleanup_fault()
         self.stop_committed = True

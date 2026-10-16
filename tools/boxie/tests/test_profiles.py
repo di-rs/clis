@@ -94,7 +94,6 @@ def test_service_sighup_reload_is_atomic(tmp_path: Path, postgres_dsn: str) -> N
                     },
                     "bind_port": port,
                     "postgres_dsn_file": str(dsn_file),
-                    "api_url": "http://127.0.0.1:1",
                 }
             )
         )

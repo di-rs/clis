@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 from boxie.domain.lifecycle import EnsureRequest, OrchestratorObservation, SandboxRef
 from boxie.domain.models import Principal, SandboxSpec, SandboxState
 from boxie.sandbox.execution.orchestrator import DurableOrchestrator
-from boxie_test_support.durable import Daemon, Guard
+from boxie_test_support.durable import Daemon, Guard, launch_execution
 from boxie_test_support.orchestrator import Clock, configuration
 
 
@@ -34,7 +34,7 @@ async def setup(
         clock(),
         clock() + timedelta(seconds=3600),
     )
-    await orchestrator.ensure(request)
+    await launch_execution(orchestrator, request)
     return orchestrator, request, daemon, clock, guard
 
 

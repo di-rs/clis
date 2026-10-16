@@ -78,7 +78,7 @@ class DeploymentWorkflow:
 def test_production_mtls_workflow_ui_and_database_isolation(temporal_stack: Any) -> None:
     async def exercise() -> None:
         stack = temporal_stack
-        for identity in ("boxie-api", "boxie-worker", "operator", "ui-client"):
+        for identity in ("boxie-api", "boxie-orchestrator", "operator", "ui-client"):
             client = await asyncio.wait_for(
                 Client.connect(stack.address, namespace="boxie", tls=tls(stack, identity)), 10
             )
@@ -100,7 +100,7 @@ def test_production_mtls_workflow_ui_and_database_isolation(temporal_stack: Any)
             rejections[name] = type(rejected.value).__name__ + ": " + str(rejected.value)[:500]
         stack.evidence["client_rejections"] = rejections
         client = await Client.connect(
-            stack.address, namespace="boxie", tls=tls(stack, "boxie-worker")
+            stack.address, namespace="boxie", tls=tls(stack, "boxie-orchestrator")
         )
         queue = "deployment-" + uuid4().hex
         async with Worker(
