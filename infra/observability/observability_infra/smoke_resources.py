@@ -84,10 +84,11 @@ class Resources:
     def daemon_unit(self) -> str:
         # Docker otherwise auto-connects to the host containerd, whose mount namespace
         # cannot see rootfs mounts created by this LogNamespace-private dockerd.
+        # The private filesystem must allow containerd's /run/containerd/s shim sockets.
         return (
             "[Unit]\nDescription=Owned Boxie observability fixture\n"
             "[Service]\nType=exec\nDelegate=yes\nKillMode=mixed\nTimeoutStopSec=15\nMemoryMax=1073741824\nMemorySwapMax=0\n"
-            "TemporaryFileSystem=/run/containerd:ro\n"
+            "TemporaryFileSystem=/run/containerd:rw,size=16M,mode=0755\n"
             f"LogNamespace={self.namespace}\n"
             f"ExecStart=/usr/bin/dockerd --config-file={self.root}/daemon.json\n"
             f"StandardOutput=append:{self.root}/dockerd.log\n"

@@ -706,7 +706,7 @@ def test_owned_containerd_rejects_shared_namespace_and_foreign_configuration(
                 owned_containerd(root, 101, proc_root=proc)
 
 
-def test_daemon_unit_hides_only_shared_containerd_path() -> None:
+def test_daemon_unit_hides_shared_socket_with_bounded_writable_shim_directory() -> None:
     from observability_infra.smoke_resources import Resources
     from observability_infra.smoke_runtime import Commands, Deadline
 
@@ -714,7 +714,7 @@ def test_daemon_unit_hides_only_shared_containerd_path() -> None:
         Path("/var/tmp/boxie-observability-0123456789ab"), Commands(Deadline(2, reserve=0.1))
     )
     unit = resources.daemon_unit()
-    assert "TemporaryFileSystem=/run/containerd:ro\n" in unit
+    assert "TemporaryFileSystem=/run/containerd:rw,size=16M,mode=0755\n" in unit
     assert f"LogNamespace={resources.namespace}\n" in unit
     assert f"ExecStart=/usr/bin/dockerd --config-file={resources.root}/daemon.json\n" in unit
     assert "PrivateTmp=" not in unit
