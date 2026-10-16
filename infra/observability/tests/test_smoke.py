@@ -967,3 +967,57 @@ def test_image_path_selects_only_absolute_bounded_redacted_path() -> None:
     assert image_path(["PATH=.:/bin"], ()) == "[PATH unavailable]"
     assert image_path(["PATH=/bin", "PATH=/usr/bin"], ()) == "[PATH unavailable]"
     assert image_path(["PATH=/" + "x" * 4096], ()) == "[PATH unavailable]"
+
+
+def test_progress_advances_per_sandbox_order_even_when_attach_attempt_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+    from typing import Any
+
+    from observability_infra import smoke_application, smoke_runtime
+
+    class Attempted(Exception):
+        pass
+
+    orders: list[int] = []
+
+    class Client:
+        def __init__(self, *args: object) -> None:
+            pass
+
+        async def start(self, *, attachment_order: int = 1) -> None:
+            orders.append(attachment_order)
+            raise Attempted
+
+    @asynccontextmanager
+    async def connect(*args: object, **kwargs: object) -> Any:
+        yield SimpleNamespace(recv=None, send=None)
+
+    async def request(*args: object, **kwargs: object) -> Any:
+        return None
+
+    monkeypatch.setattr(
+        smoke_application,
+        "stack_at",
+        lambda *args: SimpleNamespace(consumer="private-test", api_url="http://127.0.0.1:1"),
+    )
+    monkeypatch.setattr(smoke_application, "connect", connect)
+    monkeypatch.setattr(smoke_application, "Session", Client)
+    app = smoke_application.Application(
+        tmp_path, smoke_runtime.Commands(smoke_runtime.Deadline(3, reserve=0.1))
+    )
+    monkeypatch.setattr(app, "request", request)
+
+    async def exercise() -> None:
+        try:
+            for sandbox in ("one", "two", "one"):
+                with pytest.raises(Attempted):
+                    await app.progress(sandbox)
+            assert orders == [1, 1, 2]
+        finally:
+            await app.client.aclose()
+
+    asyncio.run(exercise())

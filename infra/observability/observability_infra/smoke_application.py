@@ -114,6 +114,7 @@ class Application:
         self.stack = stack_at(root, commands)
         self.artifacts: list[str] = []
         self.sandboxes: list[str] = []
+        self.attachment_orders: dict[str, int] = {}
         self.sentinels = (
             self.stack.consumer,
             "artifact-private-" + uuid4().hex,
@@ -200,6 +201,9 @@ class Application:
         await self.request("GET", "/v1/sandboxes/" + sandbox)
         http_seconds = time.monotonic() - started
         endpoint = self.stack.api_url.replace("http://", "ws://")
+        # Reserve before connecting: a failed response may still have attached.
+        order = self.attachment_orders.get(sandbox, 0) + 1
+        self.attachment_orders[sandbox] = order
         async with asyncio.timeout(min(12, self.deadline.remaining())):
             async with connect(
                 endpoint + f"/v1/sandboxes/{sandbox}/terminal",
@@ -209,7 +213,7 @@ class Application:
                 close_timeout=1,
             ) as connection:
                 session = Session(connection.recv, connection.send)
-                await session.start()
+                await session.start(attachment_order=order)
                 token = uuid4().hex
                 await session.write(
                     (

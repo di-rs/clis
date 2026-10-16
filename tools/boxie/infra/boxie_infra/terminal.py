@@ -33,10 +33,16 @@ class Session:
         value: dict[str, object] = json.loads(frame)
         return value
 
-    async def start(self) -> None:
+    async def start(self, *, attachment_order: int = 1) -> None:
         await self.send(
             json.dumps(
-                {"type": "attach", "attachment_order": 1, "resume_after": 0, "cols": 80, "rows": 24}
+                {
+                    "type": "attach",
+                    "attachment_order": attachment_order,
+                    "resume_after": 0,
+                    "cols": 80,
+                    "rows": 24,
+                }
             )
         )
         initial = await self.receive()
