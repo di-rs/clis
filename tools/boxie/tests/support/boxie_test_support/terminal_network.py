@@ -5,31 +5,32 @@ This fixture proves terminal transport, not PostgreSQL/Temporal orchestration.
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any
 from uuid import UUID, uuid4
 
 import httpx
 from boxie.api.app import ApiConfig, create_app
-from boxie.bootstrap.orchestrator import create_orchestrator_app
+from boxie.bootstrap.config import OrchestratorConfig
 from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import EnsureRequest, SandboxRef
 from boxie.domain.models import Principal, SandboxSpec, SandboxView, TerminationReason
 from boxie.sandbox.execution.orchestrator import DurableOrchestrator
 from boxie.sandbox.transport.client import OrchestratorClient
-from boxie.sandbox.transport.reporting import ObservationReporter
+from boxie.sandbox.transport.server import create_orchestrator_app
+from fastapi import FastAPI
+from websockets.asyncio.client import ClientConnection
 
 from boxie_test_support.api import CONSUMER_AUTH, serve
 from boxie_test_support.artifacts import Artifacts
 from boxie_test_support.durable import Daemon, Guard
-from boxie_test_support.orchestrator import Clock, configuration
+from boxie_test_support.orchestrator import Clock, FakeTerminal, configuration
 
 
 class EchoDaemon(Daemon):
     @property
-    def terminals(self) -> Any:
+    def terminals(self) -> dict[str, FakeTerminal]:
         return self.streams
 
     async def start(self, identifier: str) -> None:
@@ -85,32 +86,53 @@ class Admission:
         return await self.get(principal, identifier)
 
 
+@dataclass
+class Network:
+    api: httpx.AsyncClient
+    orchestrator_url: str
+    daemon: EchoDaemon
+    orchestrator: DurableOrchestrator
+    config: OrchestratorConfig
+    clock: Clock
+
+
 @asynccontextmanager
-async def network(root: Path, *, shell: str = "/bin/sh") -> AsyncIterator[Any]:
+async def network(
+    root: Path, *, shell: str = "/bin/sh", daemon: EchoDaemon | None = None
+) -> AsyncIterator[Network]:
     import json
 
     config = configuration(root)
     profiles = json.loads(config.profiles_file.read_text())
     profiles["shell"]["commands"] = [[shell]]
     config.profiles_file.write_text(json.dumps(profiles))
-    clock, daemon = Clock(), EchoDaemon()
+    clock = Clock()
+    daemon = daemon or EchoDaemon()
     clock.now = datetime.now(UTC)
     artifacts = Artifacts(config.data_dir / "artifacts")
 
     async def path(principal: Principal, identifier: UUID) -> Path:
         return artifacts.path(principal, identifier)
 
-    async def noop() -> None:
-        pass
-
     orchestrator = DurableOrchestrator(config, daemon, path, Guard(), clock, clock.monotonic)
-    # No artifact HTTP route is called on the orchestrator in this terminal-only harness.
-    orchestrator_artifacts: Any = SimpleNamespace(collect=noop, collect_orphans=noop)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        try:
+            await orchestrator.start()
+            yield
+        finally:
+            await orchestrator.close()
+
+    async def readiness() -> dict[str, bool]:
+        return {"docker": await daemon.ready(), "execution": orchestrator.execution_ready}
+
     app = create_orchestrator_app(
         orchestrator,
-        orchestrator_artifacts,
+        artifacts,
         credential=b"orchestrator-test-secret",
-        reporter=ObservationReporter("http://127.0.0.1:1", b"unused"),
+        readiness=readiness,
+        lifespan=lifespan,
     )
     async with serve(app) as origin:
         async with OrchestratorClient(origin, b"orchestrator-test-secret", timeout=1) as client:
@@ -124,7 +146,7 @@ async def network(root: Path, *, shell: str = "/bin/sh") -> AsyncIterator[Any]:
             )
             async with serve(api) as url:
                 async with httpx.AsyncClient(base_url=url, headers=CONSUMER_AUTH) as http:
-                    yield SimpleNamespace(
+                    yield Network(
                         api=http,
                         orchestrator_url=origin,
                         daemon=daemon,
@@ -135,7 +157,12 @@ async def network(root: Path, *, shell: str = "/bin/sh") -> AsyncIterator[Any]:
 
 
 async def attach(
-    socket: Any, *, cursor: int = 0, cols: int = 80, rows: int = 24, order: int | None = None
+    socket: ClientConnection,
+    *,
+    cursor: int = 0,
+    cols: int = 80,
+    rows: int = 24,
+    order: int | None = None,
 ) -> tuple[int, bytes]:
     import json
 
@@ -146,6 +173,7 @@ async def attach(
     reply = json.loads(await socket.recv())
     assert reply["type"] == "attached", reply
     epoch = reply["epoch"]
+    assert isinstance(epoch, int)
     payload = bytearray()
     while True:
         frame = await socket.recv()

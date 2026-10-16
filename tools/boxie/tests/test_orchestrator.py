@@ -7,7 +7,7 @@ def test_durable_provision_preserves_approved_isolation_and_entrypoint(tmp_path:
 
     from boxie.domain.models import SandboxState
     from boxie_test_support.orchestrator import IMAGE
-    from test_orchestrator_lifecycle import settled, setup
+    from lifecycle_support import settled, setup
 
     async def exercise() -> None:
         orchestrator, request, daemon, _, _ = await setup(tmp_path)

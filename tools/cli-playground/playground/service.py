@@ -8,7 +8,8 @@ import shutil
 import time
 import zipfile
 import zlib
-from collections.abc import AsyncIterable
+from asyncio import timeout
+from collections.abc import AsyncIterable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -53,8 +54,11 @@ class PlaygroundService:
         store: EnvironmentStore,
         sessions: SessionStore,
         boxie: BoxieClient,
+        *,
+        clock: Callable[[], float] = time.time,
     ) -> None:
         self.settings, self.store, self.sessions, self.boxie = settings, store, sessions, boxie
+        self.clock = clock
         self.uploads = asyncio.Semaphore(1)
         self.active_creates: set[UUID] = set()
 
@@ -146,7 +150,7 @@ class PlaygroundService:
         # A restarted process cannot finish an in-flight terminal attachment.
         for binding in self.sessions.bindings():
             if binding.attachment_deadline is not None and (
-                startup or binding.attachment_deadline <= time.time()
+                startup or binding.attachment_deadline <= self.clock()
             ):
                 self.cancel_attachment(binding.id)
         # A restarted process cannot return an old page's one-time credential.
@@ -157,7 +161,7 @@ class PlaygroundService:
             ):
                 continue
             if intent.id in self.active_creates or (
-                not startup and not intent.abandoned and intent.claim_until > time.time()
+                not startup and not intent.abandoned and intent.claim_until > self.clock()
             ):
                 continue
             try:
@@ -196,7 +200,7 @@ class PlaygroundService:
             or not binding.authenticates(credential)
             or binding.pending_stop
             or binding.sandbox.state in {"terminating", "terminated", "failed"}
-            or binding.sandbox.absolute_deadline <= datetime.now(UTC)
+            or binding.sandbox.absolute_deadline <= datetime.fromtimestamp(self.clock(), UTC)
             or self.store.record(preview_id) is None
         ):
             raise LookupError("session not found")
@@ -207,7 +211,7 @@ class PlaygroundService:
     ) -> SessionBinding:
         binding = self.binding(preview_id, identifier, revision, credential)
         binding.attachment_claim += 1
-        binding.attachment_deadline = time.time() + 40
+        binding.attachment_deadline = self.clock() + 40
         self.sessions.save(binding)
         self.sessions.claimed(identifier)
         return binding
@@ -258,7 +262,7 @@ class PlaygroundService:
             preview_id=preview_id,
             revision=revision,
             credential_hash=hashlib.sha256(credential.encode()).hexdigest(),
-            claim_until=time.time() + 30,
+            claim_until=self.clock() + 30,
             spec=SandboxRequest(
                 artifact_id=environment.artifact_id, profile_id=self.settings.boxie_profile
             ),
@@ -281,7 +285,7 @@ class PlaygroundService:
                 self.sessions.save(binding)
                 await self.retry_stops()
                 raise ArtifactConflictError("preview revision changed")
-            intent.claim_until = time.time() + 30
+            intent.claim_until = self.clock() + 30
             self.sessions.create_intent(intent)
             return binding, credential
         except BaseException:
@@ -330,7 +334,7 @@ class PlaygroundService:
             raise UploadBusyError from error
         temporary: Path | None = None
         try:
-            async with asyncio.timeout(60):
+            async with timeout(60):
                 await self.cleanup_inactive()
                 temporary = self.store.temporary_directory()
                 size = 0
@@ -398,7 +402,7 @@ class PlaygroundService:
                     clis=clis,
                     artifact_id=uuid4(),
                     sha256=digest,
-                    expires_at=time.time() + self.settings.preview_seconds,
+                    expires_at=self.clock() + self.settings.preview_seconds,
                 )
                 intent = UploadIntent(
                     artifact=metadata,

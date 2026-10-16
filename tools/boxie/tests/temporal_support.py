@@ -26,11 +26,12 @@ from boxie.sandbox.transport.reporting import ObservationReporter
 from boxie.temporal.activities import LifecycleActivities
 from boxie.temporal.dispatcher import OutboxDispatcher
 from boxie_test_support.api import CONSUMER_AUTH, serve
+from boxie_test_support.durable import Daemon
 from boxie_test_support.orchestrator import configuration
+from database_support import MIGRATIONS
 from temporal_test_server import test_server_path as test_server_path
 from temporalio.client import Client
-from test_orchestrator_lifecycle import Daemon
-from test_postgres import MIGRATIONS
+from temporalio.service import TLSConfig
 
 
 @asynccontextmanager
@@ -77,3 +78,15 @@ async def durable_stack(dsn: str, root: Path, client: Client, queue: str) -> Asy
                 activities = LifecycleActivities(life, control)
                 dispatcher = OutboxDispatcher(PostgresOutbox(sessions), client, queue)
                 yield http, life, orchestrator, daemon, sessions, activities, dispatcher
+
+
+def tls(stack: Any, identity: str, *, domain: str = "temporal") -> TLSConfig:
+    directory = (
+        "operator" if identity == "operator" else "ui" if identity == "ui-client" else "clients"
+    )
+    return TLSConfig(
+        server_root_ca_cert=(stack.root / "clients/frontend-ca.pem").read_bytes(),
+        domain=domain,
+        client_cert=(stack.root / directory / f"{identity}.pem").read_bytes(),
+        client_private_key=(stack.root / directory / f"{identity}.key").read_bytes(),
+    )

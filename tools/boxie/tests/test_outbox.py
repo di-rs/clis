@@ -11,15 +11,11 @@ from uuid import uuid4
 import pytest
 from boxie.persistence.models import OrchestratorObservationRecord, Outbox
 from boxie_test_support.terminal_network import attach
-from database_support import add_check
-from integration.conftest import postgres_dsn as postgres_dsn
-from integration.conftest import postgres_server as postgres_server
-from integration.conftest import temporal_stack as temporal_stack
+from database_support import OWNER, add_check, database, upload
 from sqlalchemy import func, insert, update
 from sqlmodel import col, select
+from temporal_support import tls
 from temporalio.client import Client
-from test_postgres import OWNER, database, upload
-from test_temporal_deployment import tls
 
 pytestmark = pytest.mark.integration
 
@@ -171,8 +167,8 @@ def test_workflow_cleanup_preserves_first_termination_cause(
         from boxie.domain.models import SandboxState, TerminationReason
         from boxie.temporal.workflows import SandboxLifecycle
         from boxie_test_support.api import artifact, create
+        from database_support import counts
         from temporal_support import durable_stack
-        from test_postgres import counts
 
         client = await Client.connect(
             temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-worker")
@@ -252,9 +248,9 @@ def test_runnable_stack_preserves_accounting_and_worker_replacement(
         from boxie.domain.models import TerminationReason
         from boxie.temporal.workflows import SandboxLifecycle
         from boxie_test_support.api import ready, terminal_url
+        from database_support import counts
         from temporal_support import durable_stack
         from temporalio.worker import Replayer
-        from test_postgres import counts
         from websockets.asyncio.client import connect
 
         client = await Client.connect(
@@ -947,7 +943,7 @@ def test_production_cancel_during_concurrent_inspection(
         from boxie.temporal.activities import SafeActivityErrors
         from boxie.temporal.workflows import SandboxLifecycle
         from temporalio.worker import Replayer, Worker
-        from test_temporal_lifecycle import Decisions
+        from workflow_support import Decisions
 
         client = await Client.connect(
             temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-worker")
@@ -1045,9 +1041,9 @@ def test_workflow_cancel_retains_uncertain_create_until_actual_removal(
         from boxie.temporal.contracts import LifecycleResult
         from boxie.temporal.workflows import SandboxLifecycle
         from boxie_test_support.api import artifact, create
+        from database_support import counts
         from temporal_support import durable_stack
         from temporalio.worker import Replayer
-        from test_postgres import counts
 
         client = await Client.connect(
             temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-worker")

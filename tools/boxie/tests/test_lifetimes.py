@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from boxie.domain.models import SandboxState
-from test_orchestrator_lifecycle import settled, setup
+from lifecycle_support import settled, setup
 
 
 @pytest.mark.parametrize(

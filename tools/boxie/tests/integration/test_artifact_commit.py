@@ -14,9 +14,9 @@ from boxie.persistence.database import database as session_database
 from boxie.persistence.models import Artifact
 from boxie.persistence.postgres_artifacts import PostgresArtifactStore
 from boxie_test_support.orchestrator import bundle
+from database_support import OWNER, database
 from sqlalchemy.exc import DBAPIError
 from sqlmodel import select
-from test_postgres import OWNER, database
 
 from integration.faults import Faults
 

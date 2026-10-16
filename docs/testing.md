@@ -65,6 +65,14 @@ no Docker daemon. The [Boxie infrastructure guide](../tools/boxie/infra/README.m
 covers the separate native Linux/gVisor smoke; Playground consumes Boxie's private
 HTTP/WebSocket API and owns no Docker access.
 
+The root pytest configuration registers the shared [dependency fixtures](../tools/boxie/tests/support/boxie_test_support/dependencies.py)
+once. PostgreSQL and Temporal servers start only when requested and are shared
+within the session; roles and databases remain isolated per test, with separate
+teardown for each acquired resource. Request fixtures by name rather than importing
+them into test modules. Keep reusable setup in support modules, use small Protocols
+for checked fakes, and inject clocks and transports. Reserve monkeypatching for
+environment handling and deliberate failures at system boundaries.
+
 ## Check reporting
 
 Run `git diff --check`. For new documentation, pass `--files PATH` to the relevant

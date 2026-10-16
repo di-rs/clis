@@ -1,6 +1,5 @@
 """Product admission contract, exercised through the public HTTP boundary."""
 
-import time
 from pathlib import Path
 
 import aiohttp
@@ -8,7 +7,7 @@ import pytest
 from boxie_test_support.terminal_network import attach
 from fastapi.testclient import TestClient
 
-from .helpers import upload
+from .helpers import MutableClock, upload
 
 
 def test_page_admission_returns_a_private_credential_and_exact_revision(
@@ -99,11 +98,9 @@ def test_authenticated_readiness_wait_is_not_an_abandoned_page_response(
 ) -> None:
     import asyncio
     import json
-    from types import SimpleNamespace
     from uuid import UUID
 
     from playground import boxie_client as client_module
-    from playground import service as service_module
     from websockets.asyncio.client import connect
     from websockets.typing import Origin
 
@@ -114,9 +111,10 @@ def test_authenticated_readiness_wait_is_not_an_abandoned_page_response(
         async with boxie_network(tmp_path / "orchestrator") as network:
             gate = asyncio.Event()
             network.daemon.create_gate = gate
-            async with product_server(tmp_path / "product", str(network.api.base_url)) as product:
-                now = time.time()
-                monkeypatch.setattr(service_module, "time", SimpleNamespace(time=lambda: now))
+            clock = MutableClock()
+            async with product_server(
+                tmp_path / "product", str(network.api.base_url), clock=clock
+            ) as product:
                 response = await product.http.post(
                     "/api/environments",
                     params={"sha": "a" * 40, "pr": 123},
@@ -151,7 +149,7 @@ def test_authenticated_readiness_wait_is_not_an_abandoned_page_response(
                             json.dumps({"type": "auth", "credential": binding["credential"]})
                         )
                         await asyncio.wait_for(polled.wait(), 1)
-                        now += 31
+                        clock.now += 31
                         await product.service.recover(startup=False)
                         saved = product.service.sessions.get(UUID(binding["id"]))
                         assert (
@@ -166,7 +164,7 @@ def test_authenticated_readiness_wait_is_not_an_abandoned_page_response(
                         else:
                             from websockets.exceptions import ConnectionClosedError
 
-                            now += 10
+                            clock.now += 10
                             await product.service.recover(startup=False)
                             with pytest.raises(ConnectionClosedError):
                                 await ws.recv()

@@ -7,8 +7,6 @@ import pytest
 from boxie.domain.errors import BoxieError
 from boxie.sandbox.profiles import ProfileRegistry
 from boxie_test_support.orchestrator import IMAGE, configuration
-from integration.conftest import postgres_dsn as postgres_dsn
-from integration.conftest import postgres_server as postgres_server
 
 
 def test_reload_is_atomic_and_retains_approved_snapshot(tmp_path: Path) -> None:
@@ -73,7 +71,7 @@ def test_service_sighup_reload_is_atomic(tmp_path: Path, postgres_dsn: str) -> N
 
     async def exercise() -> None:
         from boxie.persistence.migrate import migrate
-        from test_postgres import MIGRATIONS
+        from database_support import MIGRATIONS
 
         await asyncio.to_thread(migrate, postgres_dsn, MIGRATIONS)
         config = configuration(tmp_path)

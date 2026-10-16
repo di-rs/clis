@@ -3,7 +3,8 @@
 import asyncio
 import os
 import stat
-from collections.abc import AsyncIterator
+import time
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -21,7 +22,13 @@ from playground.transport import RequestHostBoundary
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
-def create_app(settings: Settings | None = None, *, boxie: BoxieClient | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    boxie: BoxieClient | None = None,
+    static_dir: Path = STATIC_DIR,
+    clock: Callable[[], float] = time.time,
+) -> FastAPI:
     settings = settings or Settings()
     if boxie is None:
         secret = settings.boxie_credential_file
@@ -33,7 +40,11 @@ def create_app(settings: Settings | None = None, *, boxie: BoxieClient | None = 
             raise ValueError("invalid Boxie credential file")
         boxie = HttpBoxieClient(settings.boxie_url, credential)
     service = PlaygroundService(
-        settings, EnvironmentStore(settings), SessionStore(settings.data_dir), boxie
+        settings,
+        EnvironmentStore(settings, clock=clock),
+        SessionStore(settings.data_dir),
+        boxie,
+        clock=clock,
     )
 
     @asynccontextmanager
@@ -54,6 +65,6 @@ def create_app(settings: Settings | None = None, *, boxie: BoxieClient | None = 
     app.state.settings = service.settings
     app.state.store = service.store
     app.state.sessions = service.sessions
-    app.mount("/static", StaticFiles(directory=STATIC_DIR, check_dir=False), name="static")
-    app.include_router(create_router(service, STATIC_DIR))
+    app.mount("/static", StaticFiles(directory=static_dir, check_dir=False), name="static")
+    app.include_router(create_router(service, static_dir))
     return app

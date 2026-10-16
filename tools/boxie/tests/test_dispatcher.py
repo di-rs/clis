@@ -2,13 +2,14 @@
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
-from boxie.persistence.outbox import OutboxEvent, PostgresOutbox
+from boxie.persistence.outbox import OutboxEvent
+from boxie.temporal.contracts import LifecycleResult
 from boxie.temporal.dispatcher import OutboxDispatcher
-from temporalio.client import Client
+from boxie.temporal.workflows import SandboxLifecycle
+from temporalio.types import MethodAsyncSingleParam
 
 
 @pytest.mark.parametrize("failure", ["retry_write", "shutdown"])
@@ -50,7 +51,12 @@ def test_batch_drains_before_next_claim_and_recovers_unacknowledged(failure: str
                 raise OSError("retry write unavailable")
 
         class RPC:
-            async def start_workflow(self, *args: Any, **kwargs: Any) -> None:
+            async def start_workflow(
+                self,
+                workflow: MethodAsyncSingleParam[SandboxLifecycle, str, LifecycleResult],
+                arg: str,
+                **kwargs: object,
+            ) -> None:
                 nonlocal active, peak, settled
                 active += 1
                 peak = max(peak, active)
@@ -58,7 +64,7 @@ def test_batch_drains_before_next_claim_and_recovers_unacknowledged(failure: str
                     saturated.set()
                 failed = False
                 try:
-                    if not recovering and args[1] == str(events[0].sandbox_id):
+                    if not recovering and arg == str(events[0].sandbox_id):
                         await saturated.wait()
                         if failure == "retry_write":
                             failed = True
@@ -72,7 +78,7 @@ def test_batch_drains_before_next_claim_and_recovers_unacknowledged(failure: str
                     active -= 1
                     settled += 1
 
-        dispatcher = OutboxDispatcher(cast(PostgresOutbox, Store()), cast(Client, RPC()))
+        dispatcher = OutboxDispatcher(Store(), RPC())
         first = asyncio.create_task(dispatcher.poll())
         second: asyncio.Task[None] | None = None
         try:

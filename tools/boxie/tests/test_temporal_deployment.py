@@ -13,7 +13,7 @@ import psycopg
 import pytest
 import yaml
 from google.protobuf.duration_pb2 import Duration
-from integration.conftest import temporal_stack as temporal_stack
+from temporal_support import tls
 from temporalio import activity, workflow
 from temporalio.api.namespace.v1 import NamespaceConfig
 from temporalio.api.workflowservice.v1 import UpdateNamespaceRequest
@@ -72,18 +72,6 @@ class DeploymentWorkflow:
         return await workflow.execute_activity(
             deployment_activity, value, start_to_close_timeout=timedelta(seconds=10)
         )
-
-
-def tls(stack: Any, identity: str, *, domain: str = "temporal") -> TLSConfig:
-    directory = (
-        "operator" if identity == "operator" else "ui" if identity == "ui-client" else "clients"
-    )
-    return TLSConfig(
-        server_root_ca_cert=(stack.root / "clients/frontend-ca.pem").read_bytes(),
-        domain=domain,
-        client_cert=(stack.root / directory / f"{identity}.pem").read_bytes(),
-        client_private_key=(stack.root / directory / f"{identity}.key").read_bytes(),
-    )
 
 
 @pytest.mark.integration

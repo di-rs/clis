@@ -3,22 +3,50 @@
 import asyncio
 import logging
 import time
+from collections.abc import Sequence
 from datetime import timedelta
-from uuid import uuid4
+from typing import Protocol
+from uuid import UUID, uuid4
 
-from temporalio.client import Client
 from temporalio.common import WorkflowIDConflictPolicy, WorkflowIDReusePolicy
 from temporalio.exceptions import WorkflowAlreadyStartedError
+from temporalio.types import MethodAsyncSingleParam
 
-from boxie.persistence.outbox import OutboxEvent, PostgresOutbox
-from boxie.temporal.contracts import TASK_QUEUE
+from boxie.persistence.outbox import OutboxEvent
+from boxie.temporal.contracts import TASK_QUEUE, LifecycleResult
 from boxie.temporal.workflows import SandboxLifecycle
 
 logger = logging.getLogger(__name__)
 
 
+class OutboxStore(Protocol):
+    async def claim(self, owner: str) -> list[OutboxEvent]: ...
+    async def confirmed_terminal(self, sandbox_id: UUID) -> bool: ...
+    async def valid(self, event: OutboxEvent) -> bool: ...
+    async def acknowledge(self, event: OutboxEvent) -> bool: ...
+    async def retry(self, event: OutboxEvent) -> None: ...
+
+
+class WorkflowStarter(Protocol):
+    async def start_workflow(
+        self,
+        workflow: MethodAsyncSingleParam[SandboxLifecycle, str, LifecycleResult],
+        arg: str,
+        *,
+        id: str,
+        task_queue: str,
+        id_conflict_policy: WorkflowIDConflictPolicy,
+        id_reuse_policy: WorkflowIDReusePolicy,
+        start_signal: str,
+        start_signal_args: Sequence[object],
+        rpc_timeout: timedelta,
+    ) -> object: ...
+
+
 class OutboxDispatcher:
-    def __init__(self, store: PostgresOutbox, client: Client, task_queue: str = TASK_QUEUE) -> None:
+    def __init__(
+        self, store: OutboxStore, client: WorkflowStarter, task_queue: str = TASK_QUEUE
+    ) -> None:
         self.store, self.client, self.task_queue = store, client, task_queue
         self.owner = str(uuid4())
         self._poll_lock = asyncio.Lock()

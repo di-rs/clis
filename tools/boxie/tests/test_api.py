@@ -12,9 +12,7 @@ from boxie.api.app import ApiConfig, create_app
 from boxie.sandbox.transport.client import OrchestratorClient
 from boxie_test_support.api import CONSUMER_AUTH, FOREIGN_AUTH, artifact, create, ready, serve
 from boxie_test_support.orchestrator import bundle, request
-from integration.conftest import postgres_dsn as postgres_dsn
-from integration.conftest import postgres_server as postgres_server
-from test_postgres import counts, database
+from database_support import counts, database
 
 pytestmark = pytest.mark.integration
 

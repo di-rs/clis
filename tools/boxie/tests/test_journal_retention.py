@@ -10,7 +10,8 @@ import pytest
 from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import SandboxRef
 from boxie.domain.models import SandboxState, TerminationReason
-from test_orchestrator_lifecycle import settled, setup
+from boxie_test_support.durable import Guard
+from lifecycle_support import settled, setup
 
 
 def test_input_is_coalesced_but_critical_boundary_forces_latest(tmp_path: Path) -> None:
@@ -189,10 +190,8 @@ def test_report_response_after_forgetting_cannot_recreate_state(tmp_path: Path) 
             await release.wait()
             return httpx.Response(204)
 
-        reporter = ObservationReporter("http://owned", b"unused")
-        await reporter.client.aclose()
-        reporter.client = httpx.AsyncClient(
-            base_url="http://owned", transport=httpx.MockTransport(reply)
+        reporter = ObservationReporter(
+            "http://owned", b"unused", transport=httpx.MockTransport(reply)
         )
         reporter.offer(await orchestrator.inspect(request.ref))
         task = asyncio.create_task(reporter.flush())
@@ -282,6 +281,7 @@ def test_active_final_protocol_session_blocks_compaction(
                 await close(socket, code)
 
             monkeypatch.setattr(terminal_session, "close_socket", held_close)
+            assert isinstance(net.orchestrator.guard, Guard)
             net.orchestrator.guard.receipt = True
             async with connect(
                 terminal_url(net.api, identifier), additional_headers=CONSUMER_AUTH
@@ -317,10 +317,14 @@ def test_unknown_create_deleted_during_failed_save_remains_uncertain_after_resta
         daemon.create_gate = asyncio.Event()
         daemon.lost_ack = True
         await daemon.create_entered.wait()
-        orchestrator.runtimes[request.ref.id].worker.cancel()
-        await asyncio.gather(orchestrator.runtimes[request.ref.id].worker, return_exceptions=True)
+        worker = orchestrator.runtimes[request.ref.id].worker
+        assert worker is not None
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
         daemon.create_gate.set()
-        await orchestrator.runtimes[request.ref.id].create
+        creating = orchestrator.runtimes[request.ref.id].create
+        assert creating is not None
+        await creating
         assert daemon.resources and not daemon.started
         disk = orchestrator.journal.path.read_bytes()
         assert json.loads(disk)["records"][0]["creation_uncertain"]
@@ -445,7 +449,7 @@ def test_failed_cleanup_initialization_keeps_pending_without_creating(
 
 def test_cancelled_terminal_session_releases_retention_ownership(tmp_path: Path) -> None:
     """Cancellation must release the session pin without discarding cleanup evidence."""
-    from test_orchestrator_lifecycle import settled, setup
+    from lifecycle_support import settled, setup
 
     async def exercise() -> None:
         orchestrator, request, _, _, guard = await setup(tmp_path)

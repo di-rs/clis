@@ -2,22 +2,17 @@
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import cast
-from uuid import UUID
 
 import pytest
 from boxie_test_support.terminal_network import attach
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from playground.boxie_client import TerminalPort
 from starlette.websockets import WebSocketDisconnect
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 from websockets.typing import Origin
 
+from .boxie_fake import FakeBoxie
 from .boxie_network import admit, boxie_network, product_server, publish, socket_url
 from .helpers import upload
 
@@ -81,7 +76,7 @@ def test_orchestrator_output_limit_reaches_browser_at_exact_cap(
 
 @pytest.mark.parametrize("split", [False, True], ids=["oversized-frame", "extra-frame"])
 def test_product_defensive_cap_reports_limit_for_misbehaving_peer(
-    api_client: TestClient, monkeypatch: pytest.MonkeyPatch, split: bool
+    api_client: TestClient, boxie: FakeBoxie, split: bool
 ) -> None:
     class Peer:
         def __init__(self) -> None:
@@ -97,11 +92,7 @@ def test_product_defensive_cap_reports_limit_for_misbehaving_peer(
         async def send(self, message: str) -> None:
             pass
 
-    @asynccontextmanager
-    async def terminal(identifier: UUID) -> AsyncIterator[TerminalPort]:
-        yield Peer()
-
-    monkeypatch.setattr(cast(FastAPI, api_client.app).state.service.boxie, "terminal", terminal)
+    boxie.terminal_factory = Peer
     deployed = upload(api_client)
     binding = api_client.post(
         f"/api/environments/{deployed['id']}/sessions",

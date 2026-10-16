@@ -56,7 +56,14 @@ ERRORS = {
 
 
 class OrchestratorClient:
-    def __init__(self, base_url: str, credential: bytes, *, timeout: float = 20) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        credential: bytes,
+        *,
+        timeout: float = 20,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         url = urlsplit(base_url)
         if (
             url.scheme not in ("http", "https")
@@ -83,6 +90,7 @@ class OrchestratorClient:
             follow_redirects=False,
             trust_env=False,
             limits=httpx.Limits(max_connections=16, max_keepalive_connections=8),
+            transport=transport,
         )
 
     async def __aenter__(self) -> OrchestratorClient:

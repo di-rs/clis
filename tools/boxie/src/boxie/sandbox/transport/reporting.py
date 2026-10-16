@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from collections.abc import Callable
 from uuid import UUID
 
 import httpx
@@ -23,13 +24,22 @@ def edge(item: OrchestratorObservation) -> tuple[object, ...]:
 
 
 class ObservationReporter:
-    def __init__(self, api_url: str, credential: bytes) -> None:
+    def __init__(
+        self,
+        api_url: str,
+        credential: bytes,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self.clock = clock
         self.client = httpx.AsyncClient(
             base_url=api_url,
             headers={"Authorization": "Bearer " + credential.decode("ascii")},
             timeout=5,
             follow_redirects=False,
             trust_env=False,
+            transport=transport,
         )
         self.latest: dict[UUID, OrchestratorObservation] = {}
         self.sent: dict[UUID, tuple[tuple[object, ...], float, int]] = {}
@@ -48,7 +58,7 @@ class ObservationReporter:
     async def flush(self) -> None:
         for identifier, item in list(self.latest.items()):
             previous = self.sent.get(identifier)
-            now = time.monotonic()
+            now = self.clock()
             if previous and (
                 previous[2] >= item.event_version
                 or (previous[0] == edge(item) and now - previous[1] < 10)

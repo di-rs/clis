@@ -23,9 +23,9 @@ from boxie.temporal.workflows import SandboxLifecycle
 from boxie_test_support.orchestrator import bundle
 from sqlalchemy import and_, func
 from sqlmodel import col, select
+from temporal_support import tls
 from temporalio.client import Client
 from temporalio.worker import Replayer
-from test_temporal_deployment import tls
 
 from integration.stack import LifecycleStack
 

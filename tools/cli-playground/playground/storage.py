@@ -6,6 +6,7 @@ import re
 import shutil
 import tempfile
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -33,7 +34,8 @@ def validate_elf(path: Path) -> None:
 
 
 class EnvironmentStore:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, clock: Callable[[], float] = time.time) -> None:
+        self.clock = clock
         self.settings = settings
         self.root = settings.data_dir
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -75,7 +77,7 @@ class EnvironmentStore:
             if record.artifact is not None and record.artifact.pr != record.pr:
                 return None
             if not include_inactive and (
-                record.expires_at <= time.time() or self.is_closed(record.pr)
+                record.expires_at <= self.clock() or self.is_closed(record.pr)
             ):
                 return None
             return record
@@ -87,7 +89,7 @@ class EnvironmentStore:
         if record is None or record.artifact is None:
             return None
         artifact = record.artifact
-        if not include_inactive and artifact.expires_at <= time.time():
+        if not include_inactive and artifact.expires_at <= self.clock():
             return None
         return Environment(id=identifier, **artifact.model_dump())
 
@@ -176,7 +178,7 @@ class EnvironmentStore:
                     return result
         next_record = PreviewRecord(
             pr=pr,
-            expires_at=time.time() + self.settings.preview_seconds,
+            expires_at=self.clock() + self.settings.preview_seconds,
             build=BuildStatus(**update.model_dump()),
             artifact=record.artifact if record is not None and update.state != "empty" else None,
         )

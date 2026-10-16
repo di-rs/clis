@@ -2,7 +2,7 @@
 
 import asyncio
 from datetime import timedelta
-from typing import Any, cast
+from typing import Any
 
 import pytest
 from google.protobuf.duration_pb2 import Duration
@@ -14,7 +14,7 @@ from temporalio.api.workflowservice.v1 import (
     RegisterNamespaceRequest,
     RegisterNamespaceResponse,
 )
-from temporalio.service import RPCError, RPCStatusCode, WorkflowService
+from temporalio.service import RPCError, RPCStatusCode
 
 
 class NamespacePeer:
@@ -37,10 +37,10 @@ class NamespacePeer:
         self.calls: list[str] = []
 
     async def describe_namespace(
-        self, request: DescribeNamespaceRequest, **options: Any
+        self, request: DescribeNamespaceRequest, *, timeout: timedelta
     ) -> DescribeNamespaceResponse:
         assert request.namespace == "boxie"
-        assert options["timeout"] == timedelta(seconds=10)
+        assert timeout == timedelta(seconds=10)
         self.calls.append("describe")
         if self.describe_error is not None:
             raise RPCError("Namespace boxie already exists", self.describe_error, b"")
@@ -55,11 +55,11 @@ class NamespacePeer:
         )
 
     async def register_namespace(
-        self, request: RegisterNamespaceRequest, **options: Any
+        self, request: RegisterNamespaceRequest, *, timeout: timedelta
     ) -> RegisterNamespaceResponse:
         assert request.namespace == "boxie"
         assert request.workflow_execution_retention_period == Duration(seconds=604800)
-        assert options["timeout"] == timedelta(seconds=10)
+        assert timeout == timedelta(seconds=10)
         self.calls.append("register")
         if self.register_error is not None:
             # Deliberately misleading text: only the status may classify the failure.
@@ -74,7 +74,7 @@ def test_namespace_bootstrap_registers_absent_namespace_and_verifies_race(race: 
     peer = NamespacePeer(
         missing=True, register_error=RPCStatusCode.ALREADY_EXISTS if race else None
     )
-    asyncio.run(ensure_namespace(cast(WorkflowService, peer)))
+    asyncio.run(ensure_namespace(peer))
     assert peer.calls == ["describe", "register", "describe"]
 
 
@@ -82,7 +82,7 @@ def test_namespace_bootstrap_verifies_existing_namespace_without_registration() 
     from boxie.bootstrap.temporal import ensure_namespace
 
     peer = NamespacePeer()
-    asyncio.run(ensure_namespace(cast(WorkflowService, peer)))
+    asyncio.run(ensure_namespace(peer))
     assert peer.calls == ["describe"]
 
 
@@ -105,7 +105,7 @@ def test_namespace_bootstrap_propagates_transport_and_authentication_errors(
         register_error=status if stage == "register" else None,
     )
     with pytest.raises(RPCError) as raised:
-        asyncio.run(ensure_namespace(cast(WorkflowService, peer)))
+        asyncio.run(ensure_namespace(peer))
     assert raised.value.status == status
     assert peer.calls == (["describe"] if stage == "describe" else ["describe", "register"])
 
@@ -125,4 +125,4 @@ def test_namespace_bootstrap_rejects_wrong_namespace_state_or_retention(
 
     peer = NamespacePeer(missing=missing, **mismatch)
     with pytest.raises(ValueError, match="registered.*seven-day"):
-        asyncio.run(ensure_namespace(cast(WorkflowService, peer)))
+        asyncio.run(ensure_namespace(peer))

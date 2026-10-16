@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import importlib.util
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -16,33 +15,25 @@ import psycopg
 import pytest
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from boxie.bootstrap.config import OrchestratorConfig
 from boxie.domain.errors import BoxieError
 from boxie.domain.models import (
     OrchestratorIdentity,
     Principal,
-    SandboxSpec,
     SandboxState,
     TerminationReason,
 )
-from boxie.persistence.database import SessionFactory
 from boxie.persistence.database import database as session_database
 from boxie.persistence.migrate import migrate
 from boxie.persistence.models import (
     Artifact,
-    CapacitySlot,
     OrchestratorObservationRecord,
     Outbox,
     Sandbox,
     SandboxArtifactRef,
 )
-from boxie.persistence.postgres import PostgresLifecycle
-from boxie.persistence.postgres_artifacts import PostgresArtifactStore
-from boxie_test_support.orchestrator import Clock, bundle, configuration
+from boxie_test_support.orchestrator import Clock, bundle
 from boxie_test_support.terminal_network import network
-from database_support import add_check
-from integration.conftest import postgres_dsn as postgres_dsn
-from integration.conftest import postgres_server as postgres_server
+from database_support import MIGRATIONS, OWNER, add_check, counts, database, upload
 from sqlalchemy import (
     Column,
     Integer,
@@ -61,64 +52,6 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 pytestmark = pytest.mark.integration
-MIGRATIONS = Path(__file__).parents[1] / "src/boxie/persistence/migrations"
-OWNER = Principal("one")
-
-
-@asynccontextmanager
-async def database(
-    dsn: str, root: Path
-) -> AsyncIterator[
-    tuple[PostgresLifecycle, PostgresArtifactStore, SessionFactory, OrchestratorConfig]
-]:
-    await asyncio.to_thread(migrate, dsn, MIGRATIONS)
-    config = configuration(root)
-    from boxie.sandbox.transport.client import OrchestratorClient
-
-    async with network(root / "resolver") as harness:
-        async with OrchestratorClient(
-            harness.orchestrator_url, b"orchestrator-test-secret"
-        ) as resolver:
-            async with session_database(dsn, pool_size=24) as sessions:
-
-                async def healthy() -> bool:
-                    return True
-
-                lifecycle = PostgresLifecycle(sessions, resolver, config.identity, healthy)
-                artifacts = PostgresArtifactStore(sessions, root / "durable-artifacts")
-                yield lifecycle, artifacts, sessions, config
-
-
-async def upload(artifacts: PostgresArtifactStore) -> SandboxSpec:
-    content = bundle()
-
-    async def chunks() -> AsyncIterator[bytes]:
-        yield content
-
-    result = await artifacts.put(OWNER, uuid4(), hashlib.sha256(content).hexdigest(), chunks())
-    return SandboxSpec(result.artifact.id, "shell", ("/bin/sh",), {})
-
-
-async def counts(sessions: SessionFactory) -> tuple[int, int, int, int]:
-    """Admission/slot/reference/command counts; observation notifications tested separately."""
-    async with sessions() as session:
-        sandboxes = await session.scalar(select(func.count()).select_from(Sandbox))
-        slots = await session.scalar(
-            select(func.count())
-            .select_from(CapacitySlot)
-            .where(col(CapacitySlot.sandbox_id).is_not(None))
-        )
-        references = await session.scalar(select(func.count()).select_from(SandboxArtifactRef))
-        commands = await session.scalar(
-            select(func.count()).select_from(Outbox).where(col(Outbox.kind).in_(("start", "stop")))
-        )
-        assert (
-            sandboxes is not None
-            and slots is not None
-            and references is not None
-            and commands is not None
-        )
-        return sandboxes, slots, references, commands
 
 
 def test_nine_concurrent_creates_reserve_exactly_eight(postgres_dsn: str, tmp_path: Path) -> None:
@@ -238,7 +171,6 @@ def test_alembic_upgrades_are_idempotent_and_failed_revision_is_atomic(
     import shutil
 
     from boxie.persistence.database import database_url
-    from boxie.persistence.migrate import migrate
 
     migrations = tmp_path / "migrations"
     shutil.copytree(MIGRATIONS, migrations)
@@ -694,7 +626,8 @@ def test_durable_orchestrator_and_postgres_release_only_after_reconciled_absence
         from boxie.domain.lifecycle import EnsureRequest
         from boxie.persistence.start_guard import PostgresStartGuard
         from boxie.sandbox.execution.orchestrator import DurableOrchestrator
-        from test_orchestrator_lifecycle import Daemon, settled
+        from boxie_test_support.durable import Daemon
+        from lifecycle_support import settled
 
         async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
             view = await life.submit(OWNER, "real-persistence", await upload(artifacts))
@@ -764,7 +697,8 @@ def test_journal_outage_expires_container_but_retains_sql_accounting_until_durab
         from boxie.domain.lifecycle import EnsureRequest
         from boxie.persistence.start_guard import PostgresStartGuard
         from boxie.sandbox.execution.orchestrator import DurableOrchestrator
-        from test_orchestrator_lifecycle import Daemon, settled
+        from boxie_test_support.durable import Daemon
+        from lifecycle_support import settled
 
         async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
             view = await life.submit(OWNER, "journal-outage", await upload(artifacts))
@@ -824,7 +758,7 @@ def test_terminal_receipt_survives_prior_boot_and_retry_row_purge(
     from boxie.persistence.start_guard import PostgresStartGuard
     from boxie.sandbox.execution.orchestrator import DurableOrchestrator
     from boxie_test_support.durable import Daemon
-    from test_orchestrator_lifecycle import settled
+    from lifecycle_support import settled
 
     async def exercise() -> None:
         async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
@@ -895,10 +829,11 @@ def test_failed_restart_journal_projection_waits_for_authenticated_inspection(
         from boxie.sandbox.transport.client import OrchestratorClient
         from boxie.sandbox.transport.reporting import ObservationReporter
         from boxie.temporal.activities import LifecycleActivities
+        from boxie_test_support.durable import Daemon
         from fastapi import Request, Response
+        from lifecycle_support import settled
         from starlette.middleware.base import RequestResponseEndpoint
         from temporalio.exceptions import ApplicationError
-        from test_orchestrator_lifecycle import Daemon, settled
 
         async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
             view = await life.submit(OWNER, "restart-journal", await upload(artifacts))
@@ -963,14 +898,10 @@ def test_failed_restart_journal_projection_waits_for_authenticated_inspection(
                             stale = await life.get(OWNER, view.id)
                             assert stale.state == SandboxState.READY and not stale.cleanup_pending
                         async with OrchestratorClient(
-                            "http://orchestrator", b"restart-secret"
+                            "http://orchestrator",
+                            b"restart-secret",
+                            transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
                         ) as client:
-                            await client._http.aclose()
-                            client._http = httpx.AsyncClient(
-                                transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
-                                base_url="http://orchestrator",
-                                headers={"Authorization": "Bearer restart-secret"},
-                            )
                             activities = LifecycleActivities(life, client)
                             if restart == 0:
                                 facts = await activities.inspect_and_renew(str(view.id))

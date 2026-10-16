@@ -1,22 +1,27 @@
 """Shared explicit SQL/mTLS construction. Deployment migrations remain operator jobs."""
 
 import asyncio
+from collections.abc import Awaitable
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from uuid import UUID
 
 from temporalio.api.enums.v1 import TaskQueueType
 from temporalio.api.taskqueue.v1 import TaskQueue
-from temporalio.api.workflowservice.v1 import DescribeNamespaceRequest, DescribeTaskQueueRequest
+from temporalio.api.workflowservice.v1 import (
+    DescribeNamespaceRequest,
+    DescribeNamespaceResponse,
+    DescribeTaskQueueRequest,
+    DescribeTaskQueueResponse,
+)
 from temporalio.client import Client
 from temporalio.service import TLSConfig
 
 from boxie.bootstrap.config import DurableConfig, read_credential
 from boxie.domain.models import OrchestratorIdentity
 from boxie.persistence.database import SessionFactory, database
-from boxie.sandbox.transport.client import OrchestratorClient
 from boxie.temporal.contracts import TASK_QUEUE
 
 # Temporal 1.32.0's matching long poll defaults to 60 seconds. Poller access
@@ -55,8 +60,34 @@ async def temporal_client(config: DurableConfig, *, lazy: bool = False) -> Clien
     )
 
 
+class OrchestratorReadiness(Protocol):
+    async def ready(self) -> bool: ...
+
+
+class TemporalHealth(Protocol):
+    async def check_health(self) -> bool: ...
+
+
+class TemporalReadinessService(Protocol):
+    def describe_namespace(
+        self, req: DescribeNamespaceRequest, /, *, timeout: timedelta
+    ) -> Awaitable[DescribeNamespaceResponse]: ...
+    def describe_task_queue(
+        self, req: DescribeTaskQueueRequest, /, *, timeout: timedelta
+    ) -> Awaitable[DescribeTaskQueueResponse]: ...
+
+
+class TemporalReadiness(Protocol):
+    @property
+    def namespace(self) -> str: ...
+    @property
+    def service_client(self) -> TemporalHealth: ...
+    @property
+    def workflow_service(self) -> TemporalReadinessService: ...
+
+
 class Dependencies:
-    def __init__(self, orchestrator: OrchestratorClient, temporal: Client) -> None:
+    def __init__(self, orchestrator: OrchestratorReadiness, temporal: TemporalReadiness) -> None:
         self.orchestrator, self.temporal = orchestrator, temporal
 
     async def __call__(self) -> bool:

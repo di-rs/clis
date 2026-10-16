@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from boxie_test_support.orchestrator import FakeTerminal
+from boxie_test_support.terminal_network import EchoDaemon
 from fastapi import Request
 
 from tests.boxie_network import boxie_network, product_server, publish
@@ -22,17 +23,23 @@ class ObservedTerminal(FakeTerminal):
         await super().write(data)
 
 
+class ObservedDaemon(EchoDaemon):
+    def __init__(self) -> None:
+        super().__init__()
+        self.observed: dict[str, ObservedTerminal] = {}
+
+    async def attach(self, identifier: str) -> ObservedTerminal:
+        stream = ObservedTerminal()
+        self.streams[identifier] = stream
+        self.observed[identifier] = stream
+        return stream
+
+
 async def main() -> None:
     with tempfile.TemporaryDirectory(prefix="boxie-browser-") as directory:
         root = Path(directory)
-        async with boxie_network(root / "orchestrator") as network:
-
-            async def terminal(identifier: str) -> ObservedTerminal:
-                stream = ObservedTerminal()
-                network.daemon.streams[identifier] = stream
-                return stream
-
-            network.daemon.attach = terminal
+        daemon = ObservedDaemon()
+        async with boxie_network(root / "orchestrator", daemon=daemon) as network:
             async with product_server(
                 root / "product", str(network.api.base_url), port=8765
             ) as product:
@@ -42,9 +49,14 @@ async def main() -> None:
 
                 @product.app.get("/__test__/state")
                 async def state() -> dict[str, Any]:
-                    return {
-                        "environment": environment,
-                        "sandboxes": [
+                    sandboxes = []
+                    for record in network.orchestrator.records.values():
+                        stream = (
+                            daemon.observed.get(record.container_id)
+                            if record.container_id is not None
+                            else None
+                        )
+                        sandboxes.append(
                             {
                                 "id": str(record.id),
                                 "page_session_ids": [
@@ -58,18 +70,14 @@ async def main() -> None:
                                 "last_input_at": str(record.last_input_at),
                                 "reason": record.reason,
                                 "writes": [
-                                    base64.b64encode(data).decode()
-                                    for data in network.daemon.streams[record.container_id].writes
+                                    base64.b64encode(data).decode() for data in stream.writes
                                 ]
-                                if record.container_id in network.daemon.streams
+                                if stream is not None
                                 else [],
-                                "sizes": network.daemon.streams[record.container_id].sizes
-                                if record.container_id in network.daemon.streams
-                                else [],
+                                "sizes": stream.sizes if stream is not None else [],
                             }
-                            for record in network.orchestrator.records.values()
-                        ],
-                    }
+                        )
+                    return {"environment": environment, "sandboxes": sandboxes}
 
                 @product.app.post("/__test__/output")
                 async def output(request: Request) -> dict[str, bool]:
@@ -79,7 +87,8 @@ async def main() -> None:
                         for record in network.orchestrator.records.values()
                         if str(record.id) == value["id"]
                     )
-                    stream = network.daemon.streams[record.container_id]
+                    assert record.container_id is not None
+                    stream = daemon.observed[record.container_id]
                     for encoded in value["chunks"]:
                         stream.queue.put_nowait(base64.b64decode(encoded))
                         await asyncio.sleep(0)

@@ -2,17 +2,33 @@
 
 import argparse
 import asyncio
+from collections.abc import Awaitable
 from datetime import timedelta
 from pathlib import Path
+from typing import Protocol
 
 from google.protobuf.duration_pb2 import Duration
 from temporalio.api.enums.v1 import NamespaceState
-from temporalio.api.workflowservice.v1 import DescribeNamespaceRequest, RegisterNamespaceRequest
+from temporalio.api.workflowservice.v1 import (
+    DescribeNamespaceRequest,
+    DescribeNamespaceResponse,
+    RegisterNamespaceRequest,
+    RegisterNamespaceResponse,
+)
 from temporalio.client import Client
-from temporalio.service import RPCError, RPCStatusCode, TLSConfig, WorkflowService
+from temporalio.service import RPCError, RPCStatusCode, TLSConfig
 
 
-async def ensure_namespace(service: WorkflowService, namespace: str = "boxie") -> None:
+class NamespaceService(Protocol):
+    def describe_namespace(
+        self, req: DescribeNamespaceRequest, /, *, timeout: timedelta
+    ) -> Awaitable[DescribeNamespaceResponse]: ...
+    def register_namespace(
+        self, req: RegisterNamespaceRequest, /, *, timeout: timedelta
+    ) -> Awaitable[RegisterNamespaceResponse]: ...
+
+
+async def ensure_namespace(service: NamespaceService, namespace: str = "boxie") -> None:
     """Create only on typed NotFound; every success verifies live configuration."""
     request = DescribeNamespaceRequest(namespace=namespace)
     retention = Duration(seconds=604800)

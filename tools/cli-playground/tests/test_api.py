@@ -8,59 +8,19 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 from playground.app import create_app
-from playground.config import Settings
 from starlette.websockets import WebSocketDisconnect
 
 from .boxie_fake import FakeBoxie
-from .helpers import binary_bundle, elf_binary, upload
-
-AUTH = {"Authorization": "Bearer test-deployment-token"}
-
-
-def build_event(
-    client: TestClient,
-    state: str,
-    *,
-    run: int = 10,
-    attempt: int = 1,
-    sha: str = "a" * 40,
-    run_id: int | None = None,
-) -> httpx.Response:
-    response: httpx.Response = client.put(
-        "/api/pull-requests/123/build",
-        headers=AUTH,
-        json={
-            "sha": sha,
-            "run_id": run_id or run * 100,
-            "run_number": run,
-            "run_attempt": attempt,
-            "state": state,
-        },
-    )
-    return response
-
-
-def build_upload(
-    client: TestClient,
-    *,
-    run: int = 10,
-    attempt: int = 1,
-    sha: str = "a" * 40,
-    payload: bytes = b"fixture",
-) -> httpx.Response:
-    response: httpx.Response = client.post(
-        "/api/environments",
-        headers=AUTH,
-        params={
-            "pr": 123,
-            "sha": sha,
-            "run_id": run * 100,
-            "run_number": run,
-            "run_attempt": attempt,
-        },
-        content=binary_bundle({"echor": elf_binary(payload)}),
-    )
-    return response
+from .helpers import (
+    AUTH,
+    MutableClock,
+    Settings,
+    binary_bundle,
+    build_event,
+    build_upload,
+    elf_binary,
+    upload,
+)
 
 
 def test_build_only_preview_exposes_state_and_requires_auth(api_client: TestClient) -> None:
@@ -267,10 +227,10 @@ def test_unknown_preview_does_not_launch_terminal(api_client: TestClient) -> Non
 
 
 def test_expired_previews_are_unavailable_before_the_periodic_sweep(
-    api_client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    api_client: TestClient, clock: MutableClock, tmp_path: Path
 ) -> None:
     deployed = upload(api_client)
-    monkeypatch.setattr("playground.storage.time.time", lambda: 10**12)
+    clock.now = 10**12
     response = api_client.get(f"/api/environments/{deployed['id']}")
     assert response.status_code == 404
     assert (tmp_path / "data" / deployed["id"]).exists()

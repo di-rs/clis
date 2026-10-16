@@ -62,9 +62,9 @@ class DockerTerminal:
 
 
 class DockerBackend:
-    def __init__(self, timeout: float = 20) -> None:
+    def __init__(self, timeout: float = 20, *, client: Docker | None = None) -> None:
         self.timeout = timeout
-        self.client: Docker | None = None
+        self.client = client
 
     def _client(self) -> Docker:
         if self.client is None:

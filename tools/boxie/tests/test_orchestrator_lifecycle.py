@@ -1,7 +1,6 @@
 """Durable execution races with controlled clocks and an external daemon boundary."""
 
 import asyncio
-import importlib.util
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
@@ -10,48 +9,11 @@ from uuid import uuid4
 
 import pytest
 from boxie.domain.errors import BoxieError
-from boxie.domain.models import Principal, SandboxSpec, SandboxState, TerminationReason
+from boxie.domain.models import Principal, SandboxState, TerminationReason
 from boxie_test_support.durable import Daemon as Daemon
 from boxie_test_support.durable import Guard as Guard
-from boxie_test_support.orchestrator import Clock, FakeTerminal, configuration
-
-
-async def setup(root: Path, **changes: Any) -> tuple[Any, Any, Daemon, Clock, Guard]:
-    assert importlib.util.find_spec("boxie.sandbox.execution.orchestrator"), (
-        "durable execution missing"
-    )
-    from boxie.domain.lifecycle import EnsureRequest, SandboxRef
-    from boxie.sandbox.execution.orchestrator import DurableOrchestrator
-
-    config = configuration(root, **changes)
-    clock, daemon, guard = Clock(), Daemon(), Guard()
-
-    async def artifact(principal: Principal, identifier: Any) -> Path:
-        return root
-
-    orchestrator = DurableOrchestrator(config, daemon, artifact, guard, clock, clock.monotonic)
-    spec = SandboxSpec(uuid4(), "shell", ("/bin/sh",), {})
-    snapshot = orchestrator.profiles.resolve_profile(spec.profile_id, spec.command, spec.env)
-    request = EnsureRequest(
-        SandboxRef(uuid4(), 1),
-        Principal("one"),
-        config.identity,
-        spec,
-        snapshot,
-        clock(),
-        clock() + timedelta(seconds=3600),
-    )
-    await orchestrator.ensure(request)
-    return orchestrator, request, daemon, clock, guard
-
-
-async def settled(orchestrator: Any, ref: Any, state: SandboxState) -> Any:
-    for _ in range(200):
-        observation = await orchestrator.inspect(ref)
-        if observation.state == state:
-            return observation
-        await asyncio.sleep(0.001)
-    raise AssertionError(observation)
+from boxie_test_support.orchestrator import FakeTerminal
+from lifecycle_support import settled, setup
 
 
 def test_input_and_attachment_fences_and_absolute_deadline(tmp_path: Path) -> None:
@@ -298,6 +260,7 @@ def test_restart_retains_unknown_create_then_reconciles_late_resource(tmp_path: 
         await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
         # Model process loss: preserve the daemon operation but cancel the waiting worker.
         worker = orchestrator.runtimes[request.ref.id].worker
+        assert worker is not None
         worker.cancel()
         await asyncio.gather(worker, return_exceptions=True)
         from boxie.sandbox.execution.orchestrator import DurableOrchestrator
@@ -308,7 +271,9 @@ def test_restart_retains_unknown_create_then_reconciles_late_resource(tmp_path: 
         await replacement.start()
         assert (await replacement.inspect(request.ref)).cleanup_pending
         daemon.create_gate.set()
-        await asyncio.wait_for(orchestrator.runtimes[request.ref.id].create, 1)
+        creating = orchestrator.runtimes[request.ref.id].create
+        assert creating is not None
+        await asyncio.wait_for(creating, 1)
         await replacement.reconcile()
         assert (await replacement.inspect(request.ref)).removal_confirmed
         assert not daemon.started
@@ -330,6 +295,7 @@ def test_absolute_expiry_and_stop_cannot_be_deferred_by_blocked_terminal_write(
             entered.set()
             await asyncio.Event().wait()
 
+        assert ready.container_id is not None
         daemon.streams[ready.container_id].write = blocked_write  # type: ignore[method-assign]
         write = asyncio.create_task(orchestrator.write(request.ref, epoch, b"blocked"))
         await entered.wait()
@@ -359,7 +325,9 @@ def test_stop_during_attach_closes_late_stream(tmp_path: Path) -> None:
             await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
         ).removal_confirmed
         release.set()
-        await asyncio.wait_for(orchestrator.runtimes[request.ref.id].worker, 1)
+        worker = orchestrator.runtimes[request.ref.id].worker
+        assert worker is not None
+        await asyncio.wait_for(worker, 1)
         assert stream.closed, "late attach must not leak a PTY after confirmed removal"
         assert not daemon.started
         await orchestrator.close()
@@ -665,9 +633,9 @@ def test_journal_failure_fences_an_already_provisioning_final_start(
             assert pending.cleanup_pending and not pending.removal_confirmed
             assert not orchestrator.execution_ready
             release.set()
-            await asyncio.gather(
-                orchestrator.runtimes[second.ref.id].worker, return_exceptions=True
-            )
+            worker = orchestrator.runtimes[second.ref.id].worker
+            assert worker is not None
+            await asyncio.gather(worker, return_exceptions=True)
             assert len(daemon.started) == 1, "durability failure must fence a pending start"
         finally:
             monkeypatch.setattr(orchestrator.journal, "save", original_save)

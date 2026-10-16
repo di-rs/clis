@@ -2,7 +2,7 @@
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Protocol
 from uuid import UUID
 
 from sqlmodel import col, select
@@ -18,10 +18,9 @@ from boxie.domain.lifecycle import (
     OrchestratorObservation,
     SandboxRef,
 )
-from boxie.domain.models import SandboxState, TerminationReason
+from boxie.domain.models import OrchestratorIdentity, SandboxState, TerminationReason
 from boxie.persistence.models import OrchestratorObservationRecord, Sandbox
 from boxie.persistence.postgres import PostgresLifecycle
-from boxie.sandbox.transport.client import OrchestratorClient
 from boxie.temporal.contracts import LifecycleFacts, StopRequest
 
 
@@ -69,8 +68,27 @@ class SafeActivityErrors(Interceptor):
         return SafeActivityInbound(next)
 
 
+class LifecycleControl(Protocol):
+    async def boot(self, expected: OrchestratorIdentity) -> UUID: ...
+    async def ensure_execution(
+        self, request: EnsureRequest, boot: UUID
+    ) -> OrchestratorObservation: ...
+    async def inspect_execution(
+        self, request: DurableRequest, boot: UUID
+    ) -> OrchestratorObservation: ...
+    async def renew_execution(
+        self, request: DurableRequest, boot: UUID
+    ) -> OrchestratorObservation: ...
+    async def expire_execution(
+        self, request: DurableRequest, expiry: ExpiryRequest
+    ) -> OrchestratorObservation: ...
+    async def remove_execution(
+        self, request: DurableRequest, boot: UUID
+    ) -> OrchestratorObservation: ...
+
+
 class LifecycleActivities:
-    def __init__(self, repository: PostgresLifecycle, orchestrator: OrchestratorClient) -> None:
+    def __init__(self, repository: PostgresLifecycle, orchestrator: LifecycleControl) -> None:
         self.repository, self.orchestrator = repository, orchestrator
 
     async def _request(self, sandbox_id: str) -> DurableRequest:

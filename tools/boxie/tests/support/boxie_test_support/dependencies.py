@@ -51,10 +51,8 @@ def postgres_server() -> Iterator[str]:
 
 
 @pytest.fixture
-def postgres_dsn(postgres_server: str) -> Iterator[str]:
-    # Each test owns a database and a non-superuser role, including concurrent tests.
-    # These administration-only statements provision the database itself; application
-    # tables are accessed exclusively through SQLModel sessions in the tests.
+def postgres_role(postgres_server: str) -> Iterator[tuple[str, str]]:
+    # Separate acquisitions ensure a failed database setup still releases its role.
     name = "boxie_" + uuid4().hex
     password = secrets.token_hex(24)
     with psycopg.connect(postgres_server, autocommit=True) as conn:
@@ -63,22 +61,36 @@ def postgres_dsn(postgres_server: str) -> Iterator[str]:
                 sql.Identifier(name), sql.Literal(password)
             )
         )
+    try:
+        yield name, password
+    finally:
+        with psycopg.connect(postgres_server, autocommit=True) as conn:
+            conn.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(name)))
+
+
+@pytest.fixture
+def postgres_dsn(postgres_server: str, postgres_role: tuple[str, str]) -> Iterator[str]:
+    # Each test owns a database and a non-superuser role, including concurrent tests.
+    # These administration-only statements provision the database itself; application
+    # tables are accessed exclusively through SQLModel sessions in the tests.
+    name, password = postgres_role
+    with psycopg.connect(postgres_server, autocommit=True) as conn:
         conn.execute(
             sql.SQL("CREATE DATABASE {} OWNER {}").format(
                 sql.Identifier(name), sql.Identifier(name)
             )
         )
-        conn.execute(
-            sql.SQL("REVOKE CONNECT ON DATABASE {} FROM PUBLIC").format(sql.Identifier(name))
-        )
-    info = psycopg.conninfo.conninfo_to_dict(postgres_server)
-    info.update(dbname=name, user=name, password=password)
     try:
+        with psycopg.connect(postgres_server, autocommit=True) as conn:
+            conn.execute(
+                sql.SQL("REVOKE CONNECT ON DATABASE {} FROM PUBLIC").format(sql.Identifier(name))
+            )
+        info = psycopg.conninfo.conninfo_to_dict(postgres_server)
+        info.update(dbname=name, user=name, password=password)
         yield psycopg.conninfo.make_conninfo("", **info)
     finally:
         with psycopg.connect(postgres_server, autocommit=True) as conn:
             conn.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
-            conn.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(name)))
 
 
 @pytest.fixture(scope="session")

@@ -6,8 +6,6 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
-from integration.conftest import postgres_dsn as postgres_dsn
-from integration.conftest import postgres_server as postgres_server
 
 
 def test_initial_revision_renders_schema_and_capacity_seed(monkeypatch: pytest.MonkeyPatch) -> None:

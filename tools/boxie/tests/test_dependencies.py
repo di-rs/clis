@@ -2,44 +2,68 @@
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
-from typing import cast
-from unittest.mock import AsyncMock
+from uuid import uuid4
 
+import httpx
 import pytest
 from boxie.bootstrap.durable import Dependencies
 from boxie.sandbox.transport.client import OrchestratorClient
 from google.protobuf.timestamp_pb2 import Timestamp
 from temporalio.api.taskqueue.v1 import PollerInfo
-from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest, DescribeTaskQueueResponse
-from temporalio.client import Client
+from temporalio.api.workflowservice.v1 import (
+    DescribeNamespaceRequest,
+    DescribeNamespaceResponse,
+    DescribeTaskQueueRequest,
+    DescribeTaskQueueResponse,
+)
 
 
 @pytest.mark.parametrize("age", [None, 89, 91])
 @pytest.mark.parametrize("queue", [1, 2])
 def test_each_queue_requires_recent_worker_presence(age: int | None, queue: int) -> None:
     async def exercise() -> None:
-        async def describe(
-            request: DescribeTaskQueueRequest, **kwargs: object
-        ) -> DescribeTaskQueueResponse:
-            kind = request.task_queue_type
-            selected_age = age if kind == queue else 1
-            if selected_age is None:
-                return DescribeTaskQueueResponse()
-            timestamp = Timestamp()
-            timestamp.FromDatetime(datetime.now(UTC) - timedelta(seconds=selected_age))
-            return DescribeTaskQueueResponse(pollers=[PollerInfo(last_access_time=timestamp)])
+        class WorkflowService:
+            async def describe_namespace(
+                self, request: DescribeNamespaceRequest, *, timeout: timedelta
+            ) -> DescribeNamespaceResponse:
+                assert request.namespace == "boxie" and timeout == timedelta(seconds=5)
+                return DescribeNamespaceResponse()
 
-        orchestrator = SimpleNamespace(ready=AsyncMock(return_value=True))
-        temporal = SimpleNamespace(
-            namespace="boxie",
-            service_client=SimpleNamespace(check_health=AsyncMock(return_value=True)),
-            workflow_service=SimpleNamespace(
-                describe_namespace=AsyncMock(), describe_task_queue=describe
-            ),
-        )
-        assert await Dependencies(
-            cast(OrchestratorClient, orchestrator), cast(Client, temporal)
-        )() == (age == 89)
+            async def describe_task_queue(
+                self, request: DescribeTaskQueueRequest, *, timeout: timedelta
+            ) -> DescribeTaskQueueResponse:
+                assert request.namespace == "boxie" and timeout == timedelta(seconds=5)
+                kind = request.task_queue_type
+                selected_age = age if kind == queue else 1
+                if selected_age is None:
+                    return DescribeTaskQueueResponse()
+                timestamp = Timestamp()
+                timestamp.FromDatetime(datetime.now(UTC) - timedelta(seconds=selected_age))
+                return DescribeTaskQueueResponse(pollers=[PollerInfo(last_access_time=timestamp)])
+
+        class HealthService:
+            async def check_health(self) -> bool:
+                return True
+
+        class Temporal:
+            namespace = "boxie"
+            service_client = HealthService()
+            workflow_service = WorkflowService()
+
+        def ready(request: httpx.Request) -> httpx.Response:
+            assert request.url.path == "/readyz"
+            assert request.headers["Authorization"] == "Bearer readiness-secret"
+            return httpx.Response(
+                200,
+                json={
+                    "identity": {"installation_id": str(uuid4()), "host_id": "host"},
+                    "dependencies": {"docker": True},
+                },
+            )
+
+        async with OrchestratorClient(
+            "http://orchestrator.invalid", b"readiness-secret", transport=httpx.MockTransport(ready)
+        ) as orchestrator:
+            assert await Dependencies(orchestrator, Temporal())() == (age == 89)
 
     asyncio.run(exercise())

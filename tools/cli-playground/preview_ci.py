@@ -13,8 +13,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 from time import sleep
+from typing import Protocol
 
 # Keep direct script invocation usable from any working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -148,6 +150,19 @@ def gateway_request(
     return table(json.loads(payload))
 
 
+class GatewayRequest(Protocol):
+    def __call__(
+        self,
+        base: str,
+        token: str,
+        path: str,
+        *,
+        method: str,
+        data: bytes | None = None,
+        content_type: str = "application/zip",
+    ) -> dict[str, object]: ...
+
+
 def upload(
     api: GitHub,
     repo: str,
@@ -160,6 +175,8 @@ def upload(
     run_id: int,
     run_number: int,
     run_attempt: int,
+    gateway: GatewayRequest = gateway_request,
+    sleep: Callable[[float], None] = sleep,
 ) -> dict[str, object] | None:
     query = urllib.parse.urlencode(
         {
@@ -176,9 +193,7 @@ def upload(
         if not current_pull(api, repo, pr, sha):
             return None
         try:
-            return gateway_request(
-                base, token, "/api/environments?" + query, method="POST", data=data
-            )
+            return gateway(base, token, "/api/environments?" + query, method="POST", data=data)
         except urllib.error.HTTPError as error:
             if error.code == 409 and (stale_build(error) or not current_pull(api, repo, pr, sha)):
                 return None
@@ -209,11 +224,13 @@ def update_build(
     run_id: int,
     revision: tuple[int, int],
     state: str,
+    *,
+    gateway: GatewayRequest = gateway_request,
 ) -> dict[str, object] | None:
     if not current_pull(api, repo, pr, sha):
         return None
     try:
-        return gateway_request(
+        return gateway(
             base,
             token,
             f"/api/pull-requests/{pr}/build",
@@ -268,7 +285,14 @@ def current_pull(
 
 
 def lifecycle(
-    api: GitHub, repo: str, number: int, action: str, base_url: str, token: str
+    api: GitHub,
+    repo: str,
+    number: int,
+    action: str,
+    base_url: str,
+    token: str,
+    *,
+    gateway: GatewayRequest = gateway_request,
 ) -> str | None:
     """Reconcile trusted close/reopen events with the PR's current GitHub state."""
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
@@ -287,7 +311,7 @@ def lifecycle(
     base_url = public_origin(base_url)
     path = f"/api/pull-requests/{number}"
     if action == "reopened":
-        response = gateway_request(base_url, token, path + "/reopen", method="POST")
+        response = gateway(base_url, token, path + "/reopen", method="POST")
         if positive(response.get("reopened")) != number:
             raise ValueError("invalid reopen acknowledgement")
         # A build can finish before the lifecycle job clears the closed tombstone.
@@ -312,9 +336,9 @@ def lifecycle(
             default=None,
         )
         if latest is not None:
-            publish(api, repo, positive(latest.get("id")), base_url, token)
+            publish(api, repo, positive(latest.get("id")), base_url, token, gateway=gateway)
         return f"PR #{number} reopened; reconciled the latest available build for its current head."
-    response = gateway_request(base_url, token, path, method="DELETE")
+    response = gateway(base_url, token, path, method="DELETE")
     deleted = response.get("deleted")
     if type(deleted) is not int or deleted < 0:
         raise ValueError("invalid cleanup acknowledgement")
@@ -345,7 +369,16 @@ def lifecycle(
     return message
 
 
-def publish(api: GitHub, repo: str, run_id: int, base_url: str, token: str) -> str | None:
+def publish(
+    api: GitHub,
+    repo: str,
+    run_id: int,
+    base_url: str,
+    token: str,
+    *,
+    gateway: GatewayRequest = gateway_request,
+    sleep: Callable[[float], None] = sleep,
+) -> str | None:
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
         raise ValueError("invalid repository")
     base = f"repos/{repo}"
@@ -474,6 +507,8 @@ def publish(api: GitHub, repo: str, run_id: int, base_url: str, token: str) -> s
                     run_id=run_id,
                     run_number=revision[0],
                     run_attempt=revision[1],
+                    gateway=gateway,
+                    sleep=sleep,
                 )
                 if response is None:
                     return None
@@ -486,7 +521,7 @@ def publish(api: GitHub, repo: str, run_id: int, base_url: str, token: str) -> s
                 )
     if configured and not url:
         status_response = update_build(
-            api, repo, base_url, token, sha, number, run_id, revision, state
+            api, repo, base_url, token, sha, number, run_id, revision, state, gateway=gateway
         )
         if status_response is None:
             return None

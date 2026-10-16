@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from boxie.domain.errors import BoxieError
 from boxie.domain.models import SandboxState
-from test_orchestrator_lifecycle import settled, setup
+from lifecycle_support import settled, setup
 
 
 def test_ring_retention_sequence_and_atomic_live_cursor() -> None:
@@ -74,7 +74,7 @@ def test_pty_drain_does_not_wait_for_reader_and_payload_cap_is_exact(tmp_path: P
             for _ in range(16):
                 await stream.queue.put(b"x" * 1024 * 1024)
             await settled(orchestrator, request.ref, SandboxState.TERMINATED)
-            assert orchestrator.records[request.ref.id].reason.value == "output_limit"
+            assert orchestrator.records[request.ref.id].reason == "output_limit"
             assert terminal.remaining == 0
             assert terminal.replay.retained_bytes == 1024 * 1024
             assert terminal.replay.tail == 1024
@@ -86,23 +86,35 @@ def test_pty_drain_does_not_wait_for_reader_and_payload_cap_is_exact(tmp_path: P
 
 def test_network_replay_resize_barrier_and_browser_heartbeat(tmp_path: Path) -> None:
     import json
-    from types import SimpleNamespace
+    from collections.abc import AsyncIterator
+    from contextlib import asynccontextmanager
 
-    from boxie.bootstrap.orchestrator import create_orchestrator_app
-    from boxie.sandbox.transport.reporting import ObservationReporter
+    from boxie.sandbox.transport.server import create_orchestrator_app
     from boxie_test_support.api import serve
+    from boxie_test_support.artifacts import Artifacts
+    from fastapi import FastAPI
     from websockets.asyncio.client import connect
 
     async def exercise() -> None:
         orchestrator, request, daemon, clock, _ = await setup(tmp_path)
 
-        async def noop() -> None:
-            pass
+        @asynccontextmanager
+        async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+            try:
+                await orchestrator.start()
+                yield
+            finally:
+                await orchestrator.close()
 
-        artifacts: Any = SimpleNamespace(collect=noop, collect_orphans=noop)
-        reporter = ObservationReporter("http://127.0.0.1:1", b"unused")
+        async def readiness() -> dict[str, bool]:
+            return {"docker": await daemon.ready(), "execution": orchestrator.execution_ready}
+
         app = create_orchestrator_app(
-            orchestrator, artifacts, credential=b"secret", reporter=reporter
+            orchestrator,
+            Artifacts(tmp_path / "artifacts"),
+            credential=b"secret",
+            readiness=readiness,
+            lifespan=lifespan,
         )
         async with serve(app) as origin:
             await settled(orchestrator, request.ref, SandboxState.READY)
