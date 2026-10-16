@@ -325,6 +325,13 @@ cursor/restart, accepted-buffer recovery, full-buffer dropping, memory/disk
 pressure and diagnostics sentinel checks. No blanket native acceptance follows
 from `vector validate --no-environment` or Compose parsing.
 
+The native privacy check streams the full last 200 raw journal JSON records and
+100 diagnostic lines per collector/storage service, checking both raw text and
+JSON-decoded content. Each newline-terminated record is limited to 64 KiB, with
+an explicit total bound of record count times 64 KiB and the scenario deadline.
+Oversized, undecodable or incomplete streams fail; no truncated scan passes.
+Only counts are retained. Ordinary command capture remains capped at 256 KiB.
+
 Configuration references: [Vector HTTP buffering](https://vector.dev/docs/reference/configuration/sinks/http/),
 [Docker nonblocking delivery](https://docs.docker.com/engine/logging/configure/#configure-the-delivery-mode-of-log-messages-from-container-to-log-driver),
 and [Prometheus retention](https://prometheus.io/docs/prometheus/latest/storage/).

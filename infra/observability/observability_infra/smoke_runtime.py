@@ -90,6 +90,45 @@ def command_diagnostic(args: list[str], output: bytes, code: int, elapsed: float
     }
 
 
+class PrivacyScan:
+    """Inspect full newline records, retaining at most one record and a read chunk."""
+
+    record_limit = 65536
+
+    def __init__(self, sentinels: tuple[str, ...], max_records: int) -> None:
+        if not 1 <= max_records <= 200:
+            raise ValueError("privacy record bound required")
+        self.sentinels, self.max_records = sentinels, max_records
+        self.pending = bytearray()
+        self.records = self.total = 0
+
+    def feed(self, chunk: bytes) -> None:
+        self.total += len(chunk)
+        if self.total > self.max_records * self.record_limit:
+            raise RuntimeError("smoke privacy byte limit exceeded")
+        self.pending.extend(chunk)
+        while (end := self.pending.find(b"\n")) >= 0:
+            if end + 1 > self.record_limit:
+                raise RuntimeError("smoke privacy record limit exceeded")
+            self.records += 1
+            if self.records > self.max_records:
+                raise RuntimeError("smoke privacy record count exceeded")
+            # Do not replace invalid bytes: an undecodable record is not proof.
+            try:
+                text = self.pending[:end].decode("utf-8")
+            except UnicodeError:
+                raise RuntimeError("smoke privacy record decoding failed") from None
+            check_privacy(text, self.sentinels)
+            del self.pending[: end + 1]
+        if len(self.pending) >= self.record_limit:
+            raise RuntimeError("smoke privacy record limit exceeded")
+
+    def finish(self) -> dict[str, int]:
+        if self.pending:
+            raise RuntimeError("smoke privacy scan incomplete")
+        return {"records": self.records, "bytes": self.total}
+
+
 class Commands:
     """Capture a small result; never put command arguments/output in exceptions."""
 
@@ -103,6 +142,28 @@ class Commands:
 
     def run(
         self, args: list[str], *, env: dict[str, str] | None = None, empty_journal_ok: bool = False
+    ) -> str:
+        return self._run(args, env=env, empty_journal_ok=empty_journal_ok)
+
+    def scan_privacy(
+        self,
+        args: list[str],
+        sentinels: tuple[str, ...],
+        *,
+        max_records: int,
+        env: dict[str, str] | None = None,
+    ) -> dict[str, int]:
+        scan = PrivacyScan(sentinels, max_records)
+        self._run(args, env=env, scan=scan)
+        return scan.finish()
+
+    def _run(
+        self,
+        args: list[str],
+        *,
+        env: dict[str, str] | None,
+        empty_journal_ok: bool = False,
+        scan: PrivacyScan | None = None,
     ) -> str:
         started = time.monotonic()
         self.failed_setup_output = None
@@ -127,9 +188,12 @@ class Commands:
                         if not chunk:
                             selector.unregister(key.fd)
                         else:
-                            output.extend(chunk)
-                            if len(output) > self.output_limit:
-                                raise RuntimeError("smoke command output limit exceeded")
+                            if scan is not None:
+                                scan.feed(chunk)
+                            else:
+                                output.extend(chunk)
+                                if len(output) > self.output_limit:
+                                    raise RuntimeError("smoke command output limit exceeded")
                 process.wait(timeout=self.deadline.remaining(restoring=restoring))
             # journalctl --grep returns 1 for its exact no-match message. Other
             # exit-1 diagnostics (including permissions) must remain failures.

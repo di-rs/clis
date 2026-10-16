@@ -46,21 +46,21 @@ class Telemetry:
             name, value = line.split("=", 1)
             self.env[name] = value
 
+    def compose_args(self, *args: str) -> list[str]:
+        return [
+            "docker",
+            "compose",
+            "--project-name",
+            self.project,
+            "--file",
+            str(self.rendered / "compose.yml"),
+            "--file",
+            str(self.root / "telemetry-overlay.yml"),
+            *args,
+        ]
+
     def compose(self, *args: str) -> str:
-        return self.commands.run(
-            [
-                "docker",
-                "compose",
-                "--project-name",
-                self.project,
-                "--file",
-                str(self.rendered / "compose.yml"),
-                "--file",
-                str(self.root / "telemetry-overlay.yml"),
-                *args,
-            ],
-            env=self.env,
-        )
+        return self.commands.run(self.compose_args(*args), env=self.env)
 
     def container(self, service: str) -> str:
         identifier = self.compose("ps", "--all", "--quiet", service)
@@ -300,7 +300,7 @@ class Telemetry:
         check_privacy("\n".join(json.dumps(item) for item in records), sentinels)
         # Raw binary-journal decode and collector/storage diagnostics are separate surfaces.
         raw = await asyncio.to_thread(
-            self.commands.run,
+            self.commands.scan_privacy,
             [
                 "journalctl",
                 "--directory=" + str(self.root / "journal"),
@@ -308,16 +308,21 @@ class Telemetry:
                 "--output=json",
                 "--lines=200",
             ],
+            sentinels,
+            max_records=200,
         )
-        check_privacy(raw, sentinels)
         for service in ("vector", "victorialogs"):
-            diagnostics = await asyncio.to_thread(
-                self.compose, "logs", "--no-color", "--tail=100", service
+            await asyncio.to_thread(
+                self.commands.scan_privacy,
+                self.compose_args("logs", "--no-color", "--no-log-prefix", "--tail=100", service),
+                sentinels,
+                max_records=100,
+                env=self.env,
             )
-            check_privacy(diagnostics, sentinels)
         return {
             "decoded_records": len(records),
-            "raw_journal_lines": len(raw.splitlines()),
+            "raw_journal_lines": raw["records"],
+            "raw_journal_bytes": raw["bytes"],
             "diagnostic_tail_per_service": 100,
         }
 
