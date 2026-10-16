@@ -19,6 +19,7 @@ from observability_infra.config import Budgets, ObservabilityConfig, render_conf
 from observability_infra.smoke_application import REPO
 from observability_infra.smoke_resources import Resources
 from observability_infra.smoke_runtime import Commands, check_privacy, evidence
+from observability_infra.smoke_watchdog import journal_identity
 
 SERVICES = ("vector", "victorialogs", "prometheus", "node-exporter")
 QUERY_PORTS = {"vector": 9598, "victorialogs": 9428, "prometheus": 9090}
@@ -170,6 +171,32 @@ class Telemetry:
                 for key in ("Pid", "StartedAt", "Running", "Restarting", "ExitCode", "OOMKilled")
             },
         }
+
+    def diagnostic_args(
+        self,
+        service: str,
+        *,
+        expected: str | None = None,
+        since: str | None = None,
+    ) -> list[str]:
+        identifier = self.container(service)
+        if expected is not None and identifier != expected:
+            raise RuntimeError("foreign diagnostic container")
+        # Reuse exact daemon/project/service/internal-network ownership checks.
+        self.endpoint(service, expected=identifier)
+        journal_identity(self.root, self.commands)
+        args = [
+            "journalctl",
+            "--namespace=" + self.root.name,
+            "--no-pager",
+            "--quiet",
+            "--all",
+            "--output=cat",
+            "CONTAINER_ID_FULL=" + identifier,
+        ]
+        if since is None:
+            return [*args, "--lines=100"]
+        return [*args, "--follow", "--lines=all", "--since=" + since]
 
     def prepare(self, resources: Resources) -> None:
         image = json.loads(
@@ -342,19 +369,27 @@ class Telemetry:
             sentinels,
             max_records=200,
         )
+        tails = {}
         for service in ("vector", "victorialogs"):
-            await asyncio.to_thread(
+            args = await asyncio.to_thread(self.diagnostic_args, service)
+            tail = await asyncio.to_thread(
                 self.commands.scan_privacy,
-                self.compose_args("logs", "--no-color", "--no-log-prefix", "--tail=100", service),
+                args,
                 sentinels,
                 max_records=100,
                 env=self.env,
+                strict_stderr=True,
             )
+            if tail["records"] == 0:
+                raise RuntimeError("owned diagnostic privacy source empty")
+            tails[service] = tail["records"]
         return {
             "decoded_records": len(records),
             "raw_journal_lines": raw["records"],
             "raw_journal_bytes": raw["bytes"],
             "diagnostic_tail_per_service": 100,
+            "vector_diagnostic_records": tails["vector"],
+            "victorialogs_diagnostic_records": tails["victorialogs"],
         }
 
     def checkpoint(self) -> dict[str, Any]:
@@ -369,29 +404,54 @@ class Telemetry:
             "inode": path.stat().st_ino,
         }
 
+    def container_sample(self, identifier: str) -> dict[str, Any]:
+        item = json.loads(self.commands.run(["docker", "inspect", identifier], env=self.env))[0]
+        if not re.fullmatch("[a-f0-9]{64}", item["Id"]) or not item["Id"].startswith(identifier):
+            raise RuntimeError("resource container identity differs")
+        state = item["State"]
+        result = {
+            "id": identifier,
+            "name": item["Name"],
+            "driver": item["HostConfig"]["LogConfig"],
+            "oom_killed": state["OOMKilled"],
+        }
+        if state["OOMKilled"]:
+            raise RuntimeError("owned container OOM")
+        try:
+            cgroup = Path(f"/proc/{state['Pid']}/cgroup").read_text().split("0::", 1)[1].strip()
+        except FileNotFoundError:
+            labels = item["Config"]["Labels"]
+            if (
+                labels.get("com.docker.compose.project") != self.project
+                or labels.get("com.docker.compose.service") != "vector"
+            ):
+                raise
+            after = self.vector_identity(item["Id"])
+            before = {
+                "Id": item["Id"],
+                "RestartCount": item["RestartCount"],
+                **{key: state[key] for key in ("Pid", "StartedAt", "Running", "Restarting")},
+            }
+            if after["OOMKilled"]:
+                raise RuntimeError("owned container OOM") from None
+            if after["RestartCount"] < before["RestartCount"]:
+                raise RuntimeError("resource restart counter regressed") from None
+            if not after["Restarting"] and not any(before[key] != after[key] for key in before):
+                raise
+            result.update(memory=None, transition={"before": before, "after": after})
+            return result
+        base = Path("/sys/fs/cgroup") / cgroup.lstrip("/")
+        result["memory"] = {
+            name: (base / name).read_text().strip()
+            for name in ("memory.current", "memory.max", "memory.events", "pids.current")
+        }
+        return result
+
     def resources(self) -> dict[str, Any]:
         ids = self.commands.run(["docker", "ps", "--quiet"], env=self.env).split()
         result: dict[str, Any] = {"containers": [], "filesystems": {}}
         for identifier in ids:
-            item = json.loads(self.commands.run(["docker", "inspect", identifier], env=self.env))[0]
-            pid = item["State"]["Pid"]
-            cgroup = Path(f"/proc/{pid}/cgroup").read_text().split("0::", 1)[1].strip()
-            base = Path("/sys/fs/cgroup") / cgroup.lstrip("/")
-            counters = {
-                name: (base / name).read_text().strip()
-                for name in ("memory.current", "memory.max", "memory.events", "pids.current")
-            }
-            result["containers"].append(
-                {
-                    "id": identifier,
-                    "name": item["Name"],
-                    "memory": counters,
-                    "oom_killed": item["State"]["OOMKilled"],
-                    "driver": item["HostConfig"]["LogConfig"],
-                }
-            )
-            if item["State"]["OOMKilled"]:
-                raise RuntimeError("owned container OOM")
+            result["containers"].append(self.container_sample(identifier))
         for path in (self.root / "journal", self.root / "vector", self.root):
             stat = os.statvfs(path)
             result["filesystems"][str(path)] = {

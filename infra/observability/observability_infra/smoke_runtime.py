@@ -314,9 +314,13 @@ class Commands:
         *,
         max_records: int,
         env: dict[str, str] | None = None,
+        strict_stderr: bool = False,
     ) -> dict[str, int]:
         scan = PrivacyScan(sentinels, max_records)
-        self._run(args, env=env, scan=scan)
+        result = self._run(args, env=env, scan=scan, journal=strict_stderr)
+        if isinstance(result, _JournalOutput) and (result.stderr or result.returncode):
+            self.last_failure = command_diagnostic(args, result.stderr, result.returncode, 0)
+            raise RuntimeError("privacy journal read failed")
         return scan.finish()
 
     def _run(

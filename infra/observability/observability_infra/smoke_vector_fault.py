@@ -23,6 +23,7 @@ class VectorDiagnostics:
             "errno_text_observed": False,
             "writer_unrecoverable_observed": False,
             "bytes": 0,
+            "stderr_bytes": 0,
             "lines": 0,
             "eof": False,
             "error_type": None,
@@ -36,7 +37,7 @@ class VectorDiagnostics:
             self.args,
             env=self.env,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.PIPE,
             start_new_session=True,
         )
         self.thread = threading.Thread(target=self.read, name="vector-fault-diagnostics")
@@ -61,24 +62,21 @@ class VectorDiagnostics:
         try:
             with selectors.DefaultSelector() as selector:
                 selector.register(self.process.stdout, selectors.EVENT_READ)
+                assert self.process.stderr is not None
+                selector.register(self.process.stderr, selectors.EVENT_READ, data="stderr")
                 while not self.stop.is_set():
                     remaining = self.deadline.remaining()
                     for key, _ in selector.select(min(remaining, 0.05)):
                         chunk = os.read(key.fd, 65536)
                         if not chunk:
-                            if pending:
+                            selector.unregister(key.fd)
+                            if key.data != "stderr" and pending:
                                 raise RuntimeError("Vector diagnostic line incomplete")
-                            # EOF does not imply process exit. A client may close
-                            # its streams and remain alive; context cancellation
-                            # must still reach the group-kill/reap finally promptly.
-                            while (code := self.process.poll()) is None:
-                                if self.stop.wait(min(0.05, self.deadline.remaining())):
-                                    return
-                            if code != 0:
-                                raise RuntimeError("Vector diagnostic command failed")
+                            continue
+                        if key.data == "stderr":
                             with self.lock:
-                                self.data["eof"] = True
-                            return
+                                self.data["stderr_bytes"] += len(chunk)
+                            raise RuntimeError("Vector journal reader diagnostic")
                         pending.extend(chunk)
                         with self.lock:
                             self.data["bytes"] += len(chunk)
@@ -99,6 +97,16 @@ class VectorDiagnostics:
                                 )
                             if len(pending) > 65536:
                                 raise RuntimeError("Vector diagnostic line limit")
+                    if not selector.get_map():
+                        # Closed streams do not imply child exit; remain cancellable.
+                        while (code := self.process.poll()) is None:
+                            if self.stop.wait(min(0.05, self.deadline.remaining())):
+                                return
+                        if code != 0:
+                            raise RuntimeError("Vector diagnostic command failed")
+                        with self.lock:
+                            self.data["eof"] = True
+                        return
         except Exception as error:
             with self.lock:
                 self.data["error_type"] = type(error).__name__
@@ -116,6 +124,8 @@ class VectorDiagnostics:
         self.process.wait(timeout=1)
         assert self.process.stdout is not None
         self.process.stdout.close()
+        assert self.process.stderr is not None
+        self.process.stderr.close()
         with self.lock:
             self.data["reaped"] = True
 

@@ -160,7 +160,7 @@ def test_follower_scope_reaps_when_fault_is_cancelled() -> None:
         patch.setattr(smoke_scenarios, "VectorDiagnostics", factory)
         case = object.__new__(Case)
         case.name, case.observations = "vector-enospc", {}
-        case.telemetry = SimpleNamespace(env={})  # type: ignore[assignment]
+        case.telemetry = SimpleNamespace(env={}, diagnostic_args=lambda *a, **kw: [])  # type: ignore[assignment]
         case.commands = SimpleNamespace(deadline=Deadline(5, reserve=1))  # type: ignore[assignment]
         with pytest.raises(asyncio.CancelledError):
             asyncio.run(case.exhaustion("sandbox"))
@@ -200,3 +200,23 @@ def test_closed_streams_live_child_is_reaped_on_context_exit(
     finally:
         # Keep the RED test bounded and do not leave its failing reader behind.
         reader.thread.join(timeout=5)
+
+
+def test_reader_stderr_never_becomes_fault_proof() -> None:
+    from observability_infra.smoke_vector_fault import VectorDiagnostics
+
+    reader = VectorDiagnostics(
+        [
+            sys.executable,
+            "-c",
+            "import os,time; os.write(2,b'PRIVATE No space left on device\\n'); time.sleep(30)",
+        ],
+        {},
+        Deadline(5, reserve=1),
+    )
+    with pytest.raises(RuntimeError, match="diagnostic reader"), reader:
+        result = wait_for(reader, "error_type")
+        assert result["errno_text_observed"] is False
+        assert isinstance(result["stderr_bytes"], int) and result["stderr_bytes"] > 0
+        assert "PRIVATE" not in json.dumps(result)
+    assert reader.snapshot()["reaped"] is True

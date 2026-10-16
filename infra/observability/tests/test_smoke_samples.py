@@ -103,3 +103,48 @@ def test_peak_identity_growth_is_bounded_without_losing_prior_evidence() -> None
             break
     else:
         pytest.fail("unbounded resource identity growth")
+
+
+def test_verified_unavailable_sample_preserves_peaks_without_invented_zero() -> None:
+    observations: dict[str, Any] = {}
+    smoke_samples.record_progress(observations, progress(), sample(950))
+    missing = sample()
+    missing["containers"][0].update(
+        memory=None,
+        transition={
+            "before": {
+                "Id": "abc",
+                "Pid": 20,
+                "StartedAt": "first",
+                "RestartCount": 0,
+                "Running": True,
+                "Restarting": False,
+            },
+            "after": {
+                "Id": "abc",
+                "Pid": 30,
+                "StartedAt": "second",
+                "RestartCount": 1,
+                "Running": True,
+                "Restarting": False,
+            },
+        },
+    )
+    smoke_samples.record_progress(observations, progress(), missing)
+    assert observations["resources"]["latest"]["containers"][0]["memory"] is None
+    peak = observations["resources"]["sampled_peaks"]["containers"]["abc"]
+    assert peak["memory_current_max"] == 950 and peak["unavailable_samples"] == 1
+    smoke_samples.record_progress(observations, progress(), sample(100))
+    assert (
+        observations["resources"]["sampled_peaks"]["containers"]["abc"]["unavailable_samples"] == 1
+    )
+    first_missing: dict[str, Any] = {}
+    smoke_samples.record_progress(first_missing, progress(), missing)
+    assert (
+        "memory_current_max" not in first_missing["resources"]["sampled_peaks"]["containers"]["abc"]
+    )
+    smoke_samples.record_progress(first_missing, progress(), sample())
+    assert (
+        first_missing["resources"]["sampled_peaks"]["containers"]["abc"]["memory_current_max"]
+        == 100
+    )

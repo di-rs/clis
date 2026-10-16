@@ -763,9 +763,15 @@ class Scenario:
         identifier = self.observations["vector_fault_lifecycle"]["baseline"]["Id"]
         # Replay only this fault interval, then follow concurrently with allocation
         # and resource probes so journal vacuum cannot erase an already read error.
-        since = datetime.now().astimezone().isoformat()
+        since = f"@{time.time():.6f}"
+        args = await asyncio.to_thread(
+            self.telemetry.diagnostic_args,
+            "vector",
+            expected=identifier,
+            since=since,
+        )
         reader = VectorDiagnostics(
-            ["docker", "logs", "--follow", "--since", since, identifier],
+            args,
             self.telemetry.env,
             self.commands.deadline,
         )

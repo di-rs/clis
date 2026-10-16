@@ -88,15 +88,33 @@ def record_progress(
             raise RuntimeError("resource identity configuration changed")
         if type(item["oom_killed"]) is not bool:
             raise RuntimeError("invalid resource OOM observation")
-        peaks["containers"][identifier] = dict(
-            memory_peak(prior, item["memory"]),
+        updated = dict(
+            prior,
             name=item["name"],
             driver=item["driver"],
-            pids_current_max=max(
-                natural(item["memory"]["pids.current"]), prior.get("pids_current_max", 0)
-            ),
             oom_killed_observed=item["oom_killed"] or prior.get("oom_killed_observed", False),
         )
+        if item["memory"] is None:
+            transition = item["transition"]
+            before, after = transition["before"], transition["after"]
+            if before["Id"] != after["Id"] or not (
+                after["Restarting"]
+                or any(
+                    before[key] != after[key]
+                    for key in ("Pid", "StartedAt", "RestartCount", "Running", "Restarting")
+                )
+            ):
+                raise RuntimeError("unverified missing resource sample")
+            updated.update(
+                unavailable_samples=prior.get("unavailable_samples", 0) + 1,
+                latest_transition=transition,
+            )
+        else:
+            updated.update(memory_peak(prior if "memory_max" in prior else {}, item["memory"]))
+            updated["pids_current_max"] = max(
+                natural(item["memory"]["pids.current"]), prior.get("pids_current_max", 0)
+            )
+        peaks["containers"][identifier] = updated
     for unit, memory in current["systemd"].items():
         peaks["systemd"][unit] = memory_peak(peaks["systemd"].get(unit, {}), memory)
     for path, usage in current["filesystems"].items():
