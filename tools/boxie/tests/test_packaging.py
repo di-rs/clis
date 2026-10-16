@@ -3,6 +3,7 @@
 import json
 import tomllib
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 import yaml
@@ -289,7 +290,33 @@ def test_boxie_configuration_cli_is_product_independent(tmp_path: Path) -> None:
     )
     agent = AgentConfig.from_file(tmp_path / "agent.json")
     api = load_configuration(tmp_path / "api.json")
-    assert agent.max_sandboxes == 8
+    assert agent.identity.host_id == "generic-host"
+    generated = json.loads((tmp_path / "agent.json").read_text())
+    assert "max_sandboxes" not in generated
+    generated["max_sandboxes"] = 4
+    (tmp_path / "agent.json").write_text(json.dumps(generated))
+    with pytest.raises(TypeError, match="max_sandboxes"):
+        AgentConfig.from_file(tmp_path / "agent.json")
     assert api.agent_url == "http://agent:8091"
     assert "playground" not in (tmp_path / "api.json").read_text().lower()
     assert "playground" not in (tmp_path / "agent.json").read_text().lower()
+
+
+@pytest.mark.parametrize("capacity", [1, 4, 8])
+def test_agent_configuration_rejects_unsupported_capacity(tmp_path: Path, capacity: int) -> None:
+    from boxie.bootstrap.config import AgentConfig
+
+    config = tmp_path / "agent.json"
+    config.write_text(
+        json.dumps(
+            {
+                "data_dir": str(tmp_path),
+                "profiles_file": "/etc/boxie/profiles.json",
+                "credential_file": "/run/secrets/agent",
+                "identity": {"installation_id": str(uuid4()), "host_id": "test"},
+                "max_sandboxes": capacity,
+            }
+        )
+    )
+    with pytest.raises(TypeError, match="max_sandboxes"):
+        AgentConfig.from_file(config)

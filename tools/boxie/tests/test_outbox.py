@@ -52,6 +52,179 @@ def test_accepted_before_ack_is_redelivered_to_one_run(
     asyncio.run(exercise())
 
 
+def test_idle_worker_presence_survives_long_poll_then_expires(
+    postgres_dsn: str, temporal_stack: Any, tmp_path: Path
+) -> None:
+    """Production 1.32.0 poller access refreshes at the end of idle long polls."""
+
+    async def exercise() -> None:
+        import time
+        from datetime import UTC, datetime, timedelta
+
+        from boxie.bootstrap.durable import Dependencies
+        from boxie.bootstrap.worker import lifecycle_worker
+        from boxie.temporal.contracts import TASK_QUEUE
+        from temporal_support import durable_stack
+        from temporalio.api.enums.v1 import TaskQueueType
+        from temporalio.api.taskqueue.v1 import TaskQueue
+        from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
+
+        client = await Client.connect(
+            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-worker")
+        )
+        kinds = (TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW, TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY)
+
+        async def timestamps() -> dict[int, datetime]:
+            result: dict[int, datetime] = {}
+            for kind in kinds:
+                info = await client.workflow_service.describe_task_queue(
+                    DescribeTaskQueueRequest(
+                        namespace=client.namespace,
+                        task_queue=TaskQueue(name=TASK_QUEUE),
+                        task_queue_type=kind,
+                    ),
+                    timeout=timedelta(seconds=5),
+                )
+                if info.pollers:
+                    result[kind] = max(
+                        p.last_access_time.ToDatetime(tzinfo=UTC) for p in info.pollers
+                    )
+            return result
+
+        async with durable_stack(postgres_dsn, tmp_path, client, TASK_QUEUE) as stack:
+            activities = stack[5]
+            dependencies = Dependencies(activities.agent, client)
+            async with lifecycle_worker(client, activities):
+                async with asyncio.timeout(10):
+                    while len(initial := await timestamps()) != 2 or not await dependencies():
+                        await asyncio.sleep(0.1)
+                started = time.monotonic()
+                largest_age = 0.0
+                async with asyncio.timeout(125):
+                    while True:
+                        current = await timestamps()
+                        largest_age = max(
+                            largest_age,
+                            max(
+                                (datetime.now(UTC) - value).total_seconds()
+                                for value in current.values()
+                            ),
+                        )
+                        assert await dependencies(), current
+                        # Both queues must refresh after a full idle cycle.
+                        if all(
+                            (current[kind] - initial[kind]).total_seconds() >= 50 for kind in kinds
+                        ):
+                            break
+                        await asyncio.sleep(2)
+                print(
+                    json.dumps(
+                        {
+                            "idle_seconds": round(time.monotonic() - started, 2),
+                            "largest_poller_age_seconds": round(largest_age, 2),
+                            "initial": {str(k): v.isoformat() for k, v in initial.items()},
+                            "refreshed": {str(k): v.isoformat() for k, v in current.items()},
+                        }
+                    ),
+                    flush=True,
+                )
+            stopped = time.monotonic()
+            async with asyncio.timeout(100):
+                while await dependencies():
+                    await asyncio.sleep(2)
+            print(
+                json.dumps(
+                    {"rejected_after_worker_stop_seconds": round(time.monotonic() - stopped, 2)}
+                ),
+                flush=True,
+            )
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("cause", ["idle", "expired", "control_plane_lost"])
+@pytest.mark.parametrize("requested_first", [False, True])
+def test_workflow_cleanup_preserves_first_termination_cause(
+    postgres_dsn: str,
+    temporal_stack: Any,
+    tmp_path: Path,
+    cause: str,
+    requested_first: bool,
+) -> None:
+    async def exercise() -> None:
+        from datetime import UTC, datetime
+        from uuid import UUID
+
+        from boxie.bootstrap.worker import lifecycle_worker
+        from boxie.domain.lifecycle import AgentObservation
+        from boxie.domain.models import SandboxState, TerminationReason
+        from boxie.sandbox.protocol import ObservationWire
+        from boxie.temporal.workflows import SandboxLifecycle
+        from boxie_test_support.api import artifact, create
+        from temporal_support import durable_stack
+        from test_postgres import counts
+
+        client = await Client.connect(
+            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-worker")
+        )
+        queue = "first-cause-" + uuid4().hex
+        async with durable_stack(postgres_dsn, tmp_path, client, queue) as (
+            http,
+            life,
+            agent,
+            daemon,
+            pool,
+            activities,
+            _dispatcher,
+        ):
+            sid = UUID(await create(http, await artifact(http)))
+            request = await life.load_request(sid)
+            assert await life.bind_agent_boot(OWNER, request.identity, sid, 1, None, agent.boot_id)
+            if requested_first:
+                await life.terminate(OWNER, sid, TerminationReason.REQUESTED)
+            observation = AgentObservation(
+                sid,
+                OWNER,
+                request.identity,
+                1,
+                agent.boot_id,
+                1,
+                datetime.now(UTC),
+                SandboxState.TERMINATING,
+                True,
+                cleanup_pending=True,
+                reason=TerminationReason(cause),
+                absolute_deadline=request.absolute_deadline,
+            )
+            expected = TerminationReason.REQUESTED if requested_first else TerminationReason(cause)
+            for item, accepted in ((observation, True), (observation, False)):
+                response = await http.put(
+                    "/internal/observations",
+                    json=ObservationWire.from_domain(item).model_dump(mode="json"),
+                    headers={"Authorization": "Bearer agent-test-secret"},
+                )
+                assert response.status_code == 200
+                assert response.json() == {"accepted": accepted}
+                assert (await life.get(OWNER, sid)).reason == expected
+            assert (await counts(pool))[1:3] == (1, 1)
+            async with lifecycle_worker(client, activities, task_queue=queue):
+                handle = await client.start_workflow(
+                    SandboxLifecycle.run,
+                    str(sid),
+                    id=f"boxie/sandbox/{sid}",
+                    task_queue=queue,
+                )
+                assert (await asyncio.wait_for(handle.result(), 30)).cleaned
+            final = await life.get(OWNER, sid)
+            assert final.reason == expected
+            assert final.state == SandboxState.TERMINATED and not final.cleanup_pending
+            assert (await life.load_request(sid)).desired_stop
+            assert await counts(pool) == (1, 0, 0, 2)
+            assert daemon.creates == 0 and not daemon.resources
+
+    asyncio.run(exercise())
+
+
 @pytest.mark.parametrize("stop_first", [True, False])
 def test_runnable_stack_preserves_accounting_and_worker_replacement(
     postgres_dsn: str,

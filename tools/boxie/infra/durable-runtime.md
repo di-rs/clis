@@ -31,9 +31,14 @@ terminal continuity are excluded.
 
 `/readyz` reports orchestration readiness: SQL/outbox age and backlog, authenticated
 agent execution/Docker readiness, Temporal health/namespace and recent workflow
-and activity pollers. A command older than 30 seconds or backlog of 100 rejects new
-admission. Matching retries, status and stop still use SQL when dependencies are
-unhealthy. Stop requires the normal API DELETE, never Temporal termination.
+and activity pollers. Worker presence uses a 90-second freshness window: the
+pinned Temporal 1.32.0 server's 60-second matching long poll plus a 30-second
+scheduling/network margin. This is recent presence, not instantaneous liveness;
+a dead idle worker can remain represented for up to 90 seconds. Changes to the
+production server's long-poll setting must revisit this compatibility bound.
+Separately, a new undelivered command older than 30 seconds or backlog of 100
+rejects new admission. Matching retries, status and stop still use SQL when
+dependencies are unhealthy. Stop requires the normal API DELETE, never Temporal termination.
 Workers can restart without closing agent-owned terminals. Cleanup failures retain
 capacity and artifact references and retry durably every 30 seconds after each
 bounded cycle. Only fenced physical absence can release accounting.

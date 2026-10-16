@@ -20,6 +20,11 @@ from boxie.persistence.postgres import Pool
 from boxie.sandbox.durable_client import DurableAgentClient
 from boxie.temporal.contracts import TASK_QUEUE
 
+# Temporal 1.32.0's matching long poll defaults to 60 seconds. Poller access
+# timestamps refresh between polls, so allow another 30 seconds for scheduling
+# and network delay. Revisit this bound if the production server setting changes.
+WORKER_PRESENCE_SECONDS = 90
+
 
 def durable_config(data: dict[str, Any]) -> DurableConfig:
     converted: dict[str, Any] = {
@@ -85,10 +90,10 @@ class Dependencies:
                     ),
                     timeout=timedelta(seconds=5),
                 )
-                # A stale poller list is not current worker readiness.
+                # Recent presence is bounded evidence, not instantaneous liveness.
                 if not any(
                     (datetime.now(UTC) - p.last_access_time.ToDatetime(tzinfo=UTC)).total_seconds()
-                    < 30
+                    < WORKER_PRESENCE_SECONDS
                     for p in queue.pollers
                 ):
                     return False

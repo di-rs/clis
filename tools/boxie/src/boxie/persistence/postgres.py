@@ -232,7 +232,7 @@ class PostgresLifecycle:
             row = await (
                 await conn.execute(
                     """UPDATE sandboxes SET desired_stop=true,
-                reason=%s,state='terminating',cleanup_pending=true WHERE id=%s RETURNING *""",
+                reason=COALESCE(reason,%s),state='terminating',cleanup_pending=true WHERE id=%s RETURNING *""",
                     (reason.value, sandbox_id),
                 )
             ).fetchone()

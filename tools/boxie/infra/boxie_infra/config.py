@@ -46,7 +46,6 @@ def main() -> None:
             "credential_file": args.agent_credential,
             "identity": {"installation_id": str(args.installation_id), "host_id": args.host_id},
             "bind_host": args.bind_host,
-            "max_sandboxes": 8,
         },
         "api.json": {
             "release": "local",

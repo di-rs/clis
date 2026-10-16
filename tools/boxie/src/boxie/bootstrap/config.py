@@ -34,7 +34,6 @@ class AgentConfig:
     profiles_file: Path
     credential_file: Path
     identity: AgentIdentity
-    max_sandboxes: int = 8
     policy_maximum: LifetimePolicy = field(default_factory=LifetimePolicy)
     docker_timeout: float = 20
     sweep_seconds: float = 1
@@ -44,8 +43,6 @@ class AgentConfig:
     api_url: str | None = None
 
     def __post_init__(self) -> None:
-        if not 1 <= self.max_sandboxes <= 8:
-            raise ValueError("capacity must be 1..8")
         if not 0 < self.docker_timeout <= 60 or not 0 < self.sweep_seconds <= 10:
             raise ValueError("invalid agent intervals")
         validate_policy(self.policy_maximum)
