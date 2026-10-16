@@ -390,6 +390,11 @@ final teardown has a separate 180-second bound. Installation, setup, scenarios,
 cleanup and artifact export fit within the workflow's 65-minute hard job limit.
 Reports retain measured setup and scenario elapsed times; CI supplies job duration.
 Missing preconditions, timeouts and restoration failures are failures, never skips.
+The lifecycle-failure case injects a start error after real owned container
+creation. It requires the exact fault-hit identity, physical removal, committed
+failed SQL with cleanup complete, correlated logs and a fresh failed-state metric.
+An uncertain create is deliberately excluded: production must keep its cleanup
+obligation open when absence cannot establish the create outcome.
 The Linux process-identity test is explicitly skipped on macOS; local parser,
 subprocess and mock Access checks do not establish native acceptance.
 

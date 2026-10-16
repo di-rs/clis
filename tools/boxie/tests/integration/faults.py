@@ -8,6 +8,7 @@ The on-disk barrier is evidence of COMMIT, not of a failed INSERT.
 import asyncio
 import contextlib
 import os
+import re
 from pathlib import Path
 
 
@@ -79,12 +80,14 @@ class Faults:
                 )
                 await writer.drain()
                 return
-            if (
-                first.startswith(b"POST ")
-                and b"/containers/create" in first
-                and self.enabled("fail_create")
-            ):
-                (self.root / "failed_create_seen").touch()
+            start = re.fullmatch(
+                rb"POST (?:/v[0-9]+\.[0-9]+)?/containers/([a-f0-9]{64})/start HTTP/1\.[01]",
+                first,
+            )
+            if start and self.enabled("fail_start"):
+                # Create already returned an owned identity. Unlike an uncertain
+                # create failure, this path permits physical cleanup confirmation.
+                (self.root / "failed_start_seen").write_text(start[1].decode("ascii"))
                 writer.write(
                     b'HTTP/1.1 503 Unavailable\r\nContent-Length: 25\r\nConnection: close\r\n\r\n{"message":"owned fault"}\n'
                 )

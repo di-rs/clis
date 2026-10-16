@@ -224,7 +224,7 @@ with httpx.Client(headers={'Authorization': 'Bearer ' + credential}, timeout=1, 
         )
 
     def fault(self, name: str, enabled: bool) -> None:
-        if name not in {"hold_create", "hold_commit", "fail_delete", "fail_create"}:
+        if name not in {"hold_create", "hold_commit", "fail_delete", "fail_start"}:
             raise ValueError("unknown owned fault")
         path = self.root / "faults" / name
         if enabled:
@@ -321,7 +321,7 @@ with httpx.Client(headers={'Authorization': 'Bearer ' + credential}, timeout=1, 
             super().close()
             return
         errors = []
-        for name in ("hold_create", "hold_commit", "fail_delete", "fail_create"):
+        for name in ("hold_create", "hold_commit", "fail_delete", "fail_start"):
             self.fault(name, False)
         for operation in (
             lambda: (self.root / "runtime.log").write_text(

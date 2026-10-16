@@ -4,6 +4,7 @@ import asyncio
 import errno
 import json
 import os
+import re
 import signal
 import sys
 import time
@@ -146,7 +147,7 @@ class Scenario:
                 - before["persistent"]["bytes"],
                 "runtime_is_collected": False,
             }
-        self.app.stack.fault("fail_create", False)
+        self.app.stack.fault("fail_start", False)
         if self.name == "producer-pipe":
             for name in ("blocked-stdout", "stop-api"):
                 (self.root / "control" / name).unlink(missing_ok=True)
@@ -329,10 +330,19 @@ class Scenario:
     async def failure_case(self) -> None:
         await self.terminal_privacy()
         committed_at = time.time()
-        self.app.stack.fault("fail_create", True)
+        self.app.stack.fault("fail_start", True)
         sandbox = await self.app.provision(failed=True)
-        if not (self.app.stack.root / "faults/failed_create_seen").exists():
-            raise RuntimeError("failed-create injection was not reached")
+        marker = self.app.stack.root / "faults/failed_start_seen"
+        identifier = marker.read_text() if marker.exists() else ""
+        if not re.fullmatch("[a-f0-9]{64}", identifier):
+            raise RuntimeError("failed-start owned container identity was not observed")
+        remaining = await self.command(
+            "docker", "ps", "--all", "--quiet", "--no-trunc", "--filter", "id=" + identifier
+        )
+        if remaining:
+            raise RuntimeError("failed-start container was not physically removed")
+        self.observations["failed_start_container_id"] = identifier
+        self.observations["failed_start_container_removed"] = True
         committed = await asyncio.to_thread(self.app.committed, sandbox)
         if committed != {"state": "failed", "cleanup_pending": False}:
             raise RuntimeError("deliberate failure was not committed to SQL")

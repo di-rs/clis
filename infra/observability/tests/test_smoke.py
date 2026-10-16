@@ -98,7 +98,7 @@ def test_stack_executor_overlay_and_daemon_are_consistent(
     assert calls[0][0][-3:] == ["--file", str(overlay), "config"]
 
 
-def test_failed_create_proxy_rejects_before_upstream(
+def test_failed_start_proxy_rejects_before_upstream(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import asyncio
@@ -106,7 +106,7 @@ def test_failed_create_proxy_rejects_before_upstream(
     monkeypatch.syspath_prepend(str(Path("tools/boxie/tests").resolve()))
     from integration.faults import Faults
 
-    (tmp_path / "fail_create").touch()
+    (tmp_path / "fail_start").touch()
     monkeypatch.setenv("FAULT_DOCKER_SOCKET", str(tmp_path / "nonexistent.sock"))
 
     async def exercise() -> None:
@@ -116,13 +116,17 @@ def test_failed_create_proxy_rejects_before_upstream(
             reader, writer = await asyncio.open_connection(
                 "127.0.0.1", server.sockets[0].getsockname()[1]
             )
-            writer.write(b"POST /v1.47/containers/create HTTP/1.1\r\nContent-Length: 0\r\n\r\n")
+            writer.write(
+                b"POST /v1.47/containers/"
+                + b"a" * 64
+                + b"/start HTTP/1.1\r\nContent-Length: 0\r\n\r\n"
+            )
             await writer.drain()
             result = await asyncio.wait_for(reader.read(), 1)
             writer.close()
             await writer.wait_closed()
         assert result.startswith(b"HTTP/1.1 503")
-        assert (tmp_path / "failed_create_seen").is_file()
+        assert (tmp_path / "failed_start_seen").read_text() == "a" * 64
 
     asyncio.run(exercise())
 
