@@ -30,6 +30,18 @@ persistence:
         maxIdleConns: 2
         maxConnLifetime: 1h
 global:
+  metrics:
+    prefix: ""
+    withoutUnitSuffix: true
+    withoutCounterSuffix: true
+    recordTimerInSeconds: true
+    excludeTags:
+      namespace: [boxie]
+      taskqueue: [boxie-lifecycle]
+    prometheus:
+      framework: opentelemetry
+      listenAddress: "0.0.0.0:9090"
+      handlerPath: /metrics
   membership:
     maxJoinDuration: 30s
     broadcastAddress: '{{ env "TEMPORAL_BROADCAST_ADDRESS" }}'

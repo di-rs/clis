@@ -1,0 +1,50 @@
+rule_files: [../../rules/boxie.yml]
+evaluation_interval: 15s
+tests:
+- name: separate backing mount low while root is healthy
+  interval: 15s
+  input_series:
+  - series: node_filesystem_avail_bytes{job="node-exporter",instance="host",mountpoint="/",device="root",fstype="ext4",device_error=""}
+    values: 800x40
+  - series: node_filesystem_size_bytes{job="node-exporter",instance="host",mountpoint="/",device="root",fstype="ext4",device_error=""}
+    values: 1000x40
+  - series: node_filesystem_device_error{job="node-exporter",instance="host",mountpoint="/",device="root",fstype="ext4"}
+    values: '0x40'
+  - series: node_filesystem_avail_bytes{job="node-exporter",instance="host",mountpoint="/data",device="data",fstype="ext4",device_error=""}
+    values: 90x40
+  - series: node_filesystem_size_bytes{job="node-exporter",instance="host",mountpoint="/data",device="data",fstype="ext4",device_error=""}
+    values: 1000x40
+  - series: node_filesystem_device_error{job="node-exporter",instance="host",mountpoint="/data",device="data",fstype="ext4"}
+    values: '0x40'
+  - series: node_scrape_collector_success{job="node-exporter",instance="host",collector="filesystem"}
+    values: 1x40
+  alert_rule_test:
+  - eval_time: 1m45s
+    alertname: HostDiskSpaceCritical
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: HostDiskSpaceCritical
+    exp_alerts:
+    - exp_labels: {job: node-exporter, instance: host, mountpoint: /data, device: data, fstype: ext4, severity: critical}
+  - eval_time: 4m45s
+    alertname: HostDiskSpaceLow
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: HostDiskSpaceLow
+    exp_alerts:
+    - exp_labels: {job: node-exporter, instance: host, mountpoint: /data, device: data, fstype: ext4, severity: warning}
+- name: missing expected data mount is unknown despite root health
+  interval: 15s
+  input_series:
+  - series: node_filesystem_size_bytes{job="node-exporter",instance="host",mountpoint="/",device="root",fstype="ext4",device_error=""}
+    values: 1000x40
+  - series: node_scrape_collector_success{job="node-exporter",instance="host",collector="filesystem"}
+    values: 1x40
+  alert_rule_test:
+  - eval_time: 1m45s
+    alertname: HostDiskMetricsUnavailable
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: HostDiskMetricsUnavailable
+    exp_alerts:
+    - exp_labels: {job: node-exporter, mountpoint: /data, severity: warning}

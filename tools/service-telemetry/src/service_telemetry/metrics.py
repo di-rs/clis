@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from prometheus_client import CollectorRegistry, Counter, Histogram, generate_latest
 from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily, Metric
 
-from service_logging.logging import LogRuntime
+from service_telemetry.logging import LogRuntime
 
 METHODS = frozenset(("GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "other"))
 STATUS = frozenset(("1xx", "2xx", "3xx", "4xx", "5xx", "disconnected", "error"))

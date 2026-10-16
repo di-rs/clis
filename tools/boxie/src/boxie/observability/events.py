@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from uuid import UUID
 
-from service_logging.logging import configured_runtime
+from service_telemetry.logging import configured_runtime
 
 EVENTS = {
     "sandbox.accepted": "Sandbox accepted",

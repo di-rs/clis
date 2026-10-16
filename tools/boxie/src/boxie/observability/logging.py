@@ -4,10 +4,10 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
-from service_logging import logging as producer
-from service_logging.asgi import RequestLogging as RequestLogging
-from service_logging.logging import LogRuntime as LogRuntime
-from service_logging.logging import LogSettings as LogSettings
+from service_telemetry import logging as producer
+from service_telemetry.asgi import RequestLogging as RequestLogging
+from service_telemetry.logging import LogRuntime as LogRuntime
+from service_telemetry.logging import LogSettings as LogSettings
 
 from boxie.observability.events import EVENTS
 
@@ -82,7 +82,7 @@ def process_logging(role: str) -> LogRuntime:
             logger=logging.getLogger("temporalio.core"), append_log_fields_to_message=False
         ),
     )
-    from service_logging.metrics import private_bind_host
+    from service_telemetry.metrics import private_bind_host
 
     host = private_bind_host(os.environ.get("BOXIE_METRICS_HOST", "127.0.0.1"))
     try:

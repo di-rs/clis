@@ -26,7 +26,7 @@ from uuid import uuid4
 
 import structlog
 
-from service_logging.context import current_context, validated
+from service_telemetry.context import current_context, validated
 
 # Finite categories, no URLs, headers, exception messages, notes, source or locals.
 _BUILTIN_ERRORS = frozenset(
@@ -82,7 +82,7 @@ class LogStats:
 def _logger_category(name: object) -> str:
     if type(name) is not str or len(name) > 128:
         return "dependency"
-    for prefix in ("boxie", "playground", "uvicorn", "temporalio", "service_logging"):
+    for prefix in ("boxie", "playground", "uvicorn", "temporalio", "service_telemetry"):
         if name == prefix or name.startswith(prefix + "."):
             return prefix
     return "dependency"
@@ -196,7 +196,7 @@ class LogRuntime:
         event: str,
         *,
         level: int = logging.INFO,
-        logger: str = "service_logging",
+        logger: str = "service_telemetry",
         error: BaseException | None = None,
         **fields: object,
     ) -> None:

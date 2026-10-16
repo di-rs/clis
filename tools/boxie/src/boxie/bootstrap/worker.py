@@ -8,7 +8,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from service_logging.logging import install_asyncio_handler, log_runtime
+from service_telemetry.logging import install_asyncio_handler, log_runtime
 
 from boxie.temporal.contracts import TASK_QUEUE
 

@@ -3,16 +3,25 @@ services:
   api:
     extends: {file: compose.yml, service: api}
     user: ${BOXIE_TEST_USER:?Set fixture owner UID:GID}
+    logging: !override
+      driver: local
+      options: {max-size: 10m, max-file: "3"}
     restart: "no"
     ports: ["127.0.0.1:${BOXIE_TEST_API_PORT}:8090"]
   worker:
     extends: {file: compose.yml, service: worker}
     user: ${BOXIE_TEST_USER:?Set fixture owner UID:GID}
+    logging: !override
+      driver: local
+      options: {max-size: 10m, max-file: "3"}
     restart: "no"
   agent:
     command: [python, /fixture/agent_fixture.py, --config, /etc/boxie/agent.json]
     extends: {file: compose.yml, service: agent}
     user: ${BOXIE_TEST_USER:?Set fixture owner UID:GID}
+    logging: !override
+      driver: local
+      options: {max-size: 10m, max-file: "3"}
     restart: "no"
     environment:
       DOCKER_HOST: unix:///faults/docker.sock
@@ -33,6 +42,9 @@ services:
       - ${BOXIE_TEST_ROOT}/faults:/faults
       - ${BOXIE_TEST_FAULTS_SCRIPT}:/fixture/faults.py:ro
     networks: [control]
+    logging: !override
+      driver: local
+      options: {max-size: 10m, max-file: "3"}
     restart: "no"
   playground:
     image: ${PLAYGROUND_IMAGE}
@@ -48,11 +60,17 @@ services:
       - playground:/data
       - ${BOXIE_CONSUMER_CREDENTIAL_FILE}:/run/secrets/consumer:ro
     networks: [consumer]
+    logging: !override
+      driver: local
+      options: {max-size: 10m, max-file: "3"}
     restart: "no"
 networks:
   control:
     external: true
     name: ${BOXIE_CONTROL_NETWORK}
+  metrics:
+    external: true
+    name: ${OBS_METRICS_NETWORK}
   consumer: {}
 volumes:
   playground: {}

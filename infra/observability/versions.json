@@ -1,0 +1,79 @@
+{
+  "images": {
+    "victorialogs": {
+      "version": "v1.53.0",
+      "image": "docker.io/victoriametrics/victoria-logs@sha256:251121fa882af99b95ba0c230a4a2f412ea602d2698c64a96c58dc9842bb755d"
+    },
+    "prometheus": {
+      "version": "v3.15.0",
+      "image": "docker.io/prom/prometheus@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e"
+    },
+    "grafana": {
+      "version": "13.2.4",
+      "image": "docker.io/grafana/grafana@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f"
+    },
+    "node-exporter": {
+      "version": "v1.12.1",
+      "image": "ghcr.io/prometheus/node-exporter@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0"
+    },
+    "cloudflared": {
+      "version": "2026.10.0",
+      "image": "docker.io/cloudflare/cloudflared@sha256:9b49eed8f62806d5d45ddf59ecefb5710429598ea6d3fcccd2af938f621b2b07"
+    }
+  },
+  "collector": {
+    "version": "0.59.0",
+    "base": "docker.io/library/ubuntu@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7",
+    "snapshot": "20261015T000000Z",
+    "journalctl": "259.5-0ubuntu3.4",
+    "bootstrap_ca_sha256": "714d457d580922dbf1d0be8bd35ba236a842b50b0072ae791582a19adef772a5",
+    "archives": {
+      "amd64": {
+        "triple": "x86_64-unknown-linux-musl",
+        "sha256": "a8dbc43c18ae25d0b23a712c9262f3aad904e352b1db5e7db1d9c4aecab59496"
+      },
+      "arm64": {
+        "triple": "aarch64-unknown-linux-musl",
+        "sha256": "9a666b266168fc44a086741ed92a01880d5ae6e08e4bb49ef40a54e47cc5a8a0"
+      }
+    },
+    "published_registry_digest": null,
+    "packages": {
+      "amd64": {
+        "ca-certificates_20260601~26.04.1_all.deb": "6077d27c6b6f8b23590cb01ff877ed8c804a67a5442cc32b5a33da10d2bd0e90",
+        "libssl3t64_3.5.5-1ubuntu3.7_amd64.deb": "3ff73e121f6cd4f19e80ab4329dfd914108b3936c9db3708200203a9b245b34d",
+        "libsystemd-shared_259.5-0ubuntu3.4_amd64.deb": "9b30b1e96cc8b48f94a2df5c1cbee7690e16f727d71b40c458a64aabe15db35f",
+        "openssl-provider-legacy_3.5.5-1ubuntu3.7_amd64.deb": "51cf418571059831096abd40e0bd5debaa1ae48a6f8d87d9e4e5f7f12aa4db52",
+        "openssl_3.5.5-1ubuntu3.7_amd64.deb": "6965aafe69e0a49ef34d2e26f8e83d09d1c6037b7e9ee37f19b292a3c6851621",
+        "systemd_259.5-0ubuntu3.4_amd64.deb": "1b2eca56c5cfdbc1aca78591a68f94b7e1c996abd52095587069776b816b9dca"
+      },
+      "arm64": {
+        "ca-certificates_20260601~26.04.1_all.deb": "6077d27c6b6f8b23590cb01ff877ed8c804a67a5442cc32b5a33da10d2bd0e90",
+        "libssl3t64_3.5.5-1ubuntu3.7_arm64.deb": "9fe87b6beec5de636a70e4fb6076517a39f5053c7e23e628c9459b94f85c75ff",
+        "libsystemd-shared_259.5-0ubuntu3.4_arm64.deb": "aea5d40b9db50c324813f427b233f9b7f4996c93539c78e19effdcd9b2838229",
+        "openssl-provider-legacy_3.5.5-1ubuntu3.7_arm64.deb": "757ec89120fe3f418a842342b3a0c596b89b0e3fb0ba770347dda1219f219bbd",
+        "openssl_3.5.5-1ubuntu3.7_arm64.deb": "623ea7ec0eb80da3f40e89e3318a4e82d4c64146d206c90cabbce6998d822fa8",
+        "systemd_259.5-0ubuntu3.4_arm64.deb": "ff995fbcdc49dab7e101b42011f2970db62cfafd1c03ae832fc0370f94acd547"
+      }
+    },
+    "local_verification_build": {
+      "platform": "linux/arm64",
+      "oci_index": "sha256:26459c415d9282b87142f2314712cc41c506bc152a42494f6394d24e1ca221e6",
+      "manifest": "sha256:c95c431bddcdf5f1c853754588d28ccae3bc9dbd5d9c08592905182d67bd9055",
+      "config": "sha256:e797a9a646037c9ad5dffa5dfd80e9b8e241aa910b6f7198076391b4ad16b2c4",
+      "dockerfile_sha256": "edf35d78987b5b12b63d27c3c793512b13f5455988c037adaf7673f7c1590776",
+      "published": false
+    }
+  },
+  "plugins": {
+    "victoriametrics-logs-datasource": {
+      "version": "0.32.0",
+      "url": "https://github.com/VictoriaMetrics/victorialogs-datasource/releases/download/v0.32.0/victoriametrics-logs-datasource-v0.32.0.zip",
+      "sha256": "8204d097b17f53b1c3a71761047734b7980bd983710c6cfcef8d938abe5eeef0"
+    },
+    "prometheus": {
+      "version": "13.2.3",
+      "delivery": "bundled in pinned Grafana 13.2.4"
+    }
+  }
+}

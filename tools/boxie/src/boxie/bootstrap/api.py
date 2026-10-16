@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from service_logging.logging import install_asyncio_handler, log_runtime
+from service_telemetry.logging import install_asyncio_handler, log_runtime
 
 if TYPE_CHECKING:
     from boxie.api.app import ApiConfig

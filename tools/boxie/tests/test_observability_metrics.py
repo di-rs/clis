@@ -68,7 +68,7 @@ def test_bounded_labels_and_lease_unknown_empty_expired() -> None:
 def test_http_completion_uses_bounded_route_template() -> None:
     import asyncio
 
-    from service_logging.asgi import RequestLogging
+    from service_telemetry.asgi import RequestLogging
 
     Metrics, _ = metrics_type()
     metrics = Metrics("api")
@@ -101,7 +101,7 @@ def test_private_listener_collision_recovers_and_closes() -> None:
     import time
     import urllib.request
 
-    from service_logging.metrics import MetricsListener
+    from service_telemetry.metrics import MetricsListener
 
     Metrics, _ = metrics_type()
     with socket.socket() as occupied:
@@ -153,8 +153,8 @@ with socket.socket() as occupied:
 
 
 def test_disabled_log_sink_is_visible_without_traffic() -> None:
-    from service_logging.logging import LogRuntime, LogSettings
-    from service_logging.metrics import ProcessMetrics
+    from service_telemetry.logging import LogRuntime, LogSettings
+    from service_telemetry.metrics import ProcessMetrics
 
     runtime = LogRuntime(LogSettings(service="boxie", role="api"), {}, {}, None, 4096, "disabled")
     try:
@@ -173,13 +173,13 @@ def test_disconnect_completion_is_cancelled_once(
     import os
 
     from boxie.observability.metrics import Metrics
-    from service_logging.asgi import RequestLogging
-    from service_logging.logging import LogRuntime, LogSettings
+    from service_telemetry.asgi import RequestLogging
+    from service_telemetry.logging import LogRuntime, LogSettings
 
     read, write = os.pipe()
     runtime = LogRuntime(LogSettings(service="boxie", role="api"), {}, {}, write, 4096, "enabled")
     metrics = Metrics("api")
-    monkeypatch.setattr("service_logging.asgi.configured_runtime", lambda: runtime)
+    monkeypatch.setattr("service_telemetry.asgi.configured_runtime", lambda: runtime)
 
     async def receive() -> dict[str, str]:
         return {"type": "http.disconnect"}

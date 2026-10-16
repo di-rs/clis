@@ -1,0 +1,223 @@
+name: boxie-observability
+services:
+  vector:
+    image: ${OBS_COLLECTOR_IMAGE:?Set published derived collector digest}
+    platform: linux/amd64
+    user: 65532:65532
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    restart: unless-stopped
+    pids_limit: 128
+    mem_limit: ${OBS_VECTOR_MEMORY_BYTES:?Set memory cap}
+    logging:
+      driver: journald
+      options:
+        mode: non-blocking
+        max-buffer-size: 4m
+        tag: observability-vector
+    networks:
+      metrics:
+        aliases:
+        - vector
+      ingest:
+        aliases:
+        - vector
+    group_add:
+    - ${OBS_JOURNAL_GROUP_GID:?Set numeric host journal group}
+    environment:
+      VECTOR_LOG: info
+    command:
+    - --config
+    - /etc/vector/vector.yaml
+    volumes:
+    - ./vector.yaml:/etc/vector/vector.yaml:ro
+    - ${OBS_JOURNAL_DIRECTORY:?Set persistent journal directory}:/var/log/journal:ro
+    - ${OBS_MACHINE_ID_PATH:?Set machine identity}:/etc/machine-id:ro
+    - vector-data:/var/lib/vector
+    tmpfs:
+    - /tmp:size=16777216
+  victorialogs:
+    image: ${OBS_VICTORIALOGS_IMAGE:?Set immutable image}
+    platform: linux/amd64
+    user: 65534:65534
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    restart: unless-stopped
+    pids_limit: 128
+    mem_limit: ${OBS_LOGS_MEMORY_BYTES:?Set memory cap}
+    logging:
+      driver: journald
+      options:
+        mode: non-blocking
+        max-buffer-size: 4m
+        tag: observability-victorialogs
+    networks:
+      ingest:
+        aliases:
+        - victorialogs
+      query:
+        aliases:
+        - victorialogs
+      metrics:
+        aliases:
+        - victorialogs
+    command:
+    - -httpListenAddr=:9428
+    - -storageDataPath=/victoria-logs-data
+    - -retentionPeriod=${OBS_LOGS_RETENTION_DAYS}d
+    - -retention.maxDiskSpaceUsageBytes=${OBS_LOGS_DISK_BYTES}
+    - -metrics.exposeMetadata
+    - -loggerLevel=INFO
+    volumes:
+    - logs-data:/victoria-logs-data
+  prometheus:
+    image: ${OBS_PROMETHEUS_IMAGE:?Set immutable image}
+    platform: linux/amd64
+    user: 65534:65534
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    restart: unless-stopped
+    pids_limit: 128
+    mem_limit: ${OBS_PROMETHEUS_MEMORY_BYTES:?Set memory cap}
+    logging:
+      driver: journald
+      options:
+        mode: non-blocking
+        max-buffer-size: 4m
+        tag: observability-prometheus
+    networks:
+      metrics:
+        aliases:
+        - prometheus
+      query:
+        aliases:
+        - prometheus
+    command:
+    - --config.file=/etc/prometheus/prometheus.yml
+    - --storage.tsdb.path=/prometheus
+    - --storage.tsdb.retention.time=${OBS_PROMETHEUS_RETENTION_DAYS}d
+    - --storage.tsdb.retention.size=${OBS_PROMETHEUS_RETENTION_BYTES}B
+    - --web.listen-address=0.0.0.0:9090
+    - --log.level=info
+    volumes:
+    - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    - ./rules:/etc/prometheus/rules:ro
+    - prometheus-data:/prometheus
+  grafana:
+    image: ${OBS_GRAFANA_IMAGE:?Set immutable image}
+    platform: linux/amd64
+    user: '472:0'
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    restart: unless-stopped
+    pids_limit: 128
+    mem_limit: ${OBS_GRAFANA_MEMORY_BYTES:?Set memory cap}
+    logging:
+      driver: journald
+      options:
+        mode: non-blocking
+        max-buffer-size: 4m
+        tag: observability-grafana
+    networks:
+      query:
+        aliases:
+        - grafana
+      grafana-origin:
+        aliases:
+        - grafana
+    environment:
+      GF_LOG_LEVEL: info
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana-admin
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_PLUGINS_PREINSTALL_DISABLED: 'true'
+      GF_PLUGINS_PREINSTALL_AUTO_UPDATE: 'false'
+      GF_PLUGINS_PLUGIN_ADMIN_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: 'false'
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+    volumes:
+    - grafana-data:/var/lib/grafana
+    - ${OBS_GRAFANA_PROVISIONING_DIR:?Set owned Grafana provisioning}:/etc/grafana/provisioning:ro
+    - ${OBS_GRAFANA_PLUGIN_DIR:?Set verified pinned plugins}:/var/lib/grafana/plugins:ro
+    - ${OBS_GRAFANA_ADMIN_PASSWORD_FILE:?Set private Grafana admin file}:/run/secrets/grafana-admin:ro
+    tmpfs:
+    - /tmp:size=16777216
+  node-exporter:
+    image: ${OBS_NODE_EXPORTER_IMAGE:?Set immutable image}
+    platform: linux/amd64
+    user: 65534:65534
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    restart: unless-stopped
+    pids_limit: 128
+    mem_limit: ${OBS_EXPORTER_MEMORY_BYTES:?Set memory cap}
+    logging:
+      driver: journald
+      options:
+        mode: non-blocking
+        max-buffer-size: 4m
+        tag: observability-node-exporter
+    networks:
+      metrics:
+        aliases:
+        - node-exporter
+    command:
+    - --collector.disable-defaults
+    - --collector.filesystem
+    - --collector.meminfo
+    - --path.rootfs=/host
+    - --path.procfs=/host/proc
+    - --web.listen-address=0.0.0.0:9100
+    - --web.telemetry-path=/metrics
+    - --log.level=info
+    volumes:
+    - type: bind
+      source: /
+      target: /host
+      read_only: true
+      bind:
+        propagation: rslave
+        create_host_path: false
+    tmpfs:
+    - /host/run:ro,nosuid,nodev,noexec,mode=000,size=4096
+    - /host/var/run:ro,nosuid,nodev,noexec,mode=000,size=4096
+volumes:
+  vector-data:
+    external: true
+    name: ${OBS_VECTOR_VOLUME:?Set independent external volume}
+  logs-data:
+    external: true
+    name: ${OBS_LOGS_VOLUME:?Set independent external volume}
+  prometheus-data:
+    external: true
+    name: ${OBS_PROMETHEUS_VOLUME:?Set independent external volume}
+  grafana-data:
+    external: true
+    name: ${OBS_GRAFANA_VOLUME:?Set independent external volume}
+networks:
+  metrics:
+    external: true
+    name: ${OBS_METRICS_NETWORK}
+  grafana-origin:
+    external: true
+    name: ${OBS_GRAFANA_ORIGIN_NETWORK}
+  ingest:
+    internal: true
+  query:
+    internal: true

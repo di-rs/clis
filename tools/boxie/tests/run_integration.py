@@ -50,6 +50,9 @@ class ProductionStack:
         )
         self.env.update(
             BOXIE_CONTROL_NETWORK=self.name,
+            OBS_METRICS_NETWORK=self.name + "-metrics",
+            OBS_GRAFANA_ORIGIN_NETWORK=self.name + "-grafana",
+            OBS_TEMPORAL_UI_ORIGIN_NETWORK=self.name + "-temporal-ui",
             TEMPORAL_CERTS_DIR=str(root / "server"),
             TEMPORAL_OPERATOR_CERTS_DIR=str(root / "operator"),
             TEMPORAL_UI_CERTS_DIR=str(root / "ui"),
@@ -58,6 +61,7 @@ class ProductionStack:
         self.ui_address = ""
         self.pg_port = ""
         self.evidence: dict[str, Any] = {}
+        self.shared_networks: list[str] = []
 
     def compose(self, package: str, *args: str) -> str:
         return command(
@@ -158,6 +162,7 @@ class ProductionStack:
             shutil.copy(ca / f"{name}.pem", self.root / "server" / f"{name}-ca.pem")
 
     def write_overrides(self) -> None:
+        # These non-journal service tests intentionally use Docker local logging.
         # The host Temporal client survives process kill/start in native scenarios.
         with socket.socket() as reservation:
             reservation.bind(("127.0.0.1", 0))
@@ -165,7 +170,15 @@ class ProductionStack:
         (self.root / "platform-override.yml").write_text(
             yaml.safe_dump(
                 {
-                    "services": {"postgres": {"ports": ["127.0.0.1::5432"]}},
+                    "services": {
+                        "postgres": {
+                            "ports": ["127.0.0.1::5432"],
+                            "logging": {
+                                "driver": "local",
+                                "options": {"mode": "non-blocking", "max-buffer-size": "4m"},
+                            },
+                        }
+                    },
                     "networks": {"control": {"internal": False}},
                 }
             )
@@ -174,17 +187,66 @@ class ProductionStack:
             yaml.safe_dump(
                 {
                     "services": {
-                        "temporal": {"ports": [f"127.0.0.1:{temporal_port}:7233"]},
-                        "ui": {"ports": ["127.0.0.1::8080"]},
+                        "schema": {
+                            "logging": {
+                                "driver": "local",
+                                "options": {"max-size": "10m", "max-file": "3"},
+                            }
+                        },
+                        "bootstrap": {
+                            "logging": {
+                                "driver": "local",
+                                "options": {"max-size": "10m", "max-file": "3"},
+                            }
+                        },
+                        "temporal": {
+                            "ports": [f"127.0.0.1:{temporal_port}:7233"],
+                            "logging": {
+                                "driver": "local",
+                                "options": {"mode": "non-blocking", "max-buffer-size": "4m"},
+                            },
+                        },
+                        "ui": {
+                            "ports": ["127.0.0.1::8080"],
+                            "logging": {
+                                "driver": "local",
+                                "options": {"mode": "non-blocking", "max-buffer-size": "4m"},
+                            },
+                        },
                     }
                 }
             )
         )
+        for name in ("platform-override.yml", "temporal-override.yml"):
+            path = self.root / name
+            path.write_text(path.read_text().replace("logging:", "logging: !override"))
 
     def start(self) -> None:
         self.certificates()
         self.write_overrides()
         self.compose("platform", "up", "--detach", "--wait", "--wait-timeout", "90")
+        # Compose omits unused declarations. The fixture explicitly owns these
+        # bridges, just as production platform bootstrap must own its handles.
+        for variable in (
+            "OBS_METRICS_NETWORK",
+            "OBS_GRAFANA_ORIGIN_NETWORK",
+            "OBS_TEMPORAL_UI_ORIGIN_NETWORK",
+        ):
+            network_id = command(
+                [
+                    "docker",
+                    "network",
+                    "create",
+                    "--internal",
+                    "--label",
+                    f"io.boxie.test.owner={self.name}",
+                    self.env[variable],
+                ]
+            )
+            self.shared_networks.append(network_id)
+            network = json.loads(command(["docker", "network", "inspect", network_id]))[0]
+            if not network["Internal"] or network["Labels"].get("io.boxie.test.owner") != self.name:
+                raise RuntimeError("fixture network ownership/internal verification failed")
         self.pg_port = self.compose("platform", "port", "postgres", "5432").rsplit(":", 1)[1]
         self.compose("temporal", "build", "bootstrap")
         self.compose(
@@ -234,6 +296,26 @@ class ProductionStack:
                     self.compose(package, "down", "--volumes", "--remove-orphans")
                 except Exception as error:
                     failures.append(str(error))
+        for network_id in self.shared_networks:
+            try:
+                remaining = command(
+                    [
+                        "docker",
+                        "network",
+                        "ls",
+                        "--filter",
+                        f"id={network_id}",
+                        "--format",
+                        "{{.ID}}",
+                    ]
+                )
+                if remaining:
+                    network = json.loads(command(["docker", "network", "inspect", network_id]))[0]
+                    if network["Labels"].get("io.boxie.test.owner") != self.name:
+                        raise RuntimeError("refusing cleanup of foreign fixture network")
+                    command(["docker", "network", "rm", network_id])
+            except Exception as error:
+                failures.append(str(error))
         if failures:
             raise RuntimeError("; ".join(failures))
 

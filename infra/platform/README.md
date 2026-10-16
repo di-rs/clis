@@ -61,3 +61,12 @@ UV_CACHE_DIR=/tmp/boxie-uv-cache uv run --locked pytest -m integration tools/box
 The fixture requires Docker, creates randomly named disposable containers and
 non-superuser test databases, then removes only those test-owned resources.
 Default pytest excludes integration and never starts Docker.
+
+Platform also owns `OBS_METRICS_NETWORK`, `OBS_GRAFANA_ORIGIN_NETWORK` and
+`OBS_TEMPORAL_UI_ORIGIN_NETWORK`, all internal bridges. Compose can omit unused
+network declarations: `compose up` for PostgreSQL alone does **not** establish
+these bridges. Platform bootstrap must create and validate their installation
+ownership and `internal` property before starting cross-unit consumers. PR4 owns
+that production ensure step. Do not attach PostgreSQL to them or add idle anchor
+containers. The isolated service fixture creates only its random named bridges,
+checks ownership/internal state and removes only its recorded owned network IDs.

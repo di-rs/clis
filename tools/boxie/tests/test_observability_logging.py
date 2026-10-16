@@ -198,8 +198,8 @@ Path({str(evidence)!r}).write_text(json.dumps(asdict(runtime.stats)))
 
 def test_atomic_truncation_preserves_json_and_omits_ids_intact() -> None:
     code = """
-from service_logging.logging import bootstrap_logging, LogSettings
-from service_logging.context import bind_context
+from service_telemetry.logging import bootstrap_logging, LogSettings
+from service_telemetry.context import bind_context
 runtime = bootstrap_logging(LogSettings(service="boxie", role="api"), events={"multiline": "é\\n" * 64})
 with bind_context(request_id="11111111-1111-1111-1111-111111111111", workflow_id="boxie/sandbox/11111111-1111-1111-1111-111111111111"):
     runtime.emit("multiline")
@@ -218,7 +218,7 @@ runtime.close()
 def test_thread_asyncio_unraisable_hooks_and_structlog() -> None:
     result = child(f"""
 import structlog, gc
-from service_logging.logging import install_asyncio_handler
+from service_telemetry.logging import install_asyncio_handler
 secret = {SECRET!r}
 def fail(): raise ValueError(secret)
 thread = threading.Thread(target=fail); thread.start(); thread.join()
@@ -484,7 +484,7 @@ def test_request_boundaries_isolate_reset_and_sanitize_context(
     code = f"""
 import asyncio, importlib
 from uuid import UUID
-from service_logging.context import bind_context, current_context
+from service_telemetry.context import bind_context, current_context
 assembly = importlib.import_module({module!r})
 runtime = assembly.bootstrap_logging(assembly.LogSettings(service={service!r}, role={role!r}))
 secret = {SECRET!r}
@@ -557,8 +557,8 @@ def test_boxie_process_roots_share_shutdown_deadline(
     import threading
 
     from boxie.observability.metrics import Metrics
-    from service_logging.logging import LogRuntime, LogSettings
-    from service_logging.metrics import MetricsListener
+    from service_telemetry.logging import LogRuntime, LogSettings
+    from service_telemetry.metrics import MetricsListener
 
     root = importlib.import_module("boxie.bootstrap." + role)
     read, write = os.pipe()

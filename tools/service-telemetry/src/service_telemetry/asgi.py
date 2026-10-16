@@ -5,8 +5,8 @@ from collections.abc import Awaitable, Callable, MutableMapping
 from typing import Any
 from uuid import uuid4
 
-from service_logging.context import bind_context
-from service_logging.logging import configured_runtime
+from service_telemetry.context import bind_context
+from service_telemetry.logging import configured_runtime
 
 # ASGI's callable contract, without a runtime web-framework dependency.
 type Scope = MutableMapping[str, Any]

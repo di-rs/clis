@@ -1,11 +1,11 @@
 """Independent Playground assembly: only the domain-neutral producer is shared."""
 
-from service_logging import logging as producer
-from service_logging.asgi import RequestLogging as RequestLogging
-from service_logging.context import bind_context as bind_context
-from service_logging.logging import LogRuntime as LogRuntime
-from service_logging.logging import LogSettings as LogSettings
-from service_logging.metrics import ProcessMetrics
+from service_telemetry import logging as producer
+from service_telemetry.asgi import RequestLogging as RequestLogging
+from service_telemetry.context import bind_context as bind_context
+from service_telemetry.logging import LogRuntime as LogRuntime
+from service_telemetry.logging import LogSettings as LogSettings
+from service_telemetry.metrics import ProcessMetrics
 
 _ROUTES = {
     ("playground.service", "Sandbox stop remains pending"): "sandbox_stop_pending",

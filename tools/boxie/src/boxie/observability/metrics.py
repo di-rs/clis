@@ -7,8 +7,8 @@ from dataclasses import dataclass
 
 from prometheus_client import Counter, Histogram
 from prometheus_client.core import GaugeMetricFamily, Metric
-from service_logging.logging import LogRuntime
-from service_logging.metrics import ProcessMetrics
+from service_telemetry.logging import LogRuntime
+from service_telemetry.metrics import ProcessMetrics
 
 from boxie.domain.models import SandboxState
 from boxie.observability.events import Transition, emit

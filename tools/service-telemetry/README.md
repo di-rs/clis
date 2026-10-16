@@ -1,4 +1,4 @@
-# Bounded service logging
+# Bounded service telemetry
 
 Boxie and CLI Playground declare this small Python dependency independently.
 Each service owns its templates and assembles its HTTP middleware and process.

@@ -1,0 +1,64 @@
+{
+  "provenance": {
+    "raw_file": "node.prom",
+    "sha256": "bcba2dfd05dff99e8e29af136767ea42f37bb96260ace084ed80f7a41f28f6c5",
+    "platform": "linux/arm64",
+    "note": "Independent native exporter samples. Node uses fixture-only /etc/hosts mount; Vector uses synthetic file-envelope input, not binary journals."
+  },
+  "samples": [
+    {
+      "name": "node_filesystem_avail_bytes",
+      "labels": {
+        "device": "/dev/vda1",
+        "device_error": "",
+        "fstype": "ext4",
+        "mountpoint": "/etc/hosts"
+      },
+      "value": "9.04850587648e+11"
+    },
+    {
+      "name": "node_filesystem_device_error",
+      "labels": {
+        "device": "/dev/vda1",
+        "device_error": "",
+        "fstype": "ext4",
+        "mountpoint": "/etc/hosts"
+      },
+      "value": "0"
+    },
+    {
+      "name": "node_filesystem_size_bytes",
+      "labels": {
+        "device": "/dev/vda1",
+        "device_error": "",
+        "fstype": "ext4",
+        "mountpoint": "/etc/hosts"
+      },
+      "value": "9.77843695616e+11"
+    },
+    {
+      "name": "node_memory_MemAvailable_bytes",
+      "labels": {},
+      "value": "7.005847552e+09"
+    },
+    {
+      "name": "node_memory_MemTotal_bytes",
+      "labels": {},
+      "value": "8.317267968e+09"
+    },
+    {
+      "name": "node_scrape_collector_success",
+      "labels": {
+        "collector": "filesystem"
+      },
+      "value": "1"
+    },
+    {
+      "name": "node_scrape_collector_success",
+      "labels": {
+        "collector": "meminfo"
+      },
+      "value": "1"
+    }
+  ]
+}

@@ -316,7 +316,7 @@ def test_domain_events_reach_safe_logging_catalog() -> None:
     import os
 
     from boxie.observability.events import EVENTS
-    from service_logging.logging import LogRuntime, LogSettings
+    from service_telemetry.logging import LogRuntime, LogSettings
 
     read, write = os.pipe()
     runtime = LogRuntime(

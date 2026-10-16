@@ -73,7 +73,7 @@
         "playground",
         "uvicorn",
         "temporalio",
-        "service_logging",
+        "service_telemetry",
         "dependency"
       ]
     },

@@ -1,13 +1,13 @@
 [project]
-name = "service-logging"
+name = "observability-infra"
 version = "0.1.0"
 requires-python = ">=3.15"
-dependencies = ["structlog==26.1.0", "prometheus-client==0.26.0"]
+dependencies = ["pyyaml>=6.0.3"]
 
 [build-system]
 requires = ["uv_build==0.13.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-root = "src"
-module-name = "service_logging"
+module-root = ""
+module-name = "observability_infra"

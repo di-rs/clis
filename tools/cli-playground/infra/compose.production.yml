@@ -1,4 +1,3 @@
-# Independently resolvable; automated production activation unavailable until PR4.
 name: ${PLAYGROUND_PROJECT_NAME:-cli-playground}
 services:
   gateway:
@@ -11,12 +10,16 @@ services:
       PLAYGROUND_BOXIE_CREDENTIAL_FILE: /run/secrets/consumer
       PLAYGROUND_BOXIE_PROFILE: ${PLAYGROUND_BOXIE_PROFILE:-playground}
       PLAYGROUND_PREVIEW_DOMAIN: ${PLAYGROUND_DOMAIN}
+      PLAYGROUND_METRICS_HOST: 0.0.0.0
     volumes:
     - data:/var/lib/cli-playground
     - ${PLAYGROUND_BOXIE_CREDENTIAL_FILE:?Set consumer credential file}:/run/secrets/consumer:ro
     networks:
-    - consumer
-    - proxy
+      consumer: {}
+      proxy: {}
+      metrics:
+        aliases:
+        - playground
     read_only: true
     tmpfs:
     - /tmp
@@ -37,6 +40,12 @@ services:
       timeout: 5s
       retries: 6
       start_period: 20s
+    logging:
+      driver: journald
+      options:
+        mode: non-blocking
+        max-buffer-size: 4m
+        tag: cli-playground-gateway
   proxy:
     image: traefik:v3.7.14
     command:
@@ -76,10 +85,11 @@ services:
     restart: unless-stopped
     mem_limit: 256m
     logging:
-      driver: local
+      driver: journald
       options:
-        max-size: 10m
-        max-file: '3'
+        mode: non-blocking
+        max-buffer-size: 4m
+        tag: playground-proxy
     networks:
     - proxy
 volumes:
@@ -96,3 +106,6 @@ networks:
   proxy:
     external: true
     name: ${PLAYGROUND_PROXY_NETWORK:?Set proxy network}
+  metrics:
+    external: true
+    name: ${OBS_METRICS_NETWORK:?Set private metrics network}

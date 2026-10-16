@@ -3,8 +3,8 @@
 import asyncio
 import os
 
-from service_logging.logging import install_asyncio_handler, run_process
-from service_logging.metrics import MetricsListener
+from service_telemetry.logging import install_asyncio_handler, run_process
+from service_telemetry.metrics import MetricsListener
 
 from playground.observability import LogSettings, Metrics, bootstrap_logging
 

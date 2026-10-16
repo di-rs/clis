@@ -7,8 +7,8 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from service_logging.logging import LogRuntime, run_process
-from service_logging.metrics import MetricsListener
+from service_telemetry.logging import LogRuntime, run_process
+from service_telemetry.metrics import MetricsListener
 from temporalio.api.enums.v1 import TaskQueueType
 from temporalio.api.taskqueue.v1 import TaskQueue
 from temporalio.api.workflowservice.v1 import DescribeNamespaceRequest, DescribeTaskQueueRequest

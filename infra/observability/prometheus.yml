@@ -92,7 +92,52 @@ scrape_configs:
     - taskqueue
     regex: boxie-lifecycle|_tag_excluded_|
     action: keep
-  - regex: __name__|job|instance|le|namespace|taskqueue|task_type|service_name
+  - source_labels:
+    - task_type
+    regex: Activity|Workflow
+    action: keep
+  - source_labels:
+    - service_name
+    regex: matching
+    action: keep
+  - source_labels:
+    - partition
+    regex: 0|1|2|3|__sticky__
+    action: keep
+  - source_labels:
+    - forwarded
+    regex: '|true|false'
+    action: keep
+  - source_labels:
+    - task_priority
+    regex: '|3'
+    action: keep
+  - source_labels:
+    - __name__
+    - worker_version
+    separator: ;
+    regex: no_poller_tasks;|poll_(success|success_sync|timeouts);__unversioned__|task_dispatch_latency_(bucket|sum|count);__unversioned__|approximate_backlog_(count|age_seconds);__unversioned__
+    action: keep
+  - source_labels:
+    - worker_build_id
+    - worker_deployment_name
+    - otel_scope_version
+    separator: ;
+    regex: ;;
+    action: keep
+  - source_labels:
+    - otel_scope_name
+    regex: temporal
+    action: keep
+  - source_labels:
+    - __name__
+    - operation
+    - namespace_state
+    - source
+    separator: ;
+    regex: poll_(success|success_sync|timeouts);TaskQueueMgr;active;|task_dispatch_latency_(bucket|sum|count);MatchingEngine;;History|approximate_backlog_(count|age_seconds);TaskQueuePartitionManager;active;|no_poller_tasks;TaskQueuePartitionManager;active;
+    action: keep
+  - regex: __name__|job|instance|le|namespace|taskqueue|task_type|service_name|partition|forwarded|task_priority
     action: labelkeep
 - job_name: vector
   static_configs:
@@ -151,6 +196,16 @@ scrape_configs:
   - source_labels:
     - mountpoint
     regex: /|
+    action: keep
+  - source_labels:
+    - device_error
+    regex: ''
+    action: keep
+  - source_labels:
+    - __name__
+    - collector
+    separator: ;
+    regex: node_scrape_collector_success;(filesystem|meminfo)|node_(filesystem_.*|memory_.*);
     action: keep
   - regex: __name__|job|instance|device|mountpoint|fstype|device_error|collector
     action: labelkeep

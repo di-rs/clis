@@ -16,7 +16,7 @@ def test_independent_json_producer() -> None:
             """
 import asyncio, sys
 from playground.observability import LogSettings, RequestLogging, bootstrap_logging
-from service_logging.context import current_context
+from service_telemetry.context import current_context
 runtime = bootstrap_logging(LogSettings(service="cli-playground", role="gateway"))
 async def downstream(scope, receive, send):
     assert current_context()["request_id"] != "SENTINEL-request-header"
@@ -66,8 +66,8 @@ def test_process_owner_shares_telemetry_shutdown_budget(monkeypatch: pytest.Monk
 
     import uvicorn
     from playground import app, bootstrap
-    from service_logging.logging import LogRuntime, LogSettings
-    from service_logging.metrics import MetricsListener
+    from service_telemetry.logging import LogRuntime, LogSettings
+    from service_telemetry.metrics import MetricsListener
 
     read, write = os.pipe()
     os.set_blocking(write, False)

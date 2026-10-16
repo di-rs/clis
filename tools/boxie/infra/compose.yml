@@ -1,4 +1,3 @@
-# Durable API, worker and agent; only agent receives Docker and artifact storage.
 name: ${BOXIE_PROJECT_NAME:-boxie}
 services:
   api:
@@ -23,6 +22,9 @@ services:
         aliases:
         - ${BOXIE_API_ALIAS:-boxie-api}
       control: {}
+      metrics:
+        aliases:
+        - boxie-api
     read_only: true
     tmpfs:
     - /tmp
@@ -31,6 +33,14 @@ services:
     security_opt:
     - no-new-privileges:true
     init: true
+    logging:
+      driver: journald
+      options:
+        mode: non-blocking
+        max-buffer-size: 4m
+        tag: boxie-api
+    environment:
+      BOXIE_METRICS_HOST: 0.0.0.0
   agent:
     image: ${BOXIE_RUNTIME_IMAGE:-boxie:local}
     build:
@@ -48,7 +58,10 @@ services:
     - ${BOXIE_AGENT_CREDENTIAL_FILE}:/run/secrets/agent:ro
     - ${BOXIE_POSTGRES_DSN_FILE:?Set Boxie database DSN file}:/run/secrets/postgres-dsn:ro
     networks:
-    - control
+      control: {}
+      metrics:
+        aliases:
+        - boxie-agent
     read_only: true
     tmpfs:
     - /tmp
@@ -57,6 +70,14 @@ services:
     security_opt:
     - no-new-privileges:true
     init: true
+    logging:
+      driver: journald
+      options:
+        mode: non-blocking
+        max-buffer-size: 4m
+        tag: boxie-agent
+    environment:
+      BOXIE_METRICS_HOST: 0.0.0.0
   worker:
     image: ${BOXIE_RUNTIME_IMAGE:-boxie:local}
     build:
@@ -74,7 +95,10 @@ services:
     - ${BOXIE_WORKER_TEMPORAL_CERT_FILE:?Set dedicated Temporal client certificate}:/run/secrets/temporal-client.pem:ro
     - ${BOXIE_WORKER_TEMPORAL_KEY_FILE:?Set dedicated Temporal client key}:/run/secrets/temporal-client.key:ro
     networks:
-    - control
+      control: {}
+      metrics:
+        aliases:
+        - boxie-worker
     read_only: true
     tmpfs:
     - /tmp
@@ -83,6 +107,14 @@ services:
     security_opt:
     - no-new-privileges:true
     init: true
+    logging:
+      driver: journald
+      options:
+        mode: non-blocking
+        max-buffer-size: 4m
+        tag: boxie-worker
+    environment:
+      BOXIE_METRICS_HOST: 0.0.0.0
 networks:
   consumer:
     external: true
@@ -90,3 +122,6 @@ networks:
   control:
     external: true
     name: ${BOXIE_CONTROL_NETWORK:?Set private control network}
+  metrics:
+    external: true
+    name: ${OBS_METRICS_NETWORK:?Set private metrics network}

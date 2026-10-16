@@ -125,3 +125,18 @@ proxies and read-only journal mounts exercise process loss and truthful accounti
 - [Pinned authorizer selection](https://github.com/temporalio/temporal/blob/v1.32.0/common/authorization/authorizer.go)
 - [Pinned CLI namespace pagination](https://github.com/temporalio/cli/blob/v1.9.0/internal/temporalcli/commands.operator_namespace.go)
 - [Static jq image construction](https://github.com/jqlang/jq/blob/jq-1.8.1/Dockerfile)
+
+The native metrics endpoint is `temporal:9090/metrics` on the platform-owned
+internal metrics bridge (`OBS_METRICS_NETWORK`), without a published host port.
+The explicit OpenTelemetry configuration fixes counter names without a `_total`
+suffix and timers in seconds without an added unit suffix. Finite queue/scope
+filters and retained native partition/forwarding/priority dimensions belong to
+observability. The native endpoint uses plain private HTTP; RPC mTLS remains
+unchanged. UI additionally joins the separate internal origin bridge using alias
+`temporal-ui`, consumed only by platform operator ingress.
+
+Because the server has multiple network addresses, membership broadcast resolves
+the control-only `temporal-control` alias with the pinned image's IPv4 `getent`.
+Startup requires exactly one distinct address; it never chooses an arbitrary
+address from `hostname -i`. This keeps membership on control while the exporter
+is scrapeable on metrics. Frontend/internode certificate identities stay unchanged.

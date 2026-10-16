@@ -82,12 +82,12 @@ def test_real_isolated_installation(
     )
     (wheel,) = wheels.glob("*.whl")
     subprocess.run(
-        ["uv", "build", "--package", "service-logging", "--out-dir", str(wheels)],
+        ["uv", "build", "--package", "service-telemetry", "--out-dir", str(wheels)],
         cwd=ROOT,
         env=environment,
         check=True,
     )
-    (logging_wheel,) = wheels.glob("service_logging-*.whl")
+    (logging_wheel,) = wheels.glob("service_telemetry-*.whl")
     constraints = tmp_path / "constraints.txt"
     subprocess.run(
         [
@@ -195,6 +195,7 @@ def test_resolved_compose_isolated_topology(
         "BOXIE_DATA_DIR": str(tmp_path / "data"),
         "BOXIE_CONSUMER_NETWORK": "test-consumers",
         "BOXIE_CONTROL_NETWORK": "test-control",
+        "OBS_METRICS_NETWORK": "test-metrics",
         "PLAYGROUND_IMAGE": "playground:test",
         "PLAYGROUND_BOXIE_URL": "http://independent-boxie:8090",
         "PLAYGROUND_BOXIE_CREDENTIAL_FILE": str(tmp_path / "consumer.secret"),
@@ -248,7 +249,7 @@ def test_resolved_compose_isolated_topology(
         if name == "agent":
             mount = next(v for v in entry["volumes"] if v["target"] == values["BOXIE_DATA_DIR"])
             assert mount["source"] == mount["target"]
-            assert set(entry["networks"]) == {"control"}
+            assert set(entry["networks"]) == {"control", "metrics"}
         if name == "api":
             assert not any(v["target"] == values["BOXIE_DATA_DIR"] for v in entry["volumes"])
         if name == "gateway":
