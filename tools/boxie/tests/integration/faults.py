@@ -79,6 +79,17 @@ class Faults:
                 )
                 await writer.drain()
                 return
+            if (
+                first.startswith(b"POST ")
+                and b"/containers/create" in first
+                and self.enabled("fail_create")
+            ):
+                (self.root / "failed_create_seen").touch()
+                writer.write(
+                    b'HTTP/1.1 503 Unavailable\r\nContent-Length: 25\r\nConnection: close\r\n\r\n{"message":"owned fault"}\n'
+                )
+                await writer.drain()
+                return
             upstream, peer = await asyncio.open_unix_connection(
                 os.environ.get("FAULT_DOCKER_SOCKET", "/var/run/docker.sock")
             )

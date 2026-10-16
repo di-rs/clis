@@ -91,3 +91,27 @@ checks prove parsing and route matching only. Live allowed/denied identities,
 missing/wrong-audience JWT rejection, DNS ownership, tunnel connectivity and
 absence of direct-origin access remain authorized-environment activation gates.
 The origin checks use [Cloudflare Access validation](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/origin-parameters/#access).
+
+The existing-environment smoke provisions nothing:
+
+```sh
+uv run --locked python -m ingress_infra.smoke --config /private/access-smoke.json
+```
+
+The private JSON supplies `url` (a protected HTTPS route),
+`approved_user_cookie` and `wrong_audience_cookie` (paths to independently obtained
+Access JWT cookie values), `direct_origins` (explicit IP URLs), and `expected_body`
+(a nonsecret marker in the expected application response). The wrong-audience
+cookie must be a genuinely signed, unexpired credential for another Access
+application; an arbitrary invalid string is not wrong-audience evidence. Select a
+route that returns 200 and the marker for the approved user. Run each operator
+application separately, from the network boundary being evaluated.
+
+The adapter requires unauthenticated, forged and wrong-audience denial, the
+approved user's application response, and connection prevention for every supplied
+direct origin. A directly reachable application's own login response fails the
+origin check. Results cover only the supplied route, credentials and origin list;
+review DNS/network membership separately. Cookie contents are never emitted.
+Without `--config`, it exits 2 with an explicit outstanding activation gate.
+Mock tests cover classification only. No authorized environment is currently
+available, so live Access verification remains outstanding.

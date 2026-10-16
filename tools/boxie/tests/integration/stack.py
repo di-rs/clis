@@ -13,12 +13,21 @@ import httpx
 import psycopg
 from boxie.persistence.migrate import migrate
 from psycopg.rows import dict_row
-from run_integration import ROOT, ProductionStack, command
+from run_integration import ROOT, CommandRunner, ProductionStack, command
 
 
 class LifecycleStack(ProductionStack):
-    def __init__(self, root: Path) -> None:
-        super().__init__(root)
+    def __init__(
+        self,
+        root: Path,
+        *,
+        command_runner: CommandRunner = command,
+        runtime_overlay: Path | None = None,
+    ) -> None:
+        super().__init__(root, command_runner=command_runner)
+        self.runtime_overlay = runtime_overlay
+        self.runtime_services = ("faults", "agent", "api", "worker", "playground")
+        self.capture_teardown_logs = True
         self.installation = str(uuid4())
         self.host = self.name
         self.runtime = self.name + "-runtime"
@@ -55,7 +64,7 @@ class LifecycleStack(ProductionStack):
         )
 
     def runtime_command(self, *args: str) -> str:
-        return command(
+        return self.command(
             [
                 "docker",
                 "compose",
@@ -63,13 +72,14 @@ class LifecycleStack(ProductionStack):
                 self.runtime,
                 "--file",
                 str(ROOT / "tools/boxie/infra/compose.test.yml"),
+                *(["--file", str(self.runtime_overlay)] if self.runtime_overlay else []),
                 *args,
             ],
             env=self.env,
         )
 
     def start(self) -> None:
-        info = json.loads(command(["docker", "info", "--format", "{{json .}} "]))
+        info = json.loads(self.command(["docker", "info", "--format", "{{json .}} "]))
         if info["Architecture"] not in ("x86_64", "amd64") or "runsc" not in info["Runtimes"]:
             raise RuntimeError(
                 "native lifecycle requires Linux amd64 Docker with configured runsc; no fallback"
@@ -99,7 +109,7 @@ class LifecycleStack(ProductionStack):
             (ROOT / "tools/cli-playground/infra/profiles/playground.json").read_text()
         )
         profiles.update(json.loads((ROOT / "tools/boxie/infra/profiles.example.json").read_text()))
-        image = command(
+        image = self.command(
             [
                 "docker",
                 "image",
@@ -112,7 +122,7 @@ class LifecycleStack(ProductionStack):
         for profile in profiles.values():
             profile["image_digest"] = image
         (self.root / "profiles.json").write_text(json.dumps(profiles))
-        command(
+        self.command(
             [
                 "uv",
                 "run",
@@ -144,9 +154,10 @@ class LifecycleStack(ProductionStack):
         self.product_url = f"http://127.0.0.1:{port}"
         self.env["PLAYGROUND_PUBLIC_URL"] = self.product_url
         self.runtime_started = True
-        self.runtime_command("up", "--detach", "faults", "agent", "api", "worker", "playground")
+        self.runtime_command("up", "--detach", *self.runtime_services)
         self.api_url = "http://" + self.runtime_command("port", "api", "8090")
-        self.product_url = "http://" + self.runtime_command("port", "playground", "8000")
+        if "playground" in self.runtime_services:
+            self.product_url = "http://" + self.runtime_command("port", "playground", "8000")
         self.env["PLAYGROUND_PUBLIC_URL"] = self.product_url
         self.wait_ready()
         self.evidence.update(
@@ -209,7 +220,7 @@ with httpx.Client(headers={'Authorization': 'Bearer ' + credential}, timeout=1, 
         )
 
     def fault(self, name: str, enabled: bool) -> None:
-        if name not in {"hold_create", "hold_commit", "fail_delete"}:
+        if name not in {"hold_create", "hold_commit", "fail_delete", "fail_create"}:
             raise ValueError("unknown owned fault")
         path = self.root / "faults" / name
         if enabled:
@@ -230,7 +241,7 @@ with httpx.Client(headers={'Authorization': 'Bearer ' + credential}, timeout=1, 
             return conn.execute(query, args).fetchall()
 
     def children(self) -> list[str]:
-        ids = command(
+        ids = self.command(
             [
                 "docker",
                 "ps",
@@ -243,7 +254,7 @@ with httpx.Client(headers={'Authorization': 'Bearer ' + credential}, timeout=1, 
         ).split()
         owned = []
         for identifier in ids:
-            info = json.loads(command(["docker", "inspect", identifier]))[0]
+            info = json.loads(self.command(["docker", "inspect", identifier]))[0]
             labels = info["Config"]["Labels"]
             if (
                 labels.get("boxie.installation") == self.installation
@@ -274,7 +285,7 @@ with httpx.Client(headers={'Authorization': 'Bearer ' + credential}, timeout=1, 
         for _ in range(2):
             for identifier in self.children():
                 try:
-                    command(["docker", "rm", "--force", identifier])
+                    self.command(["docker", "rm", "--force", identifier])
                 except Exception as error:
                     failures.append(str(error))
             time.sleep(0.2)
@@ -286,11 +297,13 @@ with httpx.Client(headers={'Authorization': 'Bearer ' + credential}, timeout=1, 
             super().close()
             return
         errors = []
-        for name in ("hold_create", "hold_commit", "fail_delete"):
+        for name in ("hold_create", "hold_commit", "fail_delete", "fail_create"):
             self.fault(name, False)
         for operation in (
             lambda: (self.root / "runtime.log").write_text(
                 self.runtime_command("logs", "--no-color")
+                if self.capture_teardown_logs
+                else "disabled by smoke evidence policy"
             ),
             lambda: self.runtime_command("down", "--volumes", "--remove-orphans"),
             self.clean_children,

@@ -13,7 +13,7 @@ import socket
 import subprocess
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
 import yaml
@@ -30,8 +30,13 @@ def command(args: list[str], *, env: dict[str, str] | None = None) -> str:
     return result.stdout.strip()
 
 
+class CommandRunner(Protocol):
+    def __call__(self, args: list[str], *, env: dict[str, str] | None = None) -> str: ...
+
+
 class ProductionStack:
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, command_runner: CommandRunner = command) -> None:
+        self._command_runner = command_runner
         self.root = root
         self.name = "boxie-integration-" + uuid4().hex[:12]
         self.platform = self.name + "-platform"
@@ -57,14 +62,18 @@ class ProductionStack:
             TEMPORAL_OPERATOR_CERTS_DIR=str(root / "operator"),
             TEMPORAL_UI_CERTS_DIR=str(root / "ui"),
         )
+        self.build_network: str | None = None
         self.address = ""
         self.ui_address = ""
         self.pg_port = ""
         self.evidence: dict[str, Any] = {}
         self.shared_networks: list[str] = []
 
+    def command(self, args: list[str], *, env: dict[str, str] | None = None) -> str:
+        return self._command_runner(args, env=self.env if env is None else env)
+
     def compose(self, package: str, *args: str) -> str:
-        return command(
+        return self.command(
             [
                 "docker",
                 "compose",
@@ -85,7 +94,7 @@ class ProductionStack:
         for directory in ("server", "operator", "ui", "clients"):
             (self.root / directory).mkdir()
         for name in ("frontend", "internode", "client", "untrusted"):
-            command(
+            self.command(
                 [
                     "openssl",
                     "req",
@@ -115,7 +124,7 @@ class ProductionStack:
             target = self.root / directory
             key, cert = target / f"{name}.key", target / f"{name}.pem"
             csr, ext = ca / f"{name}.csr", ca / f"{name}.ext"
-            command(
+            self.command(
                 [
                     "openssl",
                     "req",
@@ -133,7 +142,7 @@ class ProductionStack:
             ext.write_text(
                 f"subjectAltName=DNS:{san}\nextendedKeyUsage={usage}\nbasicConstraints=CA:FALSE\n"
             )
-            command(
+            self.command(
                 [
                     "openssl",
                     "x509",
@@ -194,10 +203,15 @@ class ProductionStack:
                             }
                         },
                         "bootstrap": {
+                            **(
+                                {"build": {"network": self.build_network}}
+                                if self.build_network
+                                else {}
+                            ),
                             "logging": {
                                 "driver": "local",
                                 "options": {"max-size": "10m", "max-file": "3"},
-                            }
+                            },
                         },
                         "temporal": {
                             "ports": [f"127.0.0.1:{temporal_port}:7233"],
@@ -232,7 +246,7 @@ class ProductionStack:
             "OBS_GRAFANA_ORIGIN_NETWORK",
             "OBS_TEMPORAL_UI_ORIGIN_NETWORK",
         ):
-            network_id = command(
+            network_id = self.command(
                 [
                     "docker",
                     "network",
@@ -244,7 +258,7 @@ class ProductionStack:
                 ]
             )
             self.shared_networks.append(network_id)
-            network = json.loads(command(["docker", "network", "inspect", network_id]))[0]
+            network = json.loads(self.command(["docker", "network", "inspect", network_id]))[0]
             if not network["Internal"] or network["Labels"].get("io.boxie.test.owner") != self.name:
                 raise RuntimeError("fixture network ownership/internal verification failed")
         self.pg_port = self.compose("platform", "port", "postgres", "5432").rsplit(":", 1)[1]
@@ -276,10 +290,10 @@ class ProductionStack:
             )
         self.compose("temporal", "run", "--rm", "bootstrap")
         self.evidence = {
-            "server": command(
+            "server": self.command(
                 ["docker", "version", "--format", "{{.Server.Version}} {{.Server.Arch}}"]
             ),
-            "bootstrap_local_image_id": command(
+            "bootstrap_local_image_id": self.command(
                 ["docker", "image", "inspect", self.temporal + "-bootstrap", "--format", "{{.Id}}"]
             ),
             "images": json.loads((ROOT / "infra/temporal/versions.json").read_text()),
@@ -298,7 +312,7 @@ class ProductionStack:
                     failures.append(str(error))
         for network_id in self.shared_networks:
             try:
-                remaining = command(
+                remaining = self.command(
                     [
                         "docker",
                         "network",
@@ -310,10 +324,12 @@ class ProductionStack:
                     ]
                 )
                 if remaining:
-                    network = json.loads(command(["docker", "network", "inspect", network_id]))[0]
+                    network = json.loads(
+                        self.command(["docker", "network", "inspect", network_id])
+                    )[0]
                     if network["Labels"].get("io.boxie.test.owner") != self.name:
                         raise RuntimeError("refusing cleanup of foreign fixture network")
-                    command(["docker", "network", "rm", network_id])
+                    self.command(["docker", "network", "rm", network_id])
             except Exception as error:
                 failures.append(str(error))
         if failures:

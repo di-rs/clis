@@ -118,3 +118,20 @@ The native browser config uses the fixture's real Playground origin and Linux
 artifact, including same-page reconnection. Local Docker Desktop arm64/runc cannot
 satisfy this gate. Local real SQL/Temporal tests and mocked Docker tests remain
 separate evidence; neither establishes production activation readiness.
+
+## Observability failure smoke
+
+The separate PR-only [observability workflow](../.github/workflows/boxie-observability.yml)
+builds the final collector in an owned Linux amd64 daemon and exercises nine
+separately bounded real application/journal/storage fault scenarios. See the
+[owner's scope and evidence policy](../infra/observability/README.md#native-failure-smoke).
+Do not run these privileged faults on a development machine or a reused runner.
+The default root Python checks include portable safety, parser, executable
+entrypoint and Access-classification tests. They do not substitute for native
+systemd/runsc evidence. The Linux-only process-identity test reports its macOS skip.
+The native job's 65-minute limit includes separately bounded installation/setup,
+180 seconds per scenario, final restoration and bounded artifact export.
+
+[Ingress smoke](../infra/ingress/README.md) consumes an explicitly authorized
+existing environment. Its unconfigured exit 2 is an outstanding activation gate,
+not a passing live test. Benchmark triggers and scope remain PR-only and unchanged.

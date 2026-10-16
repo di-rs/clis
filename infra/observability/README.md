@@ -360,3 +360,75 @@ family. Other sampled queue families require `__unversioned__`. This distinction
 comes from the pinned [partition emission site](https://github.com/temporalio/temporal/blob/v1.32.0/service/matching/task_queue_partition_manager.go)
 and [partition scope construction](https://github.com/temporalio/temporal/blob/v1.32.0/service/matching/matching_engine.go),
 not an observed failure-counter sample.
+
+## Native failure smoke
+
+The PR-only [observability workflow](../../.github/workflows/boxie-observability.yml)
+uses an ephemeral GitHub-hosted Linux amd64 runner. It creates an owned dockerd
+and journald namespace; it never changes the default journal or restarts the
+runner's existing Docker daemon. Namespace/runsc/mount compatibility is a required
+preflight. An unsupported arrangement fails without selecting another backend.
+The driver is the workspace command `uv run --locked python -m observability_infra.smoke`.
+Use its `prepare`, `scenario`, `cleanup` and `export` actions only in that disposable
+CI environment. Ordinary development checks run the local tests without faults:
+
+```sh
+uv run --locked pytest infra/observability/tests/test_smoke.py
+uv run --locked python -m observability_infra.smoke --help
+```
+
+Setup has a 1,200-second budget. Each of the nine separately invoked scenarios
+has a 180-second monotonic budget including a 45-second restoration reserve;
+final teardown has a separate 180-second bound. Installation, setup, scenarios,
+cleanup and artifact export fit within the workflow's 65-minute hard job limit.
+Reports retain measured setup and scenario elapsed times; CI supplies job duration.
+Missing preconditions, timeouts and restoration failures are failures, never skips.
+The Linux process-identity test is explicitly skipped on macOS; local parser,
+subprocess and mock Access checks do not establish native acceptance.
+
+Cases cover an actual committed failed lifecycle and request/sandbox correlation,
+collector unread-tail/checkpoint restart, storage outage and accepted buffer
+recovery, an actual unread production API stdout pipe, a stopped journal receiver,
+journal retention pressure, journal filesystem ENOSPC, Vector full-buffer drops,
+and Vector filesystem ENOSPC with restart using the same state. Availability probes
+use real HTTP, the production terminal Session and a runsc sandbox. The pipe and
+stopped-receiver cases additionally provision during the fault. Synthetic v1
+pressure records are identified separately and never stand in for lifecycle facts.
+Small accepted-event comparisons tolerate duplicates; they do not promise
+exactly-once or complete delivery through pressure/crash windows.
+
+Pressure uses an explicit reduced test profile: a 256 MiB journal filesystem,
+64 MiB persistent journal target, 16 MiB runtime target, 8 MiB files and disabled
+compression/rate limiting; and a 640 MiB Vector filesystem with a 268435488-byte
+valid buffer. Production defaults are unchanged. These cases cannot establish
+saturation of the default 512 MiB buffer. The API/worker/agent test caps are
+512 MiB each, the driver has a 768 MiB address-space ceiling, the owned journal
+has 256 MiB and dockerd 1 GiB. Per-process/cgroup, OOM, buffer, disk and free-space
+observations are retained. PostgreSQL/Temporal fixture observations do not prove
+production combined-host or eight-sandbox headroom.
+
+The real collector is built from the frozen Dockerfile inputs locally in the
+owned daemon. A smoke-only Compose override selects its exact image ID with
+`pull_policy: never`; effective configuration and the running amd64 image ID must
+agree. The unusable rendering placeholder is never started. This proves neither
+registry publication nor a deployable registry digest. The reader must actually
+open binary journals as its final UID/GID with journalctl >=258, source ID
+`journal`, `current_boot_only: false` and persistent checkpoint state. No host
+reboot, genuine two-boot, boot mount ordering or power-loss claim follows.
+
+An independent file-based watchdog records the journal PID/start identity, exact
+filler inode and owned sink container before faults, then resumes/releases/starts
+those resources before teardown. Cleanup continues after individual errors,
+validates mount and loop ownership, and reports failures instead of counting runner
+recycling as restoration. CI uploads only the explicit bounded JSON evidence
+allowlist: ownership, setup/preflight, collector provenance, per-case reports,
+watchdog results and cleanup. It excludes private configuration, certificates,
+credentials, Docker configuration, full logs and database contents. Privacy checks
+inspect correlated decoded records and bounded raw journal/diagnostic tails;
+pressure output is synthetic and capped by the owned storage profile.
+
+Native CI evidence is required before accepting this harness. Configured seven-day
+maximum age and the native 256 MiB VictoriaLogs cleanup target are checked in the
+running fixture; newest-partition protection and periodic overshoot remain the
+accepted storage tradeoff. Live Access, published collector identity, production
+mount/network topology and combined capacity remain activation gates.
