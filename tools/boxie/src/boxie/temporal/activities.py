@@ -11,15 +11,15 @@ from temporalio.worker import ActivityInboundInterceptor, ExecuteActivityInput, 
 
 from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import (
-    DurableRequest,
     EnsureRequest,
     OrchestratorObservation,
     SandboxRef,
+    SandboxRequest,
 )
 from boxie.domain.models import SandboxState, TerminationReason
 from boxie.persistence.models import Sandbox
 from boxie.persistence.postgres import PostgresLifecycle
-from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+from boxie.sandbox.execution.orchestrator import Orchestrator
 from boxie.temporal.contracts import LifecycleFacts, StopRequest
 
 
@@ -68,13 +68,13 @@ class SafeActivityErrors(Interceptor):
 
 
 class LifecycleActivities:
-    def __init__(self, repository: PostgresLifecycle, orchestrator: DurableOrchestrator) -> None:
+    def __init__(self, repository: PostgresLifecycle, orchestrator: Orchestrator) -> None:
         self.repository, self.orchestrator = repository, orchestrator
 
-    async def _request(self, sandbox_id: str) -> DurableRequest:
+    async def _request(self, sandbox_id: str) -> SandboxRequest:
         return await self.repository.load_request(UUID(sandbox_id))
 
-    async def _bind(self, request: DurableRequest) -> UUID:
+    async def _bind(self, request: SandboxRequest) -> UUID:
         if request.identity != self.orchestrator.config.identity:
             raise BoxieError(404, "orchestrator identity not found")
         boot = self.orchestrator.boot_id
@@ -111,7 +111,7 @@ class LifecycleActivities:
         if request.desired_stop:
             return
         await self._bind(request)
-        observation = await self.orchestrator.ensure_ready(EnsureRequest.from_durable(request))
+        observation = await self.orchestrator.ensure_ready(EnsureRequest.from_request(request))
         await self._record(observation)
         if observation.state != SandboxState.READY:
             raise ApplicationError(
@@ -156,9 +156,9 @@ class LifecycleActivities:
 
     @activity.defn
     async def request_stop(self, request: StopRequest) -> None:
-        durable = await self._request(request.sandbox_id)
+        sandbox = await self._request(request.sandbox_id)
         await self.repository.terminate(
-            durable.principal, durable.sandbox_id, TerminationReason(request.reason)
+            sandbox.principal, sandbox.sandbox_id, TerminationReason(request.reason)
         )
 
     @activity.defn
@@ -167,9 +167,9 @@ class LifecycleActivities:
             return
         request = await self._request(sandbox_id)
         if not request.desired_stop:
-            raise BoxieError(409, "durable stop required before removal")
+            raise BoxieError(409, "stop must be committed to SQL before removal")
         await self._bind(request)
-        await self.orchestrator.initialize(EnsureRequest.from_durable(request))
+        await self.orchestrator.initialize(EnsureRequest.from_request(request))
         observation = await self.orchestrator.remove(
             SandboxRef(request.sandbox_id, request.generation),
             request.reason or TerminationReason.REQUESTED,

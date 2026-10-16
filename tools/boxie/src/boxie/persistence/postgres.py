@@ -24,7 +24,7 @@ from boxie.application.ports import AdmissionProfileResolver
 from boxie.contracts.consumer import SpecWire, ViewWire, spec_wire
 from boxie.contracts.execution import SnapshotWire
 from boxie.domain.errors import BoxieError
-from boxie.domain.lifecycle import DurableRequest, OrchestratorObservation
+from boxie.domain.lifecycle import OrchestratorObservation, SandboxRequest
 from boxie.domain.models import (
     OrchestratorIdentity,
     Principal,
@@ -238,13 +238,13 @@ class PostgresLifecycle:
             await self._enqueue(session, sandbox_id, "stop")
             return view(row)
 
-    async def load_request(self, sandbox_id: UUID) -> DurableRequest:
+    async def load_request(self, sandbox_id: UUID) -> SandboxRequest:
         """Activity-side lookup only: spec/snapshot may contain secrets."""
         async with self.sessions() as session:
             row = await session.get(Sandbox, sandbox_id)
             if row is None:
                 raise BoxieError(404, "sandbox not found")
-            return DurableRequest(
+            return SandboxRequest(
                 sandbox_id,
                 Principal(row.consumer_id),
                 OrchestratorIdentity(row.installation_id, row.host_id),

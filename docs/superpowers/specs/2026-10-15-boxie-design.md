@@ -167,11 +167,11 @@ Sandbox identifiers alone do not authorize terminal access. Enforce consumer
 ownership on status, stop, artifact access, and terminal attachment. Never put
 bearer capabilities in logged URLs or forward operator credentials to sandboxes.
 
-## Durable lifecycle and Temporal
+## Lifecycle and Temporal
 
-Temporal provides durable orchestration, retry, timers, and recovery of workflow
-execution. It does **not** checkpoint a sandbox's filesystem or process memory,
-and replay does not undo arbitrary side effects. Compensating operations must be
+Temporal persists workflow history so orchestration, retries, and timers resume
+after worker restarts. It does **not** checkpoint a sandbox's filesystem or
+process memory, and replay does not undo arbitrary side effects. Compensating operations must be
 explicit. See [Temporal workflows](https://docs.temporal.io/workflows) and
 [event history](https://docs.temporal.io/encyclopedia/event-history).
 
@@ -181,7 +181,7 @@ Explicit stop, timeouts, process exit, and provisioning failures converge on the
 same idempotent cleanup path. A failed cleanup remains visible and retryable;
 it does not silently free capacity or release an artifact reference.
 
-PostgreSQL stores durable requests received through the API, consumer identities
+PostgreSQL persists requests received through the API, consumer identities
 and idempotency keys, resource ownership, capacity reservations, artifact
 references, and a queryable status projection. Temporal history owns orchestration
 progress; Docker inspection establishes which resources actually exist. Do not
@@ -191,8 +191,8 @@ deleted.
 Commit accepted requests and an outbox record atomically. A dispatcher submits
 them to a stable workflow ID and retries safely if submission/acknowledgment is
 interrupted. Status distinguishes accepted from provisioning and ready. Stop
-requests are durable too, including a stop that arrives before workflow startup.
-If the outbox backlog or a required dependency exceeds readiness limits, reject
+requests are committed before acknowledgement, including a stop that arrives
+before workflow startup. If the outbox backlog or a required dependency exceeds readiness limits, reject
 new work explicitly instead of accepting an unbounded queue.
 
 Capacity reservations cover the full resource lifetime, including uncertain
@@ -498,7 +498,7 @@ PR. Each stage updates its documentation and runs affected checks.
 | PR | Title | Reviewable result and acceptance |
 | --- | --- | --- |
 | 1 | ♻️ Separate Boxie from CLI Playground | Extract independently runnable Boxie API/orchestrator and generic contracts; inject adapters; keep product policy in Playground; replace direct imports with HTTP/WebSocket client. Establish each service's own `infra/` directory and deployment contract now. A generic consumer can create/attach/stop without PR/SHA/domain fields. Existing Playground E2E behavior works across the service boundary. |
-| 2 | ✨ Add durable Boxie lifecycle with Temporal | Add independent Temporal/PostgreSQL deployment, workflow worker, outbox, reservations, idempotent orchestrator operations, deadlines, cleanup/reconciliation, and same-page reconnect. Retries and worker restarts do not duplicate resources; timeout/disconnect/stop behavior is verified. |
+| 2 | ✨ Add Boxie lifecycle with Temporal | Add independent Temporal/PostgreSQL deployment, workflow worker, outbox, reservations, idempotent orchestrator operations, deadlines, cleanup/reconciliation, and same-page reconnect. Retries and worker restarts do not duplicate resources; timeout/disconnect/stop behavior is verified. |
 | 3 | ✨ Add Boxie operational visibility | Add JSON event/correlation schema, collector, VictoriaLogs, Prometheus, Grafana, Access-protected operator routes, dashboards and alert rules. A deliberately failed lifecycle can be diagnosed without terminal contents entering logs. |
 | 4 | ♻️ Compose deployment and harden operations | Wire the service-owned infrastructure into the thin single-host Pulumi environment, finish shared host components and split CI responsibilities, validate release identity/deadlines, verify fresh installation and independent updates/failure handling, finish operator runbooks and security/resource checks. No migration or full backup system. |
 

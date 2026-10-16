@@ -8,8 +8,8 @@ PTYs and the execution journal. Consumers select approved profiles and upload ZI
 files; they cannot supply images, host paths or isolation settings. Boxie does not
 inspect executable formats or depend on Playground.
 
-Production requires the [durable runtime](infra/durable-runtime.md); there is no
-direct lifecycle bootstrap. Run exactly one orchestrator against its data directory.
+Complete the [runtime prerequisites](infra/runtime.md) before starting Boxie.
+Run exactly one orchestrator against its data directory.
 The directory and profile files must be writable only by the operator/orchestrator. The
 Docker daemon must see artifact paths at the same absolute location as the orchestrator.
 
@@ -28,7 +28,7 @@ An operator configuration file contains:
 {
   "data_dir": "/var/lib/boxie",
   "postgres_dsn_file": "/run/secrets/postgres-dsn",
-  "durable": {
+  "lifecycle": {
     "postgres_dsn_file": "/run/secrets/postgres-dsn",
     "temporal_address": "temporal:7233",
     "temporal_server_name": "temporal",
@@ -69,12 +69,12 @@ Its operator configuration contains:
   "consumer_credential_files": {
     "playground": "/run/secrets/boxie-playground"
   },
-  "release": "boxie-durable",
+  "release": "boxie",
   "identity": {
     "installation_id": "b18283b1-dc32-46e7-8da5-7aa380043685",
     "host_id": "sandbox-1"
   },
-  "durable": {
+  "lifecycle": {
     "postgres_dsn_file": "/run/secrets/postgres-dsn",
     "temporal_address": "temporal:7233",
     "temporal_server_name": "temporal",
@@ -130,7 +130,7 @@ relay. A new attempt or retry after an uncertain result must use a higher order;
 repeating an accepted order is rejected, not an idempotent attach replay. A failed
 cursor validation does not consume the order. Journal failure exposes no successful
 attachment and disables execution readiness until the pending state is persisted.
-Playground supplies this value from its durable page claim; browser frames cannot
+Playground supplies this value from its persisted page claim; browser frames cannot
 select or override it.
 ACK, resize, heartbeat and detach also carry the current epoch. Controls are at
 most 16 KiB of UTF-8 including JSON, columns are 1–500 and rows 1–300.
@@ -213,7 +213,8 @@ eight sandboxes by default, including uncertain creation and pending deletion.
 Ensure revalidates the immutable SQL admission before creating a journal record.
 Stopped admissions initialize cleanup only; cleaned, missing and mismatched rows
 cannot recreate execution. The final Docker start runs beneath the same SQL row
-lock used by durable stop. Only fenced confirmed absence releases SQL accounting.
+lock used to commit stop requests. Only fenced confirmed absence releases SQL
+accounting.
 
 The private terminal uses the same sequenced output and strict JSON controls
 as the consumer terminal above. Handshake denials use bounded HTTP JSON responses:
@@ -243,7 +244,8 @@ Terminals close when termination begins; slots and artifacts remain reserved
 until Docker deletion is confirmed. The orchestrator survives consumer API restarts;
 an orchestrator restart may end terminals.
 
-Local intent records are durably replaced before Docker creation. Deterministic
+Local intent records are written with file and directory fsync before Docker
+creation. Deterministic
 names and installation, host, sandbox, generation, consumer, artifact, and deadline
 labels allow restart cleanup of precisely owned resources. Startup never performs
 a daemon-wide delete. A name occupied by different labels is retained for operator
@@ -273,7 +275,8 @@ old unpublished directories only after checking SQL; unavailable SQL deletes not
 An artifact UUID and digest are immutable. Repeating the same upload is idempotent;
 a different digest returns 409. Both private HTTP APIs return 201 for new
 publication and 200 for an exact retry, using an explicit typed application
-publication result. Retirement is durable and prevents new admission.
+publication result. Retirement is committed to PostgreSQL before acknowledgement
+and prevents new admission.
 Physical files remain while a sandbox reference exists, including uncertain
 creation or failed deletion. Metadata tombstones preserve UUID immutability after
 collection. No consumer can select a host filesystem path.
@@ -290,7 +293,7 @@ uv run --locked mypy
 uv run --locked pytest
 ```
 
-Fast terminal tests use real loopback HTTP/WebSocket servers, durable orchestrator
+Fast terminal tests use real loopback HTTP/WebSocket servers, orchestrator
 execution, and explicit test-only SQL admission/artifact metadata and Docker
 boundaries. Integration tests use real PostgreSQL and production Temporal;
 profile reload also starts the real orchestrator subprocess. They cover generic text ZIPs,
@@ -304,7 +307,7 @@ The 2026-10-15 compatibility gate verified CPython 3.15.0 with `temporalio==1.34
 native Linux arm64, and emulated Linux amd64. Real Temporal worker execution,
 cancellation, graceful worker replacement, and replay of four exported histories
 passed on each platform. That gate did not exercise PostgreSQL transactions or
-process-crash recovery. These pinned dependencies are installed by the durable runtime. The mandatory
+process-crash recovery. These pinned dependencies are installed by the Boxie runtime. The mandatory
 [native lifecycle workflow](../../.github/workflows/boxie-lifecycle.yml) additionally
 exercises Linux amd64/runsc, process loss, SQL accounting and browser reconnection.
 
@@ -351,7 +354,7 @@ Provisioning activities await the local runtime. Normal cleanup retries,
 30-second inspection, command recovery, artifact collection, journal compaction
 and SQL retention are driven by Temporal. Local safety enforcement and journal
 flushes remain independent of Temporal availability. SQL admission/stop and the
-final Docker start share the existing durable row guard.
+final Docker start share the existing SQL row guard.
 
 Attachment and termination facts publish directly to SQL; there is no observation
 HTTP callback or lifecycle control HTTP protocol. Input remains local, with SQL

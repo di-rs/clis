@@ -89,7 +89,7 @@ class PostgresArtifactStore:
                             raise BoxieError(409, "artifact ID is immutable or retired")
                         return ArtifactPutResult(ArtifactView(artifact_id, sha256, False), False)
                     storage_id = uuid4()
-                    # Complete durable bytes precede metadata visibility. A lost commit
+                    # Complete bytes are synced to disk before metadata becomes visible. A lost commit
                     # response is ambiguous: leave bytes for DB-based reconciliation.
                     staged.rename(self.root / str(storage_id))
                     sync_directory(self.root)
@@ -138,7 +138,7 @@ class PostgresArtifactStore:
                 raise BoxieError(404, "artifact not found")
             row.retired = True
             row.collection_pending = row.collected_at is None
-        # Physical deletion is separately retryable; retirement is durable even if
+        # Physical deletion is separately retryable; retirement remains committed even if
         # this process exits now. The orchestrator's collector periodically calls collect.
         await self.collect()
 

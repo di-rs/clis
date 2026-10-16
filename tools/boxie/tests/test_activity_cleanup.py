@@ -1,4 +1,4 @@
-"""Activity success must prove durable finality after the last external RPC."""
+"""Activity success must prove the final journal write succeeded after the last external RPC."""
 
 import asyncio
 from dataclasses import replace
@@ -12,7 +12,7 @@ from uuid import uuid4
 import pytest
 from boxie.domain.lifecycle import OrchestratorObservation
 from boxie.domain.models import SandboxState, TerminationReason
-from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+from boxie.sandbox.execution.orchestrator import Orchestrator
 from boxie.temporal.activities import LifecycleActivities
 from boxie_test_support.dependencies import postgres_dsn as postgres_dsn
 from boxie_test_support.dependencies import postgres_server as postgres_server
@@ -60,7 +60,7 @@ def test_removal_activity_retries_until_terminal_report_is_persisted(
                 initialize=AsyncMock(),
                 remove=AsyncMock(side_effect=[stale, replace(stale, event_version=3)]),
             )
-            activities = LifecycleActivities(life, cast(DurableOrchestrator, control))
+            activities = LifecycleActivities(life, cast(Orchestrator, control))
             with pytest.raises(ApplicationError, match="cleanup pending"):
                 await activities.remove_sandbox(str(sandbox.id))
             assert await counts(sessions) == (1, 1, 1, 2)
@@ -102,7 +102,7 @@ def test_cleanup_observations_do_not_grow_workflow_notifications(
                 )
             async with sessions() as session:
                 commands = (await session.exec(select(func.count(col(Outbox.id))))).one()
-            assert commands == 2  # Admission + durable stop; cleanup retries need no signals.
+            assert commands == 2  # Admission + SQL stop commit; cleanup retries need no signals.
             assert await counts(sessions) == (1, 1, 1, 2)
             assert (await life.get(OWNER, sandbox.id)).cleanup_pending
 

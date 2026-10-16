@@ -21,12 +21,12 @@ from boxie.contracts.execution import (
 from boxie.domain.errors import BoxieError
 from boxie.domain.models import Principal
 from boxie.domain.policy import validate_policy
-from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+from boxie.sandbox.execution.orchestrator import Orchestrator
 from boxie.sandbox.terminal.session import serve_terminal
 
 
 def create_orchestrator_app(
-    orchestrator: DurableOrchestrator,
+    orchestrator: Orchestrator,
     artifacts: ArtifactAccess,
     *,
     credential: bytes,

@@ -27,7 +27,7 @@ def main() -> None:
         parser.error("--data-dir must be an absolute daemon-host path")
     args.output.mkdir(parents=True, exist_ok=True)
     identity = {"installation_id": str(args.installation_id), "host_id": args.host_id}
-    durable = {
+    lifecycle = {
         "postgres_dsn_file": args.postgres_dsn,
         "temporal_address": args.temporal_address,
         "temporal_server_name": args.temporal_server_name,
@@ -40,7 +40,7 @@ def main() -> None:
         "orchestrator.json": {
             "data_dir": str(args.data_dir),
             "postgres_dsn_file": args.postgres_dsn,
-            "durable": durable,
+            "lifecycle": lifecycle,
             "profiles_file": args.profiles,
             "credential_file": args.orchestrator_credential,
             "identity": {"installation_id": str(args.installation_id), "host_id": args.host_id},
@@ -49,7 +49,7 @@ def main() -> None:
         "api.json": {
             "release": "local",
             "identity": identity,
-            "durable": durable,
+            "lifecycle": lifecycle,
             "orchestrator_url": args.orchestrator_url,
             "orchestrator_credential_file": args.orchestrator_credential,
             "consumer_credential_files": {args.consumer_id: args.consumer_credential},

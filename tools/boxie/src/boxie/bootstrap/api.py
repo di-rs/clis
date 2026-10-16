@@ -11,11 +11,11 @@ import uvicorn
 from pydantic import TypeAdapter, ValidationError
 
 from boxie.api.app import ApiConfig, create_app
-from boxie.bootstrap.config import DurableConfig, read_credential
-from boxie.bootstrap.durable import (
+from boxie.bootstrap.config import LifecycleConfig, read_credential
+from boxie.bootstrap.dependencies import (
     Dependencies,
     database_for,
-    durable_config,
+    lifecycle_config,
     orchestrator_identity,
     temporal_client,
 )
@@ -34,7 +34,7 @@ class RuntimeConfig:
     api: ApiConfig
     orchestrator_url: str
     orchestrator_credential: bytes = field(repr=False)
-    durable: DurableConfig
+    lifecycle: LifecycleConfig
     identity: OrchestratorIdentity
     bind_host: str = "127.0.0.1"
     bind_port: int = 8090
@@ -60,9 +60,9 @@ def load_configuration(path: Path) -> RuntimeConfig:
         except ValidationError:
             raise ValueError("invalid consumer ID") from None
     api = ApiConfig(data.pop("release"), consumers)
-    if "durable" not in data or "identity" not in data:
-        raise ValueError("durable configuration and orchestrator identity required")
-    data["durable"] = durable_config(data.pop("durable"))
+    if "lifecycle" not in data or "identity" not in data:
+        raise ValueError("lifecycle configuration and orchestrator identity required")
+    data["lifecycle"] = lifecycle_config(data.pop("lifecycle"))
     data["identity"] = orchestrator_identity(data.pop("identity"))
     return RuntimeConfig(api=api, orchestrator_credential=orchestrator, **data)
 
@@ -77,9 +77,9 @@ def main() -> None:
         # SQL-backed retry/status/stop and observations must remain reachable
         # during Temporal outages. Readiness connects with a bounded timeout;
         # only new admission depends on that probe. Worker startup stays eager.
-        temporal = await temporal_client(config.durable, lazy=True)
+        temporal = await temporal_client(config.lifecycle, lazy=True)
         async with (
-            database_for(config.durable.postgres_dsn_file) as sessions,
+            database_for(config.lifecycle.postgres_dsn_file) as sessions,
             OrchestratorClient(
                 config.orchestrator_url,
                 config.orchestrator_credential,

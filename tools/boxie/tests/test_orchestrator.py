@@ -1,10 +1,10 @@
 import asyncio
 from pathlib import Path
 
-from boxie_test_support.durable import launch_execution
+from boxie_test_support.execution import launch_execution
 
 
-def test_durable_provision_preserves_approved_isolation_and_entrypoint(tmp_path: Path) -> None:
+def test_provision_preserves_approved_isolation_and_entrypoint(tmp_path: Path) -> None:
     from typing import Any
 
     from boxie.domain.models import SandboxState

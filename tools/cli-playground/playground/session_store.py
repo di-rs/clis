@@ -1,4 +1,4 @@
-"""Durable page bindings and replayable remote-operation intents."""
+"""Persisted page bindings and replayable remote-operation intents."""
 
 import hashlib
 import os
@@ -30,7 +30,7 @@ def sync_directory(directory: Path) -> None:
         os.close(descriptor)
 
 
-def durable_unlink(path: Path) -> None:
+def unlink_and_sync(path: Path) -> None:
     path.unlink(missing_ok=True)
     sync_directory(path.parent)
 
@@ -101,12 +101,12 @@ class SessionStore:
         ]
 
     def claimed(self, identifier: UUID) -> None:
-        durable_unlink(self.root / "creates" / f"{identifier}.json")
+        unlink_and_sync(self.root / "creates" / f"{identifier}.json")
 
     def upload_intent(self, intent: UploadIntent, archive: Path) -> None:
         identifier = intent.artifact.artifact_id
         target = self.archive(identifier)
-        # Bytes must be durable before the intent can become visible to recovery.
+        # Bytes must be synced to disk before the intent can become visible to recovery.
         with archive.open("rb") as source, target.open("wb") as destination:
             import shutil
 
@@ -137,8 +137,8 @@ class SessionStore:
         return self.root / "uploads" / f"{identifier}.zip"
 
     def uploaded(self, identifier: UUID) -> None:
-        durable_unlink(self.root / "uploads" / f"{identifier}.json")
-        durable_unlink(self.archive(identifier))
+        unlink_and_sync(self.root / "uploads" / f"{identifier}.json")
+        unlink_and_sync(self.archive(identifier))
 
     def retire(self, identifier: UUID) -> None:
         if (self.root / "retirements" / f"{identifier}.done").exists():

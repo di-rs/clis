@@ -1,4 +1,4 @@
-"""Orchestrator-owned final-start guard sharing durable stop's sandbox row lock."""
+"""Orchestrator-owned final-start guard sharing the SQL stop operation's sandbox row lock."""
 
 import asyncio
 from collections.abc import Awaitable, Callable

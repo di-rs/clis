@@ -7,7 +7,7 @@ import pytest
 from boxie_test_support.orchestrator import configuration
 
 
-def test_standalone_api_requires_durable_configuration(tmp_path: Path) -> None:
+def test_standalone_api_requires_lifecycle_configuration(tmp_path: Path) -> None:
     from boxie.bootstrap.api import load_configuration
 
     config = configuration(tmp_path)
@@ -25,7 +25,7 @@ def test_standalone_api_requires_durable_configuration(tmp_path: Path) -> None:
             }
         )
     )
-    with pytest.raises(ValueError, match="durable"):
+    with pytest.raises(ValueError, match="lifecycle"):
         load_configuration(path)
 
 

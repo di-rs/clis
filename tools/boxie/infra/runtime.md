@@ -1,4 +1,4 @@
-# Durable runtime
+# Runtime prerequisites
 
 Boxie uses independently operated [PostgreSQL](postgres/README.md)
 and production [Temporal](temporal/README.md) on the private control
@@ -31,7 +31,7 @@ is supported.
 Admission atomically reserves a capacity slot, artifact reference and command.
 After commit, the API attempts signal-with-start within one second. A crash or
 transport failure leaves a pending command; committed acceptance still succeeds.
-Status, matching retries and durable stop use SQL during Temporal outages.
+Status, matching retries and stop requests use SQL during Temporal outages.
 
 The orchestrator holds an exclusive OS lock on its data directory before opening
 execution resources. SDK workers poll stable installation/host lifecycle and
@@ -39,9 +39,9 @@ maintenance queues. Activities invoke the runtime directly and validate ownershi
 boot/generation fences and SQL's final-start lock remain mandatory.
 
 The lifecycle workflow awaits provisioning, inspects/renews every 30 seconds,
-and durably retries cleanup with a ten-second maximum retry interval and no
-overall cleanup timeout. Removal completes only when journaled physical absence
-is accepted by SQL with accounting release. Uncertain creation/deletion retains
+and retries cleanup across worker restarts with a ten-second maximum retry interval
+and no overall cleanup timeout. Removal completes only when journaled physical
+absence is accepted by SQL with accounting release. Uncertain creation/deletion retains
 both capacity and artifact references. Local monotonic deadlines enforce absolute,
 idle, disconnect and control-lease limits during dependency outages. Safety retries
 cannot release accounting or assume that an unseen pending create was cancelled.
@@ -77,12 +77,12 @@ instantaneous worker liveness.
 
 ## Ownership and retention
 
-Only durably removed executions without pending create operations, uncertainty,
-active activities or terminal sessions can be compacted. SQL must confirm the
-immutable request and terminal accounting release; unavailable SQL never permits
+Only executions whose removal is saved in the journal, without pending create
+operations, uncertainty, active activities or terminal sessions, can be compacted.
+SQL must confirm the immutable request and terminal accounting release; unavailable SQL never permits
 forgetting. Normal admission stops at 128 retained journal records, with eight
 additional cleanup-only identities. Journal failures close new admission until a
-full save recovers durability. An uncertain create plus lost journal writes may
+full save succeeds. An uncertain create plus lost journal writes may
 still require operator investigation.
 
 Worker execution shares the orchestrator process and its Docker trust boundary.

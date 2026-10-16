@@ -155,7 +155,7 @@ def test_capability_failures_and_restart_preserve_claimed_session_while_cleaning
     asyncio.run(exercise())
 
 
-def test_malformed_stop_reply_keeps_the_original_durable_binding_for_restart(
+def test_malformed_stop_reply_keeps_the_original_persisted_binding_for_restart(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

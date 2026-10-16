@@ -62,9 +62,9 @@ class EnvironmentStore:
         atomic_write(self.closed / str(pr), b"")
 
     def reopen_pull_request(self, pr: int) -> None:
-        from playground.session_store import durable_unlink
+        from playground.session_store import unlink_and_sync
 
-        durable_unlink(self.closed / str(pr))
+        unlink_and_sync(self.closed / str(pr))
 
     def record(self, identifier: str, *, include_inactive: bool = False) -> PreviewRecord | None:
         if re.fullmatch(ID_PATTERN, identifier) is None:

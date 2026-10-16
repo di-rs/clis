@@ -18,20 +18,20 @@ from boxie.persistence.outbox import PostgresOutbox
 from boxie.persistence.postgres import PostgresLifecycle
 from boxie.persistence.postgres_artifacts import PostgresArtifactStore
 from boxie.persistence.start_guard import PostgresStartGuard
-from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+from boxie.sandbox.execution.orchestrator import Orchestrator
 from boxie.sandbox.transport.client import OrchestratorClient
 from boxie.temporal.activities import LifecycleActivities
 from boxie.temporal.contracts import lifecycle_queue
 from boxie.temporal.dispatcher import CommandDelivery
 from boxie_test_support.api import CONSUMER_AUTH, serve
-from boxie_test_support.durable import Daemon
+from boxie_test_support.execution import Daemon
 from boxie_test_support.orchestrator import configuration
 from temporalio.client import Client
 from temporalio.service import TLSConfig
 
 
 @asynccontextmanager
-async def durable_stack(dsn: str, root: Path, client: Client) -> AsyncIterator[Any]:
+async def lifecycle_stack(dsn: str, root: Path, client: Client) -> AsyncIterator[Any]:
     migrate(dsn)
     config = configuration(root)
     profiles = json.loads(config.profiles_file.read_text())
@@ -41,7 +41,7 @@ async def durable_stack(dsn: str, root: Path, client: Client) -> AsyncIterator[A
     daemon = Daemon()
     async with database(dsn) as sessions:
         artifacts = PostgresArtifactStore(sessions, root / "artifacts")
-        orchestrator = DurableOrchestrator(
+        orchestrator = Orchestrator(
             config,
             daemon,
             artifacts.path,

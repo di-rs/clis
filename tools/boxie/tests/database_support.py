@@ -62,7 +62,7 @@ async def database(
                     return True
 
                 lifecycle = PostgresLifecycle(sessions, resolver, config.identity, healthy)
-                artifacts = PostgresArtifactStore(sessions, root / "durable-artifacts")
+                artifacts = PostgresArtifactStore(sessions, root / "artifacts")
                 yield lifecycle, artifacts, sessions, config
 
 

@@ -1,4 +1,4 @@
-"""Migrated clock-step assertions against the durable execution owner."""
+"""Migrated clock-step assertions against the orchestrator execution owner."""
 
 import asyncio
 from pathlib import Path

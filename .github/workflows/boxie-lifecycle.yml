@@ -1,4 +1,4 @@
-name: Boxie durable lifecycle
+name: Boxie lifecycle
 
 on:
   pull_request:

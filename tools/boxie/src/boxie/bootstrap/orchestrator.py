@@ -15,19 +15,19 @@ from fastapi import FastAPI
 from sqlmodel import select
 
 from boxie.bootstrap.config import OrchestratorConfig, read_credential
-from boxie.bootstrap.durable import database_for, temporal_client
+from boxie.bootstrap.dependencies import database_for, temporal_client
 from boxie.bootstrap.runtime import embedded_workers
 from boxie.persistence.postgres import PostgresLifecycle
 from boxie.persistence.postgres_artifacts import PostgresArtifactStore
 from boxie.persistence.start_guard import PostgresStartGuard
 from boxie.sandbox.docker import DockerBackend
-from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+from boxie.sandbox.execution.orchestrator import Orchestrator
 from boxie.sandbox.execution.ownership import acquire_owner_lock
 from boxie.sandbox.transport.server import create_orchestrator_app as create_transport_app
 
 
 def create_orchestrator_app(
-    orchestrator: DurableOrchestrator,
+    orchestrator: Orchestrator,
     artifacts: PostgresArtifactStore,
     *,
     credential: bytes,
@@ -70,10 +70,10 @@ def main() -> None:
     args = parser.parse_args()
     config = OrchestratorConfig.from_file(args.config)
 
-    if config.durable is None:
-        raise ValueError("orchestrator requires durable Temporal configuration")
-    durable = config.durable
-    dsn_file = durable.postgres_dsn_file
+    if config.lifecycle is None:
+        raise ValueError("orchestrator requires PostgreSQL and Temporal lifecycle configuration")
+    lifecycle = config.lifecycle
+    dsn_file = lifecycle.postgres_dsn_file
 
     async def run() -> None:
         with acquire_owner_lock(config.data_dir):
@@ -82,7 +82,7 @@ def main() -> None:
     async def run_owned() -> None:
         async with database_for(dsn_file) as sessions:
             artifacts = PostgresArtifactStore(sessions, config.data_dir / "artifacts")
-            orchestrator = DurableOrchestrator(
+            orchestrator = Orchestrator(
                 config,
                 DockerBackend(config.docker_timeout),
                 artifacts.path,
@@ -95,7 +95,7 @@ def main() -> None:
                 return orchestrator.execution_ready
 
             repository = PostgresLifecycle(sessions, orchestrator, config.identity, local_ready)
-            client = await temporal_client(durable, lazy=True)
+            client = await temporal_client(lifecycle, lazy=True)
             credential = read_credential(config.credential_file)
             app = create_orchestrator_app(
                 orchestrator,

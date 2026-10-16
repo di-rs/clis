@@ -1,4 +1,4 @@
-"""Local finality, durable receipt and bounded input persistence contracts."""
+"""Local finality, persisted receipt and bounded input persistence contracts."""
 
 import asyncio
 import json
@@ -10,7 +10,7 @@ import pytest
 from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import SandboxRef
 from boxie.domain.models import SandboxState, TerminationReason
-from boxie_test_support.durable import Guard, launch_execution
+from boxie_test_support.execution import Guard, launch_execution
 from lifecycle_support import settled, setup
 
 
@@ -104,9 +104,9 @@ def test_compaction_failure_preserves_barrier_and_readiness(
         # An ambiguous successful replacement is safe across process loss: fresh
         # ensure still consults the immutable SQL guard and cannot resurrect it.
         if after_replace:
-            from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+            from boxie.sandbox.execution.orchestrator import Orchestrator
 
-            replacement = DurableOrchestrator(
+            replacement = Orchestrator(
                 orchestrator.config,
                 orchestrator.docker,
                 orchestrator.artifact_path,
@@ -281,7 +281,7 @@ def test_unknown_create_deleted_during_failed_save_remains_uncertain_after_resta
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def exercise() -> None:
-        from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+        from boxie.sandbox.execution.orchestrator import Orchestrator
 
         orchestrator, request, daemon, clock, guard = await setup(tmp_path)
         daemon.create_gate = asyncio.Event()
@@ -303,7 +303,7 @@ def test_unknown_create_deleted_during_failed_save_remains_uncertain_after_resta
             raise OSError("persistent journal outage")
 
         for _ in range(2):
-            replacement = DurableOrchestrator(
+            replacement = Orchestrator(
                 orchestrator.config,
                 daemon,
                 orchestrator.artifact_path,
@@ -320,7 +320,7 @@ def test_unknown_create_deleted_during_failed_save_remains_uncertain_after_resta
             assert replacement.sweeper is not None
             replacement.sweeper.cancel()
             await asyncio.gather(replacement.sweeper, return_exceptions=True)
-        recovered = DurableOrchestrator(
+        recovered = Orchestrator(
             orchestrator.config,
             daemon,
             orchestrator.artifact_path,

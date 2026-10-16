@@ -10,7 +10,7 @@ from boxie.sandbox.terminal.replay import ReplayBuffer
 
 
 class ExecutionTerminal:
-    """PTY byte owner; durable attachment/activity decisions belong to the orchestrator."""
+    """PTY byte owner; attachment/activity decisions belong to the orchestrator."""
 
     def __init__(
         self,

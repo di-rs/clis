@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from boxie.bootstrap.durable import Dependencies
+from boxie.bootstrap.dependencies import Dependencies
 from boxie.sandbox.transport.client import OrchestratorClient
 from google.protobuf.timestamp_pb2 import Timestamp
 from temporalio.api.taskqueue.v1 import PollerInfo

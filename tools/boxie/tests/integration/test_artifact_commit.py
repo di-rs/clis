@@ -141,10 +141,10 @@ def test_disconnected_upload_waiter_and_collector_have_one_total_deadline(
     from boxie.bootstrap.orchestrator import create_orchestrator_app
     from boxie.domain.errors import BoxieError
     from boxie.persistence.start_guard import PostgresStartGuard
-    from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+    from boxie.sandbox.execution.orchestrator import Orchestrator
     from boxie.sandbox.transport.client import OrchestratorClient
     from boxie_test_support.api import serve
-    from boxie_test_support.durable import Daemon
+    from boxie_test_support.execution import Daemon
     from boxie_test_support.orchestrator import Clock
 
     async def exercise() -> None:
@@ -153,7 +153,7 @@ def test_disconnected_upload_waiter_and_collector_have_one_total_deadline(
                 "boxie.persistence.postgres_artifacts.OPERATION_SECONDS", 0.15, raising=False
             )
             clock = Clock()
-            orchestrator = DurableOrchestrator(
+            orchestrator = Orchestrator(
                 config, Daemon(), store.path, PostgresStartGuard(sessions), clock, clock.monotonic
             )
 

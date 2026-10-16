@@ -12,7 +12,7 @@ from boxie.domain.lifecycle import OrchestratorObservation
 from boxie.persistence.outbox import PostgresOutbox
 from boxie.persistence.postgres import PostgresLifecycle
 from boxie.persistence.postgres_artifacts import PostgresArtifactStore
-from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+from boxie.sandbox.execution.orchestrator import Orchestrator
 from boxie.temporal.activities import LifecycleActivities, SafeActivityErrors
 from boxie.temporal.contracts import TASK_QUEUE, lifecycle_queue, maintenance_queue
 from boxie.temporal.dispatcher import CommandDelivery
@@ -38,7 +38,7 @@ def lifecycle_worker(
 async def embedded_workers(
     client: Client,
     repository: PostgresLifecycle,
-    orchestrator: DurableOrchestrator,
+    orchestrator: Orchestrator,
     artifacts: PostgresArtifactStore,
 ) -> AsyncIterator[None]:
     identity = orchestrator.config.identity

@@ -1,4 +1,4 @@
-"""Durable execution races with controlled clocks and an external daemon boundary."""
+"""Orchestrator execution races with controlled clocks and an external daemon boundary."""
 
 import asyncio
 from dataclasses import replace
@@ -10,9 +10,9 @@ from uuid import uuid4
 import pytest
 from boxie.domain.errors import BoxieError
 from boxie.domain.models import Principal, SandboxState, TerminationReason
-from boxie_test_support.durable import Daemon as Daemon
-from boxie_test_support.durable import Guard as Guard
-from boxie_test_support.durable import launch_execution
+from boxie_test_support.execution import Daemon as Daemon
+from boxie_test_support.execution import Guard as Guard
+from boxie_test_support.execution import launch_execution
 from boxie_test_support.orchestrator import FakeTerminal
 from lifecycle_support import settled, setup
 
@@ -139,9 +139,9 @@ def test_restart_does_not_adopt_pty_or_forget_unknown_create(tmp_path: Path) -> 
     async def exercise() -> None:
         orchestrator, request, daemon, clock, guard = await setup(tmp_path)
         await settled(orchestrator, request.ref, SandboxState.READY)
-        from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+        from boxie.sandbox.execution.orchestrator import Orchestrator
 
-        replacement = DurableOrchestrator(
+        replacement = Orchestrator(
             orchestrator.config, daemon, orchestrator.artifact_path, guard, clock, clock.monotonic
         )
         await replacement.start()
@@ -243,9 +243,9 @@ def test_restart_retains_unknown_create_then_reconciles_late_resource(tmp_path: 
         assert worker is not None
         worker.cancel()
         await asyncio.gather(worker, return_exceptions=True)
-        from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+        from boxie.sandbox.execution.orchestrator import Orchestrator
 
-        replacement = DurableOrchestrator(
+        replacement = Orchestrator(
             orchestrator.config, daemon, orchestrator.artifact_path, guard, clock, clock.monotonic
         )
         await replacement.start()
@@ -494,7 +494,7 @@ def test_unhealthy_journal_blocks_new_execution_and_recovers_autonomously(
         try:
             clock.advance(90)
             await asyncio.wait_for(failed.wait(), 1)
-            assert hasattr(orchestrator, "execution_ready"), "durability readiness missing"
+            assert hasattr(orchestrator, "execution_ready"), "journal readiness missing"
             assert not orchestrator.execution_ready
             with pytest.raises(BoxieError) as denied:
                 await launch_execution(orchestrator, blocked)
@@ -588,7 +588,7 @@ def test_journal_failure_fences_an_already_provisioning_final_start(
             worker = orchestrator.runtimes[second.ref.id].activity
             assert worker is not None
             await asyncio.gather(worker, return_exceptions=True)
-            assert len(daemon.started) == 1, "durability failure must fence a pending start"
+            assert len(daemon.started) == 1, "journal failure must fence a pending start"
         finally:
             monkeypatch.setattr(orchestrator.journal, "save", original_save)
         try:

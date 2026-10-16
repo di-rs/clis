@@ -1,14 +1,14 @@
-"""Forget only durably removed, SQL-settled executions without live callbacks."""
+"""Forget only journal-confirmed removals settled in SQL without live callbacks."""
 
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+    from boxie.sandbox.execution.orchestrator import Orchestrator
 
 MAX_RECORDS = 128
 
 
-async def compact(orchestrator: DurableOrchestrator) -> None:
+async def compact(orchestrator: Orchestrator) -> None:
     for record in list(orchestrator.records.values()):
         if not orchestrator.runtimes[record.id].settled:
             continue

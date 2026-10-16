@@ -1,4 +1,4 @@
-"""External Docker and authorization test boundaries for durable execution."""
+"""External Docker and authorization test boundaries for orchestrator execution."""
 
 import asyncio
 from typing import Any

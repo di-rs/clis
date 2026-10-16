@@ -1,4 +1,4 @@
-# Durable API and orchestrator with embedded Temporal workers; only orchestrator receives Docker and artifact storage.
+# API and orchestrator with embedded Temporal workers; only orchestrator receives Docker and artifact storage.
 name: ${BOXIE_PROJECT_NAME:-boxie}
 services:
   api:

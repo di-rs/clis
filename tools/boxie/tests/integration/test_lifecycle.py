@@ -54,7 +54,7 @@ async def until(client: httpx.AsyncClient, identifier: str, state: str) -> dict[
 
 
 async def publish(client: httpx.AsyncClient) -> str:
-    identifier, data = str(uuid4()), bundle({"message.txt": b"native durable bytes\n"})
+    identifier, data = str(uuid4()), bundle({"message.txt": b"native artifact bytes\n"})
     result = await client.put(
         f"/v1/artifacts/{identifier}",
         content=data,
@@ -107,7 +107,7 @@ async def pending_after_restart(
     # 30s authenticated inspection (or cleanup retry) binds the new boot and
     # repairs SQL; startup or a fixed 3s delay is not a projection barrier.
     # Cleanup may bind then fail its RPC before an observation can be saved.
-    # Its durable SQL stop remains authoritative even with no observation row.
+    # Its committed SQL stop remains authoritative even with no observation row.
     async with asyncio.timeout(90):
         while True:
             await accounting(stack, identifier, 1)
@@ -344,7 +344,7 @@ def test_sustained_journal_failure_across_orchestrator_restart(
                 "orchestrator",
             )
             if unknown_create:
-                # Discovery/deletion during a failed save was never durable. A new
+                # Discovery/deletion during a failed save was never saved to the journal. A new
                 # boot sees unknown create + absence and must retain the reservation.
                 await pending_after_restart(stack, client, identifier)
                 await accounting(stack, identifier, 1)
@@ -360,7 +360,7 @@ def test_sustained_journal_failure_across_orchestrator_restart(
     asyncio.run(exercise())
 
 
-def test_unknown_create_ack_loss_recovers_with_durable_discovery(
+def test_unknown_create_ack_loss_recovers_with_persisted_discovery(
     lifecycle_stack: LifecycleStack,
 ) -> None:
     async def exercise() -> None:

@@ -289,7 +289,7 @@ class PlaygroundService:
             self.sessions.create_intent(intent)
             return binding, credential
         except BaseException:
-            # The durable idempotency key resolves ambiguous/cancelled admissions on recovery.
+            # The persisted idempotency key resolves ambiguous/cancelled admissions on recovery.
             saved = self.sessions.get(intent.id)
             if (
                 saved is None

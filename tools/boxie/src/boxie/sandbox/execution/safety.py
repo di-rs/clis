@@ -1,4 +1,4 @@
-"""Local deadline and journal enforcement, independent of the durable scheduler."""
+"""Local deadline and journal enforcement, independent of Temporal scheduling."""
 
 import asyncio
 from typing import TYPE_CHECKING
@@ -6,11 +6,11 @@ from typing import TYPE_CHECKING
 from boxie.domain.models import SandboxState
 
 if TYPE_CHECKING:
-    from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+    from boxie.sandbox.execution.orchestrator import Orchestrator
 
 
 class ExecutionSafety:
-    def __init__(self, owner: DurableOrchestrator) -> None:
+    def __init__(self, owner: Orchestrator) -> None:
         self.owner = owner
         self.task: asyncio.Task[None] | None = None
 

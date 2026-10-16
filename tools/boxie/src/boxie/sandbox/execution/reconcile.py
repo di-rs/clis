@@ -67,7 +67,7 @@ async def reconcile_removal(
             save()
         except Exception:
             # No await separates the tentative terminal projection from its save.
-            # Never expose confirmation or forget intent without durable finality.
+            # Never expose confirmation or forget intent before the final journal write succeeds.
             record.state = SandboxState.TERMINATING
             record.cleanup_pending = True
             record.removal_confirmed = False

@@ -63,4 +63,4 @@ class CommandDelivery:
                     await self.deliver(event)
                     await self.store.acknowledge(event)
         except Exception:
-            pass  # Acceptance is already durable; scheduled recovery repairs delivery.
+            pass  # Acceptance is already committed to SQL; scheduled recovery repairs delivery.

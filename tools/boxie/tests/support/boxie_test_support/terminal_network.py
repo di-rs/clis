@@ -16,7 +16,7 @@ from boxie.bootstrap.config import OrchestratorConfig
 from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import EnsureRequest, SandboxRef
 from boxie.domain.models import Principal, SandboxSpec, SandboxView, TerminationReason
-from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+from boxie.sandbox.execution.orchestrator import Orchestrator
 from boxie.sandbox.transport.client import OrchestratorClient
 from boxie.sandbox.transport.server import create_orchestrator_app
 from fastapi import FastAPI
@@ -24,7 +24,7 @@ from websockets.asyncio.client import ClientConnection
 
 from boxie_test_support.api import CONSUMER_AUTH, serve
 from boxie_test_support.artifacts import Artifacts
-from boxie_test_support.durable import Daemon, Guard, launch_execution
+from boxie_test_support.execution import Daemon, Guard, launch_execution
 from boxie_test_support.orchestrator import Clock, FakeTerminal, configuration
 
 
@@ -39,7 +39,7 @@ class EchoDaemon(Daemon):
 
 
 class Admission:
-    def __init__(self, orchestrator: DurableOrchestrator, artifacts: Artifacts) -> None:
+    def __init__(self, orchestrator: Orchestrator, artifacts: Artifacts) -> None:
         self.orchestrator, self.artifacts = orchestrator, artifacts
         self.keys: dict[tuple[Principal, str], UUID] = {}
 
@@ -91,7 +91,7 @@ class Network:
     api: httpx.AsyncClient
     orchestrator_url: str
     daemon: EchoDaemon
-    orchestrator: DurableOrchestrator
+    orchestrator: Orchestrator
     config: OrchestratorConfig
     clock: Clock
 
@@ -114,7 +114,7 @@ async def network(
     async def path(principal: Principal, identifier: UUID) -> Path:
         return artifacts.path(principal, identifier)
 
-    orchestrator = DurableOrchestrator(config, daemon, path, Guard(), clock, clock.monotonic)
+    orchestrator = Orchestrator(config, daemon, path, Guard(), clock, clock.monotonic)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:

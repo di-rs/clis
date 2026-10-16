@@ -275,7 +275,7 @@ def create_router(service: PlaygroundService, static_dir: Path) -> APIRouter:
             return
         finally:
             if claimed and not attached:
-                # Synchronous durable compensation also survives task cancellation.
+                # Synchronous persisted compensation also survives task cancellation.
                 service.cancel_attachment(session_id, claim=binding.attachment_claim)
         with suppress(WebSocketDisconnect, RuntimeError):
             await close_terminal(websocket)

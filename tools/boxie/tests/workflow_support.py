@@ -85,7 +85,7 @@ class Decisions:
 
     @activity.defn(name="remove_sandbox")
     async def remove(self, sandbox_id: str) -> None:
-        assert self.stop_committed, "removal must follow durable stop"
+        assert self.stop_committed, "removal must follow SQL stop commit"
         self.removals += 1
         self.removal_attempts.append(activity.info().attempt)
         if self.mode.startswith("terminal_remove_") and self.removals == 1:

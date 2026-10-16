@@ -1,4 +1,4 @@
-"""Production API and durable orchestrator protocol over independent loopback sockets."""
+"""Production API and orchestrator protocol over independent loopback sockets."""
 
 import asyncio
 import json

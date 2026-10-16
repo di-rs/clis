@@ -43,7 +43,7 @@ class OrchestratorConfig:
     bind_host: str = "127.0.0.1"
     bind_port: int = 8091
     postgres_dsn_file: Path | None = None
-    durable: DurableConfig | None = None
+    lifecycle: LifecycleConfig | None = None
 
     def __post_init__(self) -> None:
         if not 0 < self.docker_timeout <= 60 or not 0 < self.sweep_seconds <= 10:
@@ -59,12 +59,12 @@ class OrchestratorConfig:
             data[key] = Path(data[key])
         if "postgres_dsn_file" in data:
             data["postgres_dsn_file"] = Path(data["postgres_dsn_file"])
-        if "durable" in data:
+        if "lifecycle" in data:
             converted: dict[str, Any] = {
                 key: Path(value) if key.endswith("_file") else value
-                for key, value in data["durable"].items()
+                for key, value in data["lifecycle"].items()
             }
-            data["durable"] = DurableConfig(**converted)
+            data["lifecycle"] = LifecycleConfig(**converted)
         identity = data.pop("identity")
         data["identity"] = OrchestratorIdentity(
             UUID(identity["installation_id"]), identity["host_id"]
@@ -75,8 +75,8 @@ class OrchestratorConfig:
 
 
 @dataclass(frozen=True)
-class DurableConfig:
-    """Explicit inputs for the coordinated durable composition; no migration hook.
+class LifecycleConfig:
+    """Explicit inputs for the coordinated lifecycle composition; no migration hook.
 
     API and orchestrator use separate Temporal client identities. The orchestrator
     remains the sole Docker and artifact filesystem owner.

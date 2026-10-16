@@ -19,7 +19,7 @@ from boxie.contracts.terminal import (
 from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import SandboxRef
 from boxie.domain.models import SandboxState
-from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+from boxie.sandbox.execution.orchestrator import Orchestrator
 from boxie.sandbox.execution.runtime import TerminalSession
 from boxie.sandbox.terminal.replay import StreamGap
 
@@ -35,16 +35,14 @@ async def close_socket(websocket: WebSocket, code: int = 1000) -> None:
             await websocket.close(code=code)
 
 
-async def serve_terminal(
-    websocket: WebSocket, orchestrator: DurableOrchestrator, ref: SandboxRef
-) -> None:
+async def serve_terminal(websocket: WebSocket, orchestrator: Orchestrator, ref: SandboxRef) -> None:
     with orchestrator.terminal_session(ref) as session:
         await _serve_terminal(websocket, orchestrator, ref, session)
 
 
 async def _serve_terminal(
     websocket: WebSocket,
-    orchestrator: DurableOrchestrator,
+    orchestrator: Orchestrator,
     ref: SandboxRef,
     session: TerminalSession,
 ) -> None:

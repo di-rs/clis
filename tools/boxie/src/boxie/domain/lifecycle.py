@@ -1,4 +1,4 @@
-"""Durable ownership and observation facts shared by orchestrator and orchestration."""
+"""Sandbox ownership and observation facts shared by orchestrator and orchestration."""
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -17,7 +17,7 @@ from boxie.domain.models import (
 
 
 @dataclass(frozen=True)
-class DurableRequest:
+class SandboxRequest:
     """Sensitive repository result. Never serialize this into workflow history."""
 
     sandbox_id: UUID
@@ -103,7 +103,7 @@ class EnsureRequest:
     absolute_deadline: datetime
 
     @classmethod
-    def from_durable(cls, request: DurableRequest) -> EnsureRequest:
+    def from_request(cls, request: SandboxRequest) -> EnsureRequest:
         return cls(
             SandboxRef(request.sandbox_id, request.generation),
             request.principal,

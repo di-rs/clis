@@ -8,7 +8,7 @@ from temporalio.common import RetryPolicy
 with workflow.unsafe.imports_passed_through():
     from boxie.persistence.postgres import PostgresLifecycle
     from boxie.persistence.postgres_artifacts import PostgresArtifactStore
-    from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+    from boxie.sandbox.execution.orchestrator import Orchestrator
     from boxie.temporal.dispatcher import CommandDelivery
 
 
@@ -17,7 +17,7 @@ class MaintenanceActivities:
         self,
         delivery: CommandDelivery,
         repository: PostgresLifecycle,
-        orchestrator: DurableOrchestrator,
+        orchestrator: Orchestrator,
         artifacts: PostgresArtifactStore,
     ) -> None:
         self.delivery, self.repository = delivery, repository

@@ -1,4 +1,4 @@
-"""Durable handoff and embedded execution against production Temporal and SQL."""
+"""SQL outbox handoff and embedded execution against production Temporal and SQL."""
 
 import asyncio
 from dataclasses import replace
@@ -22,7 +22,7 @@ from boxie_test_support.dependencies import temporal_stack as temporal_stack
 from database_support import OWNER, counts, database, upload
 from sqlalchemy import func, insert, update
 from sqlmodel import col
-from temporal_support import durable_stack, tls
+from temporal_support import lifecycle_stack, tls
 from temporalio.client import Client
 from temporalio.worker import Replayer
 
@@ -41,7 +41,7 @@ def test_committed_command_recovers_without_api_delivery(
         client = await Client.connect(
             temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-orchestrator")
         )
-        async with durable_stack(postgres_dsn, tmp_path, client) as stack:
+        async with lifecycle_stack(postgres_dsn, tmp_path, client) as stack:
             spec = await upload(stack.artifacts)
             view = await stack.life.submit(OWNER, "lost-api", spec)
             if stop_first:
@@ -103,7 +103,7 @@ def test_cancelled_activity_retains_late_create_and_accounting(
         client = await Client.connect(
             temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-orchestrator")
         )
-        async with durable_stack(postgres_dsn, tmp_path, client) as stack:
+        async with lifecycle_stack(postgres_dsn, tmp_path, client) as stack:
             stack.daemon.create_gate = asyncio.Event()
             async with embedded_workers(client, stack.life, stack.orchestrator, stack.artifacts):
                 identifier = await create(stack.http, await artifact(stack.http))
@@ -142,7 +142,7 @@ def test_cleanup_preserves_first_termination_cause(
         client = await Client.connect(
             temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-orchestrator")
         )
-        async with durable_stack(postgres_dsn, tmp_path, client) as stack:
+        async with lifecycle_stack(postgres_dsn, tmp_path, client) as stack:
             view = await stack.life.submit(OWNER, "first-cause", await upload(stack.artifacts))
             identity, boot = stack.orchestrator.config.identity, stack.orchestrator.boot_id
             assert await stack.life.bind_orchestrator_boot(OWNER, identity, view.id, 1, None, boot)
@@ -290,7 +290,7 @@ def test_actual_api_process_accepts_status_and_stop_during_temporal_outage(
         client = await Client.connect(
             temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-orchestrator")
         )
-        async with durable_stack(postgres_dsn, tmp_path, client) as stack:
+        async with lifecycle_stack(postgres_dsn, tmp_path, client) as stack:
             view = await stack.life.submit(OWNER, "api-outage", await upload(stack.artifacts))
             dsn_path = tmp_path / "dsn.secret"
             dsn_path.write_text(postgres_dsn)
@@ -311,7 +311,7 @@ def test_actual_api_process_accepts_status_and_stop_during_temporal_outage(
                 "orchestrator_url": str(stack.life.resolver._http.base_url),
                 "orchestrator_credential_file": str(stack.orchestrator.config.credential_file),
                 "consumer_credential_files": {"one": str(consumer)},
-                "durable": {
+                "lifecycle": {
                     "postgres_dsn_file": str(dsn_path),
                     "temporal_address": "127.0.0.1:1",
                     "temporal_server_name": "temporal",
@@ -374,7 +374,7 @@ def test_busy_maintenance_preserves_terminal_and_lease_and_cleanup_history(
         client = await Client.connect(
             temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-orchestrator")
         )
-        async with durable_stack(postgres_dsn, tmp_path, client) as stack:
+        async with lifecycle_stack(postgres_dsn, tmp_path, client) as stack:
             gate, saturated = asyncio.Event(), asyncio.Event()
             active = 0
             original_collect = stack.artifacts.collect

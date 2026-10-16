@@ -8,21 +8,21 @@ from uuid import UUID, uuid4
 
 from boxie.domain.lifecycle import EnsureRequest, OrchestratorObservation, SandboxRef
 from boxie.domain.models import Principal, SandboxSpec, SandboxState
-from boxie.sandbox.execution.orchestrator import DurableOrchestrator
-from boxie_test_support.durable import Daemon, Guard, launch_execution
+from boxie.sandbox.execution.orchestrator import Orchestrator
+from boxie_test_support.execution import Daemon, Guard, launch_execution
 from boxie_test_support.orchestrator import Clock, configuration
 
 
 async def setup(
     root: Path, **changes: Any
-) -> tuple[DurableOrchestrator, EnsureRequest, Daemon, Clock, Guard]:
+) -> tuple[Orchestrator, EnsureRequest, Daemon, Clock, Guard]:
     config = configuration(root, **changes)
     clock, daemon, guard = Clock(), Daemon(), Guard()
 
     async def artifact(principal: Principal, identifier: UUID) -> Path:
         return root
 
-    orchestrator = DurableOrchestrator(config, daemon, artifact, guard, clock, clock.monotonic)
+    orchestrator = Orchestrator(config, daemon, artifact, guard, clock, clock.monotonic)
     spec = SandboxSpec(uuid4(), "shell", ("/bin/sh",), {})
     snapshot = orchestrator.profiles.resolve_profile(spec.profile_id, spec.command, spec.env)
     request = EnsureRequest(
@@ -39,7 +39,7 @@ async def setup(
 
 
 async def settled(
-    orchestrator: DurableOrchestrator, ref: SandboxRef, state: SandboxState
+    orchestrator: Orchestrator, ref: SandboxRef, state: SandboxState
 ) -> OrchestratorObservation:
     for _ in range(200):
         observation = await orchestrator.inspect(ref)

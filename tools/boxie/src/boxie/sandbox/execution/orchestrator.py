@@ -1,4 +1,4 @@
-"""Fenced execution of durable admissions; PostgreSQL owns all reservations."""
+"""Fenced execution of SQL admissions; PostgreSQL owns all reservations."""
 
 import asyncio
 import logging
@@ -56,7 +56,7 @@ class ExecutionConfig(Protocol):
     def sweep_seconds(self) -> float: ...
 
 
-class DurableOrchestrator:
+class Orchestrator:
     def __init__(
         self,
         config: ExecutionConfig,
@@ -78,7 +78,7 @@ class DurableOrchestrator:
         self.records = self.journal.records
         self.admission_lock = asyncio.Lock()
         self.runtimes = {
-            key: ExecutionRuntime(self, record, durable_version=record.event_version)
+            key: ExecutionRuntime(self, record, persisted_version=record.event_version)
             for key, record in self.records.items()
         }
         self._input_flush_at: float | None = None
@@ -145,7 +145,7 @@ class DurableOrchestrator:
         self._journal_healthy = True
         self._input_flush_at = None
         for key, record in self.records.items():
-            self.runtimes[key].durable_version = record.event_version
+            self.runtimes[key].persisted_version = record.event_version
 
     def _changed(self, record: ExecutionRecord) -> None:
         record.event_version += 1
@@ -180,7 +180,7 @@ class DurableOrchestrator:
                 async with asyncio.timeout(5):
                     await self.observer(await self.inspect(ref))
             except Exception:
-                pass  # Durable activity inspection repairs a lost live notification.
+                pass  # Retried activity inspection repairs a lost live notification.
 
     async def inspect(self, ref: SandboxRef) -> OrchestratorObservation:
         async with self._lock(ref):
@@ -213,7 +213,7 @@ class DurableOrchestrator:
                 return self._observation(old)
             mode = await self.guard.initialization(request, self.boot_id)
             if mode is None:
-                raise BoxieError(409, "durable admission unavailable")
+                raise BoxieError(409, "committed admission unavailable")
             # Existing cleanup keeps progressing; only new identities consume headroom.
             limit = MAX_RECORDS if mode == "execute" else MAX_RECORDS + 8
             if (
@@ -320,8 +320,8 @@ class DurableOrchestrator:
             self._changed(record)
         except Exception:
             # A full disk must not defeat expiry. The prior execution/create intent
-            # is already durable; retain the in-memory stop latch and attempt only
-            # ownership-checked removal. Confirmation still requires a final save.
+            # is already saved in the journal; retain the in-memory stop latch and
+            # attempt only ownership-checked removal. Confirmation requires a final save.
             self.runtimes[record.id].safety_required = True
 
     async def remove(self, ref: SandboxRef, reason: TerminationReason) -> OrchestratorObservation:

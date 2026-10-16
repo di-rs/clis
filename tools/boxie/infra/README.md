@@ -68,7 +68,7 @@ The [Temporal deployment](temporal/README.md) is owned here and operated as a
 separate Compose project. Its server releases and schema operations remain
 independent of Boxie application releases.
 
-Complete the required [durable runtime prerequisites](durable-runtime.md) first,
+Complete the required [runtime prerequisites](runtime.md) first,
 including explicit Alembic revisions, namespace setup, and API/orchestrator mTLS identities.
 Generate all three process JSON files (substitute your installation UUID and paths):
 

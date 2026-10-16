@@ -19,7 +19,7 @@ Generated lockfiles, test fixtures and prose are not implementation modules.
 
 | File (lines before cleanup) | Decision and reason |
 | --- | --- |
-| `tools/cli-playground/playground/service.py` (421) | Keep in this change. Upload publication, admission recovery and PR closure coordinate through the same durable intent store and upload lock. A future split should introduce explicit publication/session services and retain the cross-operation race tests, rather than move methods into mutually dependent files. |
+| `tools/cli-playground/playground/service.py` (421) | Keep in this change. Upload publication, admission recovery and PR closure coordinate through the same persisted intent store and upload lock. A future split should introduce explicit publication/session services and retain the cross-operation race tests, rather than move methods into mutually dependent files. |
 | `tools/cli-playground/infra/playground_infra/deploy.py` (309) | Keep for now. Configuration, release validation and deployment form one small operator entry point, and deployment is deliberately disabled during the staged extraction. Revisit the release-validation boundary when production activation is implemented. |
 | `tools/cli-playground/frontend/e2e/playground.spec.ts` (514) | Keep. End-to-end scenarios share browser setup and cover the same preview/terminal journey. Split by build-state and terminal interactions if those suites grow independently. |
 | `tools/cli-playground/frontend/src/terminal/session.test.ts` (358) | Keep. Cohesive state-machine tests with shared fake socket/terminal setup; production session logic is already separate. |

@@ -19,7 +19,7 @@ from temporalio.api.workflowservice.v1 import (
 from temporalio.client import Client
 from temporalio.service import TLSConfig
 
-from boxie.bootstrap.config import DurableConfig, read_credential
+from boxie.bootstrap.config import LifecycleConfig, read_credential
 from boxie.domain.models import OrchestratorIdentity
 from boxie.persistence.database import SessionFactory, database
 from boxie.temporal.contracts import TASK_QUEUE, lifecycle_queue
@@ -30,11 +30,11 @@ from boxie.temporal.contracts import TASK_QUEUE, lifecycle_queue
 WORKER_PRESENCE_SECONDS = 90
 
 
-def durable_config(data: dict[str, Any]) -> DurableConfig:
+def lifecycle_config(data: dict[str, Any]) -> LifecycleConfig:
     converted: dict[str, Any] = {
         key: Path(value) if key.endswith("_file") else value for key, value in data.items()
     }
-    return DurableConfig(**converted)
+    return LifecycleConfig(**converted)
 
 
 def orchestrator_identity(data: dict[str, str]) -> OrchestratorIdentity:
@@ -45,7 +45,7 @@ def database_for(path: Path) -> AbstractAsyncContextManager[SessionFactory]:
     return database(read_credential(path, allow_spaces=True).decode())
 
 
-async def temporal_client(config: DurableConfig, *, lazy: bool = False) -> Client:
+async def temporal_client(config: LifecycleConfig, *, lazy: bool = False) -> Client:
     # No plaintext/test-server alternative is accepted by this composition root.
     return await Client.connect(
         config.temporal_address,

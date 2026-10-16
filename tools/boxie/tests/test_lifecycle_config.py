@@ -4,11 +4,11 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from boxie.bootstrap.config import DurableConfig
+from boxie.bootstrap.config import LifecycleConfig
 
 
-def test_durable_configuration_requires_verified_tls_and_explicit_dsn(tmp_path: Path) -> None:
-    settings = DurableConfig(
+def test_lifecycle_configuration_requires_verified_tls_and_explicit_dsn(tmp_path: Path) -> None:
+    settings = LifecycleConfig(
         postgres_dsn_file=tmp_path / "db",
         temporal_address="temporal:7233",
         temporal_server_name="temporal",

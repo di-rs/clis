@@ -17,7 +17,7 @@ from boxie.sandbox.execution.reconcile import owned_container
 from boxie.sandbox.terminal.pty import ExecutionTerminal
 
 if TYPE_CHECKING:
-    from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+    from boxie.sandbox.execution.orchestrator import Orchestrator
 
 
 @dataclass
@@ -30,7 +30,7 @@ class Deadlines:
 
 @dataclass
 class ExecutionRuntime:
-    owner: DurableOrchestrator
+    owner: Orchestrator
     record: ExecutionRecord
     deadlines: Deadlines | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -42,7 +42,7 @@ class ExecutionRuntime:
     terminal_reader: asyncio.Task[None] | None = None
     reconciliation: asyncio.Task[None] | None = None
     sessions: int = 0
-    durable_version: int = 0
+    persisted_version: int = 0
     reconciliation_failed: bool = False
     safety_required: bool = False
 
@@ -67,7 +67,7 @@ class ExecutionRuntime:
             and not record.creation_uncertain
             and not record.start_uncertain
             and record.container_id is None
-            and self.durable_version == record.event_version
+            and self.persisted_version == record.event_version
             and self.sessions == 0
             and all(
                 task is None or task.done()
@@ -91,7 +91,7 @@ class ExecutionRuntime:
                 if not await guard.start_allowed(request, boot_id):
                     await owner.remove(record.ref, TerminationReason.REQUESTED)
                     return
-                # Guard verifies the retained durable artifact reference before mount lookup.
+                # Guard verifies the retained SQL artifact reference before mount lookup.
                 artifact = await artifact_path(request.principal, request.spec.artifact_id)
                 info = await owned_container(docker, record)
             async with self.lock:

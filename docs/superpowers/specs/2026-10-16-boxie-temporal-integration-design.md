@@ -8,8 +8,8 @@ Target: PR #40 (`feat/boxie-temporal`), reviewed at
 ## Intent
 
 Temporal was introduced to replace self-driven worker machinery. Integrate it
-into Boxie's orchestrator as the mechanism for durable execution, retries,
-waiting, and scheduled maintenance. Keep Boxie's domain and public API in Boxie.
+into Boxie's orchestrator to resume execution, retries, waits, and scheduled
+maintenance after worker restarts. Keep Boxie's domain and public API in Boxie.
 Use **orchestrator** consistently; there is no additional component named agent.
 
 Success means deleting redundant scheduling and transport code, not merely
@@ -19,8 +19,9 @@ moving existing loops into a new directory or adding another controller.
 
 Chosen: embed Temporal SDK workflow and activity workers in the orchestrator.
 Activities invoke its execution runtime directly. PostgreSQL retains admission,
-stop intent, capacity, and artifact accounting. Temporal owns durable lifecycle
-progression and normal cleanup retries. The runtime retains physical ownership.
+stop intent, capacity, and artifact accounting. Temporal records lifecycle
+progression and retries normal cleanup across worker restarts. The runtime retains
+physical ownership.
 
 Keeping a separate worker and only refactoring adapters would preserve most of
 the protocol and background machinery. Making Temporal the admission database
@@ -40,7 +41,7 @@ objects are accessed only inside activities or the ordinary live I/O path.
 | API process | Authentication, SQL admission/status/stop, immediate command delivery, artifact/terminal relay |
 | Orchestrator process | Embedded SDK workers, execution runtime, Docker, PTYs, journal, local safety |
 | PostgreSQL | Atomic reservations, immutable request, stop guard, observations, confirmed accounting release |
-| Temporal service | Durable activity dispatch/retries, workflow timers/history, recovery and maintenance schedules |
+| Temporal service | Activity dispatch/retries, persisted workflow timers/history, recovery and maintenance schedules |
 
 One orchestrator owns one installation/host data directory. Reject a second owner
 with an OS-held exclusive lock before Docker access or worker polling. Derive
@@ -52,7 +53,7 @@ SDK workers in the same process. Maintenance outages must not exhaust lifecycle
 activity slots. Preserve boot/generation fences; Temporal task routing does not
 replace physical ownership checks.
 
-## Durable sandbox flow
+## Sandbox flow
 
 1. API commits admission, one of eight slots, the artifact reference, and a start
    command in one SQL transaction. Existing idempotency semantics remain.
@@ -70,8 +71,8 @@ replace physical ownership checks.
    the runtime's authoritative monotonic deadlines, not a second calculation
    from asynchronously reported timestamps.
 5. Stop commits in SQL before ordinary cleanup. Stop API acknowledgement means
-   durable stop intent, not completed physical deletion. The same bounded
-   delivery path wakes the workflow; SQL-only status/stop remain available when
+   stop intent committed to PostgreSQL, not completed physical deletion. The same
+   bounded delivery path wakes the workflow; SQL-only status/stop remain available when
    Temporal is unavailable.
 6. Native Temporal retries drive bounded removal attempts without an overall
    cleanup deadline. Completion requires journaled, fenced physical absence and
@@ -139,7 +140,8 @@ gate instead of claiming this makes the system faster.
 
 Retain PTY readers, WebSocket I/O, bounded replay buffers, session pinning,
 per-execution locks, journal writes, and pending Docker operation tracking.
-These are live resources, not durable workflow schedulers.
+PTYs, WebSocket connections, and replay buffers reside in memory and are lost
+on orchestrator restart; Temporal resumes workflow scheduling from its history.
 
 Extract a narrowly scoped local safety watchdog. It enforces the earliest of
 the 60-minute absolute limit, 10-minute input inactivity, two-minute disconnect

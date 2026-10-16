@@ -33,7 +33,7 @@ from boxie.persistence.models import (
 from boxie.persistence.postgres import PostgresLifecycle
 from boxie_test_support.dependencies import postgres_dsn as postgres_dsn
 from boxie_test_support.dependencies import postgres_server as postgres_server
-from boxie_test_support.durable import launch_execution
+from boxie_test_support.execution import launch_execution
 from boxie_test_support.orchestrator import Clock, bundle
 from boxie_test_support.terminal_network import network
 from database_support import add_check
@@ -121,7 +121,7 @@ def test_identical_retries_old_snapshot_and_conflicting_key(
     asyncio.run(exercise())
 
 
-def test_stop_before_dispatch_is_durable_and_retains_accounting(
+def test_stop_before_dispatch_is_committed_and_retains_accounting(
     postgres_dsn: str, tmp_path: Path
 ) -> None:
     async def exercise() -> None:
@@ -524,7 +524,7 @@ def test_consumer_database_error_boundary_never_retries(
     asyncio.run(exercise())
 
 
-def test_final_start_guard_serializes_stop_and_validates_durable_request(
+def test_final_start_guard_serializes_stop_and_validates_stored_request(
     postgres_dsn: str, tmp_path: Path
 ) -> None:
     async def exercise() -> None:
@@ -538,7 +538,7 @@ def test_final_start_guard_serializes_stop_and_validates_durable_request(
             view = await life.submit(OWNER, "guard", await upload(artifacts))
             boot = uuid4()
             await life.bind_orchestrator_boot(OWNER, config.identity, view.id, 1, None, boot)
-            request = EnsureRequest.from_durable(await life.load_request(view.id))
+            request = EnsureRequest.from_request(await life.load_request(view.id))
             guard = PostgresStartGuard(sessions, timeout=1)
             entered, release = asyncio.Event(), asyncio.Event()
             starts = 0
@@ -584,7 +584,7 @@ def test_start_guard_timeout_and_lost_connection_retain_reservations(
             view = await life.submit(OWNER, "timeout", await upload(artifacts))
             boot = uuid4()
             await life.bind_orchestrator_boot(OWNER, config.identity, view.id, 1, None, boot)
-            request = EnsureRequest.from_durable(await life.load_request(view.id))
+            request = EnsureRequest.from_request(await life.load_request(view.id))
             guard = PostgresStartGuard(sessions, timeout=0.05)
 
             async def stuck() -> None:
@@ -627,14 +627,14 @@ def test_start_guard_timeout_and_lost_connection_retain_reservations(
     asyncio.run(exercise())
 
 
-def test_durable_orchestrator_and_postgres_release_only_after_reconciled_absence(
+def test_orchestrator_and_postgres_release_only_after_reconciled_absence(
     postgres_dsn: str, tmp_path: Path
 ) -> None:
     async def exercise() -> None:
         from boxie.domain.lifecycle import EnsureRequest
         from boxie.persistence.start_guard import PostgresStartGuard
-        from boxie.sandbox.execution.orchestrator import DurableOrchestrator
-        from boxie_test_support.durable import Daemon
+        from boxie.sandbox.execution.orchestrator import Orchestrator
+        from boxie_test_support.execution import Daemon
         from lifecycle_support import settled
 
         async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
@@ -642,13 +642,13 @@ def test_durable_orchestrator_and_postgres_release_only_after_reconciled_absence
             clock = Clock()
             clock.now = datetime.now(UTC)
             daemon = Daemon()
-            orchestrator = DurableOrchestrator(
+            orchestrator = Orchestrator(
                 config, daemon, artifacts.path, PostgresStartGuard(sessions), clock, clock.monotonic
             )
             await life.bind_orchestrator_boot(
                 OWNER, config.identity, view.id, 1, None, orchestrator.boot_id
             )
-            request = EnsureRequest.from_durable(await life.load_request(view.id))
+            request = EnsureRequest.from_request(await life.load_request(view.id))
             await launch_execution(orchestrator, request)
             observation = await settled(orchestrator, request.ref, SandboxState.READY)
             assert await life.record_observation(observation)
@@ -680,7 +680,7 @@ def test_start_guard_requires_retained_artifact_reference(
             view = await life.submit(OWNER, "reference", await upload(artifacts))
             boot = uuid4()
             await life.bind_orchestrator_boot(OWNER, config.identity, view.id, 1, None, boot)
-            request = EnsureRequest.from_durable(await life.load_request(view.id))
+            request = EnsureRequest.from_request(await life.load_request(view.id))
             guard = PostgresStartGuard(sessions)
             assert await guard.start_allowed(request, boot)
             async with sessions.begin() as session:
@@ -698,14 +698,14 @@ def test_start_guard_requires_retained_artifact_reference(
     asyncio.run(exercise())
 
 
-def test_journal_outage_expires_container_but_retains_sql_accounting_until_durable_confirmation(
+def test_journal_outage_expires_container_but_retains_sql_accounting_until_journal_confirmation(
     postgres_dsn: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def exercise() -> None:
         from boxie.domain.lifecycle import EnsureRequest
         from boxie.persistence.start_guard import PostgresStartGuard
-        from boxie.sandbox.execution.orchestrator import DurableOrchestrator
-        from boxie_test_support.durable import Daemon
+        from boxie.sandbox.execution.orchestrator import Orchestrator
+        from boxie_test_support.execution import Daemon
         from lifecycle_support import settled
 
         async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
@@ -713,13 +713,13 @@ def test_journal_outage_expires_container_but_retains_sql_accounting_until_durab
             clock = Clock()
             clock.now = datetime.now(UTC)
             daemon = Daemon()
-            orchestrator = DurableOrchestrator(
+            orchestrator = Orchestrator(
                 config, daemon, artifacts.path, PostgresStartGuard(sessions), clock, clock.monotonic
             )
             await life.bind_orchestrator_boot(
                 OWNER, config.identity, view.id, 1, None, orchestrator.boot_id
             )
-            request = EnsureRequest.from_durable(await life.load_request(view.id))
+            request = EnsureRequest.from_request(await life.load_request(view.id))
             await launch_execution(orchestrator, request)
             ready = await settled(orchestrator, request.ref, SandboxState.READY)
             assert await life.record_observation(ready)
@@ -764,8 +764,8 @@ def test_terminal_receipt_survives_prior_boot_and_retry_row_purge(
 
     from boxie.domain.lifecycle import EnsureRequest
     from boxie.persistence.start_guard import PostgresStartGuard
-    from boxie.sandbox.execution.orchestrator import DurableOrchestrator
-    from boxie_test_support.durable import Daemon
+    from boxie.sandbox.execution.orchestrator import Orchestrator
+    from boxie_test_support.execution import Daemon
     from lifecycle_support import settled
 
     async def exercise() -> None:
@@ -774,13 +774,13 @@ def test_terminal_receipt_survives_prior_boot_and_retry_row_purge(
             clock, daemon = Clock(), Daemon()
             clock.now = datetime.now(UTC)
             guard = PostgresStartGuard(sessions)
-            orchestrator = DurableOrchestrator(
+            orchestrator = Orchestrator(
                 config, daemon, artifacts.path, guard, clock, clock.monotonic
             )
             await life.bind_orchestrator_boot(
                 OWNER, config.identity, view.id, 1, None, orchestrator.boot_id
             )
-            request = EnsureRequest.from_durable(await life.load_request(view.id))
+            request = EnsureRequest.from_request(await life.load_request(view.id))
             await launch_execution(orchestrator, request)
             await settled(orchestrator, request.ref, SandboxState.READY)
             await life.terminate(OWNER, view.id, TerminationReason.REQUESTED)
@@ -809,9 +809,7 @@ def test_terminal_receipt_survives_prior_boot_and_retry_row_purge(
                         .values(cleaned_at=func.clock_timestamp() - timedelta(days=8))
                     )
                 await life.purge_retained()
-            restarted = DurableOrchestrator(
-                config, daemon, artifacts.path, guard, clock, clock.monotonic
-            )
+            restarted = Orchestrator(config, daemon, artifacts.path, guard, clock, clock.monotonic)
             assert restarted.boot_id != orchestrator.boot_id
             await restarted.compact()
             assert not restarted.records
@@ -828,9 +826,9 @@ def test_failed_restart_journal_projection_waits_for_local_inspection(
 ) -> None:
     from boxie.domain.lifecycle import EnsureRequest
     from boxie.persistence.start_guard import PostgresStartGuard
-    from boxie.sandbox.execution.orchestrator import DurableOrchestrator
+    from boxie.sandbox.execution.orchestrator import Orchestrator
     from boxie.temporal.activities import LifecycleActivities
-    from boxie_test_support.durable import Daemon
+    from boxie_test_support.execution import Daemon
     from temporalio.exceptions import ApplicationError
 
     async def exercise() -> None:
@@ -839,15 +837,13 @@ def test_failed_restart_journal_projection_waits_for_local_inspection(
             clock, daemon = Clock(), Daemon()
             clock.now = datetime.now(UTC)
             guard = PostgresStartGuard(sessions)
-            original = DurableOrchestrator(
-                config, daemon, artifacts.path, guard, clock, clock.monotonic
-            )
+            original = Orchestrator(config, daemon, artifacts.path, guard, clock, clock.monotonic)
             first = LifecycleActivities(life, original)
             await first.ensure_sandbox(str(view.id))
             old = await original.inspect(
-                EnsureRequest.from_durable(await life.load_request(view.id)).ref
+                EnsureRequest.from_request(await life.load_request(view.id)).ref
             )
-            replacement = DurableOrchestrator(
+            replacement = Orchestrator(
                 config, daemon, artifacts.path, guard, clock, clock.monotonic
             )
             save = replacement.journal.save

@@ -85,7 +85,7 @@ Frontend health alone does not prove workflow readiness. Check the Boxie
 namespace and workflow/activity execution before opening new admission. The SQL
 adapter closes new admission when dependencies fail, the oldest undelivered
 command exceeds 30 seconds, or backlog reaches 100. Matching retries, status,
-and durable stop remain available while PostgreSQL is reachable. Workers must
+and stop requests remain available while PostgreSQL is reachable. Workers must
 load sensitive spec/snapshot data inside activities; never serialize it into
 workflow history.
 
@@ -115,7 +115,7 @@ denials. It writes nonsecret runtime evidence into pytest's temporary directory.
 Linux arm64/runc proves this infrastructure path, not the later native
 Linux/amd64/runsc full-stack gate or production deployment.
 
-The [durable lifecycle workflow](../../../../.github/workflows/boxie-lifecycle.yml)
+The [lifecycle workflow](../../../../.github/workflows/boxie-lifecycle.yml)
 adds interpreter imports, pinned test-server history replay/cancellation and the
 native Linux amd64/runsc full stack. Its test-only agent launcher observes
 collector entry/completion around a successful SQL COMMIT with lost acknowledgment;

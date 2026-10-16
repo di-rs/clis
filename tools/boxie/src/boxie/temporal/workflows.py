@@ -56,7 +56,7 @@ class SandboxLifecycle:
             raise
 
     async def _cleanup(self, sandbox_id: str, reason: str) -> LifecycleResult:
-        # Never enter absence initialization or deletion until durable stop commits.
+        # Never enter absence initialization or deletion until stop commits to SQL.
         # No schedule-to-close deadline can end this obligation. Native server
         # retries keep one history command per operation, regardless of outage length.
         await workflow.execute_activity_method(

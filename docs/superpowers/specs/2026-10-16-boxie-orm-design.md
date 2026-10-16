@@ -15,10 +15,11 @@ expressions. Seed the eight slots through mapped instances. API startup does not
 migrate. Temporal's own database schema remains owned by its upstream tooling.
 
 Simplify workflows with typed activity references and native retry policies,
-durable timers and cancellation. Stop must commit before removal, and cleanup
-must remain durable until physical absence is confirmed in PostgreSQL, including
-when a racing fence rejects an RPC report. After durable stop, observations still
-project accounting but do not enqueue redundant workflow signals. Keep the transactional
+timers recovered from workflow history, and cancellation. Stop must commit before
+removal, and cleanup obligations must remain recorded until physical absence is
+confirmed in PostgreSQL, including when a racing fence rejects an RPC report. After
+stop commits, observations still project accounting but do not enqueue redundant
+workflow signals. Keep the transactional
 outbox because PostgreSQL admission and a Temporal RPC cannot share a transaction.
 Keep agent resource ownership and sensitive request loading inside activities.
 
