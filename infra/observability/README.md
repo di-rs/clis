@@ -430,7 +430,11 @@ Cases cover an actual committed failed lifecycle and request/sandbox correlation
 collector unread-tail/checkpoint restart, storage outage and accepted buffer
 recovery, an actual unread production API stdout pipe, a stopped journal receiver,
 journal retention pressure, journal filesystem ENOSPC, Vector full-buffer drops,
-and Vector filesystem ENOSPC with restart using the same state. Availability probes
+and Vector filesystem ENOSPC with restart using the same state. The latter proves
+actual ENOSPC on the owned filesystem and requires either a literal errno diagnostic
+or Vector's pinned unrecoverable disk-writer diagnostic before release/recovery.
+Both observations remain distinct: a generic writer failure does not establish that
+Vector's underlying errno was captured. Availability probes
 use real HTTP, the production terminal Session and a runsc sandbox. The pipe and
 stopped-receiver cases additionally provision during the fault. Synthetic v1
 pressure records are identified separately and never stand in for lifecycle facts.

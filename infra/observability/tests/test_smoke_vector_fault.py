@@ -220,3 +220,43 @@ def test_reader_stderr_never_becomes_fault_proof() -> None:
         assert isinstance(result["stderr_bytes"], int) and result["stderr_bytes"] > 0
         assert "PRIVATE" not in json.dumps(result)
     assert reader.snapshot()["reaped"] is True
+
+
+@pytest.mark.parametrize(
+    "enospc,literal,writer,error,stderr,expected",
+    [
+        (True, True, False, None, 0, "literal_errno"),
+        (True, False, True, None, 0, "disk_writer_failure"),
+        (True, True, True, None, 0, "literal_errno"),
+        (False, True, True, None, 0, None),
+        (True, False, False, None, 0, None),
+        (True, False, True, "RuntimeError", 0, None),
+        (True, True, True, None, 1, None),
+    ],
+)
+def test_vector_fault_trigger_requires_real_exhaustion_and_valid_writer_evidence(
+    enospc: bool,
+    literal: bool,
+    writer: bool,
+    error: str | None,
+    stderr: int,
+    expected: str | None,
+) -> None:
+    from observability_infra.smoke_scenarios import Scenario
+
+    scenario = object.__new__(Scenario)
+    scenario.observations = {"enospc_observed": enospc}
+    diagnostic = {
+        "errno_text_observed": literal,
+        "writer_unrecoverable_observed": writer,
+        "error_type": error,
+        "stderr_bytes": stderr,
+    }
+    assert scenario.record_vector_fault(diagnostic) is (expected is not None)
+    if expected is None:
+        assert "vector_fault_trigger" not in scenario.observations
+    else:
+        assert scenario.observations["vector_fault_trigger"] == expected
+        assert scenario.observations["vector_enospc_diagnostic_observed"] is literal
+        # Generic disk failure must never manufacture a literal errno observation.
+        assert diagnostic["errno_text_observed"] is literal

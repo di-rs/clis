@@ -34,6 +34,8 @@ def test_checkpoint_has_fixed_phases_safe_selection_and_bounded_export(tmp_path:
     scenario.commands = smoke_runtime.Commands(smoke_runtime.Deadline(10, reserve=2))
     scenario.observations = {
         "enospc_observed": True,
+        "vector_fault_trigger": "disk_writer_failure",
+        "vector_enospc_diagnostic_observed": False,
         "private": "PRIVATE",
         "resources": {"private": "PRIVATE"},
     }
@@ -42,6 +44,8 @@ def test_checkpoint_has_fixed_phases_safe_selection_and_bounded_export(tmp_path:
     original = path.read_text()
     assert "PRIVATE" not in original
     assert json.loads(original)["status"] == "in_progress"
+    assert json.loads(original)["vector_fault_trigger"] == "disk_writer_failure"
+    assert json.loads(original)["vector_enospc_diagnostic_observed"] is False
     with pytest.raises(ValueError):
         scenario.enospc_checkpoint("PRIVATE")
     scenario.observations["progress"] = {"count": "x" * 20000}

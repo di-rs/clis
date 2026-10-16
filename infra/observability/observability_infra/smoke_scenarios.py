@@ -715,6 +715,7 @@ class Scenario:
                 "vector_fault_metrics",
                 "vector_fault_diagnostics",
                 "vector_enospc_diagnostic_observed",
+                "vector_fault_trigger",
                 "exercise_errors",
                 "checkpoint_cleanup_errors",
             )
@@ -734,6 +735,25 @@ class Scenario:
         )
         evidence(self.root / ("enospc-checkpoint-" + self.name + ".json"), data)
         self.observations["enospc_phase"] = fault_phase
+
+    def record_vector_fault(self, diagnostic: dict[str, Any]) -> bool:
+        if (
+            self.observations.get("enospc_observed") is not True
+            or diagnostic["error_type"] is not None
+            or diagnostic["stderr_bytes"] != 0
+        ):
+            return False
+        literal = diagnostic["errno_text_observed"] is True
+        writer = diagnostic["writer_unrecoverable_observed"] is True
+        if not (literal or writer):
+            return False
+        # v0.59's disk sender logs a generic failure for write/flush errors.
+        # The separately proved filesystem ENOSPC is not a captured Vector errno.
+        self.observations["vector_enospc_diagnostic_observed"] = literal
+        self.observations["vector_fault_trigger"] = (
+            "literal_errno" if literal else "disk_writer_failure"
+        )
+        return True
 
     async def vector_lifecycle(self) -> bool:
         record = self.observations.get("vector_fault_lifecycle")
@@ -858,8 +878,7 @@ class Scenario:
                         "available": False,
                         "error_type": "CollectorNotRunning",
                     }
-                    if reader.snapshot()["errno_text_observed"]:
-                        self.observations["vector_enospc_diagnostic_observed"] = True
+                    if self.record_vector_fault(reader.snapshot()):
                         break
                     await asyncio.sleep(0.1)
                     await self.progress(sandbox)
@@ -883,8 +902,7 @@ class Scenario:
                         self.enospc_checkpoint("diagnostic_wait")
                         raise
                 self.enospc_checkpoint("diagnostic_wait")
-                if reader.snapshot()["errno_text_observed"]:
-                    self.observations["vector_enospc_diagnostic_observed"] = True
+                if self.record_vector_fault(reader.snapshot()):
                     break
                 await asyncio.sleep(0.5)
                 await self.progress(sandbox)
