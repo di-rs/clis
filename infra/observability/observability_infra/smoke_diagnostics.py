@@ -124,7 +124,12 @@ def daemon_runtime(
 
 
 def setup_diagnostics(
-    root: Path, stack: Any, failed: dict[str, Any] | None, sentinels: tuple[str, ...] = ()
+    root: Path,
+    stack: Any,
+    failed: dict[str, Any] | None,
+    sentinels: tuple[str, ...] = (),
+    *,
+    failed_build_output: bytes | None = None,
 ) -> None:
     commands = Commands(Deadline(15, reserve=0.1))
     result: dict[str, Any] = {"failed_command": failed, "containers": [], "networks": []}
@@ -138,6 +143,13 @@ def setup_diagnostics(
         str(getattr(stack, name)) for name in ("consumer", "deploy") if getattr(stack, name, None)
     )
     private += sentinels
+    if failed and failed.get("operation") == "docker.compose.build" and failed_build_output:
+        result["failed_command"] = {
+            **failed,
+            "redacted_build_error": safe_runtime_error(
+                failed_build_output.decode("utf-8", errors="replace"), private
+            ),
+        }
     try:
         info = json.loads(commands.run(["docker", "info", "--format", "{{json .}}"], env=env))
         if (

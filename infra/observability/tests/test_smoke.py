@@ -513,9 +513,17 @@ def test_setup_diagnostics_exports_only_allowlisted_state(
         temporal="owned-temporal",
         runtime="owned-runtime",
     )
-    smoke_diagnostics.setup_diagnostics(tmp_path, stack, {"returncode": 1})
+    smoke_diagnostics.setup_diagnostics(
+        tmp_path,
+        stack,
+        {"returncode": 1, "operation": "docker.compose.build"},
+        failed_build_output=("build failed: unsupported build option " + secret).encode(),
+    )
     output = (tmp_path / "setup-diagnostics.json").read_text()
     assert secret not in output
+    assert json.loads(output)["failed_command"]["redacted_build_error"] == (
+        "build failed: unsupported build option [redacted]"
+    )
     assert json.loads(output)["images"][0]["path"] == "/usr/local/bin:/usr/bin:/bin"
     detail = json.loads(output)["containers"][0]
     assert detail["exit_code"] == 127
@@ -523,6 +531,24 @@ def test_setup_diagnostics_exports_only_allowlisted_state(
     assert detail["runtime"] == "runc"
     assert detail["path"] == "/usr/local/bin:/usr/bin:/bin"
     assert detail["binds"][0]["source_kind_in_daemon"] == "unavailable"
+
+
+def test_failed_compose_build_keeps_bounded_private_diagnostic_input(tmp_path: Path) -> None:
+    from observability_infra.smoke_runtime import Commands, Deadline
+
+    executable = tmp_path / "docker"
+    executable.write_text("#!/bin/sh\nprintf '%s\\n' 'build error PRIVATE_SENTINEL'\nexit 1\n")
+    executable.chmod(0o700)
+    runner = Commands(Deadline(2, reserve=0.1))
+    with pytest.raises(RuntimeError, match="^smoke command exit 1$"):
+        runner.run([str(executable), "compose", "build", "bootstrap"])
+    assert runner.last_failure is not None
+    assert runner.last_failure["operation"] == "docker.compose.build"
+    assert "PRIVATE_SENTINEL" not in json.dumps(runner.last_failure)
+    assert runner.failed_build_output == b"build error PRIVATE_SENTINEL\n"
+    with pytest.raises(RuntimeError):
+        runner.run([str(executable), "compose", "logs"])
+    assert runner.failed_build_output is None
 
 
 def test_journal_observation_separates_runtime_and_persistent_acceptance(tmp_path: Path) -> None:

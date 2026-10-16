@@ -198,7 +198,13 @@ def prepare(root: Path, timeout_seconds: float = 1200) -> None:
     except Exception as error:
         if root.exists():
             if stack is not None:
-                setup_diagnostics(root, stack, commands.last_failure, private_sentinels)
+                setup_diagnostics(
+                    root,
+                    stack,
+                    commands.last_failure,
+                    private_sentinels,
+                    failed_build_output=commands.failed_build_output,
+                )
             evidence(
                 root / "setup.json",
                 {

@@ -72,7 +72,7 @@ def command_diagnostic(args: list[str], output: bytes, code: int, elapsed: float
         operation += ".compose." + next(
             (
                 value
-                for value in ("up", "down", "config", "logs", "exec", "ps", "port")
+                for value in ("up", "down", "config", "logs", "exec", "ps", "port", "build")
                 if value in args
             ),
             "other",
@@ -98,11 +98,14 @@ class Commands:
         self.output_limit = output_limit
         self.restoring = False
         self.last_failure: dict[str, Any] | None = None
+        # Private diagnostic input only. Never included directly in evidence or exceptions.
+        self.failed_build_output: bytes | None = None
 
     def run(
         self, args: list[str], *, env: dict[str, str] | None = None, empty_journal_ok: bool = False
     ) -> str:
         started = time.monotonic()
+        self.failed_build_output = None
         restoring = self.restoring
         self.deadline.remaining(restoring=restoring)
         process = subprocess.Popen(
@@ -142,6 +145,8 @@ class Commands:
                 self.last_failure = command_diagnostic(
                     args, bytes(output), process.returncode, time.monotonic() - started
                 )
+                if self.last_failure["operation"] == "docker.compose.build":
+                    self.failed_build_output = bytes(output)
                 raise RuntimeError(f"smoke command exit {process.returncode}")
             return output.decode("utf-8", errors="replace").strip()
         finally:
