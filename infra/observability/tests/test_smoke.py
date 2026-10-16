@@ -209,6 +209,80 @@ def test_volume_initialization_rejects_foreign_identity_before_mutation(
     assert len(changes) == 1
 
 
+def test_telemetry_endpoint_requires_running_owned_network_membership(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+    from typing import Any
+
+    from observability_infra.smoke_runtime import Commands, Deadline
+    from observability_infra.smoke_telemetry import Telemetry
+
+    identifier, network_id = "a" * 64, "b" * 64
+    telemetry = object.__new__(Telemetry)
+    telemetry.root = tmp_path
+    telemetry.project = tmp_path.name + "-telemetry"
+    telemetry.env = {"OBS_METRICS_NETWORK": "owned-metrics"}
+    telemetry.endpoints = {}
+    telemetry.stack = SimpleNamespace(name="owned-app", shared_networks=[network_id])
+    telemetry.commands = Commands(Deadline(5, reserve=0.1))
+    monkeypatch.setattr(telemetry, "compose", lambda *args: identifier)
+    info: dict[str, Any] = {
+        "DockerRootDir": str(tmp_path / "docker-data"),
+        "Labels": ["io.boxie.test.owner=" + tmp_path.name],
+    }
+    network: dict[str, Any] = {
+        "Id": network_id,
+        "Name": "owned-metrics",
+        "Driver": "bridge",
+        "Internal": True,
+        "Labels": {"io.boxie.test.owner": "owned-app"},
+        "Containers": {identifier: {"IPv4Address": "172.20.0.2/16"}},
+    }
+    attachment: dict[str, Any] = {"NetworkID": network_id, "IPAddress": "172.20.0.2"}
+    labels: dict[str, Any] = {
+        "com.docker.compose.project": telemetry.project,
+        "com.docker.compose.service": "vector",
+    }
+    item: dict[str, Any] = {
+        "Id": identifier,
+        "Config": {"Labels": labels},
+        "State": {"Running": True},
+        "NetworkSettings": {"Networks": {"owned-metrics": attachment}},
+    }
+
+    def run(args: list[str], **kwargs: object) -> str:
+        if args[1] == "info":
+            return json.dumps(info)
+        return json.dumps([network if args[1] == "network" else item])
+
+    monkeypatch.setattr(telemetry.commands, "run", run)
+    assert telemetry.endpoint("vector") == "http://172.20.0.2:9598"
+    for target, key, value in (
+        (info, "DockerRootDir", "/foreign"),
+        (labels, "com.docker.compose.project", "foreign"),
+        (labels, "com.docker.compose.service", "prometheus"),
+        (item["State"], "Running", False),
+        (network, "Id", "c" * 64),
+        (network, "Internal", False),
+        (network, "Labels", {"io.boxie.test.owner": "foreign"}),
+        (network, "Containers", {}),
+        (attachment, "NetworkID", "c" * 64),
+        (attachment, "IPAddress", "172.20.0.3"),
+    ):
+        previous = target[key]
+        target[key] = value
+        with pytest.raises(RuntimeError):
+            telemetry.endpoint("vector")
+        target[key] = previous
+    attachment["IPAddress"] = "172.20.0.4"
+    network["Containers"][identifier]["IPv4Address"] = "172.20.0.4/16"
+    telemetry.refresh_endpoint("vector")
+    assert json.loads((tmp_path / "telemetry.json").read_text()) == {
+        "vector": "http://172.20.0.4:9598"
+    }
+
+
 def test_native_fixture_refuses_development_host_before_creating_resources(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

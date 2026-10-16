@@ -103,6 +103,8 @@ class Scenario:
             self.observations["restoration"] = restored
             if not restoration_valid(json.loads(self.manifest.read_text()), restored):
                 raise RuntimeError("independent restoration incomplete")
+            if restored.get("sink_started") is True:
+                await asyncio.to_thread(self.telemetry.refresh_endpoint, "victorialogs")
         if self.flood_id:
             await self.command("docker", "rm", "--force", self.flood_id)
             self.flood_id = None
@@ -148,6 +150,7 @@ class Scenario:
                     await asyncio.sleep(0.1)
         if self.name == "collector-restart":
             await asyncio.to_thread(self.telemetry.compose, "start", "vector")
+            await asyncio.to_thread(self.telemetry.refresh_endpoint, "vector")
         if self.name in ("vector-full", "vector-enospc", "storage-restart"):
             while True:
                 try:
@@ -273,10 +276,12 @@ class Scenario:
             while total(await self.telemetry.metrics("vector"), "vector_buffer_size_events") == 0:
                 await asyncio.sleep(0.1)
         await self.command("docker", "start", identifier)
+        await asyncio.to_thread(self.telemetry.refresh_endpoint, service)
         await self.recovered(accepted)
         if service == "vector":
             # Restart same container/state twice: known accepted tail must remain searchable.
             await self.command("docker", "restart", "--time=3", identifier)
+            await asyncio.to_thread(self.telemetry.refresh_endpoint, service)
             await self.recovered(accepted)
         self.observations["same_container_id"] = identifier
         self.observations["checkpoint_after"] = self.telemetry.checkpoint()
@@ -494,6 +499,8 @@ class Scenario:
             identifier = await asyncio.to_thread(self.telemetry.container, "vector")
             await self.command("docker", "restart", "--time=3", identifier)
             await self.command("docker", "start", data["sink"])
+            for service in ("vector", "victorialogs"):
+                await asyncio.to_thread(self.telemetry.refresh_endpoint, service)
             self.observations["same_state_restart_id"] = identifier
         self.observations["free_after_release"] = (
             os.statvfs(directory).f_bavail * os.statvfs(directory).f_frsize

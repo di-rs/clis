@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -20,6 +21,7 @@ from observability_infra.smoke_resources import Resources
 from observability_infra.smoke_runtime import Commands, check_privacy, evidence
 
 SERVICES = ("vector", "victorialogs", "prometheus", "node-exporter")
+QUERY_PORTS = {"vector": 9598, "victorialogs": 9428, "prometheus": 9090}
 
 
 class Telemetry:
@@ -89,6 +91,55 @@ class Telemetry:
         if (actual.st_uid, actual.st_gid) != (uid, gid):
             raise RuntimeError("telemetry volume ownership initialization failed")
 
+    def endpoint(self, service: str) -> str:
+        # Native host queries the existing internal bridge; internal-only services
+        # cannot publish ports. Verify both sides of the exact owned attachment.
+        if service not in QUERY_PORTS:
+            raise RuntimeError("unsupported telemetry query service")
+        info = json.loads(
+            self.commands.run(["docker", "info", "--format", "{{json .}}"], env=self.env)
+        )
+        if (
+            info["DockerRootDir"] != str(self.root / "docker-data")
+            or "io.boxie.test.owner=" + self.root.name not in info["Labels"]
+        ):
+            raise RuntimeError("foreign telemetry query daemon")
+        identifier = self.container(service)
+        item = json.loads(self.commands.run(["docker", "inspect", identifier], env=self.env))[0]
+        name = self.env["OBS_METRICS_NETWORK"]
+        network = json.loads(
+            self.commands.run(["docker", "network", "inspect", name], env=self.env)
+        )[0]
+        attachment = item.get("NetworkSettings", {}).get("Networks", {}).get(name, {})
+        labels = item.get("Config", {}).get("Labels", {})
+        try:
+            address = ipaddress.IPv4Address(attachment["IPAddress"])
+            member = ipaddress.IPv4Interface(network["Containers"][identifier]["IPv4Address"])
+        except ValueError, KeyError, TypeError:
+            raise RuntimeError("missing telemetry network address") from None
+        if (
+            item["Id"] != identifier
+            or labels.get("com.docker.compose.project") != self.project
+            or labels.get("com.docker.compose.service") != service
+            or item.get("State", {}).get("Running") is not True
+            or network["Name"] != name
+            or network["Id"] not in self.stack.shared_networks
+            or network.get("Labels", {}).get("io.boxie.test.owner") != self.stack.name
+            or network.get("Internal") is not True
+            or network.get("Driver") != "bridge"
+            or attachment.get("NetworkID") != network["Id"]
+            or address != member.ip
+            or not address.is_private
+            or address.is_loopback
+            or address.is_unspecified
+        ):
+            raise RuntimeError("foreign telemetry network attachment")
+        return f"http://{address}:{QUERY_PORTS[service]}"
+
+    def refresh_endpoint(self, service: str) -> None:
+        self.endpoints[service] = self.endpoint(service)
+        evidence(self.root / "telemetry.json", self.endpoints)
+
     def prepare(self, resources: Resources) -> None:
         image = json.loads(
             self.commands.run(["docker", "image", "inspect", "boxie-collector:smoke"], env=self.env)
@@ -153,10 +204,7 @@ class Telemetry:
             if name != config.vector_volume:
                 uid, gid = (472, 0) if name == config.grafana_volume else (65534, 65534)
                 self.initialize_volume(name, uid, gid)
-        overlay: dict[str, Any] = {"services": {}}
-        for service, port in (("vector", 9598), ("victorialogs", 9428), ("prometheus", 9090)):
-            overlay["services"][service] = {"ports": [f"127.0.0.1::{port}"]}
-        overlay["services"]["vector"].update(image=image_id, pull_policy="never")
+        overlay = {"services": {"vector": {"image": image_id, "pull_policy": "never"}}}
         (self.root / "telemetry-overlay.yml").write_text(yaml.safe_dump(overlay))
         effective = json.loads(self.compose("config", "--format", "json"))
         vector = effective["services"]["vector"]
@@ -190,9 +238,8 @@ class Telemetry:
             "--lines=1",
             "--output=json",
         )
-        for service, port in (("vector", 9598), ("victorialogs", 9428), ("prometheus", 9090)):
-            self.endpoints[service] = "http://" + self.compose("port", service, str(port))
-        evidence(self.root / "telemetry.json", self.endpoints)
+        for service in QUERY_PORTS:
+            self.refresh_endpoint(service)
         evidence(
             self.root / "collector-provenance.json",
             {
