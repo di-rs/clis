@@ -12,7 +12,8 @@ configuration. Generate `api.json` and `orchestrator.json` with `boxie_infra.con
 using [config.example.env](config.example.env). Both receive distinct mTLS client
 identities. Only the orchestrator receives Docker access and artifact storage.
 
-Apply the packaged Alembic migrations explicitly:
+Migration sources live in `tools/boxie/alembic/`, alongside `alembic.ini`, and are
+included in the installed Boxie package. Apply them explicitly:
 
 ```sh
 uv run --locked python -m boxie.persistence.migrate --dsn-file /etc/boxie/postgres-dsn.secret

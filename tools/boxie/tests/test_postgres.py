@@ -58,7 +58,7 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 pytestmark = pytest.mark.integration
-MIGRATIONS = Path(__file__).parents[1] / "src/boxie/persistence/migrations"
+MIGRATIONS = Path(__file__).parents[1] / "alembic"
 OWNER = Principal("one")
 
 

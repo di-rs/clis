@@ -90,7 +90,7 @@ class LifecycleStack(ProductionStack):
                 f"host={host} dbname=boxie user=boxie password={self.env['BOXIE_DB_PASSWORD']} sslmode=disable"
             )
             path.chmod(0o600)
-        migrate(self.dsn, ROOT / "tools/boxie/src/boxie/persistence/migrations")
+        migrate(self.dsn, ROOT / "tools/boxie/alembic")
         # Compose's nested profiles bind must not create a root-owned directory.
         (self.root / "data/profiles").mkdir(parents=True, mode=0o700)
         (self.root / "faults").mkdir()

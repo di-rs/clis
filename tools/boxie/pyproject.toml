@@ -22,9 +22,14 @@ boxie-orchestrator = "boxie.bootstrap.orchestrator:main"
 boxie-api = "boxie.bootstrap.api:main"
 
 [build-system]
-requires = ["uv_build==0.13.0"]
-build-backend = "uv_build"
+requires = ["hatchling==1.30.1"]
+build-backend = "hatchling.build"
 
-[tool.uv.build-backend]
-module-root = "src"
-module-name = "boxie"
+[tool.hatch.build.targets.sdist]
+include = ["src/boxie", "alembic", "alembic.ini"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/boxie"]
+
+[tool.hatch.build.targets.wheel.force-include]
+alembic = "boxie/alembic"

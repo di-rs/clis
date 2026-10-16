@@ -23,7 +23,7 @@ from sqlalchemy.schema import AddConstraint
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col, select
 
-MIGRATIONS = Path(__file__).parents[1] / "src/boxie/persistence/migrations"
+MIGRATIONS = Path(__file__).parents[1] / "alembic"
 OWNER = Principal("one")
 
 

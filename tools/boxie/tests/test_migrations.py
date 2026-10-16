@@ -6,19 +6,21 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from boxie.persistence.migrate import migration_config
 
 
-def test_initial_revision_renders_schema_and_capacity_seed(monkeypatch: pytest.MonkeyPatch) -> None:
-    import boxie.persistence
-
+@pytest.mark.parametrize("operator_config", [False, True])
+def test_initial_revision_renders_schema_and_capacity_seed(
+    monkeypatch: pytest.MonkeyPatch, operator_config: bool
+) -> None:
     # An explicit migration target must win over an unrelated operator environment.
     monkeypatch.setenv("BOXIE_POSTGRES_DSN_FILE", "/missing/unrelated-database-secret")
     output = StringIO()
-    config = Config(output_buffer=output)
-    config.set_main_option(
-        "script_location", str(Path(boxie.persistence.__file__).with_name("migrations"))
-    )
-    config.set_main_option("sqlalchemy.url", "postgresql+psycopg://localhost/boxie")
+    config = migration_config("postgresql://localhost/boxie")
+    if operator_config:
+        config = Config(str(Path(__file__).parents[1] / "alembic.ini"))
+        config.set_main_option("sqlalchemy.url", "postgresql+psycopg://localhost/boxie")
+    config.output_buffer = output
     command.upgrade(config, "head", sql=True)
     schema = output.getvalue()
     assert "CREATE TABLE sandboxes" in schema
