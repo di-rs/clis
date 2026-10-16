@@ -20,7 +20,12 @@ from observability_infra.config import disk_buffer_capacity
 from observability_infra.smoke_application import REPO, Application
 from observability_infra.smoke_pipe_api import validate_shutdown
 from observability_infra.smoke_retention import removal_observation, retained_archive
-from observability_infra.smoke_runtime import EventIdentityError, event_identities, evidence
+from observability_infra.smoke_runtime import (
+    EventIdentityError,
+    JournalRead,
+    event_identities,
+    evidence,
+)
 from observability_infra.smoke_samples import record_progress
 from observability_infra.smoke_telemetry import Telemetry
 from observability_infra.smoke_units import transient_command, unit_name
@@ -339,6 +344,7 @@ class Scenario:
             while operation not in await self.accepted():
                 await asyncio.sleep(0.1)
             proof["persistent_observed"] = True
+            proof["persistent_read"] = self.observations.get("journal_acceptance_read")
             records = await self.telemetry.wait_logs(
                 f'instance_id:"{self.flood_instance}" AND operation_id:"{operation}"'
             )
@@ -363,15 +369,25 @@ class Scenario:
 
     async def accepted(self) -> set[str]:
         # A small recovery batch is accepted only if present in real binary journal.
-        text = await self.command(
-            "journalctl",
-            "--directory=" + str(self.root / "journal"),
-            "--no-pager",
-            "--output=cat",
-            "--grep=" + self.flood_instance,
-            "--lines=100",
+        read = await self.journal_read(self.root / "journal", self.flood_instance)
+        self.observations["journal_acceptance_read"] = read.observation
+        return self.journal_identities(read.text, self.flood_instance, "persistent")
+
+    async def journal_read(self, directory: Path, instance: str) -> JournalRead:
+        return await asyncio.to_thread(
+            self.commands.read_journal,
+            [
+                "journalctl",
+                "--directory=" + str(directory),
+                "--no-pager",
+                "--output=cat",
+                "--grep=" + instance,
+                "--lines=100",
+            ],
+            directory=directory,
+            allow_incomplete=self.name == "journal-enospc",
+            env=dict(self.app.stack.env, LC_ALL="C"),
         )
-        return self.journal_identities(text, self.flood_instance, "persistent")
 
     def journal_identities(self, text: str, instance: str, surface: str) -> set[str]:
         if surface not in {"persistent", "runtime"}:
@@ -380,7 +396,7 @@ class Scenario:
             return event_identities(text, instance)
         except EventIdentityError as error:
             self.observations["journal_parse_failure"] = dict(
-                error.detail, surface=surface, output_provenance="stdout_stderr_merged"
+                error.detail, surface=surface, output_provenance="stdout_only"
             )
             raise
 
@@ -594,18 +610,14 @@ class Scenario:
                 except FileNotFoundError:
                     pass  # Rotation/deletion is itself part of this observation interval.
             identities: set[str] = set()
+            read_observation: dict[str, Any] = {"complete": True, "warnings": {}}
             if files:
-                text = await self.command(
-                    "journalctl",
-                    "--directory=" + str(directory),
-                    "--no-pager",
-                    "--output=cat",
-                    "--grep=" + self.probe_instance,
-                    "--lines=100",
-                )
-                identities = self.journal_identities(text, self.probe_instance, name)
+                read = await self.journal_read(directory, self.probe_instance)
+                read_observation = read.observation
+                identities = self.journal_identities(read.text, self.probe_instance, name)
                 accepted |= identities
             observations[name] = {
+                "read": read_observation,
                 "files": len(files),
                 "bytes": sum(item.st_size for item in stats),
                 "inodes": sorted(item.st_ino for item in stats),
@@ -622,6 +634,11 @@ class Scenario:
         observations["sequence"] = sequence_observation(
             count, accepted, [str(item["operation_id"]) for item in records]
         )
+        complete = all(observations[name]["read"]["complete"] for name in ("persistent", "runtime"))
+        observations["sequence"]["journal_read_complete"] = complete
+        observations["sequence"]["accepted_identities_are_lower_bound"] = not complete
+        if not complete:
+            observations["sequence"]["emitted_not_observed_in_journal"] = None
         observations["pressure_emitted_lower_bound"] = int(emitted["emitted"]) if own else 0
         return observations
 

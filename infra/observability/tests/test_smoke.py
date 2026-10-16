@@ -726,7 +726,10 @@ def test_failed_compose_build_keeps_bounded_private_diagnostic_input(
     assert runner.failed_setup_output is None
 
 
-def test_journal_observation_separates_runtime_and_persistent_acceptance(tmp_path: Path) -> None:
+@pytest.mark.parametrize("complete", [True, False])
+def test_journal_observation_separates_runtime_and_persistent_acceptance(
+    tmp_path: Path, complete: bool
+) -> None:
     import asyncio
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
@@ -750,8 +753,12 @@ def test_journal_observation_separates_runtime_and_persistent_acceptance(tmp_pat
     scenario.root = tmp_path
     scenario.probe_instance = instance
     scenario.flood_instance = "pressure"
-    scenario.command = AsyncMock(  # type: ignore[method-assign]
-        return_value=json.dumps({"instance_id": instance, "operation_id": one})
+    from observability_infra.smoke_runtime import JournalRead
+
+    scenario.journal_read = AsyncMock(  # type: ignore[method-assign]
+        return_value=JournalRead(
+            json.dumps({"instance_id": instance, "operation_id": one}), {"complete": complete}
+        )
     )
     scenario.telemetry = SimpleNamespace(
         logs=AsyncMock(return_value=[{"operation_id": one}, {"operation_id": one}])
@@ -759,7 +766,8 @@ def test_journal_observation_separates_runtime_and_persistent_acceptance(tmp_pat
     report = asyncio.run(scenario.journal_observation())
     assert report["persistent"]["accepted_probe"] == [one]
     assert report["runtime"]["files"] == 0
-    assert report["sequence"]["emitted_not_observed_in_journal"] == 2
+    assert report["sequence"]["emitted_not_observed_in_journal"] == (2 if complete else None)
+    assert report["sequence"]["accepted_identities_are_lower_bound"] is (not complete)
     assert report["sequence"]["stored_duplicates"] == 1
     assert report["pressure_emitted_lower_bound"] == 1000
 

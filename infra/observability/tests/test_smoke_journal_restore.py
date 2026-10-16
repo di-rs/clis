@@ -89,6 +89,10 @@ def test_restart_is_not_delivery_recovery_without_fresh_marker(
     async def accepted() -> set[str]:
         if failure == "persistent":
             raise TimeoutError
+        scenario.observations["journal_acceptance_read"] = {
+            "complete": False,
+            "warnings": {"truncated_file": 1},
+        }
         return {str(UUID(int=1))}
 
     async def logs(query: str) -> list[dict[str, str]]:
@@ -110,6 +114,8 @@ def test_restart_is_not_delivery_recovery_without_fresh_marker(
     assert seen[0] != str(UUID(int=20))
     assert proof["persistent_observed"] is (failure != "persistent")
     assert proof["collector_observed"] is (failure is None)
+    if failure != "persistent":
+        assert proof["persistent_read"]["complete"] is False
     assert scenario.flood_instance == str(UUID(int=20))
     assert scenario.flood_id is None
     assert scenario.observations["flood_id"] == "old"

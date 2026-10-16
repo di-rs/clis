@@ -502,3 +502,9 @@ separate 32-event probe identities from the pressure flood, compare persistent a
 runtime journal observations with stored records, and retain missing/duplicate
 counts as bounded observations rather than final delivery guarantees. An unresolved
 watchdog identity or restoration failure withholds teardown and remains a failure.
+Journal reads separate records from diagnostic output. Only the ENOSPC scenario
+allows exact owned-file truncated/corrupted warnings: the report marks that surface
+incomplete, retains observed identities as a lower bound, and leaves missing journal
+counts unknown. A positively observed fresh recovery marker proves its existence,
+not complete history or recovery of old runtime entries. Other diagnostics,
+malformed records and command errors still fail; ordinary reads remain strict.

@@ -3,10 +3,12 @@
 import contextlib
 import json
 import os
+import re
 import selectors
 import signal
 import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -156,6 +158,19 @@ class PrivacyScan:
         return {"records": self.records, "bytes": self.total}
 
 
+@dataclass(frozen=True)
+class JournalRead:
+    text: str
+    observation: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class _JournalOutput:
+    stdout: bytes
+    stderr: bytes
+    returncode: int
+
+
 class Commands:
     """Capture a small result; never put command arguments/output in exceptions."""
 
@@ -170,7 +185,81 @@ class Commands:
     def run(
         self, args: list[str], *, env: dict[str, str] | None = None, empty_journal_ok: bool = False
     ) -> str:
-        return self._run(args, env=env, empty_journal_ok=empty_journal_ok)
+        result = self._run(args, env=env, empty_journal_ok=empty_journal_ok)
+        assert isinstance(result, str)
+        return result
+
+    def read_journal(
+        self,
+        args: list[str],
+        *,
+        directory: Path,
+        allow_incomplete: bool = False,
+        env: dict[str, str] | None = None,
+    ) -> JournalRead:
+        if (
+            Path(args[0]).name != "journalctl"
+            or "--directory=" + str(directory) not in args
+            or "--output=cat" not in args
+            or not any(arg.startswith("--grep=") for arg in args)
+        ):
+            raise ValueError("bounded journal directory read required")
+        started = time.monotonic()
+        result = self._run(args, env=env, journal=True)
+        assert isinstance(result, _JournalOutput)
+        warnings: dict[str, int] = {}
+        valid = (not result.stderr or result.stderr.endswith(b"\n")) and len(
+            result.stderr.splitlines()
+        ) <= 128
+        if result.stdout and not result.stdout.endswith(b"\n"):
+            raise RuntimeError("journal record stream incomplete")
+        try:
+            text = result.stdout.decode("utf-8").strip()
+            diagnostic = result.stderr.decode("utf-8")
+        except UnicodeError:
+            raise RuntimeError("journal stream decoding failed") from None
+        for line in diagnostic.splitlines():
+            match = re.fullmatch(
+                r"Journal file (.+) (is truncated|corrupted), ignoring file\.", line
+            )
+            if match is None:
+                valid = False
+                break
+            path = Path(match[1])
+            if (
+                path.parent != directory
+                or str(path) != match[1]
+                or not path.name.endswith((".journal", ".journal~"))
+                or any(ord(char) < 32 for char in match[1])
+            ):
+                valid = False
+                break
+            category = "truncated_file" if match[2] == "is truncated" else "corrupted_file"
+            warnings[category] = warnings.get(category, 0) + 1
+        observation = {
+            "complete": not result.stderr
+            and (result.returncode == 0 or (result.returncode == 1 and not result.stdout)),
+            "warnings": warnings,
+            "stdout_bytes": len(result.stdout),
+            "stderr_bytes": len(result.stderr),
+            "returncode": result.returncode,
+            "output_provenance": "stdout_only",
+        }
+        # v255 grep no-match exits 1 after a successful read, including when
+        # access-check warnings describe ignored files. Such a result is partial,
+        # never absence proof, and is allowed only by the ENOSPC caller.
+        no_match = result.returncode == 1 and not result.stdout
+        if (
+            not valid
+            or (result.stderr and not allow_incomplete)
+            or (result.returncode != 0 and not no_match)
+        ):
+            self.last_failure = command_diagnostic(
+                args, result.stderr, result.returncode, time.monotonic() - started
+            )
+            self.last_failure["journal_read"] = observation
+            raise RuntimeError("journal read incomplete or failed")
+        return JournalRead(text, observation)
 
     def scan_privacy(
         self,
@@ -191,7 +280,8 @@ class Commands:
         env: dict[str, str] | None,
         empty_journal_ok: bool = False,
         scan: PrivacyScan | None = None,
-    ) -> str:
+        journal: bool = False,
+    ) -> str | _JournalOutput:
         started = time.monotonic()
         self.failed_setup_output = None
         restoring = self.restoring
@@ -200,14 +290,18 @@ class Commands:
             args,
             env=env,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.PIPE if journal else subprocess.STDOUT,
             start_new_session=True,
         )
         assert process.stdout is not None
         output = bytearray()
+        diagnostics = bytearray()
         try:
             with selectors.DefaultSelector() as selector:
                 selector.register(process.stdout, selectors.EVENT_READ)
+                if journal:
+                    assert process.stderr is not None
+                    selector.register(process.stderr, selectors.EVENT_READ, data="stderr")
                 while selector.get_map():
                     remaining = self.deadline.remaining(restoring=restoring)
                     for key, _ in selector.select(min(remaining, 0.1)):
@@ -215,13 +309,22 @@ class Commands:
                         if not chunk:
                             selector.unregister(key.fd)
                         else:
-                            if scan is not None:
+                            if key.data == "stderr":
+                                diagnostics.extend(chunk)
+                                if (
+                                    len(diagnostics) > 16384
+                                    or len(output) + len(diagnostics) > self.output_limit
+                                ):
+                                    raise RuntimeError("smoke journal output limit exceeded")
+                            elif scan is not None:
                                 scan.feed(chunk)
                             else:
                                 output.extend(chunk)
-                                if len(output) > self.output_limit:
+                                if len(output) + len(diagnostics) > self.output_limit:
                                     raise RuntimeError("smoke command output limit exceeded")
                 process.wait(timeout=self.deadline.remaining(restoring=restoring))
+            if journal:
+                return _JournalOutput(bytes(output), bytes(diagnostics), process.returncode)
             # systemd255 --output=cat implies quiet: grep no-match exits1 with
             # no banner. Accept only that exact empty result or the normal banner;
             # stderr is merged, so permission/parse/read diagnostics still fail.
@@ -252,6 +355,8 @@ class Commands:
                 os.killpg(process.pid, signal.SIGKILL)
             process.wait(timeout=1)
             process.stdout.close()
+            if process.stderr is not None:
+                process.stderr.close()
 
 
 def check_privacy(text: str, sentinels: tuple[str, ...]) -> None:

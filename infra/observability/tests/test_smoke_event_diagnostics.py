@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from observability_infra import smoke_runtime
+from observability_infra.smoke_runtime import JournalRead
 from observability_infra.smoke_scenarios import Scenario
 
 
@@ -44,17 +45,19 @@ def test_invalid_event_shape_or_identity_cannot_pass(line: str) -> None:
     assert "private" not in json.dumps(caught.value.detail)
 
 
-def test_accepted_retains_surface_and_merged_provenance(tmp_path: Path) -> None:
+def test_accepted_retains_surface_and_separated_provenance(tmp_path: Path) -> None:
     scenario = object.__new__(Scenario)
     scenario.root = tmp_path
     scenario.flood_instance = "probe"
     scenario.observations = {}
-    scenario.command = AsyncMock(return_value="private diagnostic")  # type: ignore[method-assign]
+    scenario.journal_read = AsyncMock(  # type: ignore[method-assign]
+        return_value=JournalRead("private diagnostic", {"complete": True})
+    )
     with pytest.raises(smoke_runtime.EventIdentityError):
         asyncio.run(scenario.accepted())
     detail = scenario.observations["journal_parse_failure"]
     assert detail["surface"] == "persistent"
-    assert detail["output_provenance"] == "stdout_stderr_merged"
+    assert detail["output_provenance"] == "stdout_only"
     assert "private" not in json.dumps(detail)
 
 
@@ -70,7 +73,12 @@ def test_runtime_observation_retains_surface_before_failure(
     )
     (tmp_path / "test.journal").touch()
     monkeypatch.setattr(Path, "glob", lambda *args: iter([tmp_path / "test.journal"]))
-    scenario.command = AsyncMock(side_effect=["", "private diagnostic"])  # type: ignore[method-assign]
+    scenario.journal_read = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[
+            JournalRead("", {"complete": True}),
+            JournalRead("private diagnostic", {"complete": True}),
+        ]
+    )
     with pytest.raises(smoke_runtime.EventIdentityError):
         asyncio.run(scenario.journal_observation())
     assert scenario.observations["journal_parse_failure"]["surface"] == "runtime"
