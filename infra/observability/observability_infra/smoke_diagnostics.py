@@ -59,6 +59,21 @@ def daemon_path(proc: Path) -> str:
     return values[0]
 
 
+def image_path(environment: list[str], private: tuple[str, ...]) -> str:
+    # Image/container Config.Env is inspected in memory; only a bounded PATH leaves here.
+    paths = [item[5:] for item in environment if item.startswith("PATH=")]
+    if (
+        len(paths) != 1
+        or len(paths[0]) > 4096
+        or any(
+            not part.startswith("/") or any(ord(char) < 32 for char in part)
+            for part in paths[0].split(":")
+        )
+    ):
+        return "[PATH unavailable]"
+    return safe_runtime_error(paths[0], private)
+
+
 def source_kind(path: Path) -> str:
     try:
         mode = path.stat().st_mode
@@ -167,6 +182,7 @@ def setup_diagnostics(
                 detail: dict[str, Any] = {}
                 if state["Status"] == "created" and state["ExitCode"] != 0:
                     detail["start_error"] = safe_runtime_error(str(state.get("Error", "")), private)
+                    detail["path"] = image_path(item["Config"].get("Env") or [], private)
                     detail["runtime"] = safe_runtime_error(
                         str(item["HostConfig"]["Runtime"]), private
                     )
@@ -210,7 +226,13 @@ def setup_diagnostics(
         result["images"] = []
         for identifier in sorted(set(images))[:32]:
             item = json.loads(commands.run(["docker", "image", "inspect", identifier], env=env))[0]
-            result["images"].append({"id": item["Id"], "architecture": item["Architecture"]})
+            result["images"].append(
+                {
+                    "id": item["Id"],
+                    "architecture": item["Architecture"],
+                    "path": image_path(item.get("Config", {}).get("Env") or [], private),
+                }
+            )
     except Exception as error:
         result["diagnostic_error_type"] = type(error).__name__
         result["diagnostic_command_failure"] = commands.last_failure

@@ -464,6 +464,18 @@ def test_setup_diagnostics_exports_only_allowlisted_state(
             return "29.0.0"
         if args[1] == "ps":
             return "a" * 64 if args[-1].endswith("owned-platform") else ""
+        if args[1:3] == ["image", "ls"]:
+            return "sha256:" + "b" * 64
+        if args[1:3] == ["image", "inspect"]:
+            return json.dumps(
+                [
+                    {
+                        "Id": "sha256:" + "b" * 64,
+                        "Architecture": "amd64",
+                        "Config": {"Env": [secret, "PATH=/usr/local/bin:/usr/bin:/bin"]},
+                    }
+                ]
+            )
         if args[1] == "inspect":
             return json.dumps(
                 [
@@ -471,7 +483,7 @@ def test_setup_diagnostics_exports_only_allowlisted_state(
                         "Id": "a" * 64,
                         "Image": "sha256:" + "b" * 64,
                         "Config": {
-                            "Env": [secret],
+                            "Env": [secret, "PATH=/usr/local/bin:/usr/bin:/bin"],
                             "Labels": {"com.docker.compose.project": "owned-platform"},
                         },
                         "HostConfig": {"Runtime": "runc"},
@@ -504,10 +516,12 @@ def test_setup_diagnostics_exports_only_allowlisted_state(
     smoke_diagnostics.setup_diagnostics(tmp_path, stack, {"returncode": 1})
     output = (tmp_path / "setup-diagnostics.json").read_text()
     assert secret not in output
+    assert json.loads(output)["images"][0]["path"] == "/usr/local/bin:/usr/bin:/bin"
     detail = json.loads(output)["containers"][0]
     assert detail["exit_code"] == 127
     assert "/usr/bin/runc: no such file or directory" in detail["start_error"]
     assert detail["runtime"] == "runc"
+    assert detail["path"] == "/usr/local/bin:/usr/bin:/bin"
     assert detail["binds"][0]["source_kind_in_daemon"] == "unavailable"
 
 
@@ -623,3 +637,120 @@ def test_runtime_resolution_uses_only_the_daemon_root_and_path(tmp_path: Path) -
     assert source_kind(binary) == "file"
     assert source_kind(directory) == "directory"
     assert source_kind(directory / "missing") == "missing"
+
+
+def test_owned_containerd_rejects_shared_namespace_and_foreign_configuration(
+    tmp_path: Path,
+) -> None:
+    import socket
+
+    from observability_infra.smoke_containerd import owned_containerd
+
+    root = tmp_path / "boxie-observability-0123456789ab"
+    state = root / "docker-exec/containerd"
+    state.mkdir(parents=True)
+    config = state / "containerd.toml"
+    config.write_text(
+        f'root = "{root}/docker-data/containerd/daemon"\n'
+        f'state = "{state}/daemon"\n[grpc]\naddress = "{state}/containerd.sock"\n'
+    )
+    (state / "containerd.pid").write_text("102")
+    proc = tmp_path / "proc"
+    for pid, parent, executable in ((101, 1, "dockerd"), (102, 101, "containerd")):
+        directory = proc / str(pid)
+        (directory / "ns").mkdir(parents=True)
+        (directory / "root/run/containerd").mkdir(parents=True)
+        (directory / "exe").symlink_to("/usr/bin/" + executable)
+        (directory / "ns/mnt").symlink_to("mnt:[2]")
+        (directory / "cgroup").write_text(f"0::/system.slice/{root.name}.service\n")
+        fields = ["S", str(parent), *(["0"] * 17), "5678"]
+        (directory / "stat").write_text(f"{pid} ({executable}) " + " ".join(fields))
+    (proc / "1/ns").mkdir(parents=True)
+    (proc / "1/ns/mnt").symlink_to("mnt:[1]")
+    (proc / "102/cmdline").write_bytes(f"containerd\0--config\0{config}\0".encode())
+    with socket.socket(socket.AF_UNIX) as listener:
+        # Unix sockets have short path limits on macOS; use a symlink to the bound socket.
+        import tempfile
+
+        with tempfile.TemporaryDirectory(dir="/tmp") as short:
+            listener.bind(short + "/sock")
+            (state / "containerd.sock").symlink_to(short + "/sock")
+            result = owned_containerd(root, 101, proc_root=proc)
+            assert result["pid"] == 102
+            assert result["mount_namespace"] == "mnt:[2]"
+            assert result["shared_socket_hidden"] is True
+            child_stat = (proc / "102/stat").read_text()
+            (proc / "102/stat").write_text(child_stat.replace("S 101 ", "S 1 "))
+            with pytest.raises(RuntimeError, match="daemon child"):
+                owned_containerd(root, 101, proc_root=proc)
+            (proc / "102/stat").write_text(child_stat)
+            command = (proc / "102/cmdline").read_bytes()
+            (proc / "102/cmdline").write_bytes(
+                b"containerd\0--config\0/etc/containerd/config.toml\0"
+            )
+            with pytest.raises(RuntimeError, match="command"):
+                owned_containerd(root, 101, proc_root=proc)
+            (proc / "102/cmdline").write_bytes(command)
+            (proc / "102/ns/mnt").unlink()
+            (proc / "102/ns/mnt").symlink_to("mnt:[1]")
+            with pytest.raises(RuntimeError, match="namespace"):
+                owned_containerd(root, 101, proc_root=proc)
+            (proc / "102/ns/mnt").unlink()
+            (proc / "102/ns/mnt").symlink_to("mnt:[2]")
+            (proc / "101/root/run/containerd/containerd.sock").touch()
+            with pytest.raises(RuntimeError, match="shared"):
+                owned_containerd(root, 101, proc_root=proc)
+            (proc / "101/root/run/containerd/containerd.sock").unlink()
+            config.write_text(config.read_text().replace(str(state / "daemon"), "/run/containerd"))
+            with pytest.raises(RuntimeError, match="configuration"):
+                owned_containerd(root, 101, proc_root=proc)
+
+
+def test_daemon_unit_hides_only_shared_containerd_path() -> None:
+    from observability_infra.smoke_resources import Resources
+    from observability_infra.smoke_runtime import Commands, Deadline
+
+    resources = Resources(
+        Path("/var/tmp/boxie-observability-0123456789ab"), Commands(Deadline(2, reserve=0.1))
+    )
+    unit = resources.daemon_unit()
+    assert "TemporaryFileSystem=/run/containerd:ro\n" in unit
+    assert f"LogNamespace={resources.namespace}\n" in unit
+    assert f"ExecStart=/usr/bin/dockerd --config-file={resources.root}/daemon.json\n" in unit
+    assert "PrivateTmp=" not in unit
+
+
+def test_cleanup_keeps_mounts_until_owned_containerd_has_exited(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from observability_infra import smoke_resources
+    from observability_infra.smoke_runtime import Commands, Deadline
+
+    resources = smoke_resources.Resources(
+        Path("/var/tmp/boxie-observability-0123456789ab"), Commands(Deadline(2, reserve=0.1))
+    )
+    resources.root = tmp_path
+    resources.state["containerd"] = {"pid": 102, "start": "123"}
+    monkeypatch.setattr(smoke_resources, "require_ephemeral_runner", lambda: None)
+    monkeypatch.setattr(smoke_resources, "process_identity", lambda pid: "123")
+    monkeypatch.setattr(
+        resources.commands, "run", lambda args: "0" if "--property=MainPID" in args else "not-found"
+    )
+    with pytest.raises(RuntimeError, match="containerd still running; retaining mounts"):
+        resources.close()
+    assert not (tmp_path / "cleanup.json").exists()
+    # A reused PID is not the recorded writer and must never be signalled.
+    monkeypatch.setattr(smoke_resources, "process_identity", lambda pid: "999")
+    assert resources.close() == {"errors": [], "mounts_remaining": []}
+
+
+def test_image_path_selects_only_absolute_bounded_redacted_path() -> None:
+    from observability_infra.smoke_diagnostics import image_path
+
+    assert (
+        image_path(["PASSWORD=secret", "PATH=/bin:/secret/bin"], ("secret",))
+        == "/bin:/[redacted]/bin"
+    )
+    assert image_path(["PATH=.:/bin"], ()) == "[PATH unavailable]"
+    assert image_path(["PATH=/bin", "PATH=/usr/bin"], ()) == "[PATH unavailable]"
+    assert image_path(["PATH=/" + "x" * 4096], ()) == "[PATH unavailable]"

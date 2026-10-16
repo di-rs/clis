@@ -14,7 +14,9 @@ import time
 from pathlib import Path
 from typing import Any
 
+from observability_infra.smoke_containerd import owned_containerd
 from observability_infra.smoke_runtime import Commands, evidence
+from observability_infra.smoke_watchdog import process_identity
 
 
 def require_ephemeral_runner() -> None:
@@ -79,6 +81,19 @@ class Resources:
         self.save()
         self.commands.run(["mount", "-o", "nosuid,nodev", device, str(target)])
 
+    def daemon_unit(self) -> str:
+        # Docker otherwise auto-connects to the host containerd, whose mount namespace
+        # cannot see rootfs mounts created by this LogNamespace-private dockerd.
+        return (
+            "[Unit]\nDescription=Owned Boxie observability fixture\n"
+            "[Service]\nType=exec\nDelegate=yes\nKillMode=mixed\nTimeoutStopSec=15\nMemoryMax=1073741824\nMemorySwapMax=0\n"
+            "TemporaryFileSystem=/run/containerd:ro\n"
+            f"LogNamespace={self.namespace}\n"
+            f"ExecStart=/usr/bin/dockerd --config-file={self.root}/daemon.json\n"
+            f"StandardOutput=append:{self.root}/dockerd.log\n"
+            f"StandardError=append:{self.root}/dockerd.log\n"
+        )
+
     def prepare(self) -> None:
         require_ephemeral_runner()
         self.root.mkdir(mode=0o755, exist_ok=False)
@@ -134,12 +149,7 @@ class Resources:
         self.new_file(self.root / "daemon.json", json.dumps(daemon))
         self.new_file(
             Path("/run/systemd/system") / self.unit,
-            "[Unit]\nDescription=Owned Boxie observability fixture\n"
-            "[Service]\nType=exec\nDelegate=yes\nKillMode=mixed\nTimeoutStopSec=15\nMemoryMax=1073741824\nMemorySwapMax=0\n"
-            f"LogNamespace={self.namespace}\n"
-            f"ExecStart=/usr/bin/dockerd --config-file={self.root}/daemon.json\n"
-            f"StandardOutput=append:{self.root}/dockerd.log\n"
-            f"StandardError=append:{self.root}/dockerd.log\n",
+            self.daemon_unit(),
         )
         self.commands.run(["systemctl", "daemon-reload"])
         self.commands.run(["systemctl", "start", self.unit])
@@ -173,16 +183,11 @@ class Resources:
             )
             for unit in (self.unit, self.journal_unit)
         }
-        self.state["daemon_mount_namespace"] = self.commands.run(
-            [
-                "readlink",
-                "/proc/"
-                + self.commands.run(
-                    ["systemctl", "show", self.unit, "--property=MainPID", "--value"]
-                )
-                + "/ns/mnt",
-            ]
+        daemon_pid = int(
+            self.commands.run(["systemctl", "show", self.unit, "--property=MainPID", "--value"])
         )
+        self.state["containerd"] = owned_containerd(self.root, daemon_pid)
+        self.state["daemon_mount_namespace"] = self.state["containerd"]["mount_namespace"]
         self.save()
 
     def owned_cgroup(self, unit: str) -> str:
@@ -270,6 +275,13 @@ class Resources:
             pid = self.commands.run(["systemctl", "show", unit, "--property=MainPID", "--value"])
             if pid not in ("", "0"):
                 raise RuntimeError("owned writer still running; retaining mounts")
+        managed = self.state.get("containerd")
+        if managed:
+            try:
+                if process_identity(managed["pid"]) == managed["start"]:
+                    raise RuntimeError("owned containerd still running; retaining mounts")
+            except FileNotFoundError:
+                pass
         for target in reversed(self.state["mounts"]):
             try:
                 if os.path.ismount(target):

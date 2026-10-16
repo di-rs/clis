@@ -407,6 +407,14 @@ has 256 MiB and dockerd 1 GiB. Per-process/cgroup, OOM, buffer, disk and free-sp
 observations are retained. PostgreSQL/Temporal fixture observations do not prove
 production combined-host or eight-sandbox headroom.
 
+The owned dockerd service hides `/run/containerd` with a service-private read-only
+temporary filesystem. Docker must start its own managed containerd under the owned
+root; it cannot reuse the host socket across the journal mount namespace. Before
+any builds or application startup, preflight verifies the managed process parent,
+start identity, executable, cgroup, socket, storage paths and matching private
+mount namespace. Cleanup requires that recorded process to exit before releasing
+mounts. Neither the host containerd nor its socket is altered.
+
 The real collector is built from the frozen Dockerfile inputs locally in the
 owned daemon. A smoke-only Compose override selects its exact image ID with
 `pull_policy: never`; effective configuration and the running amd64 image ID must
