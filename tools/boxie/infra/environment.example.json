@@ -1,0 +1,20 @@
+{
+  "BOXIE_AGENT_CONFIG": "/srv/boxie/config/boxie_agent_config",
+  "BOXIE_AGENT_CREDENTIAL_FILE": "/srv/boxie/config/boxie_agent_credential_file",
+  "BOXIE_API_ALIAS": "boxie-api",
+  "BOXIE_API_CONFIG": "/srv/boxie/config/boxie_api_config",
+  "BOXIE_API_TEMPORAL_CERT_FILE": "/srv/boxie/config/boxie_api_temporal_cert_file",
+  "BOXIE_API_TEMPORAL_KEY_FILE": "/srv/boxie/config/boxie_api_temporal_key_file",
+  "BOXIE_CONSUMER_CREDENTIAL_FILE": "/srv/boxie/config/boxie_consumer_credential_file",
+  "BOXIE_CONSUMER_NETWORK": "clis-example-boxie_consumer",
+  "BOXIE_CONTROL_NETWORK": "clis-example-boxie_control",
+  "BOXIE_DATA_DIR": "/srv/boxie/boxie-data",
+  "BOXIE_DOCKER_GID": "999",
+  "BOXIE_POSTGRES_DSN_FILE": "/srv/boxie/config/boxie_postgres_dsn_file",
+  "BOXIE_PROFILES_FILE": "/srv/boxie/config/boxie_profiles_file",
+  "BOXIE_TEMPORAL_CA_FILE": "/srv/boxie/config/boxie_temporal_ca_file",
+  "BOXIE_WORKER_CONFIG": "/srv/boxie/config/boxie_worker_config",
+  "BOXIE_WORKER_TEMPORAL_CERT_FILE": "/srv/boxie/config/boxie_worker_temporal_cert_file",
+  "BOXIE_WORKER_TEMPORAL_KEY_FILE": "/srv/boxie/config/boxie_worker_temporal_key_file",
+  "OBS_METRICS_NETWORK": "clis-example-obs_metrics"
+}

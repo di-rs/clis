@@ -1,0 +1,37 @@
+name: Boxie release
+'on':
+  push:
+    branches:
+    - master
+    paths:
+    - tools/boxie/src/**
+    - tools/boxie/pyproject.toml
+    - tools/boxie/infra/Runtime.Dockerfile*
+    - tools/boxie/infra/compose.production.yml
+    - tools/boxie/infra/release*.json
+    - tools/deploy/**
+    - tools/service-telemetry/**
+    - .github/workflows/component-release.yml
+    - pyproject.toml
+    - uv.lock
+    - tools/boxie/infra/pre-activate.sh
+    - .github/workflows/boxie-release.yml
+  workflow_dispatch: null
+permissions: {}
+concurrency:
+  group: boxie-release
+  cancel-in-progress: false
+jobs:
+  application:
+    if: ${{ github.ref == 'refs/heads/master' && (github.event_name != 'push' || vars.BOXIE_AUTO_DEPLOY
+      == 'true') }}
+    permissions:
+      contents: read
+      packages: write
+    # actionlint 1.7.12 lacks $/ support; reusable ./ calls still resolve the caller commit.
+    uses: ./.github/workflows/component-release.yml # zizmor: ignore[self-repository]
+    with:
+      component: boxie
+      directory: tools/boxie/infra
+      dockerfile: tools/boxie/infra/Runtime.Dockerfile
+      image_variable: BOXIE_RUNTIME_IMAGE

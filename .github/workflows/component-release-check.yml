@@ -1,0 +1,38 @@
+name: Component release smoke
+
+on:
+  pull_request:
+    branches: [master, refactor/boxie-service, feat/boxie-temporal, feat/boxie-observability]
+    paths:
+      - 'tools/deploy/**'
+      - 'tools/boxie/infra/**'
+      - 'tools/cli-playground/infra/**'
+      - 'infra/platform/**'
+      - 'infra/environments/**'
+      - '.github/workflows/*release*.yml'
+      - 'pyproject.toml'
+      - 'uv.lock'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: component-release-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.13.0'
+          enable-cache: false
+      - run: uv sync --locked --all-packages
+      - name: Independent updates, failed activation, rollback and retained state
+        run: uv run --locked pytest tools/deploy/tests/test_native_release.py -m integration -v

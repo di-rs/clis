@@ -3,6 +3,7 @@
 import json
 import tomllib
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 import pytest
@@ -88,13 +89,29 @@ def test_private_compose_units_do_not_share_privileges() -> None:
     assert product["networks"]["consumer"]["external"] is True
 
 
-def test_production_activation_is_guarded_before_release_side_effects() -> None:
-    release = yaml.safe_load((ROOT / ".github/workflows/cli-playground-release.yml").read_text())
-    first = release["jobs"]["release"]["steps"][0]
-    assert "Production activation is unavailable" in first.get("run", "")
-    assert "exit 1" in first["run"]
-    setup = yaml.safe_load((ROOT / ".github/workflows/cli-playground-setup.yml").read_text())
-    assert set(setup["jobs"]) == {"provision"}
+@pytest.mark.parametrize(
+    "component,directory,services",
+    [
+        ("boxie", "tools/boxie/infra", {"api", "worker", "agent"}),
+        ("playground", "tools/cli-playground/infra", {"gateway", "proxy"}),
+    ],
+)
+def test_production_descriptors_validate_independent_release_ownership(
+    component: str, directory: str, services: set[str]
+) -> None:
+    from deploy_tool.manifests import load
+
+    root = ROOT / directory
+    manifest = load(root / "release-component.json", root / "release.example.json")
+    assert manifest.component == component
+    assert set(cast(list[str], manifest.descriptor["services"])) == services
+    config = yaml.safe_load(manifest.files["compose.production.yml"])
+    for name, service in config["services"].items():
+        assert ("docker.sock" in json.dumps(service)) == (name == "agent")
+        if name != "proxy":
+            assert service["user"] == "10001:10001"
+            assert service["mem_limit"]
+            assert service["pids_limit"] == 256
 
 
 @pytest.mark.integration
@@ -227,6 +244,9 @@ def test_resolved_compose_isolated_topology(
     import subprocess
 
     values = {
+        "BOXIE_DOCKER_GID": "999",
+        "CLIS_RELEASE_REVISION": "a" * 40,
+        "PLAYGROUND_PROXY_IMAGE": "traefik:test",
         "BOXIE_RUNTIME_IMAGE": "boxie:test",
         "BOXIE_API_CONFIG": str(tmp_path / "api.json"),
         "BOXIE_WORKER_CONFIG": str(tmp_path / "worker.json"),
@@ -286,6 +306,8 @@ def test_resolved_compose_isolated_topology(
     expected_project = (
         {"boxie": "operator-boxie", "cli-playground": "operator-playground"}[service]
         if project_override
+        else ("clis-boxie" if service == "boxie" else "clis-playground")
+        if manifest == "compose.production.yml"
         else service
     )
     assert config["name"] == expected_project
@@ -308,7 +330,9 @@ def test_resolved_compose_isolated_topology(
     assert all(volume["external"] for volume in config.get("volumes", {}).values())
 
 
-def test_boxie_configuration_cli_is_product_independent(tmp_path: Path) -> None:
+def test_boxie_configuration_cli_is_product_independent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import subprocess
     import sys
 
@@ -346,7 +370,9 @@ def test_boxie_configuration_cli_is_product_independent(tmp_path: Path) -> None:
         check=True,
     )
     agent = AgentConfig.from_file(tmp_path / "agent.json")
+    monkeypatch.setenv("BOXIE_RELEASE", "c" * 40)
     api = load_configuration(tmp_path / "api.json")
+    assert api.api.release == "c" * 40
     assert agent.identity.host_id == "generic-host"
     generated = json.loads((tmp_path / "agent.json").read_text())
     assert "max_sandboxes" not in generated

@@ -1,4 +1,4 @@
-name: ${BOXIE_PROJECT_NAME:-boxie}
+name: ${BOXIE_PROJECT_NAME:-clis-boxie}
 services:
   api:
     image: ${BOXIE_RUNTIME_IMAGE:?Set approved immutable Boxie image}
@@ -24,7 +24,7 @@ services:
         - boxie-api
     read_only: true
     tmpfs:
-    - /tmp
+    - /tmp:size=67108864,nosuid,nodev,noexec
     cap_drop:
     - ALL
     security_opt:
@@ -39,6 +39,24 @@ services:
         tag: boxie-api
     environment:
       BOXIE_METRICS_HOST: 0.0.0.0
+      BOXIE_RELEASE: ${CLIS_RELEASE_REVISION:?Set release revision}
+    user: 10001:10001
+    healthcheck:
+      test:
+      - CMD
+      - /app/.venv/bin/python
+      - -m
+      - boxie.bootstrap.health
+      - api
+      - --config
+      - /etc/boxie/api.json
+      interval: 15s
+      timeout: 12s
+      retries: 8
+      start_period: 30s
+    stop_grace_period: 10s
+    mem_limit: 512m
+    pids_limit: 256
   agent:
     image: ${BOXIE_RUNTIME_IMAGE:?Set approved immutable Boxie image}
     command:
@@ -59,7 +77,7 @@ services:
         - boxie-agent
     read_only: true
     tmpfs:
-    - /tmp
+    - /tmp:size=67108864,nosuid,nodev,noexec
     cap_drop:
     - ALL
     security_opt:
@@ -74,6 +92,26 @@ services:
         tag: boxie-agent
     environment:
       BOXIE_METRICS_HOST: 0.0.0.0
+      BOXIE_RELEASE: ${CLIS_RELEASE_REVISION:?Set release revision}
+    user: 10001:10001
+    group_add:
+    - ${BOXIE_DOCKER_GID:?Set host Docker group}
+    healthcheck:
+      test:
+      - CMD
+      - /app/.venv/bin/python
+      - -m
+      - boxie.bootstrap.health
+      - agent
+      - --config
+      - /etc/boxie/agent.json
+      interval: 15s
+      timeout: 12s
+      retries: 8
+      start_period: 30s
+    stop_grace_period: 45s
+    mem_limit: 512m
+    pids_limit: 256
   worker:
     image: ${BOXIE_RUNTIME_IMAGE:?Set approved immutable Boxie image}
     command:
@@ -94,7 +132,7 @@ services:
         - boxie-worker
     read_only: true
     tmpfs:
-    - /tmp
+    - /tmp:size=67108864,nosuid,nodev,noexec
     cap_drop:
     - ALL
     security_opt:
@@ -109,6 +147,24 @@ services:
         tag: boxie-worker
     environment:
       BOXIE_METRICS_HOST: 0.0.0.0
+      BOXIE_RELEASE: ${CLIS_RELEASE_REVISION:?Set release revision}
+    user: 10001:10001
+    healthcheck:
+      test:
+      - CMD
+      - /app/.venv/bin/python
+      - -m
+      - boxie.bootstrap.health
+      - worker
+      - --config
+      - /etc/boxie/worker.json
+      interval: 15s
+      timeout: 12s
+      retries: 8
+      start_period: 30s
+    stop_grace_period: 25s
+    mem_limit: 768m
+    pids_limit: 256
 networks:
   consumer:
     external: true

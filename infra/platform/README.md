@@ -5,7 +5,10 @@ Temporal persistence, and Temporal visibility each have a distinct database and
 non-superuser login. `init-databases.sql` revokes public database access. Only the
 platform provisioning credential is a superuser; never give it to applications.
 
-Set `BOXIE_CONTROL_NETWORK` and four independently generated secrets:
+First provision the shared host and storage with the
+[single-host environment](../environments/single-host/README.md). Run the explicit
+platform resource preparation with its exported plan before starting Compose.
+Set `BOXIE_CONTROL_NETWORK`, `POSTGRES_VOLUME`, and four independently generated secrets:
 `POSTGRES_PASSWORD`, `BOXIE_DB_PASSWORD`, `TEMPORAL_DB_PASSWORD`, and
 `VISIBILITY_DB_PASSWORD`. Supply them from operator-owned environment files with
 mode 0600. From this directory, run `docker compose up -d --wait`. PostgreSQL
@@ -29,9 +32,9 @@ the private network. Migrations serialize under a PostgreSQL advisory lock,
 verify the SHA-256 of every previously applied migration, and commit each new
 numbered migration atomically. API startup must never perform migrations.
 
-The current service bootstraps remain direct until the coordinated PR2 cutover;
-SQL adapters are explicitly injected by tests. A later cutover must switch
-admission, agent artifacts, fenced operations, and worker dispatch together.
+The production API, worker and agent use the durable PostgreSQL/Temporal
+configuration. Run schema management before their release; ordinary process
+startup and application rollback never reverse schema changes.
 
 ## Retention and ownership
 
@@ -62,11 +65,42 @@ The fixture requires Docker, creates randomly named disposable containers and
 non-superuser test databases, then removes only those test-owned resources.
 Default pytest excludes integration and never starts Docker.
 
-Platform also owns `OBS_METRICS_NETWORK`, `OBS_GRAFANA_ORIGIN_NETWORK` and
-`OBS_TEMPORAL_UI_ORIGIN_NETWORK`, all internal bridges. Compose can omit unused
-network declarations: `compose up` for PostgreSQL alone does **not** establish
-these bridges. Platform bootstrap must create and validate their installation
-ownership and `internal` property before starting cross-unit consumers. PR4 owns
-that production ensure step. Do not attach PostgreSQL to them or add idle anchor
-containers. The isolated service fixture creates only its random named bridges,
-checks ownership/internal state and removes only its recorded owned network IDs.
+Platform owns the control, consumer, metrics, Grafana-origin and Temporal-origin
+bridges. `python3 resources.py --plan resources.json` runs the explicit preparation
+step on the target host. The plan comes from the environment’s `sharedResources`
+output; `resources.py` is `platform_infra/resources.py` copied from the same source
+revision. It requires the bootstrap-installed `boxie-storage-guard` and an attached,
+mounted persistent disk. It validates existing network ownership, bridge driver
+and isolation, volume ownership and backing directory, and numeric directory
+owners before creating absent resources. Conflicting resources fail closed; the
+command never adopts, repairs or deletes them and never starts a container.
+
+`POSTGRES_VOLUME` is external to Compose and backed by a directory on the
+persistent disk. All shared data volumes have the same independent platform
+ownership, and application releases preserve them. The environment plan supplies
+the required directory owners (PostgreSQL 999, Boxie/Playground
+10001, Vector 65532, VictoriaLogs/Prometheus 65534, Grafana 472). The installation
+plan creates only the selected product volumes.
+
+The host package provisions Hetzner resources, pinned SSH identity and first-boot
+Docker/gVisor setup. Docker’s data root is on `/srv/boxie`; its systemd prestart
+guard verifies the exact persistent volume device. Missing storage prevents Docker
+startup, including after reboot, so a missing disk cannot silently redirect state
+to the host root filesystem. The host deployment key remains administrative
+access. Keep it in the deployment environment’s secret store, separate from the
+public `{host, host_public_key, identity_ref}` connection profile.
+
+The isolated service fixture creates only its random named bridges, checks
+ownership/internal state and removes only its recorded owned network IDs.
+
+Host bootstrap also installs the environment-supplied observability journal policy
+in `/etc/systemd/journald.conf.d/60-clis.conf`. The canonical policy uses persistent
+storage, a 1 GiB persistent target, a 128 MiB runtime target, 4 GiB free-space
+headroom, two-day retention and hourly rotation. Platform validates that the
+supplied policy has finite explicit limits; it does not import observability.
+Bootstrap installs journal ACL tools, prepares persistent journal directories,
+grants the normal `systemd-journal` group read/traversal access and inherited
+ACLs, makes machine identity readable, restarts journald and flushes it. Each
+systemd/ACL activation command has a 60-second timeout. The policy file and ACLs
+survive reboot. `/etc/boxie-platform/journal-group-gid` contains the host-discovered
+public numeric GID for `OBS_JOURNAL_GROUP_GID`; never guess it from a local host.

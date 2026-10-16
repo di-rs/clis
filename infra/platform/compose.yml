@@ -29,17 +29,19 @@ services:
         max-buffer-size: 4m
         tag: platform-postgres
 volumes:
-  postgres-data: null
+  postgres-data:
+    external: true
+    name: ${POSTGRES_VOLUME:?provide platform-owned persistent volume}
 networks:
   control:
     name: ${BOXIE_CONTROL_NETWORK:?provide private control network name}
-    internal: true
+    external: true
   metrics:
     name: ${OBS_METRICS_NETWORK:?Set platform network handle}
-    internal: true
+    external: true
   grafana-origin:
     name: ${OBS_GRAFANA_ORIGIN_NETWORK:?Set platform network handle}
-    internal: true
+    external: true
   temporal-ui-origin:
     name: ${OBS_TEMPORAL_UI_ORIGIN_NETWORK:?Set platform network handle}
-    internal: true
+    external: true

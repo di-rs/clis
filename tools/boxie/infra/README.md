@@ -1,4 +1,4 @@
-# Boxie local infrastructure
+# Boxie infrastructure
 
 Boxie owns its runtime image, private API, privileged agent, artifact data and
 trusted profile configuration. Both manifests default to Compose project `boxie`;
@@ -10,10 +10,44 @@ a shared `COMPOSE_PROJECT_NAME` or shared `--project-name` override.
 The consumer API has no host port. Only the agent mounts the Docker socket; it joins a separate control network. Playground is an
 optional consumer and is not required to configure or start Boxie.
 
-Production activation is unavailable during PR1–PR3. The independently targetable
-`compose.production.yml` describes the private topology for validation; PR4 will
-supply split-service release and activation tooling. No command here provisions
-cloud resources.
+Production releases use the service-owned [descriptor](release-component.json)
+and generic [release tool](../../deploy/README.md). Provision shared resources
+with the [single-host environment](../../../infra/environments/single-host/README.md).
+Production uses stable Compose project `clis-boxie`; local development retains
+`boxie`. No release command provisions cloud resources or upgrades Temporal.
+
+## Production activation
+
+Copy [environment.example.json](environment.example.json) outside the checkout,
+replace its network/storage handles from the environment outputs, and supply the
+host-owned process configuration, approved profiles and credential paths. Keep
+this input mode 0600. The three processes use one `BOXIE_RUNTIME_IMAGE` digest
+from the approved CI release manifest. API/worker/agent run as UID:GID 10001:10001;
+only the agent also receives the numeric host Docker group. Credential and key
+files must be reader-owned mode 0600, and data must be writable by UID 10001.
+The host's read-only registry credential is provisioned separately if required.
+
+Use `python -m deploy_tool prepare` with this directory's descriptor, the approved
+release manifest, private JSON environment and a fresh private output directory.
+Use `python -m deploy_tool deploy` with that bundle, the nonsecret pinned connection
+profile and the separately resolved deployment SSH key. The protected GitHub
+`boxie` environment supplies `DEPLOYMENT_PROFILE`, `DEPLOYMENT_SSH_KEY` and
+`COMPONENT_ENVIRONMENT`; it needs no cloud or Pulumi credentials. Automatic
+releases remain opt-in through repository variable `BOXIE_AUTO_DEPLOY=true`.
+
+Before replacing a running release, the service-owned hook stops API admission,
+then the workflow worker, then the agent with a 45-second grace period. The agent
+records termination and removes owned sandboxes through its existing shutdown
+path; failed deletion remains pending for restart reconciliation. Updates
+explicitly end terminals. Neither rollback nor restart restores a PTY. Pull and
+configuration validation happen before the hook. Runtime health checks require
+SQL/mTLS/agent/worker dependencies, and the worker checks migration checksums
+against the running image. Application releases do not apply schema changes.
+
+Compatible failed activation attempts restore the retained previous release;
+there is no schema rollback. Inspect `/opt/clis/boxie/status.json` after a timeout
+or failed rollback. Never delete volumes or erase pending cleanup to recover.
+Verify a generic create/terminal/stop cycle before deploying Playground.
 
 ## Configure a disposable native Linux host
 
@@ -37,11 +71,11 @@ regular files with mode `0600`: one agent credential and one consumer credential
 Do not put credentials in URLs. The API reads both files; the agent only reads its
 own credential. A consumer receives only its own credential.
 
-Linux bind mounts preserve numeric ownership. The current Boxie runtime image
-runs as UID 0; with `cap_drop: ALL`, it cannot bypass another UID's file
-permissions. Provision its agent/consumer credentials, database DSN and dedicated
-Temporal private keys as reader-owned regular files with mode `0600` (UID 0 for
-the current production manifests). Keep secret mounts read-only. Public
+Linux bind mounts preserve numeric ownership. The production processes run as UID 10001; with `cap_drop: ALL`, they cannot
+bypass another UID's file permissions. Local manifests may use the image default
+UID 0; set reader ownership for the selected manifest. Provision its agent/consumer credentials, database DSN and dedicated
+Temporal private keys as reader-owned regular files with mode `0600` (UID 10001 for
+the production manifests). Keep secret mounts read-only. Public
 certificates and configuration must also be readable by their service UID, and
 each containing directory must permit traversal. Create `BOXIE_DATA_DIR` and
 its `profiles` subdirectory with the agent's UID and owner write/traverse access
@@ -50,8 +84,8 @@ wrong owner. The pinned Temporal server, operator and UI images use UID 1000;
 their private keys must be owned by that reader with mode `0600` as well.
 Do not compensate with group/world access or additional DAC capabilities.
 
-PR4 provisioning must enforce these per-service UID, private-file and writable
-directory contracts, including consumer credential delivery and key rotation.
+Platform preparation enforces writable directory ownership; operators install
+reader-owned credentials and rotate them explicitly.
 The configuration generator writes paths only; it does not provision ownership.
 
 Copy [profiles.example.json](profiles.example.json) to the configured profiles

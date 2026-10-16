@@ -1,0 +1,41 @@
+{
+  "component": "playground",
+  "compose_file": "compose.production.yml",
+  "files": [
+    "routes.yml"
+  ],
+  "services": [
+    "gateway",
+    "proxy"
+  ],
+  "image_variables": {
+    "PLAYGROUND_IMAGE": [
+      "gateway"
+    ],
+    "PLAYGROUND_PROXY_IMAGE": [
+      "proxy"
+    ]
+  },
+  "required_environment": [
+    "ACME_EMAIL",
+    "CLOUDFLARE_DNS_API_TOKEN",
+    "OBS_METRICS_NETWORK",
+    "PLAYGROUND_BOXIE_CREDENTIAL_FILE",
+    "PLAYGROUND_BOXIE_PROFILE",
+    "PLAYGROUND_BOXIE_URL",
+    "PLAYGROUND_CERTIFICATES_VOLUME",
+    "PLAYGROUND_CONSUMER_NETWORK",
+    "PLAYGROUND_DATA_VOLUME",
+    "PLAYGROUND_DEPLOY_TOKEN",
+    "PLAYGROUND_DOMAIN",
+    "PLAYGROUND_PROXY_NETWORK"
+  ],
+  "healthchecks": {
+    "gateway": {
+      "kind": "docker"
+    },
+    "proxy": {
+      "kind": "docker"
+    }
+  }
+}

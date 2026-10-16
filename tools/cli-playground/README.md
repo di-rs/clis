@@ -44,7 +44,7 @@ uv run --locked --package cli-playground uvicorn playground.app:create_app \
 
 No Docker client, Docker socket or Boxie implementation is installed in the
 Playground image. Its server-side consumer credential is not sent to the browser.
-Production activation is unavailable until PR4; setup currently provisions only.
+Production releases use independently supplied Boxie and platform connection outputs.
 The terminal keeps credentials, applied output sequence and screen in page memory.
 Reconnect drains pending xterm writes, resumes retained output exactly once and
 synchronizes geometry before enabling user input. Input typed while disconnected
@@ -59,14 +59,12 @@ when upgrading xterm. This private dependency keeps terminal-generated replies
 working during replay without counting them as user activity. Browser tests drive
 DOM composition events; they do not claim OS-native IME coverage.
 
-## Production transition
+## Production deployment
 
-Production activation is unavailable until PR4. The [hosting reference](infra/README.md)
-retains protected host/DNS provisioning; setup now provisions only. Release and
-all deploy entrypoints fail before state reads, publication or activation. Keep
-automatic release disabled through this transition. Existing preview-controller
-trust boundaries remain unchanged; local Compose and native runsc CI validate the
-split runtime independently.
+The [hosting reference](infra/README.md) describes independent product releases.
+The thin [single-host environment](../../infra/environments/single-host/README.md)
+composes shared infrastructure. Automatic application deployment is opt-in;
+preview-controller trust boundaries remain unchanged.
 
 ## Workflow responsibilities
 
@@ -74,8 +72,8 @@ split runtime independently.
 | --- | --- |
 | [CLI playground build](../../.github/workflows/cli-playground.yml) | Compile affected PR binaries without deployment credentials |
 | [CLI playground previews](../../.github/workflows/cli-playground-preview.yml) | Trusted build-state updates, artifact publication and PR close/reopen reconciliation |
-| [CLI playground release](../../.github/workflows/cli-playground-release.yml) | Fails explicitly until split-service release support in PR4 |
-| [CLI playground setup](../../.github/workflows/cli-playground-setup.yml) | Manually provision infrastructure only |
+| [CLI playground release](../../.github/workflows/cli-playground-release.yml) | Build and release only the Playground application and its proxy |
+| [CLI playground setup](../../.github/workflows/cli-playground-setup.yml) | Manually provision the shared single-host environment |
 | [Boxie durable lifecycle](../../.github/workflows/boxie-lifecycle.yml) | Verify PostgreSQL/Temporal recovery and native Linux/gVisor lifecycle and browser faults |
 
 PR publication stores a binary batch and preview metadata. It does not deploy

@@ -1,0 +1,6 @@
+name: single-host
+description: Shared platform and independently released service declarations
+runtime:
+  name: python
+  options:
+    virtualenv: ../../../.venv

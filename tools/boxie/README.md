@@ -308,5 +308,6 @@ exercises Linux amd64/runsc, process loss, SQL accounting and browser reconnecti
 [Local infrastructure](infra/README.md) owns the private API/worker/agent Compose unit,
 Docker build, trusted generic profile and installed operator smoke commands.
 `boxie` and `cli-playground` are independent runtime distributions; neither image
-installs an infrastructure package. The root lockfile pins both builds. Production
-activation remains unavailable until PR4.
+installs an infrastructure package. The root lockfile pins both builds. Production releases target the service-owned descriptor through the
+[component release tool](../deploy/README.md); infrastructure provisioning lives
+in the [single-host environment](../../infra/environments/single-host/README.md).

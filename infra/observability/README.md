@@ -220,8 +220,8 @@ the target. The user accepted this tradeoff; it is **not a filesystem quota**.
 Seven days is a maximum age, not a guaranteed history window under size deletion.
 See [VictoriaLogs disk retention](https://docs.victoriametrics.com/victorialogs/#retention-by-disk-space-usage)
 and the [selected 1.53.0 cleanup implementation](https://github.com/VictoriaMetrics/VictoriaLogs/blob/v1.53.0/lib/logstorage/storage.go#L769-L842).
-Other budgets remain independent starting settings, not measured capacity. PR4 must measure combined headroom with PostgreSQL, Temporal and
-eight sandboxes. Journal installation/reload belongs to host bootstrap, not this
+Other budgets remain independent starting settings, not measured capacity. Before production activation, measure combined headroom with PostgreSQL, Temporal and
+eight sandboxes; the selected VM has not been certified by local tests. Journal installation/reload belongs to host bootstrap, not this
 renderer. Application logging must remain independent of collector availability.
 
 `backing_mounts` is the finite actual host filesystem mountpoint set, default
@@ -366,7 +366,7 @@ and [Prometheus retention](https://prometheus.io/docs/prometheus/latest/storage/
 Platform bootstrap must explicitly create/validate the three shared bridge
 handles before consumers start: Compose can omit declarations unused by platform
 services, so PostgreSQL's `compose up` alone is insufficient. PostgreSQL stays off
-these bridges. PR4 owns production network ownership/internal-property validation.
+these bridges. The platform's explicit resource preparation validates installation ownership, bridge driver and internal properties before activation.
 
 Native Temporal retention preserves `partition`, `forwarded`, and `task_priority`:
 the selected executable emits distinct series that would collide if these were
@@ -519,3 +519,31 @@ malformed records and command errors still fail; ordinary reads remain strict.
 ENOSPC checkpoints retain only fixed phases and bounded progress/fault observations
 before restoration. They are explicitly nonfinal and cannot establish successful
 restoration or cleanup; the final report and independent cleanup evidence do that.
+
+## Single-host installation inputs
+
+The thin environment exports `observabilitySettings` with both `/` and
+`/srv/boxie` backing mounts and adds the Playground scrape only when that consumer
+is selected. Export it separately from private credentials. The host bootstrap
+installs the owner-selected bounded persistent journal policy and records its
+actual supplementary group in `/etc/boxie-platform/journal-group-gid`.
+
+Render a new configuration directory from the matching checkout and explicit
+operator inputs, then follow this package's plugin/credential and Compose setup:
+
+```sh
+uv run --locked python -m observability_infra.render \
+  --settings /private/observability-settings.json \
+  --assets infra/observability \
+  --collector-image ghcr.io/OWNER/collector@sha256:APPROVED_DIGEST \
+  --journal-gid-file /private/host-journal-group-gid \
+  --grafana-url https://grafana.example.com \
+  --output /private/observability-rendered
+```
+
+Copy the public numeric group file from the pinned host before rendering on the
+operator machine. Supply the published derived collector digest, verified pinned
+Grafana plugin directory and private Grafana administrator credential separately.
+Do not omit `/srv/boxie` from filesystem monitoring: it backs PostgreSQL, Docker,
+artifacts and all telemetry data volumes. Verify both mount series in Prometheus
+and exercise the configured low-space alerts before production activation.

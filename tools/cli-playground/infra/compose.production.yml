@@ -1,4 +1,4 @@
-name: ${PLAYGROUND_PROJECT_NAME:-cli-playground}
+name: ${PLAYGROUND_PROJECT_NAME:-clis-playground}
 services:
   gateway:
     image: ${PLAYGROUND_IMAGE:?Set approved immutable Playground image}
@@ -11,6 +11,7 @@ services:
       PLAYGROUND_BOXIE_PROFILE: ${PLAYGROUND_BOXIE_PROFILE:-playground}
       PLAYGROUND_PREVIEW_DOMAIN: ${PLAYGROUND_DOMAIN}
       PLAYGROUND_METRICS_HOST: 0.0.0.0
+      PLAYGROUND_RELEASE: ${CLIS_RELEASE_REVISION:?Set release revision}
     volumes:
     - data:/var/lib/cli-playground
     - ${PLAYGROUND_BOXIE_CREDENTIAL_FILE:?Set consumer credential file}:/run/secrets/consumer:ro
@@ -22,7 +23,7 @@ services:
         - playground
     read_only: true
     tmpfs:
-    - /tmp
+    - /tmp:size=67108864,nosuid,nodev,noexec
     cap_drop:
     - ALL
     security_opt:
@@ -33,11 +34,10 @@ services:
       test:
       - CMD
       - /app/.venv/bin/python
-      - -c
-      - import os,urllib.parse,urllib.request; r=urllib.request.Request('http://127.0.0.1:8000/healthz',headers={'Host':urllib.parse.urlsplit(os.environ['PLAYGROUND_PUBLIC_URL']).netloc});
-        urllib.request.urlopen(r,timeout=3).close()
+      - -m
+      - playground.health
       interval: 10s
-      timeout: 5s
+      timeout: 10s
       retries: 6
       start_period: 20s
     logging:
@@ -46,8 +46,11 @@ services:
         mode: non-blocking
         max-buffer-size: 4m
         tag: cli-playground-gateway
+    user: 10001:10001
+    mem_limit: 512m
+    pids_limit: 256
   proxy:
-    image: traefik:v3.7.14
+    image: ${PLAYGROUND_PROXY_IMAGE:?Set immutable Traefik image}
     command:
     - --global.checknewversion=false
     - --global.sendanonymoususage=false

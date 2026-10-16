@@ -135,3 +135,25 @@ The native job's 65-minute limit includes separately bounded installation/setup,
 [Ingress smoke](../infra/ingress/README.md) consumes an explicitly authorized
 existing environment. Its unconfigured exit 2 is an outstanding activation gate,
 not a passing live test. Benchmark triggers and scope remain PR-only and unchanged.
+
+## Component release and platform checks
+
+The root Python checks include platform resource ownership, Pulumi component
+mock graphs, single-host composition, private release preparation and the
+standalone SSH activation adapter. Host-side scripts are checked against Python
+3.12 grammar; application code remains on Python 3.15. No cloud resources are
+created by these checks.
+
+The PR-only [component release smoke](../.github/workflows/component-release-check.yml)
+executes real Compose updates and failed-activation rollback while preserving a
+random persistent sentinel and the exact container of an unrelated component:
+
+```sh
+uv run --locked pytest tools/deploy/tests/test_native_release.py -m integration
+```
+
+It owns random labeled test networks, volumes and containers. Missing Docker or
+registry access fails when selected. This test does not establish cloud bootstrap,
+production dependency readiness, native gVisor isolation or live DNS/Access.
+Those acceptance gates remain in the
+[single-host runbook](../infra/environments/single-host/README.md).

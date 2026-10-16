@@ -1,0 +1,51 @@
+{
+  "component": "boxie",
+  "compose_file": "compose.production.yml",
+  "files": [
+    "pre-activate.sh"
+  ],
+  "services": [
+    "api",
+    "agent",
+    "worker"
+  ],
+  "image_variables": {
+    "BOXIE_RUNTIME_IMAGE": [
+      "api",
+      "worker",
+      "agent"
+    ]
+  },
+  "required_environment": [
+    "BOXIE_AGENT_CONFIG",
+    "BOXIE_AGENT_CREDENTIAL_FILE",
+    "BOXIE_API_ALIAS",
+    "BOXIE_API_CONFIG",
+    "BOXIE_API_TEMPORAL_CERT_FILE",
+    "BOXIE_API_TEMPORAL_KEY_FILE",
+    "BOXIE_CONSUMER_CREDENTIAL_FILE",
+    "BOXIE_CONSUMER_NETWORK",
+    "BOXIE_CONTROL_NETWORK",
+    "BOXIE_DATA_DIR",
+    "BOXIE_DOCKER_GID",
+    "BOXIE_POSTGRES_DSN_FILE",
+    "BOXIE_PROFILES_FILE",
+    "BOXIE_TEMPORAL_CA_FILE",
+    "BOXIE_WORKER_CONFIG",
+    "BOXIE_WORKER_TEMPORAL_CERT_FILE",
+    "BOXIE_WORKER_TEMPORAL_KEY_FILE",
+    "OBS_METRICS_NETWORK"
+  ],
+  "healthchecks": {
+    "api": {
+      "kind": "docker"
+    },
+    "agent": {
+      "kind": "docker"
+    },
+    "worker": {
+      "kind": "docker"
+    }
+  },
+  "pre_activate": "pre-activate.sh"
+}

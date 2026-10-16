@@ -1,8 +1,6 @@
 """Application wiring, static assets, and process lifecycle."""
 
 import asyncio
-import os
-import stat
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -11,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from playground.boxie_client import BoxieClient, HttpBoxieClient
-from playground.config import Settings
+from playground.config import Settings, read_boxie_credential
 from playground.observability import Metrics, RequestLogging
 from playground.routes import RequestHostBoundary, create_router
 from playground.service import PlaygroundService
@@ -29,13 +27,7 @@ def create_app(
 ) -> FastAPI:
     settings = settings or Settings()
     if boxie is None:
-        secret = settings.boxie_credential_file
-        if not stat.S_ISREG(secret.lstat().st_mode) or secret.lstat().st_mode & 0o077:
-            raise ValueError("Boxie credential must be a private regular file")
-        with os.fdopen(os.open(secret, os.O_RDONLY | os.O_NOFOLLOW), "r") as stream:
-            credential = stream.read(4097).strip()
-        if not 16 <= len(credential) <= 4096 or any(not 33 <= ord(c) <= 126 for c in credential):
-            raise ValueError("invalid Boxie credential file")
+        credential = read_boxie_credential(settings.boxie_credential_file)
         boxie = HttpBoxieClient(settings.boxie_url, credential)
     service = PlaygroundService(
         settings, EnvironmentStore(settings), SessionStore(settings.data_dir), boxie

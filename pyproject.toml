@@ -7,6 +7,8 @@ dependencies = []
 [dependency-groups]
 dev = [
     "boxie-test-support",
+    "platform-infra",
+    "clis-deploy",
     "observability-infra",
     "ingress-infra",
     "httpx",
@@ -26,7 +28,7 @@ package = false
 required-version = ">=0.13.0"
 
 [tool.uv.workspace]
-members = ["infra/ingress", "infra/observability", "tools/service-telemetry", "tools/boxie", "tools/boxie/tests/support", "tools/cli-playground", "tools/boxie/infra", "tools/cli-playground/infra", "tools/cli-bench", "tools/cli-testing"]
+members = ["infra/platform", "tools/deploy", "infra/ingress", "infra/observability", "tools/service-telemetry", "tools/boxie", "tools/boxie/tests/support", "tools/cli-playground", "tools/boxie/infra", "tools/cli-playground/infra", "tools/cli-bench", "tools/cli-testing"]
 
 [tool.ruff]
 target-version = "py315"
@@ -35,20 +37,26 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
 
+[tool.ruff.per-file-target-version]
+"tools/deploy/deploy_tool/remote.py" = "py312"
+"infra/platform/platform_infra/resources.py" = "py312"
+
 [tool.mypy]
 python_version = "3.15"
 plugins = ["pydantic.mypy"]
-files = ["tools", "infra/observability", "infra/ingress"]
+files = ["tools", "infra/observability", "infra/ingress", "infra/platform", "infra/environments"]
 mypy_path = ["tools"]
 strict = true
 
 [tool.pytest]
-testpaths = ["infra/ingress/tests", "infra/observability/tests", "tools/boxie/tests", "tools/ci/tests", "tools/cli-bench/tests", "tools/cli-playground/tests", "tools/cli-testing/tests"]
+testpaths = ["infra/environments/single-host/tests", "infra/platform/tests", "tools/deploy/tests", "infra/ingress/tests", "infra/observability/tests", "tools/boxie/tests", "tools/ci/tests", "tools/cli-bench/tests", "tools/cli-playground/tests", "tools/cli-testing/tests"]
 pythonpath = ["tools", "tools/cli-bench"]
 addopts = ["--strict-config", "--strict-markers", "-m", "not integration"]
 markers = ["integration: real isolated builds/installations and external-tool checks; prerequisites required"]
 
 [tool.uv.sources]
+platform-infra = { workspace = true }
+clis-deploy = { workspace = true }
 ingress-infra = { workspace = true }
 observability-infra = { workspace = true }
 service-telemetry = { workspace = true }

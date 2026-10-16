@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import hmac
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -54,7 +55,8 @@ def load_configuration(path: Path) -> RuntimeConfig:
             TypeAdapter(ConsumerId).validate_python(consumer)
         except ValidationError:
             raise ValueError("invalid consumer ID") from None
-    api = ApiConfig(data.pop("release"), consumers)
+    configured_release = data.pop("release")
+    api = ApiConfig(os.environ.get("BOXIE_RELEASE", configured_release), consumers)
     if "durable" not in data or "identity" not in data:
         raise ValueError("durable configuration and agent identity required")
     data["durable"] = durable_config(data.pop("durable"))

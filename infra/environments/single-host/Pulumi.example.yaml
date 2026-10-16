@@ -1,0 +1,28 @@
+# Copy to Pulumi.STACK.yaml, replace identities, then run pulumi preview.
+# Use the existing remote Pulumi backend; this project creates a fresh environment.
+config:
+  single-host:environment:
+    host:
+      installation_id: 12345678-1234-4234-8234-123456789abc
+      identity_ref: BOXIE_DEPLOYMENT_KEY
+      ssh_cidrs: [192.0.2.10/32]
+      location: nbg1
+      server_type: cx33
+      volume_size_gb: 40
+      protect: true
+      backups: false
+    boxie_image: ghcr.io/OWNER/boxie@sha256:REPLACE_WITH_64_LOWERCASE_HEX_DIGEST
+    consumer_credential_ref: BOXIE_CONSUMER_CREDENTIAL
+    # Omit Playground entirely for a generic Boxie environment.
+    # playground:
+    #   domain: play.example.com
+    #   cloudflare_zone_id: REPLACE_WITH_32_LOWERCASE_HEX_ID
+    #   image: ghcr.io/OWNER/playground@sha256:REPLACE_WITH_64_LOWERCASE_HEX_DIGEST
+    # Omit dashboard ingress until configuring operator Access and its secret.
+    # operators:
+    #   account_id: REPLACE_WITH_32_LOWERCASE_HEX_ID
+    #   zone_id: REPLACE_WITH_32_LOWERCASE_HEX_ID
+    #   team_name: operators
+    #   grafana_hostname: grafana.example.com
+    #   temporal_hostname: temporal.example.com
+    #   allowed_identities: [operator@example.com]

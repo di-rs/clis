@@ -21,3 +21,7 @@ node_modules/
 
 /tools/cli-playground/playground/static/
 !/tools/boxie/infra/config.example.env
+
+/.superpowers/
+/infra/environments/single-host/Pulumi.*.yaml
+!/infra/environments/single-host/Pulumi.example.yaml

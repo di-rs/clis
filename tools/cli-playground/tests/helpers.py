@@ -2,9 +2,7 @@
 
 import io
 import struct
-import subprocess
 import zipfile
-from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -41,39 +39,3 @@ def upload(
     assert response.status_code == 201, response.text
     result: dict[str, str] = response.json()
     return result
-
-
-APP_ENV = (
-    b"PLAYGROUND_DOMAIN=play.example\nACME_EMAIL=ops@example.org\n"
-    b"PLAYGROUND_DEPLOY_TOKEN=local-test-secret\n"
-    b"CLOUDFLARE_DNS_API_TOKEN=private-renewal-token\n"
-)
-GATEWAY_IMAGE = "ghcr.io/di-rs/clis-playground-gateway@sha256:" + "1" * 64
-SANDBOX_IMAGE = "registry.example:5000/team/sandbox@sha256:" + "2" * 64
-
-
-def protected(path: Path, data: bytes) -> Path:
-    path.write_bytes(data)
-    path.chmod(0o600)
-    return path
-
-
-def git_commit(root: Path) -> None:
-    """Commit staged fixture files without depending on the user's Git identity."""
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(root),
-            "-c",
-            "user.name=Test",
-            "-c",
-            "user.email=test@example.org",
-            "-c",
-            "commit.gpgsign=false",
-            "commit",
-            "-qm",
-            "fixture",
-        ],
-        check=True,
-    )

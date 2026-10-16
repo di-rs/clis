@@ -10,9 +10,11 @@ members = [
     "cli-bench",
     "cli-playground",
     "cli-testing-policy",
+    "clis-deploy",
     "clis-tools",
     "ingress-infra",
     "observability-infra",
+    "platform-infra",
     "playground-infra",
     "service-telemetry",
 ]
@@ -232,12 +234,18 @@ version = "0.1.0"
 source = { editable = "tools/boxie/infra" }
 dependencies = [
     { name = "httpx" },
+    { name = "platform-infra" },
+    { name = "pulumi" },
+    { name = "pydantic" },
     { name = "websockets" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.28" },
+    { name = "platform-infra" },
+    { name = "pulumi", specifier = "==3.268.0" },
+    { name = "pydantic", specifier = ">=2.14,<3" },
     { name = "websockets", specifier = ">=16" },
 ]
 
@@ -316,6 +324,17 @@ wheels = [
 ]
 
 [[package]]
+name = "clis-deploy"
+version = "0.1.0"
+source = { editable = "tools/deploy" }
+dependencies = [
+    { name = "pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pyyaml", specifier = ">=6.0.3" }]
+
+[[package]]
 name = "clis-tools"
 version = "0.1.0"
 source = { virtual = "." }
@@ -323,10 +342,12 @@ source = { virtual = "." }
 [package.dev-dependencies]
 dev = [
     { name = "boxie-test-support" },
+    { name = "clis-deploy" },
     { name = "httpx" },
     { name = "ingress-infra" },
     { name = "mypy" },
     { name = "observability-infra" },
+    { name = "platform-infra" },
     { name = "pulumi" },
     { name = "pulumi-cloudflare" },
     { name = "pulumi-hcloud" },
@@ -342,10 +363,12 @@ dev = [
 [package.metadata.requires-dev]
 dev = [
     { name = "boxie-test-support", editable = "tools/boxie/tests/support" },
+    { name = "clis-deploy", editable = "tools/deploy" },
     { name = "httpx" },
     { name = "ingress-infra", editable = "infra/ingress" },
     { name = "mypy" },
     { name = "observability-infra", editable = "infra/observability" },
+    { name = "platform-infra", editable = "infra/platform" },
     { name = "pulumi", specifier = "==3.268.0" },
     { name = "pulumi-cloudflare", specifier = "==6.22.1" },
     { name = "pulumi-hcloud", specifier = "==1.43.1" },
@@ -813,28 +836,43 @@ wheels = [
 ]
 
 [[package]]
+name = "platform-infra"
+version = "0.1.0"
+source = { editable = "infra/platform" }
+dependencies = [
+    { name = "pulumi" },
+    { name = "pulumi-hcloud" },
+    { name = "pulumi-tls" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pulumi", specifier = "==3.268.0" },
+    { name = "pulumi-hcloud", specifier = "==1.43.1" },
+    { name = "pulumi-tls", specifier = "==5.6.2" },
+    { name = "pydantic", specifier = ">=2.14,<3" },
+]
+
+[[package]]
 name = "playground-infra"
 version = "0.1.0"
 source = { editable = "tools/cli-playground/infra" }
 dependencies = [
-    { name = "boxie-infra" },
     { name = "cli-playground" },
+    { name = "platform-infra" },
     { name = "pulumi" },
     { name = "pulumi-cloudflare" },
-    { name = "pulumi-hcloud" },
-    { name = "pulumi-tls" },
     { name = "pydantic" },
     { name = "pyyaml" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "boxie-infra" },
     { name = "cli-playground" },
+    { name = "platform-infra" },
     { name = "pulumi", specifier = "==3.268.0" },
     { name = "pulumi-cloudflare", specifier = "==6.22.1" },
-    { name = "pulumi-hcloud", specifier = "==1.43.1" },
-    { name = "pulumi-tls", specifier = "==5.6.2" },
     { name = "pydantic", specifier = ">=2.14,<3" },
     { name = "pyyaml", specifier = ">=6.0.3" },
 ]
