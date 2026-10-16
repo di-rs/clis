@@ -115,10 +115,16 @@ def test_native_fixture_compose_resolves_owned_fault_boundaries(tmp_path: Path) 
     from integration.stack import LifecycleStack
 
     stack = LifecycleStack(tmp_path)
+    stack.env["BOXIE_TEST_API_PORT"] = "18890"
     stack.env["BOXIE_TEST_PRODUCT_PORT"] = "18888"
     stack.env["BOXIE_TEST_DATA_MODE"] = "ro"
     config = json.loads(stack.runtime_command("config", "--format", "json"))
     services = config["services"]
+    for service, published, target in (("api", "18890", 8090), ("playground", "18888", 8000)):
+        assert [
+            (port["host_ip"], port["published"], port["target"], port["protocol"])
+            for port in services[service]["ports"]
+        ] == [("127.0.0.1", published, target, "tcp")]
     for name in ("api", "worker", "playground"):
         assert not any("docker.sock" in str(mount) for mount in services[name].get("volumes", []))
     assert services["agent"]["environment"]["DOCKER_HOST"] == "unix:///faults/docker.sock"
