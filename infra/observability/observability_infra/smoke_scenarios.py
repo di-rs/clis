@@ -19,7 +19,7 @@ from uuid import UUID, uuid4
 from observability_infra.smoke_application import REPO, Application
 from observability_infra.smoke_pipe_api import validate_shutdown
 from observability_infra.smoke_retention import removal_observation, retained_archive
-from observability_infra.smoke_runtime import event_identities, evidence
+from observability_infra.smoke_runtime import EventIdentityError, event_identities, evidence
 from observability_infra.smoke_samples import record_progress
 from observability_infra.smoke_telemetry import Telemetry
 from observability_infra.smoke_units import transient_command, unit_name
@@ -330,7 +330,18 @@ class Scenario:
             "--grep=" + self.flood_instance,
             "--lines=100",
         )
-        return event_identities(text, self.flood_instance)
+        return self.journal_identities(text, self.flood_instance, "persistent")
+
+    def journal_identities(self, text: str, instance: str, surface: str) -> set[str]:
+        if surface not in {"persistent", "runtime"}:
+            raise ValueError("unknown journal observation surface")
+        try:
+            return event_identities(text, instance)
+        except EventIdentityError as error:
+            self.observations["journal_parse_failure"] = dict(
+                error.detail, surface=surface, output_provenance="stdout_stderr_merged"
+            )
+            raise
 
     async def recovered(self, accepted: set[str]) -> None:
         while True:
@@ -551,7 +562,7 @@ class Scenario:
                     "--grep=" + self.probe_instance,
                     "--lines=100",
                 )
-                identities = event_identities(text, self.probe_instance)
+                identities = self.journal_identities(text, self.probe_instance, name)
                 accepted |= identities
             observations[name] = {
                 "files": len(files),

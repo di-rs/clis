@@ -277,15 +277,47 @@ def evidence(path: Path, value: Any) -> None:
     temporary.replace(path)
 
 
+class EventIdentityError(ValueError):
+    """A fatal record failure carrying only bounded structural evidence."""
+
+    def __init__(self, detail: dict[str, Any]) -> None:
+        super().__init__("journal event identity decoding failed")
+        self.detail = detail
+
+
 def event_identities(text: str, instance: str) -> set[str]:
     """A parser comparison helper; JSONL itself is never journal ingestion proof."""
     from uuid import UUID
 
     identities = set()
-    for line in text.splitlines():
-        event = json.loads(line)
+    for number, line in enumerate(text.splitlines(), 1):
+        detail: dict[str, Any] = {"line_number": number, "line_bytes": len(line.encode())}
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError as error:
+            categories = {
+                "Expecting value": "value",
+                "Expecting ',' delimiter": "delimiter",
+                "Expecting ':' delimiter": "delimiter",
+                "Expecting property name enclosed in double quotes": "property_name",
+                "Unterminated string starting at": "unterminated_string",
+                "Invalid control character at": "control_character",
+                "Invalid \\escape": "escape",
+                "Invalid \\uXXXX escape": "unicode_escape",
+                "Extra data": "extra_data",
+            }
+            detail.update(category=categories.get(error.msg, "json_other"), position=error.pos)
+            diagnostic = command_diagnostic(["journalctl"], line.encode(), 0, 0)
+            detail["journal_diagnostic"] = diagnostic.get("journal_error")
+            detail["classification"] = diagnostic["classification"]
+            raise EventIdentityError(detail) from None
+        if not isinstance(event, dict):
+            raise EventIdentityError(dict(detail, category="event_shape"))
         if event.get("instance_id") == instance:
-            identities.add(str(UUID(event["operation_id"])))
+            try:
+                identities.add(str(UUID(event["operation_id"])))
+            except KeyError, ValueError, TypeError, AttributeError:
+                raise EventIdentityError(dict(detail, category="operation_identity")) from None
     return identities
 
 
