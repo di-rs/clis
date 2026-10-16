@@ -765,28 +765,40 @@ def test_journal_observation_separates_runtime_and_persistent_acceptance(tmp_pat
 
 
 @pytest.mark.parametrize(
-    "output,code,empty",
+    "output,code,options,allowed,empty",
     [
-        ("-- No entries --", 1, True),
-        ("Permission denied", 1, False),
-        ("-- No entries --", 2, False),
+        ("-- No entries --", 1, ["--grep=probe"], True, True),
+        ("", 1, ["--grep=probe", "--output=cat"], True, True),
+        ("Permission denied", 1, ["--grep=probe", "--output=cat"], True, False),
+        ("Invalid regular expression", 1, ["--grep=probe", "--output=cat"], True, False),
+        ("-- No entries --", 2, ["--grep=probe"], True, False),
+        ("", 2, ["--grep=probe", "--output=cat"], True, False),
+        ("", 1, ["--grep=probe"], True, False),
+        ("", 1, ["--output=cat"], True, False),
+        ("", 1, ["--grep=probe", "--output=cat"], False, False),
+        (" ", 1, ["--grep=probe", "--output=cat"], True, False),
     ],
 )
 def test_empty_journal_query_does_not_hide_read_errors(
-    tmp_path: Path, output: str, code: int, empty: bool
+    tmp_path: Path, output: str, code: int, options: list[str], allowed: bool, empty: bool
 ) -> None:
     from observability_infra.smoke_runtime import Commands, Deadline
 
     executable = tmp_path / "journalctl"
-    executable.write_text("#!/bin/sh\nprintf '%s\\n' '" + output + "'\nexit " + str(code) + "\n")
+    # stderr is merged with stdout; even otherwise-empty permission errors must fail.
+    executable.write_text("#!/bin/sh\nprintf '%s' '" + output + "' >&2\nexit " + str(code) + "\n")
     executable.chmod(0o700)
     runner = Commands(Deadline(2, reserve=0.1))
-    args = [str(executable), "--grep=probe"]
+    args = [str(executable), *options]
     if empty:
-        assert runner.run(args, empty_journal_ok=True) == ""
+        assert runner.run(args, empty_journal_ok=allowed) == ""
+        other = executable.with_name("other-command")
+        executable.rename(other)
+        with pytest.raises(RuntimeError):
+            runner.run([str(other), *options], empty_journal_ok=allowed)
     else:
         with pytest.raises(RuntimeError):
-            runner.run(args, empty_journal_ok=True)
+            runner.run(args, empty_journal_ok=allowed)
 
 
 def test_runtime_error_preserves_missing_path_but_redacts_credentials() -> None:

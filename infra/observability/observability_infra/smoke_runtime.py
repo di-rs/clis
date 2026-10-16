@@ -195,14 +195,17 @@ class Commands:
                                 if len(output) > self.output_limit:
                                     raise RuntimeError("smoke command output limit exceeded")
                 process.wait(timeout=self.deadline.remaining(restoring=restoring))
-            # journalctl --grep returns 1 for its exact no-match message. Other
-            # exit-1 diagnostics (including permissions) must remain failures.
+            # systemd255 --output=cat implies quiet: grep no-match exits1 with
+            # no banner. Accept only that exact empty result or the normal banner;
+            # stderr is merged, so permission/parse/read diagnostics still fail.
             if (
                 empty_journal_ok
                 and Path(args[0]).name == "journalctl"
                 and any(arg.startswith("--grep=") for arg in args)
                 and process.returncode == 1
-                and output.strip() == b"-- No entries --"
+                and (
+                    output.strip() == b"-- No entries --" or ("--output=cat" in args and not output)
+                )
             ):
                 return ""
             if process.returncode:
