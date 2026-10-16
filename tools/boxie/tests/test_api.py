@@ -1,15 +1,42 @@
 import asyncio
 import hashlib
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
+import httpx
+import pytest
+from boxie.api.app import ApiConfig, create_app
+from boxie.sandbox.client import AgentClient
 from boxie_test_support.agent import bundle, request
-from boxie_test_support.api import FOREIGN_AUTH, artifact, create, ready, stack
+from boxie_test_support.api import CONSUMER_AUTH, FOREIGN_AUTH, artifact, create, ready, serve
+from integration.conftest import postgres_dsn as postgres_dsn
+from integration.conftest import postgres_server as postgres_server
+from test_postgres import counts, database
+
+pytestmark = pytest.mark.integration
 
 
-def test_api_auth_ownership_idempotency_and_validation(tmp_path: Path) -> None:
+@asynccontextmanager
+async def stack(dsn: str, root: Path) -> AsyncIterator[tuple[httpx.AsyncClient, Any]]:
+    async with database(dsn, root) as (life, artifacts, pool, _):
+        async with AgentClient("http://127.0.0.1:1", b"agent-test-secret") as terminal:
+            app = create_app(
+                ApiConfig("test", {"one": b"consumer-one-secret", "two": b"consumer-two-secret"}),
+                life,
+                artifacts,
+                terminal,
+            )
+            async with serve(app) as url:
+                async with httpx.AsyncClient(base_url=url, headers=CONSUMER_AUTH) as client:
+                    yield client, pool
+
+
+def test_api_auth_ownership_idempotency_and_validation(tmp_path: Path, postgres_dsn: str) -> None:
     async def exercise() -> None:
-        async with stack(tmp_path) as (client, agent, daemon, _clock):
+        async with stack(postgres_dsn, tmp_path) as (client, pool):
             unauthorized = await client.get(
                 "/v1/sandboxes/" + str(uuid4()), headers={"Authorization": ""}
             )
@@ -25,8 +52,8 @@ def test_api_auth_ownership_idempotency_and_validation(tmp_path: Path) -> None:
             assert all(response.status_code == 202 for response in responses)
             identifier = responses[0].json()["id"]
             assert {response.json()["id"] for response in responses} == {identifier}
-            await ready(client, identifier)
-            assert agent.reserved_count == 1 and len(daemon.configs) == 1
+            await ready(client, identifier, "accepted")
+            assert (await counts(pool))[:3] == (1, 1, 1)
             foreign = await client.get(f"/v1/sandboxes/{identifier}", headers=FOREIGN_AUTH)
             assert foreign.status_code == 404
             assert (
@@ -44,6 +71,9 @@ def test_api_auth_ownership_idempotency_and_validation(tmp_path: Path) -> None:
             for patch in (
                 {"profile_id": "unknown"},
                 {"image": "arbitrary"},
+                {"host_path": "/etc"},
+                {"command": ["/bin/evil"]},
+                {"env": {"LD_PRELOAD": "evil"}},
                 {"consumer_id": "two"},
                 {"policy": {"max_seconds": 3601}},
             ):
@@ -55,15 +85,15 @@ def test_api_auth_ownership_idempotency_and_validation(tmp_path: Path) -> None:
             assert (await client.post("/v1/sandboxes", json=spec)).status_code == 422
             stopped = await client.delete(f"/v1/sandboxes/{identifier}")
             assert stopped.status_code == 200
-            await ready(client, identifier, "terminated")
-            assert not daemon.configs and agent.reserved_count == 0
+            await ready(client, identifier, "terminating")
+            assert (await counts(pool))[:3] == (1, 1, 1)
 
     asyncio.run(exercise())
 
 
-def test_immutable_artifact_status_and_retirement(tmp_path: Path) -> None:
+def test_immutable_artifact_status_and_retirement(tmp_path: Path, postgres_dsn: str) -> None:
     async def exercise() -> None:
-        async with stack(tmp_path) as (client, _agent, _daemon, _clock):
+        async with stack(postgres_dsn, tmp_path) as (client, _pool):
             data = bundle()
             identifier = str(uuid4())
             initial = await client.put(
@@ -80,8 +110,10 @@ def test_immutable_artifact_status_and_retirement(tmp_path: Path) -> None:
             assert retry.status_code == 200
             conflict = await client.put(
                 f"/v1/artifacts/{identifier}",
-                content=b"bad",
-                headers={"X-Content-SHA256": "a" * 64},
+                content=bundle({"different": b"bytes"}),
+                headers={
+                    "X-Content-SHA256": hashlib.sha256(bundle({"different": b"bytes"})).hexdigest()
+                },
             )
             assert conflict.status_code == 409
             assert (
@@ -100,11 +132,12 @@ def test_immutable_artifact_status_and_retirement(tmp_path: Path) -> None:
     asyncio.run(exercise())
 
 
-def test_agent_owns_capacity(tmp_path: Path) -> None:
+def test_sql_owns_capacity(tmp_path: Path, postgres_dsn: str) -> None:
     async def exercise() -> None:
-        async with stack(tmp_path, max_sandboxes=1) as (client, _agent, _daemon, _clock):
+        async with stack(postgres_dsn, tmp_path) as (client, _pool):
             identifier = await artifact(client)
-            await create(client, identifier)
+            for index in range(8):
+                await create(client, identifier, str(index))
             assert (
                 await client.post(
                     "/v1/sandboxes",

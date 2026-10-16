@@ -26,6 +26,7 @@ from boxie.sandbox.execution import ExecutionJournal, ExecutionRecord
 from boxie.sandbox.profiles import ProfileRegistry
 from boxie.sandbox.provision import ProvisionDecisions, provision
 from boxie.sandbox.reconcile import reconcile_removal
+from boxie.sandbox.retention import MAX_RECORDS, compact
 from boxie.sandbox.terminal import ExecutionTerminal
 
 logger = logging.getLogger(__name__)
@@ -62,14 +63,21 @@ class DurableAgent:
         self.profiles = ProfileRegistry(config.profiles_file, config.data_dir / "profiles")
         self.journal = ExecutionJournal(config.data_dir / "execution.json", config.identity)
         self.records = self.journal.records
+        self.admission_lock = asyncio.Lock()
+        self.sessions: dict[UUID, int] = {}
+        self.durable_versions = {key: value.event_version for key, value in self.records.items()}
+        self.forget_observation: Callable[[UUID], None] | None = None
+        self._input_flush_at: float | None = None
         self.deadlines: dict[UUID, Deadlines] = {}
         self.locks: dict[UUID, asyncio.Lock] = {}
         self.cleanup_locks: dict[UUID, asyncio.Lock] = {}
         self.workers: dict[UUID, asyncio.Task[None]] = {}
         self.creates: dict[UUID, asyncio.Task[None]] = {}
         self.terminals: dict[UUID, ExecutionTerminal] = {}
+        self.terminal_readers: dict[UUID, asyncio.Task[None]] = {}
         self.reconciliations: dict[UUID, asyncio.Task[None]] = {}
         self.sweeper: asyncio.Task[None] | None = None
+        self.compactor: asyncio.Task[None] | None = None
         self.stopping = False
         self.observer: Callable[[AgentObservation], None] | None = None
         self._reported: dict[UUID, int] = {}
@@ -83,6 +91,7 @@ class DurableAgent:
         return record
 
     def _lock(self, ref: SandboxRef) -> asyncio.Lock:
+        self._record(ref)
         return self.locks.setdefault(ref.id, asyncio.Lock())
 
     @property
@@ -93,7 +102,12 @@ class DurableAgent:
         journal flush and successful per-record retries establish recovery.
         Task 3 must include this signal in its authenticated readiness response.
         """
-        return not self.stopping and self._journal_healthy and not self._failed_reconciliations
+        return (
+            not self.stopping
+            and self._journal_healthy
+            and not self._failed_reconciliations
+            and len(self.records) < MAX_RECORDS
+        )
 
     def _save(self) -> None:
         try:
@@ -106,6 +120,8 @@ class DurableAgent:
         if not self._journal_healthy:
             logger.info("execution journal persistence recovered")
         self._journal_healthy = True
+        self._input_flush_at = None
+        self.durable_versions = {key: value.event_version for key, value in self.records.items()}
         if self.observer:
             for record in self.records.values():
                 if self._reported.get(record.id) != record.event_version:
@@ -162,16 +178,30 @@ class DurableAgent:
             != request.accepted_at + timedelta(seconds=spec.policy.max_seconds)
         ):
             raise BoxieError(422, "invalid admitted deadline")
-        async with self._lock(request.ref):
+        async with self.admission_lock:
             old = self.records.get(request.ref.id)
             if old:
                 if old.request() != request:
                     raise BoxieError(409, "immutable execution request differs")
                 return self._observation(old)
-            if not self.execution_ready:
+            mode = await self.guard.initialization(request, self.boot_id)
+            if mode is None:
+                raise BoxieError(409, "durable admission unavailable")
+            # Existing cleanup keeps progressing; only new identities consume headroom.
+            limit = MAX_RECORDS if mode == "execute" else MAX_RECORDS + 8
+            if (
+                self.stopping
+                or not self._journal_healthy
+                or (mode == "execute" and self._failed_reconciliations)
+                or len(self.records) >= limit
+            ):
                 raise BoxieError(503, "agent execution unavailable")
             now = self.clock()
             record = ExecutionRecord.create(request, self.boot_id, now + timedelta(seconds=90))
+            if mode != "execute":
+                record.state = SandboxState.TERMINATING
+                record.cleanup_pending = True
+                record.reason = mode
             self.records[record.id] = record
             self.deadlines[record.id] = Deadlines(
                 self.monotonic() + max(0, (request.absolute_deadline - now).total_seconds()),
@@ -187,7 +217,9 @@ class DurableAgent:
                 record.reason = TerminationReason.PROVISIONING_FAILED
                 record.event_version += 1
                 raise BoxieError(503, "agent execution unavailable") from None
-            self.workers[record.id] = asyncio.create_task(self._provision(record))
+            self.workers[record.id] = asyncio.create_task(
+                self._provision(record) if mode == "execute" else self._cleanup(record)
+            )
             return self._observation(record)
 
     def _expiry(self, record: ExecutionRecord) -> TerminationReason | None:
@@ -207,7 +239,9 @@ class DurableAgent:
 
     def _live(self, record: ExecutionRecord) -> bool:
         return (
-            self.execution_ready
+            not self.stopping
+            and self._journal_healthy
+            and not self._failed_reconciliations
             and record.boot_id == self.boot_id
             and record.state not in FINAL | {SandboxState.TERMINATING}
             and self._expiry(record) is None
@@ -273,6 +307,8 @@ class DurableAgent:
                 return
             terminal = self.terminals.pop(record.id, None)
             if terminal:
+                if terminal.reader:
+                    self.terminal_readers[record.id] = terminal.reader
                 try:
                     async with asyncio.timeout(self.config.docker_timeout):
                         await terminal.close()
@@ -392,7 +428,9 @@ class DurableAgent:
             if source == "user" and self._live(record):
                 self.deadlines[ref.id].idle = self.monotonic() + record.spec.policy.idle_seconds
                 record.last_input_at = self.clock()
-                self._changed(record)
+                record.event_version += 1
+                if self._input_flush_at is None:
+                    self._input_flush_at = self.monotonic() + 1
 
     async def resize(self, ref: SandboxRef, epoch: int, columns: int, rows: int) -> None:
         if not 1 <= columns <= 500 or not 1 <= rows <= 300:
@@ -433,16 +471,25 @@ class DurableAgent:
         await self.reconcile()
         self.sweeper = asyncio.create_task(self._sweep())
 
+    async def compact(self) -> None:
+        await compact(self)
+
     async def _sweep(self) -> None:
         while True:
-            if not self._journal_healthy:
+            if not self._journal_healthy or (
+                self._input_flush_at is not None and self.monotonic() >= self._input_flush_at
+            ):
                 try:
                     # Flush all in-memory pending decisions, including a failed
                     # final removal save, before advertising recovered durability.
                     self._save()
                 except Exception:
                     pass
+            if self.compactor is None or self.compactor.done():
+                self.compactor = asyncio.create_task(self.compact())
             for record in list(self.records.values()):
+                if record.state in FINAL:
+                    continue
                 previous = self.reconciliations.get(record.id)
                 if previous is None or previous.done():
                     # The supervisor consumes and records failures. A cancelled
@@ -450,13 +497,21 @@ class DurableAgent:
                     self.reconciliations[record.id] = asyncio.create_task(
                         self._supervised_reconcile(record)
                     )
-            await asyncio.sleep(self.config.sweep_seconds)
+            delay = min(1, self.config.sweep_seconds)
+            if self._input_flush_at is not None:
+                remaining = self._input_flush_at - self.monotonic()
+                if remaining > 0:
+                    delay = min(delay, remaining)
+            await asyncio.sleep(delay)
 
     async def close(self) -> None:
         self.stopping = True
         if self.sweeper:
             self.sweeper.cancel()
             await asyncio.gather(self.sweeper, return_exceptions=True)
+        if self.compactor:
+            self.compactor.cancel()
+            await asyncio.gather(self.compactor, return_exceptions=True)
         await asyncio.gather(
             *(
                 self.remove(r.ref, TerminationReason.AGENT_SHUTDOWN)

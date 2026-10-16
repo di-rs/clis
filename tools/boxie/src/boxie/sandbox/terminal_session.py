@@ -35,7 +35,9 @@ async def close_socket(websocket: WebSocket, code: int = 1000) -> None:
 
 
 async def serve_terminal(websocket: WebSocket, agent: DurableAgent, ref: SandboxRef) -> None:
+    agent._record(ref)
     terminal = agent.terminals[ref.id]
+    agent.sessions[ref.id] = agent.sessions.get(ref.id, 0) + 1
     ring = terminal.replay
     epoch: int | None = None
     tasks: list[asyncio.Task[None]] = []
@@ -229,4 +231,9 @@ async def serve_terminal(websocket: WebSocket, agent: DurableAgent, ref: Sandbox
                 if epoch is not None:
                     await agent.detach(ref, epoch)
             finally:
-                await close_socket(websocket)
+                try:
+                    await close_socket(websocket)
+                finally:
+                    agent.sessions[ref.id] -= 1
+                    if not agent.sessions[ref.id]:
+                        agent.sessions.pop(ref.id)

@@ -89,7 +89,7 @@ workflow history.
 From the repository root:
 
 ```sh
-UV_CACHE_DIR=/tmp/boxie-uv-cache uv run --locked pytest tools/boxie/tests/test_temporal_deployment.py
+UV_CACHE_DIR=/tmp/boxie-uv-cache uv run --locked pytest -m integration tools/boxie/tests/test_temporal_deployment.py
 UV_CACHE_DIR=/tmp/boxie-uv-cache uv run --locked python tools/boxie/tests/run_integration.py
 ```
 
@@ -107,6 +107,13 @@ workflow/activity, the actual UI namespace API, and six cross-database credentia
 denials. It writes nonsecret runtime evidence into pytest's temporary directory.
 Linux arm64/runc proves this infrastructure path, not the later native
 Linux/amd64/runsc full-stack gate or production deployment.
+
+The [durable lifecycle workflow](../../.github/workflows/boxie-lifecycle.yml)
+adds interpreter imports, pinned test-server history replay/cancellation and the
+native Linux amd64/runsc full stack. Its test-only agent launcher observes
+collector entry/completion around a successful SQL COMMIT with lost acknowledgment;
+collection logic, cadence and deadlines remain production code. Owned Docker/SQL
+proxies and read-only journal mounts exercise process loss and truthful accounting.
 
 ## Primary sources
 

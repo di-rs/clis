@@ -14,6 +14,8 @@ from uuid import uuid4
 import httpx
 from websockets.asyncio.client import connect
 
+from boxie_infra.terminal import Session
+
 
 def containers(sandbox_id: str) -> list[str]:
     return subprocess.check_output(
@@ -110,18 +112,15 @@ async def exercise(url: str, credential_file: Path, profile: str) -> None:
             ) as terminal:
                 # Split marker in the command: echoed input cannot satisfy the output assertion.
                 token = uuid4().hex
-                await terminal.send(
-                    json.dumps(
-                        {
-                            "type": "input",
-                            "data": f"cat /opt/artifact/message.txt; printf '%s%s' '{token[:16]}' '{token[16:]}'\n",
-                        }
-                    )
+                session = Session(terminal.recv, terminal.send)
+                await session.start()
+                await session.write(
+                    f"cat /opt/artifact/message.txt; printf '%s%s' '{token[:16]}' '{token[16:]}'\n".encode()
                 )
                 output = b""
                 async with asyncio.timeout(20):
                     while token.encode() not in output:
-                        frame = await terminal.recv()
+                        frame = await session.read()
                         if not isinstance(frame, bytes):
                             raise RuntimeError("Unexpected terminal status")
                         output += frame

@@ -218,15 +218,32 @@ class ProductionStack:
         (self.root / "evidence.json").write_text(json.dumps(self.evidence, indent=2))
 
     def close(self) -> None:
+        failures: list[str] = []
         for package in ("temporal", "platform"):
             if (self.root / f"{package}-override.yml").exists():
-                self.compose(package, "down", "--volumes", "--remove-orphans")
+                try:
+                    self.compose(package, "down", "--volumes", "--remove-orphans")
+                except Exception as error:
+                    failures.append(str(error))
+        if failures:
+            raise RuntimeError("; ".join(failures))
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--runtime", choices=["runsc"])
+    parser.add_argument("--browser", action="store_true")
     parser.add_argument("pytest_args", nargs="*")
     args = parser.parse_args()
+    if args.browser and not args.runtime:
+        parser.error("--browser requires --runtime runsc")
+    if args.browser:
+        os.environ["BOXIE_BROWSER"] = "1"
+    selected = (
+        ["tools/boxie/tests/integration/test_lifecycle.py"]
+        if args.runtime
+        else ["tools/boxie/tests/test_postgres.py", "tools/boxie/tests/test_temporal_deployment.py"]
+    )
     raise SystemExit(
         subprocess.call(
             [
@@ -236,8 +253,7 @@ def main() -> None:
                 "pytest",
                 "-m",
                 "integration",
-                "tools/boxie/tests/test_postgres.py",
-                "tools/boxie/tests/test_temporal_deployment.py",
+                *selected,
                 *args.pytest_args,
             ]
         )

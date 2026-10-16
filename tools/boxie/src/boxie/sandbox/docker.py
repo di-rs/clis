@@ -39,16 +39,6 @@ class ExecutionDocker(Protocol):
     async def close(self) -> None: ...
 
 
-class DockerPort(Protocol):
-    async def ready(self) -> bool: ...
-    async def create(self, name: str, config: dict[str, Any]) -> None: ...
-    async def attach(self, name: str) -> TerminalPort: ...
-    async def start(self, name: str) -> None: ...
-    async def labels(self, name: str) -> dict[str, str] | None: ...
-    async def delete(self, name: str) -> None: ...
-    async def close(self) -> None: ...
-
-
 class DockerTerminal:
     def __init__(self, container: DockerContainer, stream: Stream) -> None:
         self.container, self.stream = container, stream
@@ -102,10 +92,6 @@ class DockerBackend:
             raise
         labels: dict[str, str] = data["Config"]["Labels"] or {}
         return ContainerInfo(data["Id"], labels, data["State"]["Running"])
-
-    async def labels(self, name: str) -> dict[str, str] | None:
-        info = await self.inspect(name)
-        return info.labels if info else None
 
     async def delete(self, name: str) -> None:
         async with asyncio.timeout(self.timeout):

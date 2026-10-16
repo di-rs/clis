@@ -61,6 +61,16 @@ class Daemon:
 
 class Guard:
     stopped = False
+    receipt = False
+    missing = False
+
+    async def initialization(self, request: Any, boot: Any) -> Any:
+        from boxie.domain.models import TerminationReason
+
+        return None if self.missing else TerminationReason.REQUESTED if self.stopped else "execute"
+
+    async def terminal_receipt(self, request: Any) -> bool:
+        return self.receipt
 
     async def run_start_if_allowed(self, request: Any, boot: Any, start: Any) -> bool:
         if self.stopped:

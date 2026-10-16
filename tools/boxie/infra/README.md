@@ -81,8 +81,9 @@ pnpm --dir tools/cli-playground/frontend build
 uv run --locked pytest tools/boxie/tests/test_packaging.py -m integration
 ```
 
-The native Linux [sandbox check](../../../.github/workflows/cli-playground-sandbox.yml)
-starts separate API and agent processes bound to loopback, then exercises both
+The native Linux [sandbox check](../../../.github/workflows/boxie-lifecycle.yml)
+starts isolated PostgreSQL, Temporal, API, worker, agent and Playground services,
+then exercises process faults, browser recovery and both
 `boxie_infra.smoke` and `playground_infra.smoke` through HTTP and WebSocket. Each
 inspects the actual sandbox's `runsc`, non-root user, no-network mode, read-only
 root/artifact, capabilities, no-new-privileges, resource limits, tmpfs, disabled

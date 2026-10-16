@@ -3,7 +3,7 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Literal, Protocol
 from uuid import UUID
 
 from boxie.domain.models import (
@@ -135,6 +135,12 @@ class StartGuard(Protocol):
     start_allowed validates immutable admission AND its retained artifact reference,
     before mount and again before READY. It is not final-start authorization.
     """
+
+    async def initialization(
+        self, request: EnsureRequest, boot_id: UUID
+    ) -> Literal["execute"] | TerminationReason | None: ...
+
+    async def terminal_receipt(self, request: EnsureRequest) -> bool: ...
 
     async def start_allowed(self, request: EnsureRequest, boot_id: UUID) -> bool: ...
     async def run_start_if_allowed(

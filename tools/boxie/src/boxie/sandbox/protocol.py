@@ -2,10 +2,10 @@
 
 from dataclasses import asdict
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from boxie.domain.lifecycle import AgentObservation, ExpiryRequest, SandboxRef
 from boxie.domain.lifecycle import EnsureRequest as DomainEnsureRequest
@@ -72,12 +72,6 @@ class SpecWire(ProfileRequest):
         )
 
 
-class SubmitRequest(WireModel):
-    consumer_id: ConsumerId
-    idempotency_key: Annotated[str, Field(min_length=1, max_length=200)]
-    spec: SpecWire
-
-
 class SnapshotWire(ProfileRequest):
     config_digest: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
     image_digest: str
@@ -122,23 +116,6 @@ class ControlRequest(WireModel):
     generation: Positive
 
 
-class EnsureRequest(ControlRequest):
-    snapshot: SnapshotWire
-    artifact_id: UUID
-    deadline: datetime
-
-    @field_validator("deadline")
-    @classmethod
-    def timezone_required(cls, value: datetime) -> datetime:
-        if value.tzinfo is None:
-            raise ValueError("deadline requires timezone")
-        return value
-
-
-class RemoveRequest(ControlRequest):
-    reason: TerminationReason = TerminationReason.REQUESTED
-
-
 class ViewWire(WireModel):
     id: UUID
     state: SandboxState
@@ -167,17 +144,6 @@ class ArtifactWire(WireModel):
 class ReadyWire(WireModel):
     identity: IdentityWire
     dependencies: dict[str, bool]
-
-
-class StatusWire(WireModel):
-    type: Literal["status"]
-    reason: TerminationReason
-
-
-class ResizeWire(WireModel):
-    type: str = Field(pattern="^resize$")
-    columns: Annotated[int, Field(strict=True, ge=1, le=500)]
-    rows: Annotated[int, Field(strict=True, ge=1, le=300)]
 
 
 def spec_wire(spec: SandboxSpec) -> SpecWire:

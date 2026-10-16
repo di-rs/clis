@@ -40,6 +40,7 @@ def create_durable_agent_app(
     reporter: ObservationReporter,
 ) -> FastAPI:
     agent.observer = reporter.offer
+    agent.forget_observation = reporter.forget
 
     async def collect() -> None:
         while True:

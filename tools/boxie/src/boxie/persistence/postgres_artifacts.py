@@ -8,7 +8,8 @@ import shutil
 import tempfile
 import time
 import zipfile
-from collections.abc import AsyncIterable, Iterator
+from collections.abc import AsyncIterable, AsyncIterator, Iterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -19,6 +20,8 @@ from boxie.persistence.artifacts import ArtifactLimits
 from boxie.persistence.atomic import sync_directory
 from boxie.persistence.postgres import Pool, keyed_lock
 
+OPERATION_SECONDS = 20.0
+
 
 class PostgresArtifactStore:
     def __init__(self, pool: Pool, root: Path, limits: ArtifactLimits | None = None) -> None:
@@ -28,12 +31,22 @@ class PostgresArtifactStore:
         self._files_lock = asyncio.Lock()
         self._scan: Iterator[os.DirEntry[str]] | None = None
 
+    @asynccontextmanager
+    async def _operation(self) -> AsyncIterator[None]:
+        # One total deadline includes waiting for publication/collection ownership.
+        # Uncertain commit bytes stay published for subsequent SQL reconciliation.
+        try:
+            async with asyncio.timeout(OPERATION_SECONDS), self._files_lock:
+                yield
+        except TimeoutError:
+            raise BoxieError(503, "artifact storage unavailable") from None
+
     async def put(
         self, principal: Principal, artifact_id: UUID, sha256: str, chunks: AsyncIterable[bytes]
     ) -> ArtifactPutResult:
         if not re.fullmatch(r"[a-f0-9]{64}", sha256):
             raise BoxieError(422, "invalid SHA-256 digest")
-        async with self._files_lock:
+        async with self._operation():
             staged = Path(tempfile.mkdtemp(prefix=".upload-", dir=self.root))
             try:
                 digest, size = hashlib.sha256(), 0
@@ -122,7 +135,7 @@ class PostgresArtifactStore:
         if not 1 <= limit <= 1000:
             raise ValueError("collection limit must be 1..1000")
         collected = 0
-        async with self._files_lock, self.pool.connection() as conn, conn.transaction():
+        async with self._operation(), self.pool.connection() as conn, conn.transaction():
             rows = await (
                 await conn.execute(
                     """SELECT * FROM artifacts a WHERE retired
@@ -157,7 +170,7 @@ class PostgresArtifactStore:
         if minimum_age_seconds < 60 or not 1 <= limit <= 1000:
             raise ValueError("orphan collection requires bounded limit and >=60s grace")
         count = 0
-        async with self._files_lock, self.pool.connection() as conn:
+        async with self._operation(), self.pool.connection() as conn:
             # scandir is lazy; a bounded pass avoids materializing a large directory.
             if self._scan is None:
                 self._scan = os.scandir(self.root)

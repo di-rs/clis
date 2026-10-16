@@ -1,17 +1,15 @@
 # Boxie sandbox service
 
-Boxie is an independently deployed, private sandbox service. The privileged agent
-owns Docker access, immutable generic artifacts, admission, idempotency, capacity,
-and terminal lifetimes. Consumers select approved profiles and upload ZIP files;
-they cannot supply images, host paths, Docker options, or isolation settings.
-This package does not depend on a consuming product or inspect executable formats.
+Boxie is an independently deployed private sandbox service. PostgreSQL owns
+admission, idempotency, eight capacity slots and artifact references. The API
+commits requests and an outbox; a separate Temporal worker drives the durable
+lifecycle. Only the sandbox agent receives Docker access and owns artifact bytes,
+PTYs and the execution journal. Consumers select approved profiles and upload ZIP
+files; they cannot supply images, host paths or isolation settings. Boxie does not
+inspect executable formats or depend on Playground.
 
-The unprivileged consumer API delegates admission and terminal ownership to the
-agent over its authenticated private protocol. PR1 uses a transitional direct
-lifecycle with agent-local admission and recovery. PR2 replaces that authority
-with PostgreSQL and Temporal after PR1's required checks pass, including native
-Linux amd64/runsc. PR1 does not provide durable workflow orchestration or terminal
-replay. Run exactly one agent process against its local data directory.
+Production requires the [durable runtime](infra/durable-runtime.md); there is no
+direct lifecycle bootstrap. Run exactly one agent against its data directory.
 The directory and profile files must be writable only by the operator/agent. The
 Docker daemon must see artifact paths at the same absolute location as the agent.
 
@@ -29,6 +27,8 @@ An operator configuration file contains:
 ```json
 {
   "data_dir": "/var/lib/boxie",
+  "postgres_dsn_file": "/run/secrets/postgres-dsn",
+  "api_url": "http://boxie-api:8090",
   "profiles_file": "/etc/boxie/profiles.json",
   "credential_file": "/run/secrets/boxie-agent",
   "identity": {
@@ -62,7 +62,19 @@ Its operator configuration contains:
   "consumer_credential_files": {
     "playground": "/run/secrets/boxie-playground"
   },
-  "release": "boxie-pr1",
+  "release": "boxie-durable",
+  "identity": {
+    "installation_id": "b18283b1-dc32-46e7-8da5-7aa380043685",
+    "host_id": "sandbox-1"
+  },
+  "durable": {
+    "postgres_dsn_file": "/run/secrets/postgres-dsn",
+    "temporal_address": "temporal:7233",
+    "temporal_server_name": "temporal",
+    "temporal_ca_file": "/run/secrets/temporal-ca.pem",
+    "temporal_cert_file": "/run/secrets/temporal-client.pem",
+    "temporal_key_file": "/run/secrets/temporal-client.key"
+  },
   "request_timeout": 20,
   "bind_host": "127.0.0.1",
   "bind_port": 8090
@@ -95,8 +107,8 @@ Foreign resources return 404. UUIDs and digests remain opaque to the API.
 Sandbox POST sends the `spec` object directly, without the agent's ownership or
 idempotency envelope. Unknown fields, images, paths and Docker settings are
 rejected. Invalid bodies return 422, conflicting retries 409, capacity exhaustion
-429 and unavailable agent calls 503. API restarts retain agent-owned IDs,
-idempotency records, capacity and terminal draining.
+429 and unavailable agent calls 503. API restarts retain SQL-owned IDs,
+idempotency records and capacity; the agent keeps draining terminal output.
 
 Terminal attachments start with a JSON text frame
 `{"type":"attach","attachment_order":1,"resume_after":0,"cols":80,"rows":24}`. The response
@@ -142,9 +154,8 @@ cursors stay in page memory. Page reload starts fresh; restart continuity and
 screen snapshots are not supported.
 
 `GET /healthz` is unauthenticated liveness. Authenticated `GET /readyz` returns
-the API release and required agent dependency result, with 503 when unavailable.
-The agent's authenticated `/readyz` reports its identity and a bounded Docker
-dependency check. Access logs are disabled by both entry points.
+the API release and SQL, agent and Temporal readiness, with 503 when unavailable.
+The agent's authenticated `/readyz` reports Docker, SQL and execution persistence. Access logs are disabled by both entry points.
 
 A trusted profile file is a JSON object keyed by profile ID:
 
@@ -181,9 +192,8 @@ opaque resource IDs. Wire schemas reject extra object fields and invalid bounds.
 | Upload artifact | `PUT /v1/artifacts/{uuid}?consumer_id=...`, raw ZIP body, `X-Content-SHA256` header |
 | Retire artifact | `DELETE /v1/artifacts/{uuid}?consumer_id=...` |
 | Resolve profile | `POST /v1/profiles/resolve`, `{profile_id, command, env}` |
-| Admit sandbox | `POST /v1/sandboxes`, `{consumer_id, idempotency_key, spec}` |
-| Inspect sandbox | `GET /v1/sandboxes/{uuid}?consumer_id=...` |
-| Terminate sandbox | `DELETE /v1/sandboxes/{uuid}?consumer_id=...&reason=requested` |
+| Execute admitted request | `POST /v1/sandboxes/{uuid}/ensure`, complete immutable SQL request and `X-Agent-Boot` |
+| Inspect/renew/remove/expire | `POST /v1/sandboxes/{uuid}/{operation}`, consumer, installation, host, generation and boot fences |
 | Terminal | `WS /v1/sandboxes/{uuid}/terminal?consumer_id=...` |
 | Readiness | `GET /readyz`, agent identity and dependency results |
 
@@ -195,13 +205,10 @@ with `id`, `state`, `created_at`, `absolute_deadline`, `reason`, and
 for the exact canonical specification; changed requests return 409. Capacity is
 eight sandboxes by default, including uncertain creation and pending deletion.
 
-Lower-level `POST /v1/sandboxes/{uuid}/{ensure,inspect,remove}` operations require
-`consumer_id`, `identity: {installation_id, host_id}`, and `generation`. Ensure
-also requires the original `snapshot`, `artifact_id`, and `deadline`; remove
-accepts a termination `reason`. **PR1 ensure only operates on an already-admitted
-persisted record.** It cannot admit a new resource or bypass admission ownership,
-policy, capacity, or idempotency. The future database authority will supply a
-complete trusted provisioning request instead.
+Ensure revalidates the immutable SQL admission before creating a journal record.
+Stopped admissions initialize cleanup only; cleaned, missing and mismatched rows
+cannot recreate execution. The final Docker start runs beneath the same SQL row
+lock used by durable stop. Only fenced confirmed absence releases SQL accounting.
 
 The private terminal uses the same sequenced output and strict JSON controls
 as the consumer terminal above. Handshake denials use bounded HTTP JSON responses:
@@ -254,8 +261,9 @@ unsupported compression are rejected. ZIP stored and deflate compression are
 accepted. Files are ordinary generic data; nested text and executable files are
 both supported. Files receive mode `0555`, removing unsafe permission bits;
 directories use ordinary traversable permissions. Publication uses atomic rename
-and metadata replacement. Cancellation removes staging; startup removes abandoned
-unpublished staging directories.
+before SQL metadata commit. An uncertain COMMIT retains bytes for SQL-based
+reconciliation. The periodic collector deletes retired unreferenced bytes and
+old unpublished directories only after checking SQL; unavailable SQL deletes nothing.
 
 An artifact UUID and digest are immutable. Repeating the same upload is idempotent;
 a different digest returns 409. Both private HTTP APIs return 201 for new
@@ -269,15 +277,18 @@ collection. No consumer can select a host filesystem path.
 
 ```sh
 uv run --locked pytest tools/boxie/tests/test_agent.py tools/boxie/tests/test_artifacts.py tools/boxie/tests/test_profiles.py
-uv run --locked pytest tools/boxie/tests/test_api.py tools/boxie/tests/test_service_boundary.py tools/boxie/tests/test_terminal_proxy.py
+uv run --locked pytest tools/boxie/tests/test_service_boundary.py tools/boxie/tests/test_terminal_proxy.py
+uv run --locked pytest -m integration tools/boxie/tests/test_api.py
 uv run --locked ruff check .
 uv run --locked ruff format --check .
 uv run --locked mypy
 uv run --locked pytest
 ```
 
-Tests use real loopback HTTP/WebSocket servers and a real agent subprocess for
-SIGHUP, replacing only the Docker boundary. They cover generic text ZIPs,
+Fast terminal tests use real loopback HTTP/WebSocket servers, durable agent
+execution, and explicit test-only SQL admission/artifact metadata and Docker
+boundaries. Integration tests use real PostgreSQL and production Temporal;
+profile reload also starts the real agent subprocess. They cover generic text ZIPs,
 isolation requests, attach-before-start, ownership, immutable profile versions,
 byte-preserving terminal input, timeouts, cancellation, cleanup failures, restart
 reconciliation, concurrent idempotency, and artifact retention. These tests do
@@ -288,12 +299,13 @@ The 2026-10-15 compatibility gate verified CPython 3.15.0 with `temporalio==1.34
 native Linux arm64, and emulated Linux amd64. Real Temporal worker execution,
 cancellation, graceful worker replacement, and replay of four exported histories
 passed on each platform. That gate did not exercise PostgreSQL transactions or
-process-crash recovery. These dependencies are reserved for the later persistence
-and orchestration increment and are not installed by this package yet.
+process-crash recovery. These pinned dependencies are installed by the durable runtime. The mandatory
+[native lifecycle workflow](../../.github/workflows/boxie-lifecycle.yml) additionally
+exercises Linux amd64/runsc, process loss, SQL accounting and browser reconnection.
 
 ## Independent distribution and topology
 
-[Local infrastructure](infra/README.md) owns the private two-process Compose unit,
+[Local infrastructure](infra/README.md) owns the private API/worker/agent Compose unit,
 Docker build, trusted generic profile and installed operator smoke commands.
 `boxie` and `cli-playground` are independent runtime distributions; neither image
 installs an infrastructure package. The root lockfile pins both builds. Production

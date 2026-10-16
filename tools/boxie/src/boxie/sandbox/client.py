@@ -3,7 +3,6 @@
 import asyncio
 from collections.abc import AsyncIterable, AsyncIterator, Mapping
 from contextlib import asynccontextmanager
-from datetime import datetime
 from types import TracebackType
 from typing import Any
 from urllib.parse import urlencode, urlsplit, urlunsplit
@@ -22,8 +21,6 @@ from boxie.domain.models import (
     Principal,
     ProfileSnapshot,
     SandboxSpec,
-    SandboxView,
-    TerminationReason,
 )
 from boxie.sandbox.protocol import (
     ArtifactWire,
@@ -31,8 +28,6 @@ from boxie.sandbox.protocol import (
     IdentityWire,
     ReadyWire,
     SnapshotWire,
-    SubmitRequest,
-    ViewWire,
     spec_wire,
 )
 from boxie.sandbox.terminal_protocol import response
@@ -136,13 +131,6 @@ class AgentClient:
         except httpx.HTTPError, TimeoutError:
             raise dependency_error() from None
 
-    async def _view(self, method: str, path: str, **kwargs: Any) -> SandboxView:
-        _status, body = await self._request(method, path, **kwargs)
-        try:
-            return ViewWire.model_validate_json(body).domain()
-        except ValidationError:
-            raise dependency_error() from None
-
     async def ready(self) -> bool:
         try:
             _status, body = await self._request("GET", "/readyz")
@@ -150,28 +138,6 @@ class AgentClient:
             return bool(readiness.dependencies) and all(readiness.dependencies.values())
         except BoxieError, ValidationError:
             return False
-
-    async def submit(
-        self, principal: Principal, idempotency_key: str, spec: SandboxSpec
-    ) -> SandboxView:
-        body = SubmitRequest(
-            consumer_id=principal.consumer_id, idempotency_key=idempotency_key, spec=spec_wire(spec)
-        )
-        return await self._view("POST", "/v1/sandboxes", json=body.model_dump(mode="json"))
-
-    async def get(self, principal: Principal, sandbox_id: UUID) -> SandboxView:
-        return await self._view(
-            "GET", f"/v1/sandboxes/{sandbox_id}", params={"consumer_id": principal.consumer_id}
-        )
-
-    async def terminate(
-        self, principal: Principal, sandbox_id: UUID, reason: TerminationReason
-    ) -> SandboxView:
-        return await self._view(
-            "DELETE",
-            f"/v1/sandboxes/{sandbox_id}",
-            params={"consumer_id": principal.consumer_id, "reason": reason.value},
-        )
 
     async def put(
         self, principal: Principal, artifact_id: UUID, sha256: str, chunks: AsyncIterable[bytes]
@@ -233,50 +199,6 @@ class AgentClient:
             ),
             generation=generation,
         ).model_dump(mode="json")
-
-    async def ensure(
-        self,
-        principal: Principal,
-        identity: AgentIdentity,
-        sandbox_id: UUID,
-        generation: int,
-        snapshot: ProfileSnapshot,
-        artifact_id: UUID,
-        deadline: datetime,
-    ) -> SandboxView:
-        return await self._view(
-            "POST",
-            f"/v1/sandboxes/{sandbox_id}/ensure",
-            json={
-                **self._control(principal, identity, generation),
-                "snapshot": SnapshotWire.from_domain(snapshot).model_dump(mode="json"),
-                "artifact_id": str(artifact_id),
-                "deadline": deadline.isoformat(),
-            },
-        )
-
-    async def inspect(
-        self, principal: Principal, identity: AgentIdentity, sandbox_id: UUID, generation: int
-    ) -> SandboxView:
-        return await self._view(
-            "POST",
-            f"/v1/sandboxes/{sandbox_id}/inspect",
-            json=self._control(principal, identity, generation),
-        )
-
-    async def remove(
-        self,
-        principal: Principal,
-        identity: AgentIdentity,
-        sandbox_id: UUID,
-        generation: int,
-        reason: TerminationReason,
-    ) -> SandboxView:
-        return await self._view(
-            "POST",
-            f"/v1/sandboxes/{sandbox_id}/remove",
-            json={**self._control(principal, identity, generation), "reason": reason.value},
-        )
 
     @asynccontextmanager
     async def attach(

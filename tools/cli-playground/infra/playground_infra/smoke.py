@@ -7,7 +7,6 @@ binary, --boxie-url, and --credential-file. This does not configure Docker.
 import argparse
 import asyncio
 import hashlib
-import json
 import re
 import sys
 import tempfile
@@ -16,26 +15,12 @@ import zipfile
 from pathlib import Path
 
 from boxie_infra.smoke import inspect_sandbox, verify_deleted
-from playground.boxie_client import HttpBoxieClient, SandboxRequest, TerminalPort
+from boxie_infra.terminal import Session
+from playground.boxie_client import HttpBoxieClient, SandboxRequest
 from playground.storage import validate_elf
 
 PROMPT = b"__PLAYGROUND_SMOKE_PROMPT__ "
 ANSI = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
-
-
-class Session:
-    def __init__(self, terminal: TerminalPort) -> None:
-        self.terminal = terminal
-
-    async def read(self) -> bytes:
-        data = await self.terminal.receive()
-        return data if isinstance(data, bytes) else b""
-
-    async def write(self, data: bytes) -> None:
-        await self.terminal.send(json.dumps({"type": "input", "data": data.decode()}))
-
-    async def resize(self, columns: int, rows: int) -> None:
-        await self.terminal.send(json.dumps({"type": "resize", "columns": columns, "rows": rows}))
 
 
 class Shell:
@@ -112,7 +97,8 @@ async def exercise(binary: Path, url: str, credential_file: Path, profile: str) 
                 raise RuntimeError(f"Sandbox did not become ready: {view.state}")
             inspect_sandbox(str(sandbox_id))
             async with client.terminal(sandbox_id) as terminal:
-                session = Session(terminal)
+                session = Session(terminal.receive, terminal.send)
+                await session.start()
                 shell = Shell(session)
                 await shell.start()
                 output = await shell.run("echor 'native-cli-ok'")

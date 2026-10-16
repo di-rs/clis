@@ -64,3 +64,39 @@ Time-skipping tests use deterministic activities and export/replay real historie
 The separate production-server tests exercise PostgreSQL, mTLS, HTTP, agent fencing
 and resource accounting without skipping PostgreSQL or agent clocks. Native
 Linux/runsc and full process-crash proof are additional integration gates.
+
+## Execution journal bounds
+
+Only durably removed executions with no pending create, uncertainty or protocol
+session can be reclaimed. The agent reads back the exact immutable SQL request
+and terminal cleaned state with no slot or artifact reference. This proof survives
+prior-boot reports and lost acknowledgments. An authoritative missing row after
+SQL retention is also safe: all fresh execution initialization revalidates SQL and
+rejects missing/cleaned admissions. SQL errors never authorize forgetting.
+
+Ordinary admission stops at 128 retained records. Cleanup-only initialization has
+eight reserved records of headroom, with a hard total ceiling of 136. Existing
+cleanup and receipt retries continue while readiness is closed; uncertain
+ownership never ages out. Compaction atomically replaces the journal and reclaims
+per-execution callbacks/maps only after they settle. Failed writes keep the
+in-memory barrier and close readiness until a full durable save succeeds.
+
+User-input idle timestamps and versions change immediately in memory and flush
+on a one-second scheduled cadence; critical lifecycle/attachment saves include
+all pending input. This is a cadence, not a maximum fsync latency guarantee. There
+is at most one pending flush fact, never a task per input. A restart never adopts
+the prior PTY, so losing the last input interval cannot extend a resumed session.
+
+
+Artifact upload and each bounded collector batch use one 20-second total async
+deadline, including waiting for their shared file lock. The public client retains
+its existing 20-second total deadline. Timeout reports dependency unavailable;
+ambiguous publication/COMMIT retains bytes for retry/readback. Synchronous file
+operations and driver cancellation unwinding are not a hard wall-clock guarantee.
+
+If a lost create acknowledgment is discovered and physically deleted while all
+journal saves fail, then the agent crashes before recording discovery, the next
+boot must retain unknown ownership even when Docker reports absence. That case
+keeps SQL capacity/artifact references and needs operator investigation; recovery
+does not invent finality. A durably known container ID can instead reconcile
+absence after storage recovery and confirm cleanup. Neither case resumes a PTY.

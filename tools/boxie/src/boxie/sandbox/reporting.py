@@ -41,6 +41,10 @@ class ObservationReporter:
             self.latest[observation.sandbox_id] = observation
             self.changed.set()
 
+    def forget(self, identifier: UUID) -> None:
+        self.latest.pop(identifier, None)
+        self.sent.pop(identifier, None)
+
     async def flush(self) -> None:
         for identifier, item in list(self.latest.items()):
             previous = self.sent.get(identifier)
@@ -56,7 +60,7 @@ class ObservationReporter:
                         "/internal/observations",
                         json=ObservationWire.from_domain(item).model_dump(mode="json"),
                     )
-                if response.status_code in (200, 204):
+                if response.status_code in (200, 204) and self.latest.get(identifier) is item:
                     self.sent[identifier] = (edge(item), now, item.event_version)
                     if self.latest.get(identifier) == item and item.removal_confirmed:
                         self.latest.pop(identifier, None)

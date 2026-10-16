@@ -16,7 +16,6 @@ from boxie.api.app import ApiConfig, create_app
 from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import EnsureRequest, SandboxRef
 from boxie.domain.models import Principal, SandboxSpec, SandboxView, TerminationReason
-from boxie.persistence.artifacts import ArtifactStore
 from boxie.sandbox.durable_client import DurableAgentClient
 from boxie.sandbox.durable_server import create_durable_agent_app
 from boxie.sandbox.lifecycle import DurableAgent
@@ -24,6 +23,7 @@ from boxie.sandbox.reporting import ObservationReporter
 
 from boxie_test_support.agent import Clock, configuration
 from boxie_test_support.api import CONSUMER_AUTH, serve
+from boxie_test_support.artifacts import Artifacts
 from boxie_test_support.durable import Daemon, Guard
 
 
@@ -38,7 +38,7 @@ class EchoDaemon(Daemon):
 
 
 class Admission:
-    def __init__(self, agent: DurableAgent, artifacts: ArtifactStore) -> None:
+    def __init__(self, agent: DurableAgent, artifacts: Artifacts) -> None:
         self.agent, self.artifacts = agent, artifacts
         self.keys: dict[tuple[Principal, str], UUID] = {}
 
@@ -49,7 +49,7 @@ class Admission:
         if (principal, key) in self.keys:
             return await self.get(principal, self.keys[principal, key])
         identifier = uuid4()
-        self.artifacts.retain(principal, spec.artifact_id, str(identifier))
+        self.artifacts.path(principal, spec.artifact_id)
         request = EnsureRequest(
             SandboxRef(identifier, 1),
             principal,
@@ -95,7 +95,7 @@ async def network(root: Path, *, shell: str = "/bin/sh") -> AsyncIterator[Any]:
     config.profiles_file.write_text(json.dumps(profiles))
     clock, daemon = Clock(), EchoDaemon()
     clock.now = datetime.now(UTC)
-    artifacts = ArtifactStore(config.data_dir / "artifacts")
+    artifacts = Artifacts(config.data_dir / "artifacts")
 
     async def path(principal: Principal, identifier: UUID) -> Path:
         return artifacts.path(principal, identifier)

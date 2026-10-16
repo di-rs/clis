@@ -94,8 +94,27 @@ checks also accept the intermediate bases `refactor/boxie-service`,
 runs only affected or explicitly requested suites. Privileged publication and
 deployment retain their trusted default-branch boundaries.
 
-PR1 uses a transitional direct lifecycle with agent-local admission and recovery.
-PR2 replaces this authority with PostgreSQL and Temporal; begin it only after
-PR1's required checks, including native Linux amd64/runsc, pass. Mocked checks,
-isolated package installs and local Compose health checks do not establish cloud
-provisioning, DNS/Access or production activation readiness.
+Boxie has only the PostgreSQL/Temporal lifecycle. Default pytest excludes live
+services; explicit integration selection fails when dependencies are missing.
+Run the isolated infrastructure tier with:
+
+```sh
+uv run --locked python tools/boxie/tests/run_integration.py
+```
+
+The [Linux lifecycle workflow](../.github/workflows/boxie-lifecycle.yml) builds
+native images and `echor`, verifies interpreter imports and pinned replay/cancellation,
+then runs `run_integration.py --runtime runsc --browser`. This requires Linux amd64
+Docker with configured gVisor, built `boxie:lifecycle`, `cli-playground:lifecycle`
+and `clis-playground-sandbox:lifecycle` images, `target/release/echor`, and Chromium.
+`BOXIE_NATIVE_BINARY` may select the native executable. The fixture owns random
+Compose projects, volumes, identity labels and fault proxies. It independently
+kills API, worker, agent and Temporal; tests failed Docker deletion, actual
+artifact COMMIT acknowledgment loss, collector overlap and journal failure across
+agent restart; and replays production histories. Cleanup removes only verified
+owned sandbox IDs and attempts every Compose layer even after a cleanup error.
+
+The native browser config uses the fixture's real Playground origin and Linux
+artifact, including same-page reconnection. Local Docker Desktop arm64/runc cannot
+satisfy this gate. Local real SQL/Temporal tests and mocked Docker tests remain
+separate evidence; neither establishes production activation readiness.

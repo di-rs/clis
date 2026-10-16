@@ -3,54 +3,65 @@
 import asyncio
 import hashlib
 import io
+import shutil
 import stat
 import struct
 import zipfile
 from collections.abc import AsyncIterator
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from boxie.domain.errors import BoxieError
 from boxie.domain.models import Principal
-from boxie.persistence.artifacts import ArtifactLimits, ArtifactStore
+from boxie.persistence.artifact_files import extract_archive
+from boxie.persistence.artifacts import ArtifactLimits
 from boxie_test_support.agent import bundle
+
+
+class Archive:
+    """Extraction harness only; SQL publication/ownership is covered in test_postgres."""
+
+    def __init__(self, root: Path, limits: ArtifactLimits | None = None) -> None:
+        self.root, self.limits = root, limits or ArtifactLimits()
+
+    def path(self, principal: Principal, identifier: UUID) -> Path:
+        return self.root / str(identifier) / "files"
+
+    def exists(self, identifier: UUID) -> bool:
+        return (self.root / str(identifier) / "files").exists()
+
+    async def put(
+        self, principal: Principal, identifier: UUID, digest: str, data: AsyncIterator[bytes]
+    ) -> None:
+        staged = self.root / str(identifier)
+        staged.mkdir()
+        try:
+            with (staged / "archive.zip").open("wb") as output:
+                async for chunk in data:
+                    output.write(chunk)
+            try:
+                await extract_archive(staged, self.limits)
+            except (
+                zipfile.BadZipFile,
+                NotImplementedError,
+                RuntimeError,
+                EOFError,
+                FileExistsError,
+                NotADirectoryError,
+                IsADirectoryError,
+                ValueError,
+            ) as error:
+                raise BoxieError(422, "invalid ZIP artifact") from error
+        except BaseException:
+            shutil.rmtree(staged)
+            raise
 
 
 async def chunks(data: bytes) -> AsyncIterator[bytes]:
     for offset in range(0, len(data), 7):
         yield data[offset : offset + 7]
         await asyncio.sleep(0)
-
-
-def test_atomic_idempotent_metadata_and_retirement_survive_restart(tmp_path: Path) -> None:
-    async def exercise() -> None:
-        store = ArtifactStore(tmp_path)
-        principal, identifier = Principal("one"), uuid4()
-        data = bundle()
-        digest = hashlib.sha256(data).hexdigest()
-        first = await store.put(principal, identifier, digest, chunks(data))
-        retry = await store.put(principal, identifier, digest, chunks(data))
-        assert first.created and not retry.created and retry.artifact == first.artifact
-        with pytest.raises(BoxieError) as error:
-            await store.put(principal, identifier, "0" * 64, chunks(data))
-        assert error.value.status == 409
-        store.retain(principal, identifier, "sandbox-1")
-        await store.retire(principal, identifier)
-        store = ArtifactStore(tmp_path)
-        assert (
-            store.path(principal, identifier).joinpath("nested/hello.txt").read_bytes()
-            == b"ordinary text\n"
-        )
-        with pytest.raises(BoxieError):
-            store.retain(principal, identifier, "sandbox-2")
-        store.release(principal, identifier, "sandbox-1")
-        assert not store.exists(identifier)
-        await store.retire(principal, identifier)
-        with pytest.raises(BoxieError):
-            await store.put(principal, identifier, digest, chunks(data))
-
-    asyncio.run(exercise())
 
 
 @pytest.mark.parametrize(
@@ -60,7 +71,7 @@ def test_unsafe_archive_paths_are_rejected(tmp_path: Path, name: str) -> None:
     async def exercise() -> None:
         data = bundle({name: b"unsafe"})
         with pytest.raises(BoxieError):
-            await ArtifactStore(tmp_path).put(
+            await Archive(tmp_path).put(
                 Principal("one"), uuid4(), hashlib.sha256(data).hexdigest(), chunks(data)
             )
         assert not list(tmp_path.glob("*/files"))
@@ -98,7 +109,7 @@ def test_unsafe_zip_members(tmp_path: Path, kind: str) -> None:
             struct.pack_into("<H", data, 8, 99)
             struct.pack_into("<H", data, central + 10, 99)
         with pytest.raises(BoxieError):
-            await ArtifactStore(tmp_path).put(
+            await Archive(tmp_path).put(
                 Principal("one"), uuid4(), hashlib.sha256(data).hexdigest(), chunks(bytes(data))
             )
         assert not list(tmp_path.glob(".upload-*"))
@@ -109,7 +120,6 @@ def test_unsafe_zip_members(tmp_path: Path, kind: str) -> None:
 @pytest.mark.parametrize(
     "limits",
     [
-        ArtifactLimits(compressed_bytes=10),
         ArtifactLimits(expanded_bytes=10),
         ArtifactLimits(member_bytes=10),
         ArtifactLimits(files=1),
@@ -119,28 +129,9 @@ def test_limits_count_actual_bytes_and_members(tmp_path: Path, limits: ArtifactL
     async def exercise() -> None:
         data = bundle({"a": b"a" * 11, "b": b"b"})
         with pytest.raises(BoxieError):
-            await ArtifactStore(tmp_path, limits).put(
+            await Archive(tmp_path, limits).put(
                 Principal("one"), uuid4(), hashlib.sha256(data).hexdigest(), chunks(data)
             )
-        assert not list(tmp_path.glob(".upload-*"))
-
-    asyncio.run(exercise())
-
-
-def test_cancelled_upload_and_bad_digest_leave_no_publication(tmp_path: Path) -> None:
-    async def exercise() -> None:
-        store = ArtifactStore(tmp_path)
-        identifier = uuid4()
-
-        async def interrupted() -> AsyncIterator[bytes]:
-            yield bundle()
-            raise asyncio.CancelledError
-
-        with pytest.raises(asyncio.CancelledError):
-            await store.put(Principal("one"), identifier, "0" * 64, interrupted())
-        with pytest.raises(BoxieError):
-            await store.put(Principal("one"), identifier, "0" * 64, chunks(bundle()))
-        assert not store.exists(identifier)
         assert not list(tmp_path.glob(".upload-*"))
 
     asyncio.run(exercise())
@@ -155,7 +146,7 @@ def test_file_directory_conflicts_are_validation_errors(
     async def exercise() -> None:
         data = bundle(files)
         with pytest.raises(BoxieError) as error:
-            await ArtifactStore(tmp_path).put(
+            await Archive(tmp_path).put(
                 Principal("one"), uuid4(), hashlib.sha256(data).hexdigest(), chunks(data)
             )
         assert error.value.status == 422
@@ -173,7 +164,7 @@ def test_executable_bits_are_safe_and_bad_size_headers_cannot_publish(tmp_path: 
             entry.external_attr = (stat.S_IFREG | 0o6777) << 16
             archive.writestr(entry, b"#!/bin/sh\nprintf hello\n")
         data = out.getvalue()
-        store, identifier, principal = ArtifactStore(tmp_path), uuid4(), Principal("one")
+        store, identifier, principal = Archive(tmp_path), uuid4(), Principal("one")
         await store.put(principal, identifier, hashlib.sha256(data).hexdigest(), chunks(data))
         assert (store.path(principal, identifier) / "script").stat().st_mode & 0o7777 == 0o555
         forged = bytearray(data)
@@ -185,43 +176,6 @@ def test_executable_bits_are_safe_and_bad_size_headers_cannot_publish(tmp_path: 
                 principal, forged_id, hashlib.sha256(forged).hexdigest(), chunks(bytes(forged))
             )
         assert not store.exists(forged_id)
-
-    asyncio.run(exercise())
-
-
-def test_restart_removes_staging_metadata_before_loading_published_artifacts(
-    tmp_path: Path,
-) -> None:
-    import json
-
-    async def exercise() -> None:
-        principal, identifier = Principal("one"), uuid4()
-        data = bundle()
-        store = ArtifactStore(tmp_path)
-        await store.put(principal, identifier, hashlib.sha256(data).hexdigest(), chunks(data))
-        store.retain(principal, identifier, "running-sandbox")
-        await store.retire(principal, identifier)
-        # Exact crash window: put has fsynced metadata but not renamed the staging directory.
-        staged = tmp_path / ".upload-interrupted-publication"
-        (staged / "files").mkdir(parents=True)
-        (staged / "files" / "unpublished").write_text("incomplete upload")
-        (staged / "metadata.json").write_text(
-            json.dumps(
-                {
-                    "consumer_id": "one",
-                    "sha256": "1" * 64,
-                    "retired": False,
-                    "references": [],
-                }
-            )
-        )
-        restarted = ArtifactStore(tmp_path)
-        assert not staged.exists()
-        assert (
-            restarted.path(principal, identifier) / "nested/hello.txt"
-        ).read_bytes() == b"ordinary text\n"
-        restarted.release(principal, identifier, "running-sandbox")
-        assert not restarted.exists(identifier)
 
     asyncio.run(exercise())
 
@@ -252,14 +206,14 @@ def test_zip_metadata_is_rejected_before_eager_parser(
     def forbidden_parser(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("unbounded central directory reached eager ZipFile parser")
 
-    monkeypatch.setattr("boxie.persistence.artifacts.zipfile.ZipFile", forbidden_parser)
+    monkeypatch.setattr("boxie.persistence.artifact_files.zipfile.ZipFile", forbidden_parser)
 
     async def exercise() -> None:
         async def upload_chunks() -> AsyncIterator[bytes]:
             yield bytes(data)
 
         limits = ArtifactLimits(files=1024 if kind.endswith("directory_bytes") else 1)
-        store, identifier = ArtifactStore(tmp_path, limits), uuid4()
+        store, identifier = Archive(tmp_path, limits), uuid4()
         with pytest.raises(BoxieError) as error:
             await store.put(
                 Principal("one"), identifier, hashlib.sha256(data).hexdigest(), upload_chunks()
@@ -284,7 +238,7 @@ def zip64_directory(original: bytes) -> bytes:
 def test_bounded_zip64_metadata_remains_compatible(tmp_path: Path) -> None:
     async def exercise() -> None:
         data = zip64_directory(bundle())
-        store, identifier, principal = ArtifactStore(tmp_path), uuid4(), Principal("one")
+        store, identifier, principal = Archive(tmp_path), uuid4(), Principal("one")
         await store.put(principal, identifier, hashlib.sha256(data).hexdigest(), chunks(data))
         assert (
             store.path(principal, identifier) / "nested/hello.txt"
@@ -328,11 +282,11 @@ def test_inconsistent_metadata_is_rejected_before_eager_parser(
     def forbidden_parser(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("inconsistent metadata reached eager ZIP parser")
 
-    monkeypatch.setattr("boxie.persistence.artifacts.zipfile.ZipFile", forbidden_parser)
+    monkeypatch.setattr("boxie.persistence.artifact_files.zipfile.ZipFile", forbidden_parser)
 
     async def exercise() -> None:
         with pytest.raises(BoxieError) as error:
-            await ArtifactStore(tmp_path).put(
+            await Archive(tmp_path).put(
                 Principal("one"), uuid4(), hashlib.sha256(data).hexdigest(), chunks(bytes(data))
             )
         assert error.value.status == 422
@@ -351,7 +305,7 @@ def test_valid_archive_comments_and_prefixed_zip_remain_compatible(tmp_path: Pat
             archive.writestr(entry, b"generic text")
         data = b"small prepended data\n" + out.getvalue()
         principal, identifier = Principal("one"), uuid4()
-        store = ArtifactStore(tmp_path)
+        store = Archive(tmp_path)
         await store.put(principal, identifier, hashlib.sha256(data).hexdigest(), chunks(data))
         assert (store.path(principal, identifier) / "text").read_bytes() == b"generic text"
 

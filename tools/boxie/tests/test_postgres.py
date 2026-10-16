@@ -20,7 +20,8 @@ from boxie.domain.models import (
     SandboxState,
     TerminationReason,
 )
-from boxie_test_support.agent import Clock, DockerDaemon, bundle, configuration, live
+from boxie_test_support.agent import Clock, bundle, configuration
+from boxie_test_support.terminal_network import network
 from integration.conftest import postgres_dsn as postgres_dsn
 from integration.conftest import postgres_server as postgres_server
 from psycopg.rows import dict_row
@@ -49,8 +50,8 @@ async def database(dsn: str, root: Path) -> AsyncIterator[tuple[Any, Any, Any, A
     config = configuration(root)
     from boxie.sandbox.client import AgentClient
 
-    async with live(config, DockerDaemon(), Clock()) as (http, _agent):
-        async with AgentClient(str(http.base_url), b"agent-test-secret") as resolver:
+    async with network(root / "resolver") as harness:
+        async with AgentClient(harness.agent_url, b"agent-test-secret") as resolver:
             async with AsyncConnectionPool(
                 dsn, min_size=1, max_size=24, kwargs={"row_factory": dict_row}
             ) as pool:
@@ -120,8 +121,10 @@ def test_identical_retries_old_snapshot_and_conflicting_key(
             # A fresh trusted resolver reads the operator's new profile file.
             from boxie.sandbox.client import AgentClient
 
-            async with live(config, DockerDaemon(), Clock()) as (http, _):
-                async with AgentClient(str(http.base_url), b"agent-test-secret") as resolver:
+            async with network(tmp_path / "reloaded-resolver") as harness:
+                harness.config.profiles_file.write_text(config.profiles_file.read_text())
+                harness.agent.profiles.reload()
+                async with AgentClient(harness.agent_url, b"agent-test-secret") as resolver:
                     life.resolver = resolver
                     retry = await life.submit(OWNER, "same", spec)
                     new = await life.submit(OWNER, "new", spec)
@@ -734,5 +737,65 @@ def test_journal_outage_expires_container_but_retains_sql_accounting_until_durab
             finally:
                 monkeypatch.setattr(agent.journal, "save", original_save)
                 await agent.close()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("purged", [False, True])
+def test_terminal_receipt_survives_prior_boot_and_retry_row_purge(
+    postgres_dsn: str, tmp_path: Path, purged: bool
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from boxie.domain.lifecycle import EnsureRequest
+    from boxie.persistence.start_guard import PostgresStartGuard
+    from boxie.sandbox.lifecycle import DurableAgent
+    from boxie_test_support.durable import Daemon
+    from test_agent_lifecycle import settled
+
+    async def exercise() -> None:
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
+            view = await life.submit(OWNER, "receipt", await upload(artifacts))
+            clock, daemon = Clock(), Daemon()
+            clock.now = datetime.now(UTC)
+            guard = PostgresStartGuard(pool)
+            agent = DurableAgent(config, daemon, artifacts.path, guard, clock, clock.monotonic)
+            await life.bind_agent_boot(OWNER, config.identity, view.id, 1, None, agent.boot_id)
+            request = EnsureRequest.from_durable(await life.load_request(view.id))
+            await agent.ensure(request)
+            await settled(agent, request.ref, SandboxState.READY)
+            await life.terminate(OWNER, view.id, TerminationReason.REQUESTED)
+            observation = await agent.remove(request.ref, TerminationReason.REQUESTED)
+            assert await life.record_observation(observation)
+            assert await guard.terminal_receipt(request)
+            from dataclasses import replace
+
+            assert not await guard.terminal_receipt(
+                replace(request, principal=Principal("foreign"))
+            )
+            assert not await guard.terminal_receipt(
+                replace(request, absolute_deadline=request.absolute_deadline + timedelta(seconds=1))
+            )
+            assert await guard.initialization(request, agent.boot_id) is None
+            await agent.close()
+            if purged:
+                async with pool.connection() as conn:
+                    await conn.execute(
+                        "UPDATE outbox SET delivered_at=clock_timestamp()-interval '8 days' WHERE sandbox_id=%s",
+                        (view.id,),
+                    )
+                    await conn.execute(
+                        "UPDATE sandboxes SET cleaned_at=clock_timestamp()-interval '8 days' WHERE id=%s",
+                        (view.id,),
+                    )
+                await life.purge_retained()
+            restarted = DurableAgent(config, daemon, artifacts.path, guard, clock, clock.monotonic)
+            assert restarted.boot_id != agent.boot_id
+            await restarted.compact()
+            assert not restarted.records
+            with pytest.raises(BoxieError):
+                await restarted.ensure(request)
+            assert not restarted.records and not restarted.locks
+            await restarted.close()
 
     asyncio.run(exercise())
