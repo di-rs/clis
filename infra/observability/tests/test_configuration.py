@@ -166,6 +166,19 @@ def test_selected_consumers_and_actual_mounts_drive_targets_and_alerts(
     )
 
 
+@pytest.mark.parametrize("job", ["playground-extra", "playgound"])
+def test_unknown_consumer_fails_before_destination_creation(tmp_path: Path, job: str) -> None:
+    from observability_infra.config import ScrapeEndpoint, render_config
+
+    destination = tmp_path / "out"
+    with pytest.raises(ValueError, match="unsupported scrape job"):
+        render_config(
+            make_config(consumer_scrapes=(ScrapeEndpoint(job, "playground:9104"),)),
+            destination,
+        )
+    assert not destination.exists()
+
+
 def test_fixed_logging_and_private_service_networks() -> None:
     root = OWNER.parents[1]
     for manifest, tags in (

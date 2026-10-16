@@ -8,7 +8,8 @@ sanitized process error hooks. The [event schema](../../infra/observability/even
 is the cross-service contract. The neutral `metrics` module supplies bounded
 HTTP/log instruments and the owned private listener; importing logging does not
 create instruments or start exporters. Domain instruments and route catalogs
-remain in Boxie and Playground. The historical package name is retained.
+remain in Boxie and Playground. The package is `service-telemetry`, imported as
+`service_telemetry`.
 
 `bootstrap_logging(LogSettings(...))` is an explicit process-root operation.
 It duplicates an owned stdout pipe into a descriptor above 2, keeping it separate

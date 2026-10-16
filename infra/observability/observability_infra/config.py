@@ -211,7 +211,9 @@ def _prometheus(config: ObservabilityConfig) -> tuple[str, str]:
     templates = {job["job_name"]: job for job in prometheus["scrape_configs"]}
     jobs = []
     for endpoint in config.endpoints.scrapes:
-        job = templates.get(endpoint.job, {"job_name": endpoint.job})
+        if endpoint.job not in templates:
+            raise ValueError(f"unsupported scrape job: {endpoint.job}")
+        job = templates[endpoint.job]
         job["static_configs"] = [{"targets": [endpoint.address]}]
         if endpoint.job == "node-exporter":
             job["metric_relabel_configs"][1]["regex"] = (

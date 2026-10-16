@@ -26,6 +26,54 @@ def test_distributions_have_explicit_isolated_modules(relative: str, module: str
     assert config["tool"]["uv"]["build-backend"]["module-name"] == module
 
 
+@pytest.mark.parametrize(
+    "dockerfile,package",
+    [
+        ("tools/boxie/infra/Runtime.Dockerfile", "boxie"),
+        ("tools/cli-playground/infra/Playground.Dockerfile", "cli-playground"),
+    ],
+)
+def test_service_image_staged_workspace_resolves(
+    tmp_path: Path, dockerfile: str, package: str
+) -> None:
+    import os
+    import shlex
+    import shutil
+    import subprocess
+
+    # Reproduce only metadata actually staged before sync, including manifests
+    # inside directory COPYs. No full checkout can hide a missing workspace member.
+    for line in (ROOT / dockerfile).read_text().splitlines():
+        if line.startswith("RUN uv sync "):
+            break
+        if not line.startswith("COPY "):
+            continue
+        tokens = shlex.split(line)[1:]
+        if tokens[0].startswith("--"):
+            continue
+        for source in tokens[:-1]:
+            path = ROOT / source
+            if path.is_dir():
+                path = path / "pyproject.toml"
+            if path.name not in {"pyproject.toml", "uv.lock", ".python-version"}:
+                continue
+            if not path.is_file():
+                continue
+            target = tmp_path / path.relative_to(ROOT)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, target)
+    result = subprocess.run(
+        ["uv", "export", "--locked", "--offline", "--package", package, "--no-dev", "--no-hashes"],
+        cwd=tmp_path,
+        env={key: value for key, value in os.environ.items() if key != "VIRTUAL_ENV"},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "service-telemetry" in result.stdout
+
+
 def test_private_compose_units_do_not_share_privileges() -> None:
     boxie = yaml.safe_load((ROOT / "tools/boxie/infra/compose.yml").read_text())
     product = yaml.safe_load((ROOT / "tools/cli-playground/infra/compose.yml").read_text())
