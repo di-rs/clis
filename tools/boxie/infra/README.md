@@ -93,3 +93,17 @@ A consumer-network operator can run `python -m boxie_infra.smoke --boxie-url
 http://boxie-api:8090 --credential-file /private/consumer.secret` with the `smoke`
 profile approved. The inspection portion also requires operator Docker access;
 that access belongs to the test runner, never the Playground service.
+
+## Runtime identities before production activation
+
+The current API and orchestrator containers use the image's root identity.
+Before PR4 enables production activation, assign an explicit non-root identity
+per service and validate startup with the actual mounted secrets and storage.
+Provision credential files with mode `0600` and ownership readable by each
+intended process; use separate file copies where service UIDs differ. Provision
+the Playground data volume and Boxie data directory for their service owners.
+Grant the orchestrator the Docker socket's group, while keeping that group and
+the socket out of the API and Playground containers. Do not set a global `USER`
+on the shared Boxie image without coordinating these mounts. Acceptance requires
+real container tests of secret reads, persistent writes, Docker access, and
+independent restarts under the selected identities.

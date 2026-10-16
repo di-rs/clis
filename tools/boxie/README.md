@@ -240,7 +240,16 @@ a daemon-wide delete. A name occupied by different labels is retained for operat
 inspection, never deleted. If a create call times out and no container is yet
 observable, absence alone cannot prove that a late create will not occur: cleanup
 stays pending and retains capacity/artifacts until the owned container is observed
-and removed. This conservative uncertainty can require operator investigation.
+and removed. This conservative uncertainty can require operator investigation. Explicit Docker
+create rejections for invalid parameters or a missing image release the reservation
+after absence is confirmed; conflicts, server errors and timeouts remain uncertain.
+Elapsed time alone never confirms deletion.
+
+Terminal input renews idle deadlines in memory without rewriting the registry.
+Completed records are currently retained without expiry to preserve idempotency;
+registry writes and admission scans still grow with history. Pruning requires an
+explicit retry/retention contract (or durable idempotency tombstones), rather than
+silently allowing an old request key to create a second sandbox.
 
 ## Artifacts
 
@@ -270,7 +279,7 @@ collection. No consumer can select a host filesystem path.
 ## Verification and feasibility
 
 ```sh
-uv run --locked pytest tools/boxie/tests/test_orchestrator.py tools/boxie/tests/test_artifacts.py tools/boxie/tests/test_profiles.py
+uv run --locked pytest tools/boxie/tests
 uv run --locked pytest tools/boxie/tests/test_api.py tools/boxie/tests/test_service_boundary.py tools/boxie/tests/test_terminal_proxy.py
 uv run --locked ruff check .
 uv run --locked ruff format --check .

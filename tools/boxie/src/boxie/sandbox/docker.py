@@ -13,6 +13,10 @@ from aiohttp import ClientTimeout
 from boxie.domain.models import ProfileSnapshot
 
 
+class CreateRejected(Exception):
+    """The daemon definitively rejected creation before creating a container."""
+
+
 class TerminalPort(Protocol):
     async def read(self) -> bytes: ...
     async def write(self, data: bytes) -> None: ...
@@ -63,7 +67,14 @@ class DockerBackend:
         return True
 
     async def create(self, name: str, config: dict[str, Any]) -> None:
-        await self._client().containers.create(config, name=name)
+        try:
+            await self._client().containers.create(config, name=name)
+        except DockerError as error:
+            # Only documented bad-parameter / missing-image responses prove rejection.
+            # Conflict, server errors and transport failures can leave resources behind.
+            if error.status in (400, 404):
+                raise CreateRejected from error
+            raise
 
     async def attach(self, name: str) -> DockerTerminal:
         container = self._client().containers.container(name)

@@ -10,7 +10,7 @@ from boxie.domain.models import (
     SandboxView,
     TerminationReason,
 )
-from boxie.sandbox.docker import container_config
+from boxie.sandbox.docker import CreateRejected, container_config
 from boxie.sandbox.registry.records import FINAL, Record
 from boxie.sandbox.terminal import Terminal
 
@@ -29,19 +29,31 @@ async def provision(owner: Orchestrator, record: Record) -> None:
         record.creation_uncertain = True
         owner._save()
         async with asyncio.timeout(owner.config.docker_timeout):
-            await owner.docker.create(
-                record.name,
-                container_config(
-                    record.snapshot.domain(),
-                    owner.artifacts.path(record.principal, record.spec.artifact_id),
-                    record.labels,
-                ),
-            )
+            try:
+                await owner.docker.create(
+                    record.name,
+                    container_config(
+                        record.snapshot.domain(),
+                        owner.artifacts.path(record.principal, record.spec.artifact_id),
+                        record.labels,
+                    ),
+                )
+            except CreateRejected:
+                record.creation_uncertain = False
+                owner._save()
+                raise
+            record.creation_uncertain = False
+            owner._save()
             stream = await owner.docker.attach(record.name)
             terminal = Terminal(owner, record, stream)
             owner.terminals[record.id] = terminal
+            if owner.monotonic() >= owner._deadlines[record.id].absolute:
+                await owner._cleanup(record, TerminationReason.EXPIRED)
+                return
             await owner.docker.start(record.name)
-        record.creation_uncertain = False
+        if owner.monotonic() >= owner._deadlines[record.id].absolute:
+            await owner._cleanup(record, TerminationReason.EXPIRED)
+            return
         record.state = SandboxState.READY
         record.idle_deadline = owner.clock() + timedelta(seconds=record.spec.policy.idle_seconds)
         deadlines = owner._deadlines[record.id]

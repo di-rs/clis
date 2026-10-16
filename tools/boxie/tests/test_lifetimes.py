@@ -209,3 +209,27 @@ def test_live_deadlines_ignore_wall_steps(tmp_path: Path, wall_step: int, timer:
                     await websocket.close()
 
     asyncio.run(exercise())
+
+
+def test_terminal_activity_renews_idle_without_registry_writes(tmp_path: Path) -> None:
+    async def exercise() -> None:
+        clock, daemon = Clock(), DockerDaemon()
+        async with live(configuration(tmp_path), daemon, clock) as (client, owner):
+            identifier = (
+                await client.post("/v1/sandboxes", json=request(await upload(client)))
+            ).json()["id"]
+            await settled(client, identifier, "ready")
+            async with connect(terminal_url(client, identifier), additional_headers=AUTH) as ws:
+                assert await ws.recv() == b"ready\n"
+                before = owner.path.stat().st_mtime_ns
+                for _ in range(3):
+                    clock.advance(599)
+                    await ws.send(b"keep alive")
+                    assert await ws.recv() == b"keep alive"
+                    await asyncio.sleep(0.03)
+                    assert not daemon.removed
+                assert owner.path.stat().st_mtime_ns == before
+                clock.advance(600)
+                assert (await settled(client, identifier, "terminated"))["reason"] == "idle"
+
+    asyncio.run(exercise())

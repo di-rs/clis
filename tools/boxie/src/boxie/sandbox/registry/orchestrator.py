@@ -274,7 +274,8 @@ class Orchestrator:
             return
         deadlines.idle = now + record.spec.policy.idle_seconds
         record.idle_deadline = self.clock() + timedelta(seconds=record.spec.policy.idle_seconds)
-        self._save()
+        # Live enforcement uses monotonic deadlines; restart cleans up all active records.
+        # Do not serialize and fsync the entire history for each terminal input frame.
 
     def disconnected(self, record: Record) -> None:
         if record.state == SandboxState.READY and record.disconnected_at is None:
