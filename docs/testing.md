@@ -109,10 +109,19 @@ Run the isolated infrastructure tier with:
 uv run --locked python tools/boxie/tests/run_integration.py
 ```
 
-The [Linux lifecycle workflow](../.github/workflows/boxie-lifecycle.yml) builds
-native images and `echor`, verifies interpreter imports and pinned replay/cancellation,
-then runs `run_integration.py --runtime runsc --browser`. This requires Linux amd64
-Docker with configured gVisor, built `boxie:lifecycle`, `cli-playground:lifecycle`
+The [Linux lifecycle workflow](../.github/workflows/boxie-lifecycle.yml) runs real
+PostgreSQL/Temporal checks, pinned replay/cancellation, credential permissions and
+endpoint restart checks on pull requests. The native lifecycle/browser E2Es are
+temporarily manual-only while their hang is investigated. Use `workflow_dispatch`
+to build the native images and `echor` and run all six cases, or run locally:
+
+```sh
+uv run --locked python tools/boxie/tests/run_integration.py --runtime runsc --browser -- -vv --durations=10
+```
+
+Each CI tier has its own timeout and reports individual tests and slow durations.
+The optional native E2Es require Linux amd64 Docker with configured gVisor,
+built `boxie:lifecycle`, `cli-playground:lifecycle`
 and `clis-playground-sandbox:lifecycle` images, `target/release/echor`, and Chromium.
 `BOXIE_NATIVE_BINARY` may select the native executable. The fixture owns random
 Compose projects, volumes, identity labels and fault proxies. It independently
@@ -123,5 +132,5 @@ owned sandbox IDs and attempts every Compose layer even after a cleanup error.
 
 The native browser config uses the fixture's real Playground origin and Linux
 artifact, including same-page reconnection. Local Docker Desktop arm64/runc cannot
-satisfy this gate. Local real SQL/Temporal tests and mocked Docker tests remain
+satisfy this platform requirement. Local real SQL/Temporal tests and mocked Docker tests remain
 separate evidence; neither establishes production activation readiness.

@@ -16,9 +16,6 @@ from boxie.persistence.models import Outbox
 from boxie.temporal.contracts import LifecycleResult
 from boxie.temporal.workflows import SandboxLifecycle
 from boxie_test_support.api import artifact, create, ready
-from boxie_test_support.dependencies import postgres_dsn as postgres_dsn
-from boxie_test_support.dependencies import postgres_server as postgres_server
-from boxie_test_support.dependencies import temporal_stack as temporal_stack
 from database_support import OWNER, counts, database, upload
 from sqlalchemy import func, insert, update
 from sqlmodel import col

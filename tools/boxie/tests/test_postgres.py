@@ -31,8 +31,6 @@ from boxie.persistence.models import (
     SandboxArtifactRef,
 )
 from boxie.persistence.postgres import PostgresLifecycle
-from boxie_test_support.dependencies import postgres_dsn as postgres_dsn
-from boxie_test_support.dependencies import postgres_server as postgres_server
 from boxie_test_support.execution import launch_execution
 from boxie_test_support.orchestrator import Clock, bundle
 from boxie_test_support.terminal_network import network

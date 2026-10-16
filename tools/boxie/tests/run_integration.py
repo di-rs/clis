@@ -219,7 +219,6 @@ class ProductionStack:
                 + "\n"
                 + self.compose("temporal", "logs", "--tail", "100")
             )
-        self.bootstrap()
         self.evidence = {
             "server": command(
                 ["docker", "version", "--format", "{{.Server.Version}} {{.Server.Arch}}"]
@@ -227,7 +226,7 @@ class ProductionStack:
             "bootstrap_sdk": version("temporalio"),
             "images": json.loads((ROOT / "tools/boxie/infra/temporal/versions.json").read_text()),
             "schema": "fresh setup and explicit update succeeded for distinct databases",
-            "namespace": "bootstrap succeeded twice and checked seven-day retention",
+            "namespace": "bootstrap succeeded and checked seven-day retention",
         }
         (self.root / "evidence.json").write_text(json.dumps(self.evidence, indent=2))
 

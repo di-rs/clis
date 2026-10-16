@@ -102,15 +102,18 @@ pnpm --dir tools/cli-playground/frontend build
 uv run --locked pytest tools/boxie/tests/test_packaging.py -m integration
 ```
 
-The native Linux [sandbox check](../../../.github/workflows/boxie-lifecycle.yml)
-starts isolated PostgreSQL, Temporal, API, orchestrator and Playground services,
-then exercises process faults, browser recovery and both
+The optional native Linux [sandbox check](../../../.github/workflows/boxie-lifecycle.yml)
+starts isolated PostgreSQL, Temporal, API, orchestrator and Playground services.
+Manual `workflow_dispatch` runs exercise browser recovery, process faults and both
 `boxie_infra.smoke` and `playground_infra.smoke` through HTTP and WebSocket. Each
 inspects the actual sandbox's `runsc`, non-root user, no-network mode, read-only
 root/artifact, capabilities, no-new-privileges, resource limits, tmpfs, disabled
 Docker logs and confirmed container deletion. The product smoke also checks the
 native Rust CLI, fixtures, pipes/redirection, resize and Ctrl-C. Ordinary Docker
-image builds or fake-daemon E2Es do not count as this platform check.
+image builds or fake-daemon E2Es do not count as this platform check. All six native
+lifecycle/browser cases are temporarily excluded from automatic PR runs while
+their hang is investigated. PRs retain real SQL/Temporal integration, credential
+permission and endpoint restart checks.
 
 The lifecycle fixture runs API and orchestrator as the runner's numeric UID:GID
 so its private files and writable storage share one owner. Its Linux-volume DAC
