@@ -69,6 +69,26 @@ class Telemetry:
             raise RuntimeError("foreign telemetry container")
         return identifier
 
+    def initialize_volume(self, name: str, uid: int, gid: int) -> None:
+        item = json.loads(self.commands.run(["docker", "volume", "inspect", name], env=self.env))[0]
+        target = self.root / "docker-data/volumes" / name / "_data"
+        if (
+            name not in {self.root.name + suffix for suffix in ("-logs", "-prometheus", "-grafana")}
+            or item["Name"] != name
+            or item.get("Labels", {}).get("io.boxie.test.owner") != self.root.name
+            or item["Driver"] != "local"
+            or item.get("Options")
+            or item["Mountpoint"] != str(target)
+            or not target.is_dir()
+            or target.resolve() != target
+        ):
+            raise RuntimeError("foreign telemetry volume initialization refused")
+        # Only this newly created volume root, never recursive or a bind source.
+        os.chown(target, uid, gid)
+        actual = target.stat()
+        if (actual.st_uid, actual.st_gid) != (uid, gid):
+            raise RuntimeError("telemetry volume ownership initialization failed")
+
     def prepare(self, resources: Resources) -> None:
         image = json.loads(
             self.commands.run(["docker", "image", "inspect", "boxie-collector:smoke"], env=self.env)
@@ -103,6 +123,11 @@ class Telemetry:
         ]
         resources.state["volumes"] = volumes
         resources.save()
+        existing = self.commands.run(
+            ["docker", "volume", "ls", "--format", "{{.Name}}"], env=self.env
+        ).splitlines()
+        if set(volumes) & set(existing):
+            raise RuntimeError("refusing pre-existing telemetry volume")
         for name in volumes:
             args = [
                 "docker",
@@ -122,7 +147,12 @@ class Telemetry:
                     "--opt",
                     "device=" + str(self.root / "vector"),
                 ]
-            self.commands.run([*args, name], env=self.env)
+            created = self.commands.run([*args, name], env=self.env)
+            if created != name:
+                raise RuntimeError("created telemetry volume identity differs")
+            if name != config.vector_volume:
+                uid, gid = (472, 0) if name == config.grafana_volume else (65534, 65534)
+                self.initialize_volume(name, uid, gid)
         overlay: dict[str, Any] = {"services": {}}
         for service, port in (("vector", 9598), ("victorialogs", 9428), ("prometheus", 9090)):
             overlay["services"][service] = {"ports": [f"127.0.0.1::{port}"]}

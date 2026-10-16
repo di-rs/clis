@@ -99,13 +99,13 @@ class Commands:
         self.restoring = False
         self.last_failure: dict[str, Any] | None = None
         # Private diagnostic input only. Never included directly in evidence or exceptions.
-        self.failed_build_output: bytes | None = None
+        self.failed_setup_output: bytes | None = None
 
     def run(
         self, args: list[str], *, env: dict[str, str] | None = None, empty_journal_ok: bool = False
     ) -> str:
         started = time.monotonic()
-        self.failed_build_output = None
+        self.failed_setup_output = None
         restoring = self.restoring
         self.deadline.remaining(restoring=restoring)
         process = subprocess.Popen(
@@ -145,8 +145,11 @@ class Commands:
                 self.last_failure = command_diagnostic(
                     args, bytes(output), process.returncode, time.monotonic() - started
                 )
-                if self.last_failure["operation"] == "docker.compose.build":
-                    self.failed_build_output = bytes(output)
+                if self.last_failure["operation"] in {
+                    "docker.compose.build",
+                    "docker.compose.port",
+                }:
+                    self.failed_setup_output = bytes(output)
                 raise RuntimeError(f"smoke command exit {process.returncode}")
             return output.decode("utf-8", errors="replace").strip()
         finally:

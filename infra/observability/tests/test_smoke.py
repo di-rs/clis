@@ -159,6 +159,56 @@ def test_owned_stack_uses_direct_buildkit_with_existing_build_network(
     assert "network_mode" not in override["services"]["bootstrap"]
 
 
+def test_volume_initialization_rejects_foreign_identity_before_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from observability_infra.smoke_runtime import Commands, Deadline
+    from observability_infra.smoke_telemetry import Telemetry
+
+    name = tmp_path.name + "-logs"
+    target = tmp_path / "docker-data/volumes" / name / "_data"
+    target.mkdir(parents=True)
+    item = {
+        "Name": name,
+        "Labels": {"io.boxie.test.owner": tmp_path.name},
+        "Driver": "local",
+        "Mountpoint": str(target),
+        "Options": None,
+    }
+    telemetry = object.__new__(Telemetry)
+    telemetry.root = tmp_path
+    telemetry.env = {}
+    telemetry.commands = Commands(Deadline(5, reserve=0.1))
+    monkeypatch.setattr(telemetry.commands, "run", lambda *args, **kwargs: json.dumps([item]))
+    changes: list[tuple[Path, int, int]] = []
+    original_chown = os.chown
+
+    def chown(path: Path, uid: int, gid: int) -> None:
+        changes.append((path, uid, gid))
+        original_chown(path, uid, gid)
+
+    monkeypatch.setattr(os, "chown", chown)
+    telemetry.initialize_volume(name, os.getuid(), os.getgid())
+    assert changes == [(target, os.getuid(), os.getgid())]
+    for key, value in (
+        ("Name", "foreign"),
+        ("Labels", {"io.boxie.test.owner": "foreign"}),
+        ("Driver", "foreign"),
+        ("Mountpoint", str(tmp_path)),
+        ("Options", {"device": "/foreign", "type": "none", "o": "bind"}),
+    ):
+        previous = item[key]
+        item[key] = value
+        with pytest.raises(RuntimeError, match="volume"):
+            telemetry.initialize_volume(name, os.getuid(), os.getgid())
+        item[key] = previous
+    target.rmdir()
+    target.symlink_to(tmp_path, target_is_directory=True)
+    with pytest.raises(RuntimeError, match="volume"):
+        telemetry.initialize_volume(name, os.getuid(), os.getgid())
+    assert len(changes) == 1
+
+
 def test_native_fixture_refuses_development_host_before_creating_resources(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -475,8 +525,9 @@ def test_failed_command_diagnostic_is_bounded_and_does_not_disclose_output() -> 
     assert "-c" not in json.dumps(detail)
 
 
+@pytest.mark.parametrize("operation", ["build", "port"])
 def test_setup_diagnostics_exports_only_allowlisted_state(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
 ) -> None:
     from types import SimpleNamespace
 
@@ -495,7 +546,9 @@ def test_setup_diagnostics_exports_only_allowlisted_state(
         if args[1] == "version" or args[1:3] == ["compose", "version"]:
             return "29.0.0"
         if args[1] == "ps":
-            return "a" * 64 if args[-1].endswith("owned-platform") else ""
+            if args[-1].endswith("owned-platform"):
+                return "a" * 64
+            return "c" * 64 if args[-1].endswith(tmp_path.name + "-telemetry") else ""
         if args[1:3] == ["image", "ls"]:
             return "sha256:" + "b" * 64
         if args[1:3] == ["image", "inspect"]:
@@ -512,11 +565,18 @@ def test_setup_diagnostics_exports_only_allowlisted_state(
             return json.dumps(
                 [
                     {
-                        "Id": "a" * 64,
+                        "Id": args[-1],
                         "Image": "sha256:" + "b" * 64,
                         "Config": {
                             "Env": [secret, "PATH=/usr/local/bin:/usr/bin:/bin"],
-                            "Labels": {"com.docker.compose.project": "owned-platform"},
+                            "Labels": {
+                                "com.docker.compose.project": "owned-platform"
+                                if args[-1] == "a" * 64
+                                else tmp_path.name + "-telemetry",
+                                "com.docker.compose.service": "postgres"
+                                if args[-1] == "a" * 64
+                                else "vector",
+                            },
                         },
                         "HostConfig": {"Runtime": "runc"},
                         "Mounts": [
@@ -548,13 +608,13 @@ def test_setup_diagnostics_exports_only_allowlisted_state(
     smoke_diagnostics.setup_diagnostics(
         tmp_path,
         stack,
-        {"returncode": 1, "operation": "docker.compose.build"},
-        failed_build_output=("build failed: unsupported build option " + secret).encode(),
+        {"returncode": 1, "operation": "docker.compose." + operation},
+        failed_setup_output=(operation + " failed: diagnostic " + secret).encode(),
     )
     output = (tmp_path / "setup-diagnostics.json").read_text()
     assert secret not in output
-    assert json.loads(output)["failed_command"]["redacted_build_error"] == (
-        "build failed: unsupported build option [redacted]"
+    assert json.loads(output)["failed_command"]["redacted_" + operation + "_error"] == (
+        operation + " failed: diagnostic [redacted]"
     )
     assert json.loads(output)["images"][0]["path"] == "/usr/local/bin:/usr/bin:/bin"
     detail = json.loads(output)["containers"][0]
@@ -563,9 +623,13 @@ def test_setup_diagnostics_exports_only_allowlisted_state(
     assert detail["runtime"] == "runc"
     assert detail["path"] == "/usr/local/bin:/usr/bin:/bin"
     assert detail["binds"][0]["source_kind_in_daemon"] == "unavailable"
+    assert json.loads(output)["containers"][1]["service"] == "vector"
 
 
-def test_failed_compose_build_keeps_bounded_private_diagnostic_input(tmp_path: Path) -> None:
+@pytest.mark.parametrize("operation", ["build", "port"])
+def test_failed_compose_build_keeps_bounded_private_diagnostic_input(
+    tmp_path: Path, operation: str
+) -> None:
     from observability_infra.smoke_runtime import Commands, Deadline
 
     executable = tmp_path / "docker"
@@ -573,14 +637,14 @@ def test_failed_compose_build_keeps_bounded_private_diagnostic_input(tmp_path: P
     executable.chmod(0o700)
     runner = Commands(Deadline(2, reserve=0.1))
     with pytest.raises(RuntimeError, match="^smoke command exit 1$"):
-        runner.run([str(executable), "compose", "build", "bootstrap"])
+        runner.run([str(executable), "compose", operation, "bootstrap"])
     assert runner.last_failure is not None
-    assert runner.last_failure["operation"] == "docker.compose.build"
+    assert runner.last_failure["operation"] == "docker.compose." + operation
     assert "PRIVATE_SENTINEL" not in json.dumps(runner.last_failure)
-    assert runner.failed_build_output == b"build error PRIVATE_SENTINEL\n"
+    assert runner.failed_setup_output == b"build error PRIVATE_SENTINEL\n"
     with pytest.raises(RuntimeError):
         runner.run([str(executable), "compose", "logs"])
-    assert runner.failed_build_output is None
+    assert runner.failed_setup_output is None
 
 
 def test_journal_observation_separates_runtime_and_persistent_acceptance(tmp_path: Path) -> None:

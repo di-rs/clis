@@ -129,7 +129,7 @@ def setup_diagnostics(
     failed: dict[str, Any] | None,
     sentinels: tuple[str, ...] = (),
     *,
-    failed_build_output: bytes | None = None,
+    failed_setup_output: bytes | None = None,
 ) -> None:
     commands = Commands(Deadline(15, reserve=0.1))
     result: dict[str, Any] = {"failed_command": failed, "containers": [], "networks": []}
@@ -143,11 +143,16 @@ def setup_diagnostics(
         str(getattr(stack, name)) for name in ("consumer", "deploy") if getattr(stack, name, None)
     )
     private += sentinels
-    if failed and failed.get("operation") == "docker.compose.build" and failed_build_output:
+    if (
+        failed
+        and failed.get("operation") in {"docker.compose.build", "docker.compose.port"}
+        and failed_setup_output
+    ):
+        operation = failed["operation"].rsplit(".", 1)[1]
         result["failed_command"] = {
             **failed,
-            "redacted_build_error": safe_runtime_error(
-                failed_build_output.decode("utf-8", errors="replace"), private
+            "redacted_" + operation + "_error": safe_runtime_error(
+                failed_setup_output.decode("utf-8", errors="replace"), private
             ),
         }
     try:
@@ -169,7 +174,7 @@ def setup_diagnostics(
                 if re.fullmatch(r"v?[0-9][0-9A-Za-z.+_-]{0,64}", version)
                 else "unrecognized"
             )
-        for project in (stack.platform, stack.temporal, stack.runtime):
+        for project in (stack.platform, stack.temporal, stack.runtime, root.name + "-telemetry"):
             ids = commands.run(
                 [
                     "docker",
@@ -214,6 +219,10 @@ def setup_diagnostics(
                 result["containers"].append(
                     {
                         **detail,
+                        "service": safe_runtime_error(
+                            str(item["Config"]["Labels"].get("com.docker.compose.service", "")),
+                            private,
+                        )[:64],
                         "id": item["Id"],
                         "image_id": item["Image"],
                         "status": state["Status"],

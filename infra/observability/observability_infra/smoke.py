@@ -203,7 +203,7 @@ def prepare(root: Path, timeout_seconds: float = 1200) -> None:
                     stack,
                     commands.last_failure,
                     private_sentinels,
-                    failed_build_output=commands.failed_build_output,
+                    failed_setup_output=commands.failed_setup_output,
                 )
             evidence(
                 root / "setup.json",
