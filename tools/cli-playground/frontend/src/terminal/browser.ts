@@ -2,6 +2,7 @@ import { createFreshBinding, stopBinding } from "../environment";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { createSession, type SessionState } from "./session";
+import { createInputIntent } from "./input-intent";
 
 export type BrowserTerminal = ReturnType<typeof createBrowserTerminal>;
 
@@ -21,7 +22,7 @@ export function createBrowserTerminal(
     scrollback: 5000,
     screenReaderMode: true,
     allowProposedApi: false,
-    disableStdin: true,
+    disableStdin: false,
     theme: {
       background: "#0b0b0b",
       foreground: "#dedede",
@@ -52,14 +53,12 @@ export function createBrowserTerminal(
   let disposed = false;
   let observer: ResizeObserver | undefined;
   let session: ReturnType<typeof createSession> | undefined;
-  const fit = () => {
-    if (!disposed && host.clientWidth > 0 && host.clientHeight > 0) fitAddon.fit();
-  };
+  let input: ReturnType<typeof createInputIntent> | undefined;
   const queueFit = () => {
     if (disposed || resizeFrame) return;
     resizeFrame = requestAnimationFrame(() => {
       resizeFrame = 0;
-      fit();
+      if (!disposed) session?.syncGeometry();
     });
   };
   const focus = () => terminal.focus();
@@ -80,11 +79,13 @@ export function createBrowserTerminal(
     window.removeEventListener("pagehide", hide);
     window.removeEventListener("pageshow", show);
     session?.dispose();
+    input?.dispose();
     // Disposing xterm also disposes its loaded addons and keyboard listeners.
     terminal.dispose();
   };
 
   try {
+    input = createInputIntent(terminal);
     terminal.loadAddon(fitAddon);
     terminal.open(host);
     terminal.attachCustomKeyEventHandler(
@@ -98,7 +99,11 @@ export function createBrowserTerminal(
     );
     session = createSession({
       terminal,
-      fit,
+      input,
+      geometry: {
+        measure: () => fitAddon.proposeDimensions() ?? { cols: terminal.cols, rows: terminal.rows },
+        apply: ({ cols, rows }) => terminal.resize(cols, rows),
+      },
       prepare: async () => {
         const binding = await createFreshBinding(environmentId, revision);
         return {
@@ -122,7 +127,8 @@ export function createBrowserTerminal(
     window.addEventListener("pageshow", show);
     queueFit();
     return {
-      connect: session.connect,
+      startFresh: session.startFresh,
+      resumeExisting: session.resumeExisting,
       disconnect: session.disconnect,
       paste: session.paste,
       dispose,

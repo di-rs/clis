@@ -43,7 +43,7 @@ strict = true
 [tool.pytest]
 testpaths = ["tools/boxie/tests", "tools/ci/tests", "tools/cli-bench/tests", "tools/cli-playground/tests", "tools/cli-testing/tests"]
 pythonpath = ["tools", "tools/cli-bench"]
-addopts = ["--strict-config", "--strict-markers", "-m", "not integration"]
+addopts = ["--strict-config", "--strict-markers", "-p", "boxie_test_support.dependencies", "-m", "not integration"]
 markers = ["integration: real isolated builds/installations and external-tool checks; prerequisites required"]
 
 [tool.uv.sources]

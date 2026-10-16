@@ -13,7 +13,10 @@ import subprocess
 import sys
 import time
 import urllib.request
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from pathlib import Path
+from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -217,11 +220,26 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def wait_for_health(domain: str) -> None:
+class HealthResponse(Protocol):
+    def read(self, size: int, /) -> bytes: ...
+
+
+class HealthOpener(Protocol):
+    def open(self, url: str, /, *, timeout: float) -> AbstractContextManager[HealthResponse]: ...
+
+
+def wait_for_health(
+    domain: str,
+    *,
+    timeout: float = HEALTH_TIMEOUT,
+    opener: HealthOpener | None = None,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
     url = f"https://{domain}/healthz"
-    deadline = time.monotonic() + HEALTH_TIMEOUT
-    opener = urllib.request.build_opener(NoRedirect)
-    while (remaining := deadline - time.monotonic()) > 0:
+    deadline = clock() + timeout
+    opener = opener if opener is not None else urllib.request.build_opener(NoRedirect)
+    while (remaining := deadline - clock()) > 0:
         try:
             with opener.open(url, timeout=min(5, remaining)) as response:
                 payload = response.read(1025)
@@ -229,7 +247,7 @@ def wait_for_health(domain: str) -> None:
                 return
         except OSError, ValueError:
             pass
-        time.sleep(min(5, max(0, deadline - time.monotonic())))
+        sleep(min(5, max(0, deadline - clock())))
     raise RuntimeError(
         f"Services started but public HTTPS health is not ready at {url}. "
         f"Check DNS, ACME and {REMOTE_LOG} on the server."

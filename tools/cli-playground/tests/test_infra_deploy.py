@@ -2,9 +2,8 @@
 
 import io
 import json
+import os
 import subprocess
-import time
-import urllib.request
 from pathlib import Path
 
 import pytest
@@ -58,20 +57,29 @@ def test_invalid_app_configuration_is_rejected_before_network(tmp_path: Path, da
         deploy.AppConfig.model_validate(deploy.environment_file(app)[1])
 
 
-def test_oversized_manifest_is_refused_before_ssh(harness: dict[str, Path]) -> None:
-    harness["release"].write_bytes(b" " * 65536)
+def test_oversized_manifest_is_refused_before_ssh(tmp_path: Path) -> None:
+    release = tmp_path / "release.json"
+    release.write_bytes(b" " * 65536)
     with pytest.raises(ValueError, match="release"):
-        deploy.read_release(harness["release"])
-    assert not harness["log"].exists()
+        deploy.read_release(release)
 
 
-def test_tracked_secret_file_is_refused_before_archive_or_ssh(harness: dict[str, Path]) -> None:
-    tracked = protected(harness["root"] / "private.env", APP_ENV)
-    subprocess.run(["git", "-C", str(harness["root"]), "add", "private.env"], check=True)
-    git_commit(harness["root"])
+def test_tracked_secret_file_is_refused_before_archive_or_ssh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Git is exercised for real, isolated from hook variables and user configuration.
+    for name in tuple(os.environ):
+        if name.startswith("GIT_"):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    tracked = protected(tmp_path / "private.env", APP_ENV)
+    subprocess.run(["git", "-C", str(tmp_path), "add", "private.env"], check=True)
+    git_commit(tmp_path)
+    monkeypatch.setattr(deploy, "ROOT", tmp_path)
     with pytest.raises(ValueError, match="tracked"):
         deploy.committed_revision((tracked,))
-    assert not harness["log"].exists()
 
 
 @pytest.mark.parametrize(
@@ -82,7 +90,7 @@ def test_tracked_secret_file_is_refused_before_archive_or_ssh(harness: dict[str,
     ],
 )
 def test_public_health_retries_until_ready_or_timeout(
-    monkeypatch: pytest.MonkeyPatch, responses: list[bytes], succeeds: bool
+    responses: list[bytes], succeeds: bool
 ) -> None:
     elapsed = [0.0]
 
@@ -91,15 +99,18 @@ def test_public_health_retries_until_ready_or_timeout(
             assert url == "https://play.example/healthz" and 0 < timeout <= 5
             return io.BytesIO(responses.pop(0))
 
-    monkeypatch.setattr(urllib.request, "build_opener", lambda *args: Opener())
-    monkeypatch.setattr(deploy, "HEALTH_TIMEOUT", 10)
-    monkeypatch.setattr(time, "monotonic", lambda: elapsed[0])
-    monkeypatch.setattr(time, "sleep", lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds))
+    def sleep(seconds: float) -> None:
+        elapsed[0] += seconds
+
     if succeeds:
-        deploy.wait_for_health("play.example")
+        deploy.wait_for_health(
+            "play.example", timeout=10, opener=Opener(), clock=lambda: elapsed[0], sleep=sleep
+        )
     else:
         with pytest.raises(RuntimeError, match="Services started.*HTTPS health"):
-            deploy.wait_for_health("play.example")
+            deploy.wait_for_health(
+                "play.example", timeout=10, opener=Opener(), clock=lambda: elapsed[0], sleep=sleep
+            )
 
 
 @pytest.mark.parametrize("image", ["ghcr.io/team/app:latest", "app@sha256:" + "1" * 64])

@@ -65,6 +65,14 @@ no Docker daemon. The [Boxie infrastructure guide](../tools/boxie/infra/README.m
 covers the separate native Linux/gVisor smoke; Playground consumes Boxie's private
 HTTP/WebSocket API and owns no Docker access.
 
+The root pytest configuration registers the shared [dependency fixtures](../tools/boxie/tests/support/boxie_test_support/dependencies.py)
+once. PostgreSQL and Temporal servers start only when requested and are shared
+within the session; roles and databases remain isolated per test, with separate
+teardown for each acquired resource. Request fixtures by name rather than importing
+them into test modules. Keep reusable setup in support modules, use small Protocols
+for checked fakes, and inject clocks and transports. Reserve monkeypatching for
+environment handling and deliberate failures at system boundaries.
+
 ## Check reporting
 
 Run `git diff --check`. For new documentation, pass `--files PATH` to the relevant
@@ -89,13 +97,40 @@ fail. The PR frontend job runs this gate. Image builds and native Linux/gVisor
 smoke are separate checks; ordinary Docker/runc is not gVisor evidence.
 
 Unprivileged PR quality, frontend, sandbox, binary-build and affected benchmark
-checks also accept the intermediate bases `refactor/boxie-service`,
-`feat/boxie-temporal` and `feat/boxie-observability`. Benchmark selection still
-runs only affected or explicitly requested suites. Privileged publication and
-deployment retain their trusted default-branch boundaries.
+checks target `master`. Benchmark selection runs only affected or explicitly
+requested suites. Privileged publication and deployment retain their trusted
+default-branch boundaries.
 
-PR1 uses a transitional direct lifecycle with orchestrator-local admission and recovery.
-PR2 replaces this authority with PostgreSQL and Temporal; begin it only after
-PR1's required checks, including native Linux amd64/runsc, pass. Mocked checks,
-isolated package installs and local Compose health checks do not establish cloud
-provisioning, DNS/Access or production activation readiness.
+Boxie has only the PostgreSQL/Temporal lifecycle. Default pytest excludes live
+services; explicit integration selection fails when dependencies are missing.
+Run the isolated infrastructure tier with:
+
+```sh
+uv run --locked python tools/boxie/tests/run_integration.py
+```
+
+The [Linux lifecycle workflow](../.github/workflows/boxie-lifecycle.yml) runs real
+PostgreSQL/Temporal checks, pinned replay/cancellation, credential permissions and
+endpoint restart checks on pull requests. The native lifecycle/browser E2Es are
+temporarily manual-only while their hang is investigated. Use `workflow_dispatch`
+to build the native images and `echor` and run all six cases, or run locally:
+
+```sh
+uv run --locked python tools/boxie/tests/run_integration.py --runtime runsc --browser -- -vv --durations=10
+```
+
+Each CI tier has its own timeout and reports individual tests and slow durations.
+The optional native E2Es require Linux amd64 Docker with configured gVisor,
+built `boxie:lifecycle`, `cli-playground:lifecycle`
+and `clis-playground-sandbox:lifecycle` images, `target/release/echor`, and Chromium.
+`BOXIE_NATIVE_BINARY` may select the native executable. The fixture owns random
+Compose projects, volumes, identity labels and fault proxies. It independently
+kills API, orchestrator (including its embedded workers) and Temporal; tests failed
+Docker deletion, actual artifact COMMIT acknowledgment loss, collector overlap and journal failure across
+orchestrator restart; and replays production histories. Cleanup removes only verified
+owned sandbox IDs and attempts every Compose layer even after a cleanup error.
+
+The native browser config uses the fixture's real Playground origin and Linux
+artifact, including same-page reconnection. Local Docker Desktop arm64/runc cannot
+satisfy this platform requirement. Local real SQL/Temporal tests and mocked Docker tests remain
+separate evidence; neither establishes production activation readiness.

@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -135,10 +136,17 @@ def stack_outputs() -> dict[str, Any]:
     return outputs
 
 
-def wait_for_ssh(host: str, directory: Path, timeout: float = 600) -> None:
+def wait_for_ssh(
+    host: str,
+    directory: Path,
+    timeout: float = 600,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
     command = deploy.ssh_command(host, directory / "identity", directory / "known_hosts")
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    deadline = clock() + timeout
+    while clock() < deadline:
         try:
             result = subprocess.run(
                 [*command, "true"],
@@ -151,7 +159,7 @@ def wait_for_ssh(host: str, directory: Path, timeout: float = 600) -> None:
                 return
         except subprocess.TimeoutExpired:
             pass
-        time.sleep(min(5, max(0, deadline - time.monotonic())))
+        sleep(min(5, max(0, deadline - clock())))
     raise RuntimeError("SSH did not become ready with the pinned host identity")
 
 

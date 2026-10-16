@@ -22,16 +22,23 @@ const currentBuild = {
   state: "ready",
 };
 
-type ClientMessage =
-  | { type: "auth"; credential: string }
-  | { type: "input"; data: string }
-  | { type: "resize"; cols: number; rows: number };
+type ClientMessage = {
+  type: string;
+  credential?: string;
+  data?: string;
+  epoch?: number;
+  cols?: number;
+  rows?: number;
+  resume_after?: number;
+  nonce?: number;
+};
 
 interface Session {
   socket: WebSocketRoute;
   messages: ClientMessage[];
   closed: boolean;
   deleted: boolean;
+  sequence: number;
 }
 
 async function mockTerminal(page: Page, identifier = environmentId): Promise<Session[]> {
@@ -66,7 +73,7 @@ async function mockTerminal(page: Page, identifier = environmentId): Promise<Ses
   await page.routeWebSocket(
     (url) => url.pathname === `/ws/${identifier}`,
     (socket) => {
-      const session: Session = { socket, messages: [], closed: false, deleted: false };
+      const session: Session = { socket, messages: [], closed: false, deleted: false, sequence: 0 };
       socket.onMessage((message) => {
         expect(typeof message).toBe("string");
         expect(message.length).toBeLessThanOrEqual(16_384);
@@ -85,6 +92,17 @@ async function mockTerminal(page: Page, identifier = environmentId): Promise<Ses
             }),
           );
         }
+        if (data.type === "attach") {
+          session.sequence = data.resume_after ?? 0;
+          socket.send(JSON.stringify({ type: "attached", epoch: 1 }));
+          socket.send(
+            JSON.stringify({ type: "replay_complete", epoch: 1, sequence: session.sequence }),
+          );
+        } else if (data.type === "resize") {
+          socket.send(
+            JSON.stringify({ type: "resized", epoch: 1, cols: data.cols, rows: data.rows }),
+          );
+        } else if (data.type === "heartbeat") socket.send(JSON.stringify(data));
         session.messages.push(data);
       });
       socket.onClose(() => {
@@ -96,8 +114,14 @@ async function mockTerminal(page: Page, identifier = environmentId): Promise<Ses
   return sessions;
 }
 
+function output(session: Session, data: Buffer) {
+  const header = Buffer.alloc(8);
+  header.writeBigUInt64BE(BigInt(++session.sequence));
+  session.socket.send(Buffer.concat([header, data]));
+}
+
 function inputs(session: Session): string[] {
-  return session.messages.flatMap((message) => (message.type === "input" ? [message.data] : []));
+  return session.messages.flatMap((message) => (message.type === "input" ? [message.data!] : []));
 }
 
 async function openPlayground(page: Page): Promise<Session[]> {
@@ -127,12 +151,13 @@ test("loads the production terminal, fits the viewport, and inserts commands wit
   await expect
     .poll(() =>
       session.messages.some(
-        (message) => message.type === "resize" && message.cols > 0 && message.rows > 0,
+        (message) =>
+          message.type === "resize" && (message.cols ?? 0) > 0 && (message.rows ?? 0) > 0,
       ),
     )
     .toBe(true);
 
-  session.socket.send(Buffer.from("Native terminal output\r\n", "utf8"));
+  output(session, Buffer.from("Native terminal output\r\n", "utf8"));
   await expect(page.locator(".xterm-accessibility-tree")).toContainText("Native terminal output");
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
@@ -171,16 +196,16 @@ for (const count of [3, 5, 10]) {
     await page.goto(previewPath);
     await expect(page.locator("#connection-status")).toHaveText("Connected");
     const session = sessions[0];
-    session.socket.send(Buffer.from("Existing workspace output\r\n", "utf8"));
-    const output = page.locator(".xterm-accessibility-tree");
-    await expect(output).toContainText("Existing workspace output");
+    output(session, Buffer.from("Existing workspace output\r\n", "utf8"));
+    const screen = page.locator(".xterm-accessibility-tree");
+    await expect(screen).toContainText("Existing workspace output");
     const picker = page.getByRole("combobox", { name: "CLI", exact: true });
     await expect(picker.locator("option")).toHaveCount(count);
     await expect(picker).toHaveValue("catr");
     await picker.selectOption(target);
     await expect(page).toHaveURL(previewPath);
     await expect(page).toHaveTitle(`${target} / CLI playground`);
-    await expect(output).toContainText("Existing workspace output");
+    await expect(screen).toContainText("Existing workspace output");
     await expect(picker).toHaveValue(target);
     await page
       .getByRole("button", { name: `Insert ${target} --help: Explore the options` })
@@ -196,7 +221,7 @@ for (const count of [3, 5, 10]) {
 
 test("pastes a large Unicode document through bounded messages in order", async ({ page }) => {
   const [session] = await openPlayground(page);
-  session.socket.send(Buffer.from("\x1b[?2004hReady to paste", "utf8"));
+  output(session, Buffer.from("\x1b[?2004hReady to paste", "utf8"));
   await expect(page.locator(".xterm-accessibility-tree")).toContainText("Ready to paste");
   const text = '漢🙂\t"\\'.repeat(5_000);
   await page.locator(".xterm-helper-textarea").evaluate((element, value) => {
@@ -211,7 +236,7 @@ test("pastes a large Unicode document through bounded messages in order", async 
   await expect(page.locator("#connection-status")).toHaveText("Connected");
 });
 
-for (const action of ["Reset session", "Start new session"]) {
+for (const action of ["Reset session"]) {
   test(`${action} refreshes the revision at the same PR URL`, async ({ page }) => {
     const sessions = await openPlayground(page);
     await page.route(`**${metadataPath}`, (route) =>
@@ -252,7 +277,7 @@ test("a rejected stale revision can reload metadata and reconnect at the same UR
   );
   await sessions[0].socket.close({ code: 1008, reason: "Revision changed" });
   await expect(page.locator("#connection-status")).toHaveText("Disconnected");
-  await page.getByRole("button", { name: "Start new session" }).click();
+  await page.getByRole("button", { name: "Reset session" }).click();
   await expect(page.locator("#meta-sha")).toHaveText("bbbbbbb");
   await expect.poll(() => sessions.length).toBe(2);
   expect(new URL(sessions[1].socket.url()).searchParams.get("revision")).toBe("b".repeat(40));
@@ -271,7 +296,7 @@ test("a new build is discovered without replacing the current terminal, includin
   await expect(page.locator("#connection-status")).toHaveText("Connected");
   const first = sessions[0];
   expect(new URL(first.socket.url()).searchParams.get("revision")).toBe(`${metadata.sha}-12-1`);
-  first.socket.send(Buffer.from("My work is still here\r\n"));
+  output(first, Buffer.from("My work is still here\r\n"));
   latest = {
     ...latest,
     revision: `${metadata.sha}-12-2`,
@@ -400,19 +425,19 @@ test("a failed head distinguishes the latest successful build from an older acti
   expect(sessions[0].closed).toBe(false);
 });
 
-test("disconnect retains output and disables input, while reconnect and reset start fresh terminals", async ({
+test("disconnect and reconnect retain output while reset starts a fresh terminal", async ({
   page,
 }) => {
   const sessions = await openPlayground(page);
   const first = sessions[0];
-  const output = page.locator(".xterm-accessibility-tree");
-  first.socket.send(Buffer.from("First session output\r\n", "utf8"));
-  await expect(output).toContainText("First session output");
+  const screen = page.locator(".xterm-accessibility-tree");
+  output(first, Buffer.from("First session output\r\n", "utf8"));
+  await expect(screen).toContainText("First session output");
 
   await page.getByRole("button", { name: "Disconnect", exact: true }).click();
   await expect(page.locator("#connection-status")).toHaveText("Disconnected");
   await expect.poll(() => first.closed).toBe(true);
-  await expect(output).toContainText("First session output");
+  await expect(screen).toContainText("First session output");
   await expect(page.getByRole("button", { name: "Disconnect", exact: true })).toBeDisabled();
   await expect(
     page.getByRole("button", { name: "Insert command to read welcome.txt" }),
@@ -421,19 +446,19 @@ test("disconnect retains output and disables input, while reconnect and reset st
   await page.keyboard.type("ignored");
   expect(inputs(first)).toEqual([]);
 
-  await page.getByRole("button", { name: "Start new session" }).click();
+  await page.getByRole("button", { name: "Reconnect", exact: true }).click();
   await expect.poll(() => sessions.length).toBe(2);
   await expect(page.locator("#connection-status")).toHaveText("Connected");
-  await expect(output).not.toContainText("First session output");
+  await expect(screen).toContainText("First session output");
   const second = sessions[1];
-  second.socket.send(Buffer.from("Second session output\r\n", "utf8"));
-  await expect(output).toContainText("Second session output");
+  output(second, Buffer.from("Second session output\r\n", "utf8"));
+  await expect(screen).toContainText("Second session output");
 
   await page.getByRole("button", { name: "Reset session" }).click();
   await expect.poll(() => sessions.length).toBe(3);
   await expect.poll(() => second.closed).toBe(true);
   await expect(page.locator("#connection-status")).toHaveText("Connected");
-  await expect(output).not.toContainText("Second session output");
+  await expect(screen).not.toContainText("Second session output");
   await expect(
     page.getByRole("button", { name: "Insert command to read welcome.txt" }),
   ).toBeEnabled();
@@ -445,10 +470,10 @@ test("shows operator status as text and preserves its reason after a server disc
   const sessions = await openPlayground(page);
   const session = sessions[0];
   const message = "Session limit reached. <b>Try again later.</b>";
-  session.socket.send(JSON.stringify({ type: "status", message }));
+  session.socket.send(JSON.stringify({ type: "status", reason: "output_limit", message }));
   await expect(page.locator("#session-message")).toHaveText(message);
   await expect(page.locator("#session-message b")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Start new session" })).toBeHidden();
+  await expect(page.getByRole("button", { name: "Start new session" })).toBeEnabled();
 
   await session.socket.close({ code: 1013, reason: "Session limit" });
   await expect(page.locator("#connection-status")).toHaveText("Disconnected");

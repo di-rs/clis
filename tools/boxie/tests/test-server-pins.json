@@ -1,0 +1,19 @@
+{
+  "version": "1.40.0",
+  "artifacts": [
+    {
+      "variant": "macOS_arm64",
+      "url": "https://github.com/temporalio/sdk-java/releases/download/v1.40.0/temporal-test-server_1.40.0_macOS_arm64.tar.gz",
+      "archive_sha256": "483d6b6d75979b78efa6a93ee159e8eb3232e919fe7d3576fce6e90a167804ec",
+      "archive_member": "temporal-test-server_1.40.0_macOS_arm64/temporal-test-server",
+      "binary_sha256": "3a9cd757fc118c0cf134c6fa16d5cf901a02985d02782a11029f7c2833e95cb6"
+    },
+    {
+      "variant": "linux_amd64",
+      "url": "https://github.com/temporalio/sdk-java/releases/download/v1.40.0/temporal-test-server_1.40.0_linux_amd64.tar.gz",
+      "archive_sha256": "524465a96274831e004326f6e2f2a5f3ef9aaed72c2069cf16c1d64b8b1ec3ca",
+      "archive_member": "temporal-test-server_1.40.0_linux_amd64/temporal-test-server",
+      "binary_sha256": "19defb9f7318c7cf249518b3642a735efb79876c2b6918afe312336476b796a5"
+    }
+  ]
+}

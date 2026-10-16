@@ -11,10 +11,22 @@ import uvicorn
 from pydantic import TypeAdapter, ValidationError
 
 from boxie.api.app import ApiConfig, create_app
-from boxie.application.direct_lifecycle import DirectLifecycle
-from boxie.bootstrap.config import read_credential
-from boxie.sandbox.client import OrchestratorClient
-from boxie.sandbox.protocol import ConsumerId
+from boxie.bootstrap.config import LifecycleConfig, read_credential
+from boxie.bootstrap.dependencies import (
+    Dependencies,
+    database_for,
+    lifecycle_config,
+    orchestrator_identity,
+    temporal_client,
+)
+from boxie.bootstrap.schedules import check_schedules
+from boxie.contracts.common import ConsumerId
+from boxie.domain.models import OrchestratorIdentity
+from boxie.persistence.outbox import PostgresOutbox
+from boxie.persistence.postgres import PostgresLifecycle
+from boxie.sandbox.transport.client import OrchestratorClient
+from boxie.temporal.contracts import lifecycle_queue
+from boxie.temporal.dispatcher import CommandDelivery
 
 
 @dataclass(frozen=True)
@@ -22,6 +34,8 @@ class RuntimeConfig:
     api: ApiConfig
     orchestrator_url: str
     orchestrator_credential: bytes = field(repr=False)
+    lifecycle: LifecycleConfig
+    identity: OrchestratorIdentity
     bind_host: str = "127.0.0.1"
     bind_port: int = 8090
     request_timeout: float = 20
@@ -46,6 +60,10 @@ def load_configuration(path: Path) -> RuntimeConfig:
         except ValidationError:
             raise ValueError("invalid consumer ID") from None
     api = ApiConfig(data.pop("release"), consumers)
+    if "lifecycle" not in data or "identity" not in data:
+        raise ValueError("lifecycle configuration and orchestrator identity required")
+    data["lifecycle"] = lifecycle_config(data.pop("lifecycle"))
+    data["identity"] = orchestrator_identity(data.pop("identity"))
     return RuntimeConfig(api=api, orchestrator_credential=orchestrator, **data)
 
 
@@ -56,10 +74,40 @@ def main() -> None:
     config = load_configuration(args.config)
 
     async def run() -> None:
-        async with OrchestratorClient(
-            config.orchestrator_url, config.orchestrator_credential, timeout=config.request_timeout
-        ) as orchestrator:
-            app = create_app(config.api, DirectLifecycle(orchestrator), orchestrator, orchestrator)
+        # SQL-backed retry/status/stop and observations must remain reachable
+        # during Temporal outages. Readiness connects with a bounded timeout;
+        # only new admission depends on that probe. Worker startup stays eager.
+        temporal = await temporal_client(config.lifecycle, lazy=True)
+        async with (
+            database_for(config.lifecycle.postgres_dsn_file) as sessions,
+            OrchestratorClient(
+                config.orchestrator_url,
+                config.orchestrator_credential,
+                timeout=config.request_timeout,
+            ) as orchestrator,
+        ):
+            lifecycle = PostgresLifecycle(
+                sessions,
+                orchestrator,
+                config.identity,
+                Dependencies(
+                    orchestrator,
+                    temporal,
+                    config.identity,
+                    lambda: check_schedules(temporal, config.identity),
+                ),
+            )
+            app = create_app(
+                config.api,
+                lifecycle,
+                orchestrator,
+                orchestrator,
+                deliver=CommandDelivery(
+                    PostgresOutbox(sessions, config.identity),
+                    temporal,
+                    lifecycle_queue(config.identity),
+                ).deliver_pending,
+            )
             server = uvicorn.Server(
                 uvicorn.Config(
                     app,

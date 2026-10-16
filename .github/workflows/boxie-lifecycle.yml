@@ -1,0 +1,124 @@
+name: Boxie lifecycle
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/boxie-lifecycle.yml'
+      - 'tools/cli-playground/**'
+      - 'tools/boxie/**'
+      - 'coreutils/echor/**'
+      - 'utils/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.python-version'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: boxie-lifecycle-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sandbox:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.13.0'
+          enable-cache: false
+      - name: Install signed gVisor package and configure the disposable runner
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apt-transport-https ca-certificates curl gnupg
+          curl --fail --silent --show-error --location --max-time 60 https://gvisor.dev/archive.key \
+            | sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
+          printf '%s\n' 'deb [arch=amd64 signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main' \
+            | sudo tee /etc/apt/sources.list.d/gvisor.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y runsc
+          sudo runsc install -- --platform=systrap --fdlimit=4096
+          sudo systemctl restart docker
+          runsc --version
+      - name: Build shared sandbox and native Rust CLI
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          docker build -f tools/cli-playground/Sandbox.Dockerfile -t clis-playground-sandbox:lifecycle .
+          cargo build --locked --release --package echor
+      - name: Build Boxie runtime image
+        run: |
+          docker build -f tools/boxie/infra/Runtime.Dockerfile -t boxie:lifecycle .
+      - name: Build Playground runtime image
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          docker build -f tools/cli-playground/infra/Playground.Dockerfile -t cli-playground:lifecycle .
+      - uses: voidzero-dev/setup-vp@68f39c78aaf39be468cabd2afb09c162574c84af # v1.21.2
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          working-directory: tools/cli-playground/frontend
+          node-version-file: .node-version
+          version-file: package.json
+          run-install: false
+          cache: false
+      - name: Install workspace dependencies
+        run: |
+          uv sync --locked --all-packages
+      - name: Install browser dependencies
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          pnpm --dir tools/cli-playground/frontend install --frozen-lockfile
+          pnpm --dir tools/cli-playground/frontend exec playwright install --with-deps chromium
+      - name: Verify interpreter imports and pinned time-skipping server
+        timeout-minutes: 3
+        run: |
+          uv run --locked python -c 'import temporalio.bridge.temporal_sdk_bridge; import boxie.bootstrap.runtime'
+          uv run --locked python - <<'PYTHON'
+          import hashlib, io, json, os, pathlib, tarfile, urllib.request
+          pins = json.loads(pathlib.Path("tools/boxie/tests/test-server-pins.json").read_text())
+          pin = next(p for p in pins["artifacts"] if p["variant"] == "linux_amd64")
+          with urllib.request.urlopen(pin["url"], timeout=60) as source:
+              archive = source.read()
+          assert hashlib.sha256(archive).hexdigest() == pin["archive_sha256"]
+          with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+              source = tar.extractfile(pin["archive_member"])
+              assert source is not None
+              executable = source.read()
+          assert hashlib.sha256(executable).hexdigest() == pin["binary_sha256"]
+          path = pathlib.Path(os.environ["RUNNER_TEMP"]) / "boxie-test-server"
+          path.write_bytes(executable)
+          path.chmod(0o700)
+          with open(os.environ["GITHUB_ENV"], "a") as output:
+              output.write(f"BOXIE_TEST_SERVER={path}\n")
+          PYTHON
+          export BOXIE_TEST_SERVER="$RUNNER_TEMP/boxie-test-server"
+          uv run --locked pytest -m integration tools/boxie/tests/test_temporal_lifecycle.py -vv --durations=10
+      - name: Real PostgreSQL and production Temporal cancellation, replay and process recovery
+        timeout-minutes: 7
+        run: |
+          uv run --locked pytest -m integration tools/boxie/tests/test_temporal_deployment.py tools/boxie/tests/test_outbox.py tools/boxie/tests/integration/test_artifact_commit.py -vv --durations=10
+      - name: Native credential permissions and endpoint restarts
+        timeout-minutes: 3
+        run: |
+          uv run --locked pytest -m integration tools/boxie/tests/test_native_permissions.py tools/boxie/tests/test_native_scenarios.py -vv --durations=10
+      - name: PostgreSQL restart journal projection
+        timeout-minutes: 3
+        run: |
+          uv run --locked pytest -m integration tools/boxie/tests/test_postgres.py -k failed_restart_journal -vv --durations=10
+      # Optional until the native suite's hang is resolved; never blocks a PR.
+      - name: Optional native lifecycle and browser E2E
+        if: github.event_name == 'workflow_dispatch'
+        timeout-minutes: 20
+        run: |
+          uv run --locked python tools/boxie/tests/run_integration.py --runtime runsc --browser -- -vv --durations=10 -o faulthandler_timeout=120

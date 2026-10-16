@@ -26,9 +26,8 @@ export default defineConfig({
     { name: "mobile", use: { ...devices["Pixel 7"] } },
   ],
   webServer: {
-    command:
-      "uv run --locked --package cli-playground uvicorn playground.app:create_app --factory --host 127.0.0.1 --port 8765",
-    cwd: fileURLToPath(new URL("../../../", import.meta.url)),
+    command: "uv run --locked --package cli-playground python -m tests.browser_server",
+    cwd: fileURLToPath(new URL("../", import.meta.url)),
     env: {
       PLAYGROUND_DATA_DIR: fileURLToPath(
         new URL("../../../target/playground-browser-data/", import.meta.url),

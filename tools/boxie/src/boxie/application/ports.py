@@ -1,13 +1,13 @@
 """Application ports have no dependency on the chosen transports or runtimes."""
 
-from collections.abc import AsyncIterable, Mapping
-from datetime import datetime
+from collections.abc import AsyncIterable
+from contextlib import AbstractAsyncContextManager
 from typing import Protocol
 from uuid import UUID
 
+from boxie.contracts.terminal import TerminalEvent
 from boxie.domain.models import (
     ArtifactPutResult,
-    OrchestratorIdentity,
     Principal,
     ProfileSnapshot,
     SandboxSpec,
@@ -33,26 +33,20 @@ class ArtifactAccess(Protocol):
     async def retire(self, principal: Principal, artifact_id: UUID) -> None: ...
 
 
-class OrchestratorControl(Protocol):
-    def resolve_profile(
-        self, profile_id: str, command: tuple[str, ...], env: Mapping[str, str]
-    ) -> ProfileSnapshot: ...
-    async def ensure(
-        self,
-        identity: OrchestratorIdentity,
-        sandbox_id: UUID,
-        generation: int,
-        snapshot: ProfileSnapshot,
-        artifact_id: UUID,
-        deadline: datetime,
-    ) -> SandboxView: ...
-    async def inspect(
-        self, identity: OrchestratorIdentity, sandbox_id: UUID, generation: int
-    ) -> SandboxView: ...
-    async def remove(
-        self,
-        identity: OrchestratorIdentity,
-        sandbox_id: UUID,
-        generation: int,
-        reason: TerminationReason,
-    ) -> SandboxView: ...
+class ReadyLifecycle(Lifecycle, Protocol):
+    async def ready(self) -> bool: ...
+
+
+class TerminalConnection(Protocol):
+    async def receive(self) -> bytes | TerminalEvent: ...
+    async def send(self, data: bytes | str) -> None: ...
+
+
+class TerminalAccess(Protocol):
+    def attach(
+        self, principal: Principal, sandbox_id: UUID
+    ) -> AbstractAsyncContextManager[TerminalConnection]: ...
+
+
+class AdmissionProfileResolver(Protocol):
+    async def resolve_admission(self, spec: SandboxSpec) -> ProfileSnapshot: ...

@@ -12,14 +12,9 @@ from uuid import uuid4
 import pytest
 from boxie.domain.errors import BoxieError
 from boxie.domain.models import Principal
-from boxie.persistence.artifacts import ArtifactLimits, ArtifactStore
+from boxie.persistence.artifacts import ArtifactLimits
+from boxie_test_support.archive import Archive, chunks
 from boxie_test_support.orchestrator import bundle
-
-
-async def chunks(data: bytes) -> AsyncIterator[bytes]:
-    for offset in range(0, len(data), 7):
-        yield data[offset : offset + 7]
-        await asyncio.sleep(0)
 
 
 @pytest.mark.parametrize(
@@ -48,14 +43,14 @@ def test_zip_metadata_is_rejected_before_eager_parser(
     def forbidden_parser(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("unbounded central directory reached eager ZipFile parser")
 
-    monkeypatch.setattr("boxie.persistence.artifacts.zipfile.ZipFile", forbidden_parser)
+    monkeypatch.setattr("boxie.persistence.artifact_files.zipfile.ZipFile", forbidden_parser)
 
     async def exercise() -> None:
         async def upload_chunks() -> AsyncIterator[bytes]:
             yield bytes(data)
 
         limits = ArtifactLimits(files=1024 if kind.endswith("directory_bytes") else 1)
-        store, identifier = ArtifactStore(tmp_path, limits), uuid4()
+        store, identifier = Archive(tmp_path, limits), uuid4()
         with pytest.raises(BoxieError) as error:
             await store.put(
                 Principal("one"), identifier, hashlib.sha256(data).hexdigest(), upload_chunks()
@@ -80,7 +75,7 @@ def zip64_directory(original: bytes) -> bytes:
 def test_bounded_zip64_metadata_remains_compatible(tmp_path: Path) -> None:
     async def exercise() -> None:
         data = zip64_directory(bundle())
-        store, identifier, principal = ArtifactStore(tmp_path), uuid4(), Principal("one")
+        store, identifier, principal = Archive(tmp_path), uuid4(), Principal("one")
         await store.put(principal, identifier, hashlib.sha256(data).hexdigest(), chunks(data))
         assert (
             store.path(principal, identifier) / "nested/hello.txt"
@@ -124,11 +119,11 @@ def test_inconsistent_metadata_is_rejected_before_eager_parser(
     def forbidden_parser(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("inconsistent metadata reached eager ZIP parser")
 
-    monkeypatch.setattr("boxie.persistence.artifacts.zipfile.ZipFile", forbidden_parser)
+    monkeypatch.setattr("boxie.persistence.artifact_files.zipfile.ZipFile", forbidden_parser)
 
     async def exercise() -> None:
         with pytest.raises(BoxieError) as error:
-            await ArtifactStore(tmp_path).put(
+            await Archive(tmp_path).put(
                 Principal("one"), uuid4(), hashlib.sha256(data).hexdigest(), chunks(bytes(data))
             )
         assert error.value.status == 422
@@ -147,7 +142,7 @@ def test_valid_archive_comments_and_prefixed_zip_remain_compatible(tmp_path: Pat
             archive.writestr(entry, b"generic text")
         data = b"small prepended data\n" + out.getvalue()
         principal, identifier = Principal("one"), uuid4()
-        store = ArtifactStore(tmp_path)
+        store = Archive(tmp_path)
         await store.put(principal, identifier, hashlib.sha256(data).hexdigest(), chunks(data))
         assert (store.path(principal, identifier) / "text").read_bytes() == b"generic text"
 

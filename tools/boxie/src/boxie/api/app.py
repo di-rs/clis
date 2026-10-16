@@ -1,8 +1,9 @@
 """Construct an unprivileged private API from injected application ports."""
 
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
+from uuid import UUID
 
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -12,8 +13,7 @@ from starlette.middleware.base import RequestResponseEndpoint
 from boxie.api.auth import ConsumerAuth
 from boxie.api.routes import routes
 from boxie.api.terminal import terminal_routes
-from boxie.application.ports import ArtifactAccess
-from boxie.application.service import ReadyLifecycle, Service, TerminalAccess
+from boxie.application.ports import ArtifactAccess, ReadyLifecycle, TerminalAccess
 from boxie.domain.errors import BoxieError
 
 
@@ -33,10 +33,11 @@ def create_app(
     lifecycle: ReadyLifecycle,
     artifacts: ArtifactAccess,
     terminal: TerminalAccess,
+    *,
+    deliver: Callable[[UUID], Awaitable[None]] | None = None,
 ) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     auth = ConsumerAuth(config.consumers)
-    service = Service(lifecycle, artifacts, terminal)
 
     @app.exception_handler(BoxieError)
     async def application_error(_request: Request, error: BoxieError) -> JSONResponse:
@@ -72,10 +73,13 @@ def create_app(
     async def readiness() -> JSONResponse:
         ready = await lifecycle.ready()
         return JSONResponse(
-            {"release": config.release, "dependencies": {"orchestrator": ready}},
+            {
+                "release": config.release,
+                "dependencies": {"orchestration": ready},
+            },
             status_code=200 if ready else 503,
         )
 
-    app.include_router(routes(service))
-    app.include_router(terminal_routes(service, auth))
+    app.include_router(routes(lifecycle, artifacts, deliver))
+    app.include_router(terminal_routes(lifecycle, terminal, auth))
     return app

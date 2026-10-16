@@ -1,66 +1,99 @@
 """Translate bounded consumer JSON input into the byte-preserving orchestrator stream."""
 
 import asyncio
-import json
-from typing import Annotated, Literal
+from contextlib import suppress
 from uuid import UUID
 
 from fastapi import APIRouter, WebSocket
 from fastapi.responses import JSONResponse
-from pydantic import Field, ValidationError
+from pydantic import ValidationError
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from boxie.api.auth import ConsumerAuth
-from boxie.application.service import Service, TerminalConnection
-from boxie.domain.errors import BoxieError
-from boxie.sandbox.protocol import ResizeWire, StatusWire, WireModel
+from boxie.application.ports import Lifecycle, TerminalAccess, TerminalConnection
+from boxie.contracts.terminal import (
+    Ack,
+    Attached,
+    AttachRequest,
+    Heartbeat,
+    Input,
+    Resize,
+    control,
+)
+from boxie.domain.errors import BoxieError, TerminalWriteClosed
+
+DRAIN_TIMEOUT = 2.0
 
 
-class InputWire(WireModel):
-    type: Literal["input"]
-    data: Annotated[str, Field(min_length=1)]
+async def close_socket(websocket: WebSocket, code: int = 1000) -> None:
+    with suppress(WebSocketDisconnect, RuntimeError, TimeoutError, OSError):
+        async with asyncio.timeout(2):
+            await websocket.close(code=code)
 
 
 async def proxy(websocket: WebSocket, connection: TerminalConnection) -> None:
+    epoch: int | None = None
+    cursor = acked = 0
+    last_nonce = -1
+
     async def receive() -> None:
+        nonlocal cursor, acked, last_nonce
         while True:
             message = await websocket.receive()
             if message["type"] == "websocket.disconnect":
                 return
             text = message.get("text")
             if text is None or len(text.encode()) > 16384:
-                await websocket.close(code=1008)
+                await close_socket(websocket, 1008)
                 return
             try:
-                data = json.loads(text)
-                if isinstance(data, dict) and data.get("type") == "input":
-                    frame = InputWire.model_validate(data)
-                    await connection.send(frame.data.encode("utf-8"))
-                else:
-                    size = ResizeWire.model_validate(data)
-                    await connection.send(size.model_dump_json())
+                frame = control.validate_json(text)
+                if isinstance(frame, AttachRequest):
+                    cursor = acked = frame.resume_after
+                try:
+                    await connection.send(frame.model_dump_json())
+                except TerminalWriteClosed:
+                    if not (
+                        isinstance(frame, (Ack, Heartbeat, Input, Resize))
+                        and frame.epoch == epoch
+                        and (not isinstance(frame, Ack) or acked <= frame.sequence <= cursor)
+                        and (not isinstance(frame, Heartbeat) or frame.nonce > last_nonce)
+                    ):
+                        raise
+                    # A valid late control may race a normal upstream close.
+                    # Only a delivered terminal status can complete this drain.
+                    async with asyncio.timeout(DRAIN_TIMEOUT):
+                        await asyncio.shield(output_task)
+                    return
+                if isinstance(frame, Ack):
+                    acked = frame.sequence
+                elif isinstance(frame, Heartbeat):
+                    last_nonce = frame.nonce
             except ValueError, ValidationError, UnicodeError:
-                await websocket.close(code=1008)
+                await close_socket(websocket, 1008)
                 return
 
     async def send() -> None:
+        nonlocal epoch, cursor
         while True:
             message = await connection.receive()
             async with asyncio.timeout(20):
                 if isinstance(message, bytes):
-                    # Keep output bounded even if the upstream daemon returns a large read.
-                    for offset in range(0, len(message), 65536):
-                        await websocket.send_bytes(message[offset : offset + 65536])
+                    if not 9 <= len(message) <= 16392:
+                        raise BoxieError(503, "invalid orchestrator output frame")
+                    cursor = int.from_bytes(message[:8], "big")
+                    await websocket.send_bytes(message)
                 else:
-                    try:
-                        status = StatusWire.model_validate_json(message)
-                    except ValidationError:
-                        raise BoxieError(503, "invalid orchestrator terminal status") from None
-                    await websocket.send_json(status.model_dump(mode="json"))
-                    await websocket.close()
-                    return
+                    status = message
+                    if isinstance(status, Attached):
+                        epoch = status.epoch
+                    await websocket.send_text(status.model_dump_json())
+                    if status.type == "status":
+                        await close_socket(websocket)
+                        return
 
-    tasks = [asyncio.create_task(receive()), asyncio.create_task(send())]
+    output_task = asyncio.create_task(send())
+    tasks = [asyncio.create_task(receive()), output_task]
     try:
         done, _pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in done:
@@ -70,7 +103,8 @@ async def proxy(websocket: WebSocket, connection: TerminalConnection) -> None:
     finally:
         for task in tasks:
             task.cancel()
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        async with asyncio.timeout(2):
+            results = await asyncio.gather(*tasks, return_exceptions=True)
         for result in results:
             if isinstance(result, BaseException) and not isinstance(
                 result, (asyncio.CancelledError, WebSocketDisconnect, BoxieError)
@@ -78,16 +112,19 @@ async def proxy(websocket: WebSocket, connection: TerminalConnection) -> None:
                 raise result
 
 
-def terminal_routes(service: Service, auth: ConsumerAuth) -> APIRouter:
+def terminal_routes(
+    lifecycle: Lifecycle, terminal_access: TerminalAccess, auth: ConsumerAuth
+) -> APIRouter:
     router = APIRouter()
 
     @router.websocket("/v1/sandboxes/{sandbox_id}/terminal")
     async def terminal(websocket: WebSocket, sandbox_id: UUID) -> None:
         try:
             principal = auth.resolve(websocket.headers.get("Authorization", ""))
-            await service.lifecycle.get(principal, sandbox_id)
-            async with service.terminal.attach(principal, sandbox_id) as connection:
-                await websocket.accept()
+            await lifecycle.get(principal, sandbox_id)
+            async with terminal_access.attach(principal, sandbox_id) as connection:
+                async with asyncio.timeout(10):
+                    await websocket.accept()
                 await proxy(websocket, connection)
         except BoxieError as error:
             if websocket.application_state == WebSocketState.CONNECTING:
@@ -95,9 +132,9 @@ def terminal_routes(service: Service, auth: ConsumerAuth) -> APIRouter:
                     JSONResponse({"detail": str(error)}, status_code=error.status)
                 )
             elif websocket.application_state == WebSocketState.CONNECTED:
-                await websocket.close(code=1011)
+                await close_socket(websocket, 1011)
         except TimeoutError, WebSocketDisconnect:
             if websocket.application_state == WebSocketState.CONNECTED:
-                await websocket.close(code=1011)
+                await close_socket(websocket, 1011)
 
     return router

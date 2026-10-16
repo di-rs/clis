@@ -18,21 +18,38 @@ def main() -> None:
     parser.add_argument("--orchestrator-credential", default="/run/secrets/orchestrator")
     parser.add_argument("--consumer-credential", default="/run/secrets/consumer")
     parser.add_argument("--profiles", default="/etc/boxie/profiles.json")
+    parser.add_argument("--postgres-dsn", default="/run/secrets/postgres-dsn")
+    parser.add_argument("--temporal-address", default="temporal:7233")
+    parser.add_argument("--temporal-server-name", default="temporal")
+    parser.add_argument("--temporal-namespace", default="boxie")
     args = parser.parse_args()
     if not args.data_dir.is_absolute():
         parser.error("--data-dir must be an absolute daemon-host path")
     args.output.mkdir(parents=True, exist_ok=True)
+    identity = {"installation_id": str(args.installation_id), "host_id": args.host_id}
+    lifecycle = {
+        "postgres_dsn_file": args.postgres_dsn,
+        "temporal_address": args.temporal_address,
+        "temporal_server_name": args.temporal_server_name,
+        "temporal_namespace": args.temporal_namespace,
+        "temporal_ca_file": "/run/secrets/temporal-ca.pem",
+        "temporal_cert_file": "/run/secrets/temporal-client.pem",
+        "temporal_key_file": "/run/secrets/temporal-client.key",
+    }
     configurations = {
         "orchestrator.json": {
             "data_dir": str(args.data_dir),
+            "postgres_dsn_file": args.postgres_dsn,
+            "lifecycle": lifecycle,
             "profiles_file": args.profiles,
             "credential_file": args.orchestrator_credential,
             "identity": {"installation_id": str(args.installation_id), "host_id": args.host_id},
             "bind_host": args.bind_host,
-            "max_sandboxes": 8,
         },
         "api.json": {
             "release": "local",
+            "identity": identity,
+            "lifecycle": lifecycle,
             "orchestrator_url": args.orchestrator_url,
             "orchestrator_credential_file": args.orchestrator_credential,
             "consumer_credential_files": {args.consumer_id: args.consumer_credential},

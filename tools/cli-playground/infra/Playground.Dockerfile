@@ -17,8 +17,8 @@ COPY tools/cli-playground/pyproject.toml tools/cli-playground/pyproject.toml
 COPY tools/cli-playground/infra/pyproject.toml tools/cli-playground/infra/pyproject.toml
 COPY tools/cli-bench/pyproject.toml tools/cli-bench/pyproject.toml
 COPY tools/cli-testing/pyproject.toml tools/cli-testing/pyproject.toml
-COPY tools/cli-playground/playground tools/cli-playground/playground
-COPY --from=frontend /frontend/dist/ tools/cli-playground/playground/static/
+COPY tools/cli-playground/src/playground tools/cli-playground/src/playground
+COPY --from=frontend /frontend/dist/ tools/cli-playground/src/playground/static/
 RUN uv sync --locked --package cli-playground --no-dev --no-editable --no-python-downloads
 FROM python:3.15-slim
 WORKDIR /app

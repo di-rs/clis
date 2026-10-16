@@ -18,7 +18,8 @@
     "src/**/*.ts",
     "src/**/*.svelte",
     "vite.config.ts",
-    "playwright.config.ts",
-    "e2e/**/*.ts"
+    "playwright*.config.ts",
+    "e2e/**/*.ts",
+    "e2e-native/**/*.ts"
   ]
 }
