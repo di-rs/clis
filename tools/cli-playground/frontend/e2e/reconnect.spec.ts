@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import { expect, test, type Page, type APIRequestContext } from "@playwright/test";
+import { observeTerminalResize, resizeTerminalViewport } from "./resize";
 
 test.describe.configure({ mode: "serial" });
 interface Sandbox {
@@ -106,6 +107,83 @@ async function disconnect(page: Page) {
   );
   await expect(page.locator("#connection-status")).toHaveText("Disconnected");
 }
+
+test("viewport input waits for the current resize acknowledgement instead of old Connected or stale geometry", async ({
+  page,
+  request,
+}) => {
+  let hold = false;
+  let held: { release(): void; wrong(): void } | undefined;
+  await page.routeWebSocket("**/ws/**", (socket) => {
+    const server = socket.connectToServer();
+    server.onMessage((message) => {
+      if (hold && typeof message === "string") {
+        const frame = JSON.parse(message);
+        if (frame.type === "resized") {
+          held = {
+            release: () => {
+              socket.send(message);
+              held = undefined;
+            },
+            wrong: () => {
+              socket.send(JSON.stringify({ ...frame, epoch: frame.epoch - 1 }));
+              socket.send(JSON.stringify({ ...frame, cols: frame.cols + 1 }));
+            },
+          };
+          return;
+        }
+      }
+      socket.send(message);
+    });
+  });
+  await observeTerminalResize(page);
+  const first = await open(page, request);
+  await disconnect(page);
+  await page.getByRole("button", { name: "Reconnect", exact: true }).click();
+  await expect(page.locator("#connection-status")).toHaveText("Connected");
+  expect((await currentSandbox(page, request)).id).toBe(first.id);
+  await page.clock.install();
+  await page.clock.pauseAt(new Date(Date.now() + 1000));
+  hold = true;
+  let finished = false;
+  const resized = resizeTerminalViewport(page, { width: 900, height: 700 }).then(() => {
+    finished = true;
+  });
+  const settled = resized.catch(() => {});
+  try {
+    await page.waitForFunction(() => window.innerWidth === 900);
+    await expect(page.locator("#connection-status")).toHaveText("Connected");
+    expect(finished).toBe(false);
+    await page.clock.runFor(100);
+    await expect.poll(() => !!held).toBe(true);
+    await expect(page.locator("#connection-status")).toHaveText("Synchronizing");
+    held!.wrong();
+    await page.clock.runFor(100);
+    await expect(page.locator("#connection-status")).toHaveText("Synchronizing");
+    expect(finished).toBe(false);
+    await page.locator(".xterm-helper-textarea").pressSequentially("discarded");
+    expect((await inputs(page)).map((i) => i.data).join("")).toBe("");
+    hold = false;
+    held!.release();
+    await page.clock.resume();
+    await resized;
+    await page.locator(".xterm-helper-textarea").pressSequentially("after-resize");
+    await expect
+      .poll(async () =>
+        Buffer.concat(
+          (await state(request)).sandboxes
+            .find((s) => s.id === first.id)!
+            .writes.map((x) => Buffer.from(x, "base64")),
+        ).toString(),
+      )
+      .toBe("after-resize");
+  } finally {
+    hold = false;
+    held?.release();
+    await page.clock.resume();
+    await settled;
+  }
+});
 
 test("real product/API/agent reconnect preserves one PTY and Unicode screen, loses no applied cursor, never replays input, and reload is fresh", async ({
   page,

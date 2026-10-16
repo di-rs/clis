@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { nativeArchive } from "./archive";
+import { observeTerminalResize, resizeTerminalViewport } from "../e2e/resize";
 
 test("native shell and same-page reconnect preserve the admitted session", async ({
   page,
@@ -16,6 +17,7 @@ test("native shell and same-page reconnect preserve the admitted session", async
   });
   expect(published.ok()).toBeTruthy();
   const environment = await published.json();
+  await observeTerminalResize(page);
   await page.addInitScript(() => {
     const sockets: WebSocket[] = [];
     Object.assign(window, { nativeSockets: sockets });
@@ -56,7 +58,7 @@ test("native shell and same-page reconnect preserve the admitted session", async
     expect(new URL(after).searchParams.get("session_id")).toBe(
       new URL(before).searchParams.get("session_id"),
     );
-    await page.setViewportSize({ width: 900, height: 700 });
+    await resizeTerminalViewport(page, { width: 900, height: 700 });
     await page.locator(".xterm-helper-textarea").pressSequentially("echor 'after-'\"reconnect\"\n");
     await expect(page.locator(".xterm-rows")).toContainText("after-reconnect");
     await page.locator(".xterm-helper-textarea").pressSequentially("sleep 30\n");
