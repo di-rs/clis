@@ -5,7 +5,6 @@ import errno
 import json
 import os
 import signal
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -15,6 +14,7 @@ from uuid import UUID, uuid4
 from observability_infra.smoke_application import REPO, Application
 from observability_infra.smoke_runtime import event_identities, evidence
 from observability_infra.smoke_telemetry import Telemetry
+from observability_infra.smoke_units import transient_command, unit_name
 from observability_infra.smoke_watchdog import process_identity, restoration_valid
 
 SCENARIOS = (
@@ -64,7 +64,7 @@ class Scenario:
         self.name, self.app, self.telemetry = name, application, telemetry
         self.root, self.commands = application.root, application.commands
         self.observations: dict[str, Any] = {"scenario": name, "synthetic_pressure": False}
-        self.watch: subprocess.Popen[bytes] | None = None
+        self.watch: str | None = None
         self.manifest = self.root / ("watch-" + name + ".json")
         self.flood_id: str | None = None
         self.flood_instance = str(uuid4())
@@ -79,26 +79,38 @@ class Scenario:
         )
 
     async def arm(self, data: dict[str, Any]) -> None:
+        if self.watch is not None:
+            raise RuntimeError("only one watchdog per scenario is permitted")
+        self.watch = unit_name(self.root, self.name, watchdog=True)
+        data["watchdog_unit"] = self.watch
+        data["scenario"] = self.name
         data["restore_at"] = self.commands.deadline.end - self.commands.deadline.reserve + 2
-        evidence(self.manifest, data)
-        self.watch = subprocess.Popen(
-            [sys.executable, "-m", "observability_infra.smoke_watchdog", str(self.manifest)],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
+        evidence(self.manifest, data)  # Register before any launch or fault.
+        await asyncio.to_thread(
+            self.commands.run,
+            transient_command(
+                self.root,
+                self.name,
+                [sys.executable, "-m", "observability_infra.smoke_watchdog", str(self.manifest)],
+                watchdog=True,
+            ),
         )
-        self.observations["watchdog_pid"] = self.watch.pid
+        ready = self.manifest.with_suffix(".unit.json")
+        while not ready.exists():
+            self.commands.deadline.remaining()
+            await asyncio.sleep(0.05)
+        identity = json.loads(ready.read_text())
+        if identity["unit"] != self.watch or process_identity(identity["pid"]) != identity["start"]:
+            raise RuntimeError("watchdog process identity differs")
+        self.observations["watchdog"] = identity
 
     async def restore(self) -> None:
         if self.watch:
             self.manifest.with_suffix(".restore").touch()
-            await asyncio.to_thread(
-                self.watch.wait, timeout=min(22, self.commands.deadline.remaining(restoring=True))
-            )
             path = self.manifest.with_suffix(".result.json")
-            if self.watch.returncode or not path.exists():
-                raise RuntimeError("independent restoration watchdog failed")
+            async with asyncio.timeout(min(22, self.commands.deadline.remaining(restoring=True))):
+                while not path.exists():
+                    await asyncio.sleep(0.05)
             restored = json.loads(path.read_text())
             self.observations["restoration"] = restored
             if not restoration_valid(json.loads(self.manifest.read_text()), restored):

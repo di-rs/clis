@@ -402,7 +402,10 @@ Pressure uses an explicit reduced test profile: a 256 MiB journal filesystem,
 compression/rate limiting; and a 640 MiB Vector filesystem with a 268435488-byte
 valid buffer. Production defaults are unchanged. These cases cannot establish
 saturation of the default 512 MiB buffer. The API/worker/agent test caps are
-512 MiB each, the driver has a 768 MiB address-space ceiling, the owned journal
+512 MiB each. The driver and its one independent watchdog run in sibling transient
+services capped at 640 MiB and 128 MiB of resident memory, respectively, with no
+swap (768 MiB total). The watchdog survives driver termination; final cleanup
+verifies both units have exited before tearing down resources. The owned journal
 has 256 MiB and dockerd 1 GiB. Per-process/cgroup, OOM, buffer, disk and free-space
 observations are retained. PostgreSQL/Temporal fixture observations do not prove
 production combined-host or eight-sandbox headroom.

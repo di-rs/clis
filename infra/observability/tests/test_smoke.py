@@ -577,6 +577,7 @@ def test_outer_cleanup_preserves_resource_failure_detail(
         raise RuntimeError("cleanup failed")
 
     monkeypatch.setattr(smoke, "require_ephemeral_runner", lambda: None)
+    monkeypatch.setattr(smoke, "stop_units", lambda *args: None)
     monkeypatch.setattr(smoke, "Resources", lambda *args: SimpleNamespace(close=close))
     with pytest.raises(RuntimeError, match="cleanup incomplete"):
         smoke.cleanup(tmp_path)

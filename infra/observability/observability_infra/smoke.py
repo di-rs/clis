@@ -10,8 +10,8 @@ import asyncio
 import dataclasses
 import json
 import os
-import resource
 import shutil
+import sys
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +29,12 @@ from observability_infra.smoke_resources import Resources, require_ephemeral_run
 from observability_infra.smoke_runtime import Commands, Deadline, evidence
 from observability_infra.smoke_scenarios import SCENARIOS, Scenario
 from observability_infra.smoke_telemetry import Telemetry
+from observability_infra.smoke_units import (
+    probe_independence,
+    stop_units,
+    transient_command,
+    unit_memory,
+)
 from observability_infra.smoke_watchdog import restore_registered
 
 
@@ -53,12 +59,13 @@ class SmokeReport:
 
 def run_smoke(config: SmokeConfig, timeout_seconds: float = 180) -> SmokeReport:
     require_ephemeral_runner()
-    resource.setrlimit(resource.RLIMIT_AS, (768 * 1024**2, 768 * 1024**2))
+    driver_memory = unit_memory(config.root, config.scenario, watchdog=False)
     deadline = Deadline(timeout_seconds, reserve=min(45, timeout_seconds / 3))
     commands = Commands(deadline)
     application = Application(config.root, commands)
     telemetry = Telemetry(config.root, commands, application.stack)
     scenario = Scenario(config.scenario, application, telemetry)
+    scenario.observations["driver_memory_before"] = driver_memory
     cleanup_errors: list[str] = []
     errors: list[str] = []
 
@@ -68,6 +75,7 @@ def run_smoke(config: SmokeConfig, timeout_seconds: float = 180) -> SmokeReport:
                 await scenario.run()
         except Exception as error:
             errors.append(type(error).__name__)
+            scenario.observations["failed_command"] = commands.last_failure
             scenario.observations["failure_location"] = [
                 {"file": Path(frame.filename).name, "function": frame.name, "line": frame.lineno}
                 for frame in traceback.extract_tb(error.__traceback__)[-8:]
@@ -97,6 +105,9 @@ def run_smoke(config: SmokeConfig, timeout_seconds: float = 180) -> SmokeReport:
                 cleanup_errors.append(type(error).__name__)
 
     asyncio.run(exercise())
+    scenario.observations["driver_memory_after"] = unit_memory(
+        config.root, config.scenario, watchdog=False
+    )
     scenario.observations["errors"] = errors
     result = SmokeReport(
         config.scenario,
@@ -119,6 +130,8 @@ def prepare(root: Path, timeout_seconds: float = 1200) -> None:
     private_sentinels: tuple[str, ...] = ()
     try:
         resources.prepare()
+        stage = "driver and watchdog resident-memory isolation"
+        probe_independence(root, commands)
         os.environ["DOCKER_HOST"] = "unix://" + str(resources.socket)
         env = dict(os.environ)
         for tag, dockerfile, context in (
@@ -235,19 +248,23 @@ def cleanup(root: Path) -> None:
     errors: list[str] = []
     restorations: dict[str, Any] = {}
     for path in root.glob("watch-*.json"):
-        if path.name.endswith(".result.json"):
+        if path.name.endswith((".result.json", ".unit.json")):
             continue
         try:
             restorations[path.name] = restore_registered(path, commands)
         except Exception as error:
             restorations[path.name] = {"restored": False, "error_type": type(error).__name__}
-    if any(item["restored"] is not True for item in restorations.values()):
+    try:
+        stop_units(root, commands, (*SCENARIOS, "unit-probe"))
+    except Exception as error:
+        errors.append(type(error).__name__ + ":scenario-unit-cleanup")
+    if errors or any(item["restored"] is not True for item in restorations.values()):
         evidence(
             root / "cleanup.json",
             {
                 "status": "failed",
                 "restorations": restorations,
-                "errors": ["fault restoration incomplete; teardown withheld"],
+                "errors": [*errors, "fault restoration or unit exit incomplete; teardown withheld"],
                 "mounts_remaining": [
                     path for path in resources.state["mounts"] if os.path.ismount(path)
                 ],
@@ -276,6 +293,7 @@ def cleanup(root: Path) -> None:
         path = root / "cleanup.json"
         result = json.loads(path.read_text()) if path.exists() else {}
         result["status"] = "failed"
+    result["scenario_units_exited"] = True
     result["restorations"] = restorations
     result["application_cleanup_errors"] = errors
     evidence(root / "cleanup.json", result)
@@ -296,10 +314,12 @@ def export_evidence(root: Path, destination: Path) -> None:
         "setup.json",
         "setup-diagnostics.json",
         "preflight.json",
+        "unit-probe.json",
         "collector-provenance.json",
         "cleanup.json",
         *("scenario-" + name + ".json" for name in SCENARIOS),
         *("watch-" + name + ".result.json" for name in SCENARIOS),
+        *("watch-" + name + ".unit.json" for name in SCENARIOS),
     ]
     destination.mkdir(parents=True, exist_ok=True)
     for name in names:
@@ -315,6 +335,7 @@ def main() -> None:
     parser.add_argument("action", choices=("prepare", "scenario", "cleanup", "export"))
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--scenario", choices=SCENARIOS)
+    parser.add_argument("--inside-unit", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--evidence-dir", type=Path)
     args = parser.parse_args()
     try:
@@ -329,6 +350,26 @@ def main() -> None:
         else:
             if not args.scenario:
                 parser.error("scenario requires --scenario")
+            if not args.inside_unit:
+                require_ephemeral_runner()
+                command = transient_command(
+                    args.root,
+                    args.scenario,
+                    [
+                        sys.executable,
+                        "-m",
+                        "observability_infra.smoke",
+                        "scenario",
+                        "--root",
+                        str(args.root),
+                        "--scenario",
+                        args.scenario,
+                        "--inside-unit",
+                    ],
+                    watchdog=False,
+                )
+                # Replace the launcher; the workflow supplies the outer185s timeout.
+                os.execvp(command[0], command)
             result = run_smoke(SmokeConfig(args.root, args.scenario))
             print(
                 json.dumps(

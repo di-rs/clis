@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from observability_infra.smoke_runtime import Commands, Deadline, evidence
+from observability_infra.smoke_units import unit_memory, unit_name
 
 
 def process_identity(pid: int) -> str:
@@ -96,6 +97,19 @@ def restore_registered(
 
 def watch(manifest: Path) -> None:
     data = json.loads(manifest.read_text())
+    if "watchdog_unit" in data:
+        unit = unit_name(manifest.parent, data["scenario"], watchdog=True)
+        if data["watchdog_unit"] != unit:
+            raise RuntimeError("foreign watchdog unit")
+        evidence(
+            manifest.with_suffix(".unit.json"),
+            {
+                "unit": unit,
+                "pid": os.getpid(),
+                "start": process_identity(os.getpid()),
+                "memory": unit_memory(manifest.parent, data["scenario"], watchdog=True),
+            },
+        )
     end = float(data["restore_at"])
     trigger = manifest.with_suffix(".restore")
     while time.monotonic() < end and not trigger.exists():
