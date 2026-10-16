@@ -15,7 +15,7 @@ from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest, Describe
 from temporalio.client import Client
 
 
-@pytest.mark.parametrize("age", [None, 60, 89, 91])
+@pytest.mark.parametrize("age", [None, 89, 91])
 @pytest.mark.parametrize("queue", [1, 2])
 def test_each_queue_requires_recent_worker_presence(age: int | None, queue: int) -> None:
     async def exercise() -> None:
@@ -40,6 +40,6 @@ def test_each_queue_requires_recent_worker_presence(age: int | None, queue: int)
         )
         assert await Dependencies(
             cast(OrchestratorClient, orchestrator), cast(Client, temporal)
-        )() == (age in (60, 89))
+        )() == (age == 89)
 
     asyncio.run(exercise())

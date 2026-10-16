@@ -500,20 +500,23 @@ def test_exhausted_pool_is_503_without_lifecycle_writes(
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize("operation", ["submit", "get", "terminate"])
+# All operations share consumer_session's classification. Exercise its full
+# error table once, then retain the read and stop transaction outcomes separately.
 @pytest.mark.parametrize(
-    "error_type, unavailable",
+    "operation, error_type, unavailable",
     [
-        (psycopg.OperationalError, True),
-        (psycopg.errors.ConnectionFailure, True),
-        (psycopg.errors.AdminShutdown, True),
-        (psycopg.errors.LockNotAvailable, True),
-        (psycopg.errors.SerializationFailure, True),
-        (PoolTimeout, True),
-        (psycopg.errors.CheckViolation, False),
-        (psycopg.errors.UndefinedTable, False),
-        (psycopg.errors.InvalidPassword, False),
-        (ResourceClosedError, False),
+        ("submit", psycopg.OperationalError, True),
+        ("submit", psycopg.errors.ConnectionFailure, True),
+        ("submit", psycopg.errors.AdminShutdown, True),
+        ("submit", psycopg.errors.LockNotAvailable, True),
+        ("submit", psycopg.errors.SerializationFailure, True),
+        ("submit", PoolTimeout, True),
+        ("submit", psycopg.errors.CheckViolation, False),
+        ("submit", psycopg.errors.UndefinedTable, False),
+        ("submit", psycopg.errors.InvalidPassword, False),
+        ("submit", ResourceClosedError, False),
+        ("get", psycopg.errors.CheckViolation, False),
+        ("terminate", psycopg.OperationalError, True),
     ],
 )
 def test_consumer_database_error_boundary_never_retries(

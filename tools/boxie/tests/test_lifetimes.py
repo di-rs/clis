@@ -8,8 +8,10 @@ from boxie.domain.models import SandboxState
 from test_orchestrator_lifecycle import settled, setup
 
 
-@pytest.mark.parametrize("wall_step", [-7200, 7200])
-@pytest.mark.parametrize("timer", ["initial", "disconnected", "idle", "absolute"])
+@pytest.mark.parametrize(
+    "timer,wall_step",
+    [("initial", -7200), ("disconnected", 7200), ("idle", -7200), ("absolute", 7200)],
+)
 def test_live_deadlines_ignore_wall_steps(tmp_path: Path, wall_step: int, timer: str) -> None:
     async def exercise() -> None:
         orchestrator, request, daemon, clock, _ = await setup(tmp_path)

@@ -149,8 +149,11 @@ def test_idle_worker_presence_survives_long_poll_then_expires(
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize("cause", ["idle", "expired", "control_plane_lost"])
-@pytest.mark.parametrize("requested_first", [False, True])
+# Preserve every observed cause and both precedence paths without a Cartesian product.
+@pytest.mark.parametrize(
+    "cause,requested_first",
+    [("idle", False), ("expired", False), ("control_plane_lost", True)],
+)
 def test_workflow_cleanup_preserves_first_termination_cause(
     postgres_dsn: str,
     temporal_stack: Any,

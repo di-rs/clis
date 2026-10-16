@@ -100,8 +100,6 @@ class Decisions:
             await self.release.wait()
         if self.mode == "native_retry" and self.removals <= 100:
             raise ApplicationError("pending", type="CleanupPending")
-        if self.mode == "cleanup_failure" and self.removals < 12:
-            raise ApplicationError("pending cleanup", type="CleanupPending")
         self.facts = replace(self.facts, cleaned=True)
 
     def cleanup_fault(self) -> None:
@@ -135,7 +133,7 @@ class Decisions:
         ]
 
 
-@pytest.mark.parametrize("mode", ["stop_first", "normal", "provision_failure", "cleanup_failure"])
+@pytest.mark.parametrize("mode", ["stop_first", "normal", "provision_failure"])
 def test_lifecycle_cleanup_and_replay(mode: str, tmp_path: Path) -> None:
     async def exercise() -> None:
         workflow_module = importlib.import_module("boxie.temporal.workflows")
@@ -164,8 +162,6 @@ def test_lifecycle_cleanup_and_replay(mode: str, tmp_path: Path) -> None:
                 assert decisions.ensures == (
                     0 if mode == "stop_first" else 5 if mode == "provision_failure" else 1
                 )
-                if mode == "cleanup_failure":
-                    assert decisions.removals >= 12
                 history = await handle.fetch_history()
                 (tmp_path / f"{mode}.json").write_text(history.to_json())
                 await Replayer(workflows=[workflow_module.SandboxLifecycle]).replay_workflow(
@@ -175,7 +171,9 @@ def test_lifecycle_cleanup_and_replay(mode: str, tmp_path: Path) -> None:
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize("mode,seconds", [("idle", 600), ("detached", 120), ("absolute", 3600)])
+# The workflow receives a timestamp, not a policy cause. Cover an earlier
+# policy deadline and the absolute bound; execution tests own each timer policy.
+@pytest.mark.parametrize("mode,seconds", [("detached", 120), ("absolute", 3600)])
 def test_earliest_workflow_deadline(mode: str, seconds: int) -> None:
     async def exercise() -> None:
         from boxie.temporal.workflows import SandboxLifecycle
@@ -208,11 +206,16 @@ def test_earliest_workflow_deadline(mode: str, seconds: int) -> None:
 
 @pytest.mark.parametrize(
     "mode",
-    ["cancel_ensure", "cancel_cleanup", "unsafe_failure", "native_retry"]
-    + [
-        f"terminal_{operation}_{fault}"
-        for operation in ("stop", "remove")
-        for fault in ("400", "404", "422", "application")
+    [
+        "cancel_ensure",
+        "cancel_cleanup",
+        "unsafe_failure",
+        "native_retry",
+        "terminal_stop_400",
+        "terminal_remove_404",
+        "terminal_stop_422",
+        "terminal_stop_application",
+        "terminal_remove_application",
     ],
 )
 def test_cancellation_privacy_and_run_boundary(

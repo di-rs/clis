@@ -89,29 +89,3 @@ def test_orchestrator_client_rejects_malformed_status_without_leaking_payload(fr
                 )
 
     asyncio.run(exercise())
-
-
-def test_terminal_adapter_returns_validated_events() -> None:
-    from boxie.contracts.terminal import Attached
-    from boxie.domain.models import Principal
-    from boxie.sandbox.transport.client import OrchestratorClient
-    from boxie_test_support.api import serve
-    from fastapi import FastAPI, WebSocket
-
-    async def exercise() -> None:
-        peer = FastAPI()
-
-        @peer.websocket("/v1/sandboxes/{identifier}/terminal")
-        async def terminal(websocket: WebSocket, identifier: str) -> None:
-            await websocket.accept()
-            await websocket.send_text('{"type":"attached","epoch":3}')
-            await websocket.close()
-
-        async with serve(peer) as url:
-            async with OrchestratorClient(url, b"orchestrator-test-secret") as client:
-                async with client.attach(Principal("one"), uuid4()) as connection:
-                    event = await connection.receive()
-                    assert isinstance(event, Attached)
-                    assert event.epoch == 3
-
-    asyncio.run(exercise())

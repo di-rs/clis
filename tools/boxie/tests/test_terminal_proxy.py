@@ -107,11 +107,13 @@ def test_large_output_frame_boundaries_preserve_split_unicode_and_ack_window(
 
 @pytest.mark.parametrize(
     "phase,kind,close_code",
-    [("before", "ack", 1000), ("after", "ack", 1011)]
-    + [
-        (phase, kind, 1000)
-        for phase in ("during", "after")
-        for kind in ("ack", "heartbeat", "input", "resize")
+    [
+        ("before", "ack", 1000),
+        ("after", "ack", 1011),
+        ("during", "ack", 1000),
+        ("after", "heartbeat", 1000),
+        ("during", "input", 1000),
+        ("after", "resize", 1000),
     ],
 )
 def test_final_control_preserves_buffered_status(

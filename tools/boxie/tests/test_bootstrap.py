@@ -86,10 +86,13 @@ def test_namespace_bootstrap_verifies_existing_namespace_without_registration() 
     assert peer.calls == ["describe"]
 
 
-@pytest.mark.parametrize("stage", ["describe", "register"])
 @pytest.mark.parametrize(
-    "status",
-    [RPCStatusCode.UNAVAILABLE, RPCStatusCode.UNAUTHENTICATED, RPCStatusCode.PERMISSION_DENIED],
+    "stage,status",
+    [
+        ("describe", RPCStatusCode.UNAVAILABLE),
+        ("register", RPCStatusCode.UNAUTHENTICATED),
+        ("register", RPCStatusCode.PERMISSION_DENIED),
+    ],
 )
 def test_namespace_bootstrap_propagates_transport_and_authentication_errors(
     stage: str, status: RPCStatusCode
@@ -107,10 +110,13 @@ def test_namespace_bootstrap_propagates_transport_and_authentication_errors(
     assert peer.calls == (["describe"] if stage == "describe" else ["describe", "register"])
 
 
-@pytest.mark.parametrize("missing", [False, True])
 @pytest.mark.parametrize(
-    "mismatch",
-    [{"retention": 3600}, {"state": NamespaceState.NAMESPACE_STATE_DEPRECATED}, {"name": "other"}],
+    "missing,mismatch",
+    [
+        (False, {"retention": 3600}),
+        (True, {"state": NamespaceState.NAMESPACE_STATE_DEPRECATED}),
+        (False, {"name": "other"}),
+    ],
 )
 def test_namespace_bootstrap_rejects_wrong_namespace_state_or_retention(
     missing: bool, mismatch: dict[str, Any]

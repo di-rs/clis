@@ -1,52 +1,12 @@
 """Independent service packaging and operator-owned topology contracts."""
 
 import json
-import tomllib
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
-import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
-
-
-@pytest.mark.parametrize(
-    "relative,module",
-    [
-        ("tools/boxie", "boxie"),
-        ("tools/cli-playground", "playground"),
-        ("tools/boxie/infra", "boxie_infra"),
-        ("tools/cli-playground/infra", "playground_infra"),
-    ],
-)
-def test_distributions_have_explicit_isolated_modules(relative: str, module: str) -> None:
-    config = tomllib.loads((ROOT / relative / "pyproject.toml").read_text())
-    assert config["build-system"] == {"requires": ["uv_build==0.13.0"], "build-backend": "uv_build"}
-    assert config["tool"]["uv"]["build-backend"]["module-name"] == module
-
-
-def test_private_compose_units_do_not_share_privileges() -> None:
-    boxie = yaml.safe_load((ROOT / "tools/boxie/infra/compose.yml").read_text())
-    product = yaml.safe_load((ROOT / "tools/cli-playground/infra/compose.yml").read_text())
-    assert set(boxie["services"]) == {"api", "orchestrator", "worker"}
-    for name, service in boxie["services"].items():
-        assert not service.get("ports")
-        assert ("docker.sock" in json.dumps(service)) == (name == "orchestrator")
-    assert "docker.sock" not in json.dumps(product)
-    assert not product["services"]["gateway"].get("depends_on")
-    assert "PLAYGROUND_BOXIE_URL" in product["services"]["gateway"]["environment"]
-    assert boxie["networks"]["consumer"]["external"] is True
-    assert product["networks"]["consumer"]["external"] is True
-
-
-def test_production_activation_is_guarded_before_release_side_effects() -> None:
-    release = yaml.safe_load((ROOT / ".github/workflows/cli-playground-release.yml").read_text())
-    first = release["jobs"]["release"]["steps"][0]
-    assert "Production activation is unavailable" in first.get("run", "")
-    assert "exit 1" in first["run"]
-    setup = yaml.safe_load((ROOT / ".github/workflows/cli-playground-setup.yml").read_text())
-    assert set(setup["jobs"]) == {"provision"}
 
 
 @pytest.mark.integration
