@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bounded service event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "timestamp",
+    "level",
+    "event",
+    "message",
+    "service",
+    "role",
+    "release",
+    "instance_id",
+    "logger"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "level": {
+      "enum": [
+        "DEBUG",
+        "INFO",
+        "WARNING",
+        "ERROR",
+        "CRITICAL"
+      ]
+    },
+    "event": {
+      "type": "string",
+      "pattern": "^[a-z_]{1,64}$"
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "service": {
+      "enum": [
+        "boxie",
+        "cli-playground",
+        "unknown"
+      ]
+    },
+    "role": {
+      "enum": [
+        "api",
+        "agent",
+        "worker",
+        "gateway",
+        "unknown"
+      ]
+    },
+    "release": {
+      "type": "string",
+      "pattern": "^(unknown|[a-f0-9]{40}|[a-f0-9]{64})$"
+    },
+    "instance_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "logger": {
+      "enum": [
+        "boxie",
+        "playground",
+        "uvicorn",
+        "temporalio",
+        "service_logging",
+        "dependency"
+      ]
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "sandbox_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "operation_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "workflow_id": {
+      "type": "string",
+      "pattern": "^boxie/sandbox/[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "consumer_id": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "Reserved for a service-owned finite configuration allowlist; current producers omit it."
+    },
+    "activity_attempt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "duration_ms": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 86400000
+    },
+    "outcome": {
+      "enum": [
+        "succeeded",
+        "failed",
+        "pending",
+        "cancelled"
+      ]
+    },
+    "reason": {
+      "enum": [
+        "unavailable",
+        "invalid",
+        "timeout",
+        "cancelled",
+        "unknown"
+      ]
+    },
+    "error_type": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "error_message": {
+      "const": "operation failed"
+    },
+    "error_stack": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "truncated": {
+      "const": true
+    }
+  }
+}

@@ -6,23 +6,14 @@ import hmac
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import uvicorn
-from pydantic import TypeAdapter, ValidationError
+from service_logging.logging import install_asyncio_handler, log_runtime, run_process
 
-from boxie.api.app import ApiConfig, create_app
-from boxie.bootstrap.config import DurableConfig, read_credential
-from boxie.bootstrap.durable import (
-    Dependencies,
-    agent_identity,
-    durable_config,
-    pool_for,
-    temporal_client,
-)
-from boxie.domain.models import AgentIdentity
-from boxie.persistence.postgres import PostgresLifecycle
-from boxie.sandbox.durable_client import DurableAgentClient
-from boxie.sandbox.protocol import ConsumerId
+if TYPE_CHECKING:
+    from boxie.api.app import ApiConfig
+    from boxie.bootstrap.config import DurableConfig
+    from boxie.domain.models import AgentIdentity
 
 
 @dataclass(frozen=True)
@@ -38,6 +29,13 @@ class RuntimeConfig:
 
 
 def load_configuration(path: Path) -> RuntimeConfig:
+    from pydantic import TypeAdapter, ValidationError
+
+    from boxie.api.app import ApiConfig
+    from boxie.bootstrap.config import read_credential
+    from boxie.bootstrap.durable import agent_identity, durable_config
+    from boxie.sandbox.protocol import ConsumerId
+
     data = json.loads(path.read_text())
     agent = read_credential(Path(data.pop("agent_credential_file")))
     consumers = {
@@ -63,13 +61,21 @@ def load_configuration(path: Path) -> RuntimeConfig:
     return RuntimeConfig(api=api, agent_credential=agent, **data)
 
 
-def main() -> None:
+def _main() -> None:
+    import uvicorn
+
+    from boxie.api.app import create_app
+    from boxie.bootstrap.durable import Dependencies, pool_for, temporal_client
+    from boxie.persistence.postgres import PostgresLifecycle
+    from boxie.sandbox.durable_client import DurableAgentClient
+
     parser = argparse.ArgumentParser(description="Boxie private sandbox API")
     parser.add_argument("--config", type=Path, required=True)
     args = parser.parse_args()
     config = load_configuration(args.config)
 
     async def run() -> None:
+        install_asyncio_handler(log_runtime())
         # SQL-backed retry/status/stop and observations must remain reachable
         # during Temporal outages. Readiness connects with a bounded timeout;
         # only new admission depends on that probe. Worker startup stays eager.
@@ -101,11 +107,19 @@ def main() -> None:
                     ws_max_queue=4,
                     ws_per_message_deflate=False,
                     access_log=False,
+                    log_config=None,
                 )
             )
             await server.serve()
 
     asyncio.run(run())
+
+
+def main() -> None:
+    from boxie.observability.logging import process_logging
+
+    runtime = process_logging("api")
+    run_process(runtime, _main)
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ from boxie.api.terminal import terminal_routes
 from boxie.application.ports import ArtifactAccess
 from boxie.application.service import ReadyLifecycle, Service, TerminalAccess
 from boxie.domain.errors import BoxieError
+from boxie.observability.logging import RequestLogging
 
 
 @dataclass(frozen=True)
@@ -98,4 +99,5 @@ def create_app(
         app.include_router(observation_routes(observations))
     app.include_router(routes(service))
     app.include_router(terminal_routes(service, auth))
+    app.add_middleware(RequestLogging)
     return app

@@ -3,6 +3,7 @@ FROM python:3.15-slim AS build
 COPY --from=uv /uv /usr/local/bin/uv
 WORKDIR /app
 COPY pyproject.toml uv.lock .python-version ./
+COPY tools/service-logging tools/service-logging
 COPY tools/boxie/pyproject.toml tools/boxie/pyproject.toml
 COPY tools/boxie/tests/support/pyproject.toml tools/boxie/tests/support/pyproject.toml
 COPY tools/boxie/infra/pyproject.toml tools/boxie/infra/pyproject.toml

@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from playground.boxie_client import BoxieClient, HttpBoxieClient
 from playground.config import Settings
+from playground.observability import RequestLogging
 from playground.routes import RequestHostBoundary, create_router
 from playground.service import PlaygroundService
 from playground.session_store import SessionStore
@@ -55,4 +56,5 @@ def create_app(settings: Settings | None = None, *, boxie: BoxieClient | None = 
     app.state.sessions = service.sessions
     app.mount("/static", StaticFiles(directory=STATIC_DIR, check_dir=False), name="static")
     app.include_router(create_router(service, STATIC_DIR))
+    app.add_middleware(RequestLogging)
     return app

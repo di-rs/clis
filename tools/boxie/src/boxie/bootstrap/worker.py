@@ -6,30 +6,27 @@ import json
 import signal
 from datetime import timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from temporalio.client import Client
-from temporalio.worker import Worker
+from service_logging.logging import install_asyncio_handler, log_runtime, run_process
 
-from boxie.bootstrap.config import read_credential
-from boxie.bootstrap.durable import (
-    Dependencies,
-    agent_identity,
-    durable_config,
-    pool_for,
-    temporal_client,
-)
-from boxie.persistence.outbox import PostgresOutbox
-from boxie.persistence.postgres import PostgresLifecycle
-from boxie.sandbox.durable_client import DurableAgentClient
-from boxie.temporal.activities import LifecycleActivities, SafeActivityErrors
 from boxie.temporal.contracts import TASK_QUEUE
-from boxie.temporal.dispatcher import OutboxDispatcher
-from boxie.temporal.workflows import SandboxLifecycle
+
+if TYPE_CHECKING:
+    from temporalio.client import Client
+    from temporalio.worker import Worker
+
+    from boxie.temporal.activities import LifecycleActivities
 
 
 def lifecycle_worker(
     client: Client, activities: LifecycleActivities, *, task_queue: str = TASK_QUEUE
 ) -> Worker:
+    from temporalio.worker import Worker
+
+    from boxie.temporal.activities import SafeActivityErrors
+    from boxie.temporal.workflows import SandboxLifecycle
+
     return Worker(
         client,
         task_queue=task_queue,
@@ -41,7 +38,21 @@ def lifecycle_worker(
     )
 
 
-def main() -> None:
+def _main() -> None:
+    from boxie.bootstrap.config import read_credential
+    from boxie.bootstrap.durable import (
+        Dependencies,
+        agent_identity,
+        durable_config,
+        pool_for,
+        temporal_client,
+    )
+    from boxie.persistence.outbox import PostgresOutbox
+    from boxie.persistence.postgres import PostgresLifecycle
+    from boxie.sandbox.durable_client import DurableAgentClient
+    from boxie.temporal.activities import LifecycleActivities
+    from boxie.temporal.dispatcher import OutboxDispatcher
+
     parser = argparse.ArgumentParser(description="Boxie durable lifecycle worker")
     parser.add_argument("--config", type=Path, required=True)
     args = parser.parse_args()
@@ -49,6 +60,7 @@ def main() -> None:
     config = durable_config(settings["durable"])
 
     async def run() -> None:
+        install_asyncio_handler(log_runtime())
         client = await temporal_client(config)
         async with (
             pool_for(config.postgres_dsn_file) as pool,
@@ -86,6 +98,13 @@ def main() -> None:
                         loop.remove_signal_handler(sig)
 
     asyncio.run(run())
+
+
+def main() -> None:
+    from boxie.observability.logging import process_logging
+
+    runtime = process_logging("worker")
+    run_process(runtime, _main)
 
 
 if __name__ == "__main__":

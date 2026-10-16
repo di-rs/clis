@@ -81,6 +81,13 @@ def test_real_isolated_installation(
         check=True,
     )
     (wheel,) = wheels.glob("*.whl")
+    subprocess.run(
+        ["uv", "build", "--package", "service-logging", "--out-dir", str(wheels)],
+        cwd=ROOT,
+        env=environment,
+        check=True,
+    )
+    (logging_wheel,) = wheels.glob("service_logging-*.whl")
     constraints = tmp_path / "constraints.txt"
     subprocess.run(
         [
@@ -110,6 +117,7 @@ def test_real_isolated_installation(
             "--constraint",
             str(constraints),
             str(wheel),
+            str(logging_wheel),
         ],
         env=environment,
         check=True,

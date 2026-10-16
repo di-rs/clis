@@ -8,19 +8,22 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-import uvicorn
-
-from boxie.bootstrap.config import AgentConfig, read_credential
-from boxie.bootstrap.durable import pool_for
-from boxie.persistence.postgres_artifacts import PostgresArtifactStore
-from boxie.persistence.start_guard import PostgresStartGuard
-from boxie.sandbox.docker import DockerBackend
-from boxie.sandbox.durable_server import create_durable_agent_app
-from boxie.sandbox.lifecycle import DurableAgent
-from boxie.sandbox.reporting import ObservationReporter
+from service_logging.logging import install_asyncio_handler, log_runtime, run_process
 
 
-def main() -> None:
+def _main() -> None:
+    import uvicorn
+
+    from boxie.bootstrap.config import AgentConfig, read_credential
+    from boxie.bootstrap.durable import pool_for
+    from boxie.observability.logging import RequestLogging
+    from boxie.persistence.postgres_artifacts import PostgresArtifactStore
+    from boxie.persistence.start_guard import PostgresStartGuard
+    from boxie.sandbox.docker import DockerBackend
+    from boxie.sandbox.durable_server import create_durable_agent_app
+    from boxie.sandbox.lifecycle import DurableAgent
+    from boxie.sandbox.reporting import ObservationReporter
+
     parser = argparse.ArgumentParser(description="Boxie private sandbox agent")
     parser.add_argument("--config", type=Path, required=True)
     args = parser.parse_args()
@@ -31,6 +34,7 @@ def main() -> None:
     dsn_file, api_url = config.postgres_dsn_file, config.api_url
 
     async def run() -> None:
+        install_asyncio_handler(log_runtime())
         async with pool_for(dsn_file) as pool:
             artifacts = PostgresArtifactStore(pool, config.data_dir / "artifacts")
             agent = DurableAgent(
@@ -48,6 +52,8 @@ def main() -> None:
                 credential=credential,
                 reporter=ObservationReporter(api_url, credential),
             )
+
+            app.add_middleware(RequestLogging)
 
             def reload_profiles() -> None:
                 try:
@@ -70,6 +76,7 @@ def main() -> None:
                         ws_max_queue=4,
                         ws_per_message_deflate=False,
                         access_log=False,
+                        log_config=None,
                     )
                 )
                 await server.serve()
@@ -77,6 +84,13 @@ def main() -> None:
                 loop.remove_signal_handler(signal.SIGHUP)
 
     asyncio.run(run())
+
+
+def main() -> None:
+    from boxie.observability.logging import process_logging
+
+    runtime = process_logging("agent")
+    run_process(runtime, _main)
 
 
 if __name__ == "__main__":

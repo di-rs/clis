@@ -18,6 +18,7 @@ from boxie.domain.lifecycle import (
     SandboxRef,
 )
 from boxie.domain.models import SandboxState, TerminationReason
+from boxie.observability.context import bind_context
 from boxie.persistence.postgres import PostgresLifecycle
 from boxie.sandbox.durable_client import DurableAgentClient
 from boxie.temporal.contracts import LifecycleFacts, StopRequest
@@ -25,37 +26,46 @@ from boxie.temporal.contracts import LifecycleFacts, StopRequest
 
 class SafeActivityInbound(ActivityInboundInterceptor):
     async def execute_activity(self, input: ExecuteActivityInput) -> Any:
-        async def heartbeat() -> None:
-            while True:
-                activity.heartbeat()
-                await asyncio.sleep(2)
+        info = activity.info()
+        with bind_context(
+            workflow_id=info.workflow_id,
+            run_id=info.workflow_run_id,
+            activity_attempt=info.attempt,
+        ):
 
-        pulse = asyncio.create_task(heartbeat()) if activity.info().heartbeat_timeout else None
-        try:
-            return await self.next.execute_activity(input)
-        except asyncio.CancelledError:
-            raise
-        except Exception as error:
-            non_retryable = isinstance(error, BoxieError) and error.status in {400, 404, 422}
-            category = "InvalidRequest" if non_retryable else "DependencyUnavailable"
-            if isinstance(error, ApplicationError) and error.type in {
-                "InvalidRequest",
-                "ProvisioningStopped",
-                "CleanupPending",
-                "DependencyUnavailable",
-            }:
-                category = error.type
-                non_retryable = error.non_retryable
-            # Sanitize before SDK logging, including nested context and details.
-            raise ApplicationError(
-                "lifecycle operation pending" if not non_retryable else "lifecycle request stopped",
-                type=category,
-                non_retryable=non_retryable,
-            ) from None
-        finally:
-            if pulse:
-                pulse.cancel()
-                await asyncio.gather(pulse, return_exceptions=True)
+            async def heartbeat() -> None:
+                while True:
+                    activity.heartbeat()
+                    await asyncio.sleep(2)
+
+            pulse = asyncio.create_task(heartbeat()) if activity.info().heartbeat_timeout else None
+            try:
+                return await self.next.execute_activity(input)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                non_retryable = isinstance(error, BoxieError) and error.status in {400, 404, 422}
+                category = "InvalidRequest" if non_retryable else "DependencyUnavailable"
+                if isinstance(error, ApplicationError) and error.type in {
+                    "InvalidRequest",
+                    "ProvisioningStopped",
+                    "CleanupPending",
+                    "DependencyUnavailable",
+                }:
+                    category = error.type
+                    non_retryable = error.non_retryable
+                # Sanitize before SDK logging, including nested context and details.
+                raise ApplicationError(
+                    "lifecycle operation pending"
+                    if not non_retryable
+                    else "lifecycle request stopped",
+                    type=category,
+                    non_retryable=non_retryable,
+                ) from None
+            finally:
+                if pulse:
+                    pulse.cancel()
+                    await asyncio.gather(pulse, return_exceptions=True)
 
 
 class SafeActivityErrors(Interceptor):
