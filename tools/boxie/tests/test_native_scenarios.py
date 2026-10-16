@@ -2,14 +2,94 @@
 
 import socket
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from string import Template
+from types import SimpleNamespace
+from typing import Any
 from uuid import uuid4
 
 import httpx
 import pytest
 import yaml
 from run_integration import ROOT, ProductionStack, command
+
+
+def test_collection_observer_reaches_actual_agent_bootstrap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import runpy
+    import sys
+
+    from boxie.bootstrap import agent, config, durable
+    from boxie.persistence.postgres_artifacts import PostgresArtifactStore
+
+    class ReachedStore(Exception):
+        pass
+
+    @asynccontextmanager
+    async def pool(*args: object) -> AsyncIterator[None]:
+        yield None
+
+    observed: list[str] = []
+
+    def inspect_store(self: Any, *args: object) -> None:
+        observed.append(type(self).__name__)
+        raise ReachedStore
+
+    monkeypatch.setattr(sys, "argv", ["agent_fixture.py", "--config", "/unused"])
+    monkeypatch.setattr(
+        config.AgentConfig,
+        "from_file",
+        lambda _: SimpleNamespace(postgres_dsn_file="unused", api_url="unused", data_dir=tmp_path),
+    )
+    monkeypatch.setattr(durable, "pool_for", pool)
+    monkeypatch.setattr(PostgresArtifactStore, "__init__", inspect_store)
+    monkeypatch.setattr(agent, "install_asyncio_handler", lambda _: None)
+    monkeypatch.setattr(agent, "log_runtime", lambda: None)
+    monkeypatch.setattr(agent, "main", lambda: agent._main(None))  # type: ignore[arg-type]
+    # Restore the test wrapper's module substitution after exercising the real _main import.
+    monkeypatch.setattr(
+        "boxie.persistence.postgres_artifacts.PostgresArtifactStore", PostgresArtifactStore
+    )
+    with pytest.raises(ReachedStore):
+        runpy.run_path(
+            str(ROOT / "tools/boxie/tests/integration/agent_fixture.py"), run_name="__main__"
+        )
+    assert observed == ["ObservedArtifacts"]
+
+
+def test_native_journal_check_requires_structured_agent_error() -> None:
+    import json
+    import subprocess
+    import sys
+
+    from integration.test_lifecycle import assert_journal_failure
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import logging\n"
+            "from boxie.observability.logging import LogSettings, bootstrap_logging\n"
+            "runtime = bootstrap_logging(LogSettings(service='boxie', role='agent'))\n"
+            "logging.getLogger('boxie.sandbox.lifecycle').error("
+            "'execution journal persistence failed; new execution disabled')\n"
+            "runtime.close()\n",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert result.returncode == 0 and result.stderr == ""
+    assert_journal_failure(result.stdout)
+    event = json.loads(result.stdout)
+    for changed in ({"level": "INFO"}, {"role": "api"}, {"event": "journal_recovered"}):
+        with pytest.raises(AssertionError):
+            assert_journal_failure(json.dumps({**event, **changed}))
+    with pytest.raises(AssertionError):
+        assert_journal_failure(json.dumps({"message": "execution journal persistence failed"}))
 
 
 @pytest.mark.integration

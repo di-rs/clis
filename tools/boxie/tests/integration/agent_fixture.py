@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 import boxie.bootstrap.agent
+import boxie.persistence.postgres_artifacts
 from boxie.persistence.postgres_artifacts import PostgresArtifactStore
 
 
@@ -28,5 +29,6 @@ class ObservedArtifacts(PostgresArtifactStore):
 
 
 if __name__ == "__main__":
-    vars(boxie.bootstrap.agent)["PostgresArtifactStore"] = ObservedArtifacts
+    # The production bootstrap imports this class inside _main after logging starts.
+    vars(boxie.persistence.postgres_artifacts)["PostgresArtifactStore"] = ObservedArtifacts
     boxie.bootstrap.agent.main()

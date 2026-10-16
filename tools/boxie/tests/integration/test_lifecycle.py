@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import json
 import os
 import subprocess
 import time
@@ -21,6 +22,18 @@ from test_temporal_deployment import tls
 from integration.stack import LifecycleStack
 
 pytestmark = pytest.mark.integration
+
+
+def assert_journal_failure(logs: str) -> None:
+    events = [json.loads(line) for line in logs.splitlines() if line]
+    assert any(
+        event.get("schema_version") == 1
+        and event.get("service") == "boxie"
+        and event.get("role") == "agent"
+        and event.get("level") == "ERROR"
+        and event.get("event") == "journal_failed"
+        for event in events
+    ), "structured agent journal failure event missing"
 
 
 @pytest.fixture
@@ -286,8 +299,10 @@ def test_sustained_journal_failure_across_agent_restart(
                     await asyncio.sleep(0.2)
             # Profiles alone remain writable for bootstrap; execution.json and its
             # parent stay read-only. Physical deletion proves startup reached cleanup.
-            logs = await asyncio.to_thread(stack.runtime_command, "logs", "--no-color", "agent")
-            assert "execution journal persistence failed" in logs
+            logs = await asyncio.to_thread(
+                stack.runtime_command, "logs", "--no-color", "--no-log-prefix", "agent"
+            )
+            assert_journal_failure(logs)
             await asyncio.to_thread(stack.process, "agent", "kill")
             await asyncio.to_thread(stack.process, "agent", "start")
             await pending_after_restart(stack, client, identifier)
