@@ -116,6 +116,7 @@ def prepare(root: Path, timeout_seconds: float = 1200) -> None:
     resources = Resources(root, commands)
     stage = "owned daemon and journal"
     stack: Any = None
+    private_sentinels: tuple[str, ...] = ()
     try:
         resources.prepare()
         os.environ["DOCKER_HOST"] = "unix://" + str(resources.socket)
@@ -166,6 +167,7 @@ def prepare(root: Path, timeout_seconds: float = 1200) -> None:
         telemetry.prepare(resources)
         stage = "real HTTP PTY and binary journal preflight"
         application = Application(root, commands)
+        private_sentinels = application.sentinels
 
         async def preflight() -> None:
             async with asyncio.timeout(deadline.remaining()):
@@ -196,7 +198,7 @@ def prepare(root: Path, timeout_seconds: float = 1200) -> None:
     except Exception as error:
         if root.exists():
             if stack is not None:
-                setup_diagnostics(root, stack, commands.last_failure)
+                setup_diagnostics(root, stack, commands.last_failure, private_sentinels)
             evidence(
                 root / "setup.json",
                 {

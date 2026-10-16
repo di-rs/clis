@@ -463,17 +463,29 @@ def test_setup_diagnostics_exports_only_allowlisted_state(
         if args[1] == "version" or args[1:3] == ["compose", "version"]:
             return "29.0.0"
         if args[1] == "ps":
-            return "a" * 64
+            return "a" * 64 if args[-1].endswith("owned-platform") else ""
         if args[1] == "inspect":
             return json.dumps(
                 [
                     {
                         "Id": "a" * 64,
                         "Image": "sha256:" + "b" * 64,
-                        "Config": {"Env": [secret]},
+                        "Config": {
+                            "Env": [secret],
+                            "Labels": {"com.docker.compose.project": "owned-platform"},
+                        },
+                        "HostConfig": {"Runtime": "runc"},
+                        "Mounts": [
+                            {
+                                "Type": "bind",
+                                "Source": "/owned/init.sql",
+                                "Destination": "/init.sql",
+                            }
+                        ],
                         "State": {
-                            "Status": "exited",
-                            "ExitCode": 4,
+                            "Status": "created",
+                            "ExitCode": 127,
+                            "Error": "exec: /usr/bin/runc: no such file or directory " + secret,
                             "OOMKilled": False,
                             "Health": {"Status": "unhealthy", "Output": secret},
                         },
@@ -484,12 +496,19 @@ def test_setup_diagnostics_exports_only_allowlisted_state(
 
     monkeypatch.setattr("observability_infra.smoke_diagnostics.Commands.run", run)
     stack = SimpleNamespace(
-        env={}, platform="owned-platform", temporal="owned-temporal", runtime="owned-runtime"
+        env={"FIXTURE_PASSWORD": secret},
+        platform="owned-platform",
+        temporal="owned-temporal",
+        runtime="owned-runtime",
     )
     smoke_diagnostics.setup_diagnostics(tmp_path, stack, {"returncode": 1})
     output = (tmp_path / "setup-diagnostics.json").read_text()
     assert secret not in output
-    assert json.loads(output)["containers"][0]["exit_code"] == 4
+    detail = json.loads(output)["containers"][0]
+    assert detail["exit_code"] == 127
+    assert "/usr/bin/runc: no such file or directory" in detail["start_error"]
+    assert detail["runtime"] == "runc"
+    assert detail["binds"][0]["source_kind_in_daemon"] == "unavailable"
 
 
 def test_journal_observation_separates_runtime_and_persistent_acceptance(tmp_path: Path) -> None:
@@ -553,3 +572,54 @@ def test_empty_journal_query_does_not_hide_read_errors(
     else:
         with pytest.raises(RuntimeError):
             runner.run(args, empty_journal_ok=True)
+
+
+def test_runtime_error_preserves_missing_path_but_redacts_credentials() -> None:
+    from observability_infra.smoke_diagnostics import safe_runtime_error
+
+    secret = "fixture-secret-value"
+    message = (
+        "failed to create shim task: OCI runtime create failed: "
+        'exec: "/usr/bin/runc": no such file or directory; password=unknown-private ' + secret
+    )
+    result = safe_runtime_error(message, (secret,))
+    assert "/usr/bin/runc" in result and "no such file or directory" in result
+    assert secret not in result and "unknown-private" not in result
+    assert safe_runtime_error('Env=["SECRET=private"]', ()) == "[suspicious runtime error omitted]"
+    assert (
+        safe_runtime_error('{"env":["SECRET=private"]}', ()) == "[suspicious runtime error omitted]"
+    )
+    assert safe_runtime_error("x" * 9000, ()) == "[oversized runtime error omitted]"
+
+
+def test_daemon_path_reader_never_returns_other_environment(tmp_path: Path) -> None:
+    from observability_infra.smoke_diagnostics import daemon_path
+
+    (tmp_path / "environ").write_bytes(
+        b"TOKEN=private\x00PATH=/usr/bin:/bin\x00PASSWORD=private\x00"
+    )
+    assert daemon_path(tmp_path) == "/usr/bin:/bin"
+    (tmp_path / "environ").write_bytes(b"PATH=relative:/bin\x00")
+    with pytest.raises(ValueError, match="PATH"):
+        daemon_path(tmp_path)
+
+
+def test_runtime_resolution_uses_only_the_daemon_root_and_path(tmp_path: Path) -> None:
+    from observability_infra.smoke_diagnostics import runtime_executables, source_kind
+
+    directory = tmp_path / "custom/bin"
+    directory.mkdir(parents=True)
+    binary = directory / "runc"
+    binary.write_text("not executed by diagnostics")
+    binary.chmod(0o700)
+    (directory / "containerd").write_text("not executable")
+    resolved = runtime_executables(tmp_path, "/custom/bin:/usr/bin", ())
+    assert resolved == {
+        "runc": "/custom/bin/runc",
+        "containerd": None,
+        "containerd-shim-runc-v2": None,
+        "runsc": None,
+    }
+    assert source_kind(binary) == "file"
+    assert source_kind(directory) == "directory"
+    assert source_kind(directory / "missing") == "missing"
