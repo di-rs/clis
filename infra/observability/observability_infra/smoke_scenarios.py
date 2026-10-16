@@ -8,6 +8,7 @@ import re
 import signal
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -314,6 +315,63 @@ class Scenario:
                 return
             await asyncio.sleep(0.2)
 
+    async def wait_rules(self) -> int:
+        while True:
+            self.commands.deadline.remaining()
+            state: dict[str, Any] = {"groups": []}
+            self.observations["rules_current"] = state
+            response = json.loads(await self.telemetry.query("prometheus", "/api/v1/rules"))
+            groups = response.get("data", {}).get("groups")
+            if not isinstance(groups, list) or not 1 <= len(groups) <= 8:
+                raise RuntimeError("native rule groups unavailable")
+            pending = False
+            unhealthy = False
+            count = 0
+            for group in groups:
+                rules = group.get("rules") if isinstance(group, dict) else None
+                if not isinstance(rules, list) or not 1 <= len(rules) <= 128:
+                    raise RuntimeError("native rules unavailable")
+                count += len(rules)
+                if count > 128:
+                    raise RuntimeError("native rule evidence bound exceeded")
+                observed: list[dict[str, Any]] = []
+                state["groups"].append(observed)
+                for rule in rules:
+                    if not isinstance(rule, dict):
+                        raise RuntimeError("native rule malformed")
+                    health = rule.get("health")
+                    evaluation = rule.get("lastEvaluation")
+                    if evaluation == "0001-01-01T00:00:00Z":
+                        evaluated = "never"
+                    else:
+                        try:
+                            if not isinstance(evaluation, str):
+                                raise ValueError("missing evaluation timestamp")
+                            timestamp = datetime.fromisoformat(evaluation)
+                            evaluated = "completed" if timestamp.tzinfo is not None else "invalid"
+                        except ValueError, TypeError:
+                            evaluated = "invalid"
+                    error_field = rule.get("lastError", "")
+                    error = bool(error_field) or not isinstance(error_field, str)
+                    observed.append(
+                        {
+                            "health": health if health in ("ok", "unknown", "err") else "invalid",
+                            "evaluation": evaluated,
+                            "error_present": error,
+                        }
+                    )
+                    if health == "unknown" and evaluated == "never" and not error:
+                        pending = True
+                    elif health != "ok" or evaluated != "completed" or error:
+                        unhealthy = True
+            self.observations.setdefault("rules_initial", state)
+            if unhealthy:
+                raise RuntimeError("native rules unhealthy")
+            if not pending:
+                return len(groups)
+            # Prometheus starts unknown until its first hash-slotted evaluation.
+            await asyncio.sleep(min(0.2, self.commands.deadline.remaining()))
+
     async def terminal_privacy(self) -> None:
         sandbox = await self.app.provision()
         progress = await self.app.progress(sandbox)
@@ -360,13 +418,7 @@ class Scenario:
         for request in request_ids:
             await self.telemetry.wait_logs(f'request_id:"{request}"')
         await self.wait_failed_metric(committed_at)
-        rules = json.loads(await self.telemetry.query("prometheus", "/api/v1/rules"))
-        if not rules["data"]["groups"] or any(
-            rule.get("health") != "ok"
-            for group in rules["data"]["groups"]
-            for rule in group["rules"]
-        ):
-            raise RuntimeError("native rules unavailable/unhealthy")
+        rule_groups = await self.wait_rules()
         logs_metrics = await self.telemetry.metrics("victorialogs")
         if total(logs_metrics, "vl_max_disk_space_usage_bytes") != 268435456:
             raise RuntimeError("native VictoriaLogs cleanup target differs")
@@ -378,7 +430,7 @@ class Scenario:
             sandbox_id=sandbox,
             request_ids=sorted(request_ids),
             failed_records=len(records),
-            rule_groups=len(rules["data"]["groups"]),
+            rule_groups=rule_groups,
             logs_target_bytes=268435456,
             logs_max_age_days=7,
         )
