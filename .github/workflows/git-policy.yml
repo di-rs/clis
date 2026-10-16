@@ -2,13 +2,17 @@ name: Git Policy
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened, edited, ready_for_review, labeled]
 
 permissions:
   contents: read
 
 jobs:
   git-policy:
+    if: >-
+      ${{
+        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
+      }}
     name: git-policy
     runs-on: ubuntu-24.04
     timeout-minutes: 5

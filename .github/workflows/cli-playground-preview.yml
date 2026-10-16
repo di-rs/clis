@@ -13,7 +13,7 @@ permissions: {}
 
 jobs:
   publish:
-    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' }}
+    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.display_title != 'CI skipped' }}
     concurrency:
       group: cli-playground-publish-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
       cancel-in-progress: false
@@ -42,7 +42,7 @@ jobs:
           PLAYGROUND_DEPLOY_TOKEN: ${{ secrets.PLAYGROUND_DEPLOY_TOKEN }}
         run: uv run --locked --no-dev python tools/cli-playground/preview_ci.py publish --repo "$REPOSITORY" --run-id "$RUN_ID"
   lifecycle:
-    if: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.repo.full_name == github.repository && github.event.pull_request.base.ref == 'master' }}
+    if: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.repo.full_name == github.repository && github.event.pull_request.base.ref == 'master' && (github.event.action == 'closed' || !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci')) }}
     concurrency:
       group: cli-playground-lifecycle-${{ github.repository }}-${{ github.event.pull_request.number }}
       cancel-in-progress: false

@@ -3,6 +3,7 @@ name: Pull Request Check
 on:
   pull_request:
     branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
   push:
     branches: [master]
   workflow_dispatch:
@@ -25,6 +26,10 @@ env:
 
 jobs:
   quality:
+    if: >-
+      ${{
+        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
+      }}
     name: quality
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -47,6 +52,10 @@ jobs:
       - run: git diff --exit-code
 
   python:
+    if: >-
+      ${{
+        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
+      }}
     name: python (3.15)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -71,6 +80,10 @@ jobs:
       - run: git diff --exit-code
 
   frontend:
+    if: >-
+      ${{
+        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
+      }}
     name: frontend
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -106,6 +119,10 @@ jobs:
       - run: git diff --exit-code
 
   tests:
+    if: >-
+      ${{
+        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
+      }}
     name: tests (${{ matrix.platform }})
     strategy:
       fail-fast: false
@@ -151,6 +168,10 @@ jobs:
           if-no-files-found: error
 
   packages:
+    if: >-
+      ${{
+        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
+      }}
     name: packages
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -171,6 +192,10 @@ jobs:
       - run: git diff --exit-code
 
   docs-policy:
+    if: >-
+      ${{
+        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
+      }}
     name: docs-policy
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -197,6 +222,10 @@ jobs:
       - run: git diff --exit-code
 
   dependencies:
+    if: >-
+      ${{
+        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
+      }}
     name: dependencies
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -219,6 +248,10 @@ jobs:
           cargo machete --with-metadata
 
   workflows:
+    if: >-
+      ${{
+        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
+      }}
     name: workflows
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -246,6 +279,10 @@ jobs:
         run: zizmor --offline --no-progress .github/workflows
 
   secrets:
+    if: >-
+      ${{
+        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
+      }}
     name: secrets
     runs-on: ubuntu-24.04
     timeout-minutes: 10

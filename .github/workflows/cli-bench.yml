@@ -1,16 +1,28 @@
 name: CLI benchmark suites
 
+# Keep this condition aligned with the first job: downstream workflows skip without a runner.
+run-name: >-
+  ${{
+    (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci')) &&
+    (github.event.action != 'edited' || github.event.changes.body != null) &&
+    format('CLI benchmark suites for PR #{0}', github.event.pull_request.number) || 'CI skipped'
+  }}
+
 on:
   pull_request:
     branches: [master]
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened, edited, ready_for_review, labeled]
 
 permissions:
   contents: read
 
 jobs:
   select:
-    if: github.event.action != 'edited' || github.event.changes.body != null
+    if: >-
+      ${{
+        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci')) &&
+        (github.event.action != 'edited' || github.event.changes.body != null)
+      }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:

@@ -3,6 +3,7 @@ name: CodeQL
 on:
   pull_request:
     branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
   push:
     branches: [master]
   schedule:
@@ -18,6 +19,10 @@ concurrency:
 
 jobs:
   analyze:
+    if: >-
+      ${{
+        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
+      }}
     name: analyze (${{ matrix.language }})
     strategy:
       fail-fast: false

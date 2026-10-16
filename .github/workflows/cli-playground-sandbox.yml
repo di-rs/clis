@@ -3,6 +3,7 @@ name: CLI playground sandbox
 on:
   pull_request:
     branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
       - '.github/workflows/cli-playground-sandbox.yml'
       - 'tools/cli-playground/**'
@@ -26,6 +27,10 @@ concurrency:
 
 jobs:
   sandbox:
+    if: >-
+      ${{
+        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
+      }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
