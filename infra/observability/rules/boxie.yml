@@ -127,19 +127,19 @@ groups:
       severity: warning
   - alert: CollectorBufferHigh
     expr: vector_buffer_size_bytes{job="vector",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0"}
-      / vector_buffer_max_size_bytes{job="vector",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0"}
+      / ((vector_buffer_max_size_bytes{job="vector",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0"} >= 268435488) - 134217728)
       > 0.8
     for: 5m
     labels:
       severity: warning
   - alert: CollectorBufferCapacityUnavailable
     expr: (up{job="vector"} == 1) unless on(job,instance) (vector_buffer_max_size_bytes{job="vector",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0"}
-      > 0)
+      >= 268435488)
     for: 2m
     labels:
       severity: warning
   - alert: CollectorDropsIncreasing
-    expr: sum by(job,instance,component_id) (increase(vector_buffer_discarded_events_total{job="vector",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0"}[5m]))
+    expr: sum by(job,instance,component_id,buffer_type,stage,intentional) (increase(vector_buffer_discarded_events_total{job="vector",component_id="storage",buffer_id="storage",buffer_type="memory",stage="1",intentional="true"}[5m]) or increase(vector_buffer_discarded_events_total{job="vector",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0",intentional="false"}[5m]))
       > 0
     for: 2m
     labels:

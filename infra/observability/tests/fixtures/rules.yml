@@ -126,13 +126,13 @@ tests:
   - eval_time: 5m
     alertname: BoxieWorkerUnavailable
     exp_alerts: []
-- name: collector threshold and hold
+- name: collector native usable capacity threshold and hold
   interval: 15s
   input_series:
   - series: vector_buffer_size_bytes{job="vector",instance="vector:9598",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0"}
-    values: 80x3 81x36
+    values: 107374208x3 108716385x36
   - series: vector_buffer_max_size_bytes{job="vector",instance="vector:9598",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0"}
-    values: 100x40
+    values: 268435488x40
   alert_rule_test:
   - eval_time: 5m45s
     alertname: CollectorBufferHigh
@@ -151,7 +151,7 @@ tests:
 - name: intentional newest loss alerts
   interval: 15s
   input_series:
-  - series: vector_buffer_discarded_events_total{job="vector",instance="vector:9598",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0",intentional="true"}
+  - series: vector_buffer_discarded_events_total{job="vector",instance="vector:9598",component_id="storage",buffer_id="storage",buffer_type="memory",stage="1",intentional="true"}
     values: 0+1x40
   alert_rule_test:
   - eval_time: 2m
@@ -165,6 +165,9 @@ tests:
         instance: vector:9598
         component_id: storage
         severity: warning
+        buffer_type: memory
+        stage: '1'
+        intentional: 'true'
 - name: counter reset alone is not loss
   interval: 15s
   input_series:
@@ -358,4 +361,130 @@ tests:
   alert_rule_test:
   - eval_time: 5m
     alertname: HostDiskSpaceCritical
+    exp_alerts: []
+- name: collector production usable capacity threshold and hold
+  interval: 15s
+  input_series:
+  - series: vector_buffer_size_bytes{job="vector",instance="vector:9598",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0"}
+    values: 322122547x3 326149079x36
+  - series: vector_buffer_max_size_bytes{job="vector",instance="vector:9598",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0"}
+    values: 536870912x40
+  alert_rule_test:
+  - eval_time: 5m45s
+    alertname: CollectorBufferHigh
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: CollectorBufferHigh
+    exp_alerts:
+    - exp_labels:
+        job: vector
+        instance: vector:9598
+        component_id: storage
+        buffer_id: storage
+        buffer_type: disk
+        stage: '0'
+        severity: warning
+- name: disk unprocessable loss remains separate
+  interval: 15s
+  input_series:
+  - series: vector_buffer_discarded_events_total{job="vector",instance="vector:9598",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0",intentional="false"}
+    values: 0+1x40
+  alert_rule_test:
+  - eval_time: 2m
+    alertname: CollectorDropsIncreasing
+    exp_alerts: []
+  - eval_time: 2m15s
+    alertname: CollectorDropsIncreasing
+    exp_alerts:
+    - exp_labels:
+        job: vector
+        instance: vector:9598
+        component_id: storage
+        severity: warning
+        buffer_type: disk
+        stage: '0'
+        intentional: 'false'
+- name: collector invalid configured capacity 0
+  interval: 15s
+  input_series:
+  - series: up{job="vector",instance="vector:9598"}
+    values: 1x40
+  - series: vector_buffer_max_size_bytes{job="vector",instance="vector:9598",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0"}
+    values: '0x40'
+  alert_rule_test:
+  - eval_time: 1m45s
+    alertname: CollectorBufferCapacityUnavailable
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: CollectorBufferCapacityUnavailable
+    exp_alerts:
+    - exp_labels:
+        job: vector
+        instance: vector:9598
+        severity: warning
+  - eval_time: 6m
+    alertname: CollectorBufferHigh
+    exp_alerts: []
+- name: collector invalid configured capacity 134217728
+  interval: 15s
+  input_series:
+  - series: up{job="vector",instance="vector:9598"}
+    values: 1x40
+  - series: vector_buffer_max_size_bytes{job="vector",instance="vector:9598",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0"}
+    values: 134217728x40
+  alert_rule_test:
+  - eval_time: 1m45s
+    alertname: CollectorBufferCapacityUnavailable
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: CollectorBufferCapacityUnavailable
+    exp_alerts:
+    - exp_labels:
+        job: vector
+        instance: vector:9598
+        severity: warning
+  - eval_time: 6m
+    alertname: CollectorBufferHigh
+    exp_alerts: []
+- name: collector invalid configured capacity 268435487
+  interval: 15s
+  input_series:
+  - series: up{job="vector",instance="vector:9598"}
+    values: 1x40
+  - series: vector_buffer_max_size_bytes{job="vector",instance="vector:9598",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0"}
+    values: 268435487x40
+  alert_rule_test:
+  - eval_time: 1m45s
+    alertname: CollectorBufferCapacityUnavailable
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: CollectorBufferCapacityUnavailable
+    exp_alerts:
+    - exp_labels:
+        job: vector
+        instance: vector:9598
+        severity: warning
+  - eval_time: 6m
+    alertname: CollectorBufferHigh
+    exp_alerts: []
+- name: collector invalid configured capacity NaN
+  interval: 15s
+  input_series:
+  - series: up{job="vector",instance="vector:9598"}
+    values: 1x40
+  - series: vector_buffer_max_size_bytes{job="vector",instance="vector:9598",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0"}
+    values: NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN
+  alert_rule_test:
+  - eval_time: 1m45s
+    alertname: CollectorBufferCapacityUnavailable
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: CollectorBufferCapacityUnavailable
+    exp_alerts:
+    - exp_labels:
+        job: vector
+        instance: vector:9598
+        severity: warning
+  - eval_time: 6m
+    alertname: CollectorBufferHigh
     exp_alerts: []

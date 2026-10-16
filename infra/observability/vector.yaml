@@ -5,6 +5,7 @@ sources:
   journal:
     type: journald
     current_boot_only: false
+    batch_size: 16
     log_namespace: false
     journal_directory: /var/log/journal
     journalctl_path: /usr/bin/journalctl
@@ -34,9 +35,12 @@ sinks:
     acknowledgements:
       enabled: false
     buffer:
-      type: disk
-      max_size: 536870912
-      when_full: drop_newest
+      - type: disk
+        max_size: 536870912
+        when_full: overflow
+      - type: memory
+        max_events: 1
+        when_full: drop_newest
     batch:
       max_bytes: 1048576
       max_events: 64

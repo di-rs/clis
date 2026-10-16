@@ -70,11 +70,17 @@ The supplied host rules select `/`; deployments must explicitly update that
 finite mount list if approved storage has another backing filesystem.
 
 Native Vector buffer names and units were verified against the selected 0.59.0
-executable; the sink ID is `storage`. The lazy buffer-discard counter includes
-intentional `drop_newest` loss. `increase` can miss the first-ever loss before the
+executable; the sink ID is `storage`. Vector 0.59 disk `drop_newest` omits
+intentional-drop accounting. The selected supported chain uses disk stage 0
+with `overflow`, followed by memory stage 1 with `max_events: 1` and
+`drop_newest`. Its real memory-stage intentional counter exposes overflow loss;
+disk-stage unprocessable drops remain separate. `increase` can miss the first-ever loss before the
 first observed counter sample; absence is not proof of zero drops. Display the
-native lifetime counter alongside the rate. Missing/zero maximum buffer capacity
-is unhealthy; absent occupancy alone may be an empty startup buffer.
+native lifetime counter alongside the rate. The disk maximum gauge reports the
+configured storage ceiling, while unread-record capacity subtracts the pinned
+128 MiB data-file reserve: 512 MiB configured gives 384 MiB usable. Disk ratios
+use that usable capacity; absent or unsupported capacity is unhealthy/unknown,
+not zero. Absent occupancy alone may be an empty startup buffer.
 
 VictoriaLogs families were verified against 1.53.0 with metadata enabled. Native
 SDK latency families were scraped from the pinned Python SDK 1.34.0 on macOS
@@ -186,11 +192,20 @@ best-effort diagnostics, not exactly-once delivery.
 | --- | --- |
 | Persistent journal | 1 GiB use; keep 4 GiB free; 2 days; rotate hourly |
 | Runtime journal | 128 MiB |
-| Vector disk buffer | 536870912 bytes; `drop_newest` |
+| Vector disk buffer | 536870912-byte storage ceiling; 402653184-byte unread capacity; `overflow` |
+| Vector memory tail | `max_events: 1`; `drop_newest`; one queued batch may exceed one event |
 | Vector HTTP batches | at most 1 MiB and 64 events; flush after 1 second |
 | VictoriaLogs | 7-day maximum age; 256 MiB (268435456 bytes) cleanup target; `/victoria-logs-data` |
 | Prometheus | 7 days, 2 GB (2147483648 bytes in its binary units) retention; allocate at least 3 GiB for WAL/compaction |
 | Memory caps | Vector 256 MiB; logs 1 GiB; Prometheus 512 MiB; Grafana 256 MiB; node exporter 64 MiB; later tunnel 128 MiB |
+
+The memory tail is volatile and may interleave with disk records during recovery.
+The pinned implementation permits one oversized EventArray in an empty memory
+queue, so `max_events: 1` is not a hard one-event or byte bound. Journal reads
+explicitly use batches of 16; no downstream single-event guarantee is inferred.
+The unchanged 256 MiB Vector container cap remains the hard memory boundary.
+This is bounded-loss operational logging, without ordering, exactly-once or
+complete crash-delivery guarantees.
 
 The four external volumes are distinct: Vector state/buffer, VictoriaLogs,
 Prometheus, and Grafana. The host/bootstrap owner allocates them and sets ownership
@@ -421,7 +436,11 @@ exactly-once or complete delivery through pressure/crash windows.
 Pressure uses an explicit reduced test profile: a 256 MiB journal filesystem,
 64 MiB persistent journal target, 16 MiB runtime target, 8 MiB files and disabled
 compression/rate limiting; and a 640 MiB Vector filesystem with a 268435488-byte
-valid buffer. Production defaults are unchanged. These cases cannot establish
+configured disk ceiling (134217760 usable unread bytes after its file reserve)
+and the same memory overflow tail. Native full-buffer acceptance requires disk
+pressure, real stage-1 intentional drops, their fresh Prometheus visibility,
+HTTP/PTY progress and restored drain to zero. Production disk/memory caps are
+unchanged. These cases cannot establish
 saturation of the default 512 MiB buffer. The API/worker/agent test caps are
 512 MiB each. The driver and its one independent watchdog run in sibling transient
 services capped at 640 MiB and 128 MiB of resident memory, respectively, with no

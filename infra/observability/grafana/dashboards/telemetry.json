@@ -328,7 +328,7 @@
       "id": 105,
       "title": "Vector disk buffer bytes / maximum",
       "type": "stat",
-      "description": "Lazy occupancy may not be emitted for an empty startup buffer; absence is not numeric zero.",
+      "description": "Serialized unread disk bytes, configured disk storage ceiling, and usable unread capacity after the pinned 128 MiB data-file reserve.",
       "datasource": {
         "type": "prometheus",
         "uid": "boxie-prometheus"
@@ -411,6 +411,18 @@
           "range": false,
           "instant": true,
           "legendFormat": "Configured buffer maximum"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(((vector_buffer_max_size_bytes{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"disk\",stage=\"0\"} >= 268435488) - 134217728)) and on(job,instance) ((up{job=~\"vector\"} == 1) and (time() - timestamp(up{job=~\"vector\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "Usable disk unread capacity"
         }
       ]
     },
@@ -418,7 +430,7 @@
       "id": 106,
       "title": "Vector disk buffer utilization",
       "type": "stat",
-      "description": "",
+      "description": "Disk unread bytes / (configured ceiling minus the pinned 128 MiB file reserve). Invalid or absent capacity is unknown.",
       "datasource": {
         "type": "prometheus",
         "uid": "boxie-prometheus"
@@ -496,7 +508,7 @@
             "uid": "boxie-prometheus"
           },
           "editorMode": "code",
-          "expr": "(100 * vector_buffer_size_bytes{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"disk\",stage=\"0\"} / (vector_buffer_max_size_bytes{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"disk\",stage=\"0\"} > 0)) and on(job,instance) ((up{job=~\"vector\"} == 1) and (time() - timestamp(up{job=~\"vector\"}) < 45))",
+          "expr": "(100 * vector_buffer_size_bytes{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"disk\",stage=\"0\"} / ((vector_buffer_max_size_bytes{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"disk\",stage=\"0\"} >= 268435488) - 134217728)) and on(job,instance) ((up{job=~\"vector\"} == 1) and (time() - timestamp(up{job=~\"vector\"}) < 45))",
           "range": false,
           "instant": true,
           "legendFormat": "Buffer used"
@@ -507,7 +519,7 @@
       "id": 107,
       "title": "Vector discarded events: process lifetime",
       "type": "stat",
-      "description": "Includes intentional=true (drop_newest). Lazy family; absent is not proven zero.",
+      "description": "Memory stage 1 intentional overflow loss and disk stage 0 unprocessable loss, separately. Lazy series are unknown when absent; increase can miss the first sample.",
       "datasource": {
         "type": "prometheus",
         "uid": "boxie-prometheus"
@@ -563,7 +575,8 @@
           "values": false
         },
         "colorMode": "value",
-        "graphMode": "none"
+        "graphMode": "none",
+        "textMode": "value_and_name"
       },
       "targets": [
         {
@@ -573,10 +586,22 @@
             "uid": "boxie-prometheus"
           },
           "editorMode": "code",
-          "expr": "(vector_buffer_discarded_events_total{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"disk\",stage=\"0\"}) and on(job,instance) ((up{job=~\"vector\"} == 1) and (time() - timestamp(up{job=~\"vector\"}) < 45))",
+          "expr": "(vector_buffer_discarded_events_total{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"memory\",stage=\"1\",intentional=\"true\"}) and on(job,instance) ((up{job=~\"vector\"} == 1) and (time() - timestamp(up{job=~\"vector\"}) < 45))",
           "range": false,
           "instant": true,
-          "legendFormat": "{{intentional}}"
+          "legendFormat": "Memory overflow {{intentional}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(vector_buffer_discarded_events_total{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"disk\",stage=\"0\",intentional=\"false\"}) and on(job,instance) ((up{job=~\"vector\"} == 1) and (time() - timestamp(up{job=~\"vector\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "Disk unprocessable {{intentional}}"
         }
       ]
     },
@@ -584,7 +609,7 @@
       "id": 108,
       "title": "Vector discarded events: last 5m",
       "type": "stat",
-      "description": "Includes intentional=true. First loss may precede first scrape; compare lifetime.",
+      "description": "Memory stage 1 intentional overflow loss and disk stage 0 unprocessable loss, separately. Lazy series are unknown when absent; increase can miss the first sample.",
       "datasource": {
         "type": "prometheus",
         "uid": "boxie-prometheus"
@@ -640,7 +665,8 @@
           "values": false
         },
         "colorMode": "value",
-        "graphMode": "none"
+        "graphMode": "none",
+        "textMode": "value_and_name"
       },
       "targets": [
         {
@@ -650,10 +676,22 @@
             "uid": "boxie-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by(job,instance,component_id,intentional) ((increase(vector_buffer_discarded_events_total{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"disk\",stage=\"0\"}[5m])) and on(job,instance) ((up{job=~\"vector\"} == 1) and (time() - timestamp(up{job=~\"vector\"}) < 45)))",
+          "expr": "sum by(job,instance,component_id,intentional) ((increase(vector_buffer_discarded_events_total{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"memory\",stage=\"1\",intentional=\"true\"}[5m])) and on(job,instance) ((up{job=~\"vector\"} == 1) and (time() - timestamp(up{job=~\"vector\"}) < 45)))",
           "range": false,
           "instant": true,
-          "legendFormat": "{{intentional}}"
+          "legendFormat": "Memory overflow {{intentional}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by(job,instance,component_id,intentional) ((increase(vector_buffer_discarded_events_total{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"disk\",stage=\"0\",intentional=\"false\"}[5m])) and on(job,instance) ((up{job=~\"vector\"} == 1) and (time() - timestamp(up{job=~\"vector\"}) < 45)))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "Disk unprocessable {{intentional}}"
         }
       ]
     },

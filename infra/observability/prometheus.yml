@@ -157,7 +157,7 @@ scrape_configs:
     - component_kind
     - component_type
     separator: ;
-    regex: vector_build_info;.*|vector_buffer_.*;storage;storage;disk;0;sink;http
+    regex: vector_build_info;.*|vector_buffer_.*;storage;storage;(disk;0|memory;1);sink;http
     action: keep
   - source_labels:
     - intentional

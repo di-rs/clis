@@ -29,6 +29,13 @@ _ASSETS = (
 )
 
 
+def disk_buffer_capacity(configured: int) -> int:
+    """Pinned Vector 0.59 reserves one 128 MiB file from unread-record capacity."""
+    if type(configured) is not int or configured < 268435488:
+        raise ValueError("invalid configured Vector disk capacity")
+    return configured - 134217728
+
+
 @dataclass(frozen=True)
 class Budgets:
     journal_system_bytes: int = _GIB
@@ -279,7 +286,7 @@ def render_config(config: ObservabilityConfig, destination: Path) -> tuple[Path,
     vector["transforms"]["normalize"]["source"] = _normalizer(config)
     storage = vector["sinks"]["storage"]
     storage["uri"] = config.endpoints.log_ingest
-    storage["buffer"]["max_size"] = b.vector_buffer_bytes
+    storage["buffer"][0]["max_size"] = b.vector_buffer_bytes
     storage["batch"] = {
         "max_bytes": b.vector_batch_bytes,
         "max_events": b.vector_batch_events,

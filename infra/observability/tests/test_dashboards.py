@@ -194,6 +194,7 @@ def test_raw_stats_do_not_use_grafana_default_failure_threshold() -> None:
     assert [t["legendFormat"] for t in vector["targets"]] == [
         "Actual buffer occupancy",
         "Configured buffer maximum",
+        "Usable disk unread capacity",
     ]
     for board in dashboards():
         for panel in board["panels"]:

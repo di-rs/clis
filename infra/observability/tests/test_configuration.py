@@ -135,7 +135,11 @@ def test_render_owns_only_nonsecret_config_and_exposes_private_endpoints(
     rendered = yaml.safe_load((tmp_path / "rendered/vector.yaml").read_text())
     assert rendered["sources"]["journal"]["current_boot_only"] is False
     assert rendered["sources"]["journal"]["log_namespace"] is False
-    assert rendered["sinks"]["storage"]["buffer"]["when_full"] == "drop_newest"
+    assert rendered["sources"]["journal"]["batch_size"] == 16
+    assert rendered["sinks"]["storage"]["buffer"] == [
+        {"type": "disk", "max_size": 536870912, "when_full": "overflow"},
+        {"type": "memory", "max_events": 1, "when_full": "drop_newest"},
+    ]
     assert rendered["sinks"]["storage"]["acknowledgements"]["enabled"] is False
     assert rendered["sinks"]["storage"]["batch"]["max_events"] == 64
     assert "consumer_id" not in rendered["sinks"]["storage"]["uri"]
@@ -549,3 +553,45 @@ def test_user_budget_defaults_reach_rendered_limits(tmp_path: Path) -> None:
         assert "OBS_LOGS_DISK_BYTES=268435456" in example.read_text()
         assert "OBS_LOGS_RETENTION_DAYS=7" in example.read_text()
         assert "OBS_GRAFANA_MEMORY_BYTES=268435456" in example.read_text()
+
+
+@pytest.mark.parametrize("configured,expected", [(268435488, 134217760), (536870912, 402653184)])
+def test_disk_unread_capacity_reserves_one_pinned_data_file(configured: int, expected: int) -> None:
+    from observability_infra.config import disk_buffer_capacity
+
+    assert disk_buffer_capacity(configured) == expected
+
+
+@pytest.mark.parametrize("configured", [0, 134217728, 268435487, float("nan"), None])
+def test_invalid_disk_capacity_is_not_zero(configured: Any) -> None:
+    from observability_infra.config import disk_buffer_capacity
+
+    with pytest.raises(ValueError):
+        disk_buffer_capacity(configured)
+
+
+def test_exact_memory_tail_and_disk_metrics_do_not_collide(tmp_path: Path) -> None:
+    from observability_infra.config import render_config
+
+    render_config(make_config(), tmp_path / "out")
+    config = yaml.safe_load((tmp_path / "out/prometheus.yml").read_text())
+    rules = next(
+        j["metric_relabel_configs"] for j in config["scrape_configs"] if j["job_name"] == "vector"
+    )
+    base = {
+        "__name__": "vector_buffer_discarded_events_total",
+        "component_id": "storage",
+        "buffer_id": "storage",
+        "component_kind": "sink",
+        "component_type": "http",
+        "intentional": "true",
+    }
+    disk = relabel(base | {"buffer_type": "disk", "stage": "0"}, rules)
+    tail = relabel(base | {"buffer_type": "memory", "stage": "1"}, rules)
+    assert disk is not None and tail is not None and disk != tail
+    for kind, stage in [("disk", "1"), ("memory", "0"), ("memory", "2")]:
+        assert relabel(base | {"buffer_type": kind, "stage": stage}, rules) is None
+    assert (
+        relabel(base | {"buffer_type": "memory", "stage": "1", "component_id": "foreign"}, rules)
+        is None
+    )

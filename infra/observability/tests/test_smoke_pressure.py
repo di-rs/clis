@@ -31,12 +31,12 @@ def pressure_scenario(tmp_path: Path) -> Scenario:
 
 
 def metrics(size: float, dropped: float) -> dict[str, list[dict[str, object]]]:
+    disk = {"component_id": "storage", "buffer_id": "storage", "buffer_type": "disk", "stage": "0"}
+    tail = dict(disk, buffer_type="memory", stage="1", intentional="true")
     return {
-        name: [{"labels": {"component_id": "storage"}, "value": value}]
-        for name, value in (
-            ("vector_buffer_size_bytes", size),
-            ("vector_buffer_discarded_events_total", dropped),
-        )
+        "vector_buffer_size_bytes": [{"labels": disk, "value": size}],
+        "vector_buffer_max_size_bytes": [{"labels": disk, "value": 268435488}],
+        "vector_buffer_discarded_events_total": [{"labels": tail, "value": dropped}],
     }
 
 
@@ -62,7 +62,7 @@ def test_current_peak_emission_and_exact_flood_exit_are_bounded(tmp_path: Path) 
         "exit_code": 0,
         "oom_killed": False,
     }
-    assert len(json.dumps(observation)) < 2000
+    assert len(json.dumps(observation)) < 3000
 
 
 @pytest.mark.parametrize(
@@ -97,3 +97,82 @@ def test_missing_or_prior_flood_emission_is_not_invented_as_zero(tmp_path: Path)
     (tmp_path / "control/emitted.json").write_text(json.dumps({"instance": "old", "emitted": 900}))
     asyncio.run(scenario.buffer_pressure(metrics(100, 0), 0))
     assert scenario.observations["vector_pressure"]["latest"]["emitted_lower_bound"] is None
+
+
+def test_missing_stage_drop_and_capacity_are_not_invented(tmp_path: Path) -> None:
+    scenario = pressure_scenario(tmp_path)
+    sample = metrics(134217288, 0)
+    sample.pop("vector_buffer_discarded_events_total")
+    asyncio.run(scenario.buffer_pressure(sample, None))
+    latest = scenario.observations["vector_pressure"]["latest"]
+    assert latest["discarded_delta"] is None
+    assert latest["memory_tail_intentional_discarded"] is None
+    assert latest["usable_disk_bytes"] == 134217760
+    sample.pop("vector_buffer_max_size_bytes")
+    with pytest.raises(RuntimeError, match="capacity"):
+        asyncio.run(scenario.buffer_pressure(sample, None))
+
+
+@pytest.mark.parametrize("fault", [None, "foreign_stage", "nonpositive", "missing"])
+def test_actual_prometheus_drop_visibility_is_separate_and_strict(
+    tmp_path: Path, fault: str | None
+) -> None:
+    from types import SimpleNamespace
+
+    scenario = pressure_scenario(tmp_path)
+    labels = {
+        "job": "vector",
+        "component_id": "storage",
+        "buffer_id": "storage",
+        "buffer_type": "memory",
+        "stage": "1",
+        "intentional": "true",
+    }
+    if fault == "foreign_stage":
+        labels["stage"] = "0"
+    data = {
+        "status": "success",
+        "data": {
+            "resultType": "vector",
+            "result": [{"metric": labels, "value": [10, "0" if fault == "nonpositive" else "5"]}],
+        },
+    }
+    calls = 0
+
+    async def query(service: str, path: str, *, params: dict[str, str]) -> str:
+        nonlocal calls
+        calls += 1
+        assert service == "prometheus" and path == "/api/v1/query"
+        assert 'stage="1"' in params["query"] and "timestamp(" in params["query"]
+        if fault == "missing":
+            raise TimeoutError
+        if calls == 1:
+            return json.dumps({"status": "success", "data": {"resultType": "vector", "result": []}})
+        return json.dumps(data)
+
+    scenario.telemetry = SimpleNamespace(query=query)  # type: ignore[assignment]
+    if fault:
+        with pytest.raises((RuntimeError, TimeoutError)):
+            asyncio.run(scenario.wait_drop_metric(None, 1))
+        assert scenario.observations["prometheus_tail_discarded"] is None
+    else:
+        asyncio.run(scenario.wait_drop_metric(None, 1))
+        assert calls == 2
+        assert scenario.observations["prometheus_tail_discarded"]["value"] == 5
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -1])
+def test_nonfinite_native_buffer_metrics_are_fatal(tmp_path: Path, bad: float) -> None:
+    scenario = pressure_scenario(tmp_path)
+    with pytest.raises(RuntimeError, match="invalid native"):
+        asyncio.run(scenario.buffer_pressure(metrics(bad, 1), None))
+
+
+def test_new_counter_after_absent_baseline_is_not_a_measured_delta(tmp_path: Path) -> None:
+    scenario = pressure_scenario(tmp_path)
+    asyncio.run(scenario.buffer_pressure(metrics(134217288, 19), None))
+    observation = scenario.observations["vector_pressure"]
+    assert observation["baseline_discarded"] is None
+    assert observation["latest"]["memory_tail_intentional_discarded"] == 19
+    assert observation["latest"]["discarded_delta"] is None
+    assert observation["peak_discarded_delta"] is None

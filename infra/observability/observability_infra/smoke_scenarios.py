@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
+from observability_infra.config import disk_buffer_capacity
 from observability_infra.smoke_application import REPO, Application
 from observability_infra.smoke_pipe_api import validate_shutdown
 from observability_infra.smoke_retention import removal_observation, retained_archive
@@ -72,6 +73,37 @@ def total(metrics: dict[str, list[dict[str, Any]]], name: str) -> float:
         for sample in metrics[name]
         if not name.startswith("vector_") or sample["labels"].get("component_id") == "storage"
     )
+
+
+def stage_metric(
+    metrics: dict[str, list[dict[str, Any]]],
+    name: str,
+    kind: str,
+    stage: str,
+    *,
+    intentional: str | None = None,
+) -> float | None:
+    selected = {
+        "component_id": "storage",
+        "buffer_id": "storage",
+        "buffer_type": kind,
+        "stage": stage,
+    }
+    if intentional is not None:
+        selected["intentional"] = intentional
+    samples = [
+        sample
+        for sample in metrics.get(name, [])
+        if all(sample["labels"].get(key) == value for key, value in selected.items())
+    ]
+    if not samples:
+        return None
+    if len(samples) != 1:
+        raise RuntimeError("ambiguous native buffer metric")
+    value = float(samples[0]["value"])
+    if not math.isfinite(value) or value < 0:
+        raise RuntimeError("invalid native buffer metric")
+    return value
 
 
 def sequence_observation(emitted: int, accepted: set[str], delivered: list[str]) -> dict[str, Any]:
@@ -689,16 +721,19 @@ class Scenario:
         )
 
     async def buffer_pressure(
-        self, metrics: dict[str, list[dict[str, Any]]], baseline_drops: float
-    ) -> tuple[float, float]:
-        occupancy = total(metrics, "vector_buffer_size_bytes")
-        drops = (
-            total(metrics, "vector_buffer_discarded_events_total")
-            if "vector_buffer_discarded_events_total" in metrics
-            else 0
+        self, metrics: dict[str, list[dict[str, Any]]], baseline_drops: float | None
+    ) -> tuple[float, float | None]:
+        occupancy = stage_metric(metrics, "vector_buffer_size_bytes", "disk", "0")
+        maximum = stage_metric(metrics, "vector_buffer_max_size_bytes", "disk", "0")
+        if occupancy is None or maximum is None or not maximum.is_integer():
+            raise RuntimeError("native disk capacity observation missing")
+        usable = disk_buffer_capacity(int(maximum))
+        if maximum != 268435488:
+            raise RuntimeError("native disk configured capacity differs")
+        drops = stage_metric(
+            metrics, "vector_buffer_discarded_events_total", "memory", "1", intentional="true"
         )
-        if not all(math.isfinite(value) and value >= 0 for value in (occupancy, drops)):
-            raise RuntimeError("invalid buffer pressure metric")
+        delta = None if drops is None or baseline_drops is None else drops - baseline_drops
         info = json.loads(await self.command("docker", "inspect", str(self.flood_id)))[0]
         if (
             info["Id"] != self.flood_id
@@ -730,8 +765,15 @@ class Scenario:
                 emitted = value
         current = {
             "buffer_bytes": occupancy,
-            "discarded_delta": drops - baseline_drops,
-            "discarded_counter_present": "vector_buffer_discarded_events_total" in metrics,
+            "configured_disk_bytes": maximum,
+            "usable_disk_bytes": usable,
+            "disk_file_reserve_bytes": 134217728,
+            "discarded_delta": delta,
+            "discarded_counter_present": drops is not None,
+            "memory_tail_intentional_discarded": drops,
+            "disk_unintentional_discarded": stage_metric(
+                metrics, "vector_buffer_discarded_events_total", "disk", "0", intentional="false"
+            ),
             "emitted_lower_bound": emitted,
             "flood_state": {
                 "running": state["Running"],
@@ -744,26 +786,34 @@ class Scenario:
         self.observations["vector_pressure"] = {
             "samples": prior.get("samples", 0) + 1,
             "baseline_discarded": baseline_drops,
+            "drop_metric_labels": {
+                "component_id": "storage",
+                "buffer_id": "storage",
+                "buffer_type": "memory",
+                "stage": "1",
+                "intentional": "true",
+            },
             "first": prior.get("first", current),
             "latest": current,
             "peak_buffer_bytes": max(occupancy, prior.get("peak_buffer_bytes", occupancy)),
             "peak_discarded_delta": max(
-                drops - baseline_drops, prior.get("peak_discarded_delta", 0)
-            ),
+                value for value in (delta, prior.get("peak_discarded_delta")) if value is not None
+            )
+            if delta is not None or prior.get("peak_discarded_delta") is not None
+            else None,
         }
         if state["OOMKilled"] or (not state["Running"] and state["ExitCode"] != 0):
             raise RuntimeError("pressure flood failed")
-        if drops < baseline_drops:
+        if drops is not None and baseline_drops is not None and drops < baseline_drops:
             raise RuntimeError("pressure drop counter reset")
         return occupancy, drops
 
     async def pressure(self, sandbox: str) -> None:
         vector = self.name == "vector-full"
+        pressure_started = time.time()
         baseline = await self.telemetry.metrics("vector")
-        drops = (
-            total(baseline, "vector_buffer_discarded_events_total")
-            if "vector_buffer_discarded_events_total" in baseline
-            else 0
+        drops = stage_metric(
+            baseline, "vector_buffer_discarded_events_total", "memory", "1", intentional="true"
         )
         if vector:
             sink = await asyncio.to_thread(self.telemetry.container, "victorialogs")
@@ -799,12 +849,19 @@ class Scenario:
                 if vector:
                     metrics = await self.telemetry.metrics("vector")
                     occupancy, current_drops = await self.buffer_pressure(metrics, drops)
-                    if current_drops > drops:
-                        if occupancy < 0.8 * 268435488:
+                    if current_drops is not None and current_drops > (
+                        drops if drops is not None else 0
+                    ):
+                        usable = self.observations["vector_pressure"]["latest"]["usable_disk_bytes"]
+                        if occupancy < 0.8 * usable:
                             raise RuntimeError("drops without measured full-buffer pressure")
                         self.observations.update(
-                            buffer_peak_observed=occupancy, discarded_delta=current_drops - drops
+                            buffer_peak_observed=occupancy,
+                            discarded_delta=None if drops is None else current_drops - drops,
+                            discarded_counter_observed=current_drops,
+                            drop_baseline_previously_absent=drops is None,
                         )
+                        await self.wait_drop_metric(drops, pressure_started)
                         break
                 else:
                     # Rotation plus size-driven deletion, independently of ENOSPC.
@@ -822,6 +879,46 @@ class Scenario:
                         self.observations.update(journal_bytes=size, oldest_event_removed=True)
                         break
                 await asyncio.sleep(0.5)
+
+    async def wait_drop_metric(self, baseline: float | None, started: float) -> None:
+        labels = {
+            "job": "vector",
+            "component_id": "storage",
+            "buffer_id": "storage",
+            "buffer_type": "memory",
+            "stage": "1",
+            "intentional": "true",
+        }
+        selector = (
+            "vector_buffer_discarded_events_total{"
+            + ",".join(f'{key}="{value}"' for key, value in labels.items())
+            + "}"
+        )
+        threshold = baseline if baseline is not None else 0
+        query = f"({selector} > {threshold}) and (timestamp({selector}) >= {started})"
+        self.observations["prometheus_tail_discarded"] = None
+        while True:
+            data = json.loads(
+                await self.telemetry.query("prometheus", "/api/v1/query", params={"query": query})
+            )
+            if data.get("status") != "success" or data["data"]["resultType"] != "vector":
+                raise RuntimeError("invalid stored drop query")
+            result = data["data"]["result"]
+            if result:
+                if len(result) != 1 or any(
+                    result[0]["metric"].get(key) != value for key, value in labels.items()
+                ):
+                    raise RuntimeError("unexpected stored drop series")
+                value = float(result[0]["value"][1])
+                if not math.isfinite(value) or value <= threshold:
+                    raise RuntimeError("invalid stored drop counter")
+                self.observations["prometheus_tail_discarded"] = {
+                    "labels": labels,
+                    "value": value,
+                    "fresh_sample_after_fault": True,
+                }
+                return
+            await asyncio.sleep(0.2)
 
     async def producer_pipe(self, sandbox: str) -> None:
         control = self.root / "control"
