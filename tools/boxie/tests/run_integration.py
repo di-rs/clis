@@ -36,7 +36,7 @@ class ProductionStack:
     def __init__(self, root: Path) -> None:
         self.root = root
         self.name = "boxie-integration-" + uuid4().hex[:12]
-        self.platform = self.name + "-platform"
+        self.postgres = self.name + "-postgres"
         self.temporal = self.name + "-temporal"
         self.env = dict(os.environ)
         self.env.update(
@@ -69,7 +69,7 @@ class ProductionStack:
         directory = (
             ROOT / "tools/boxie/infra/temporal"
             if package == "temporal"
-            else ROOT / "infra/platform"
+            else ROOT / "infra/boxie/postgres"
         )
         return command(
             [
@@ -173,7 +173,7 @@ class ProductionStack:
         with socket.socket() as reservation:
             reservation.bind(("127.0.0.1", 0))
             temporal_port = reservation.getsockname()[1]
-        (self.root / "platform-override.yml").write_text(
+        (self.root / "postgres-override.yml").write_text(
             yaml.safe_dump(
                 {
                     "services": {"postgres": {"ports": ["127.0.0.1::5432"]}},
@@ -195,8 +195,8 @@ class ProductionStack:
     def start(self) -> None:
         self.certificates()
         self.write_overrides()
-        self.compose("platform", "up", "--detach", "--wait", "--wait-timeout", "90")
-        self.pg_port = self.compose("platform", "port", "postgres", "5432").rsplit(":", 1)[1]
+        self.compose("postgres", "up", "--detach", "--wait", "--wait-timeout", "90")
+        self.pg_port = self.compose("postgres", "port", "postgres", "5432").rsplit(":", 1)[1]
         self.compose("temporal", "run", "--rm", "schema", "setup")
         # Exercise upgrade path independently from first-install setup.
         self.compose("temporal", "run", "--rm", "schema", "update")
@@ -250,7 +250,7 @@ class ProductionStack:
 
     def close(self) -> None:
         failures: list[str] = []
-        for package in ("temporal", "platform"):
+        for package in ("temporal", "postgres"):
             if (self.root / f"{package}-override.yml").exists():
                 try:
                     self.compose(package, "down", "--volumes", "--remove-orphans")

@@ -1,6 +1,6 @@
 # Durable runtime
 
-Boxie uses independently operated [PostgreSQL](../../../infra/platform/README.md)
+Boxie uses independently operated [PostgreSQL](../../../infra/boxie/postgres/README.md)
 and production [Temporal](temporal/README.md) on the private control
 network. Apply their explicit schema and namespace jobs first. Production never
 uses a development/test Temporal server. Temporal certificate holders are trusted

@@ -36,7 +36,7 @@ where it does not conflict with these decisions.
 | Boxie sandbox orchestrator | Docker/gVisor provisioning adapter, actual resource inspection, PTY ownership, local cleanup enforcement | Preview metadata, public ingress |
 | Temporal deployment | Upstream server, persistence configuration, schema jobs, namespace bootstrap, private operator UI origin | Boxie's application workflows |
 | Observability deployment | Collection, log and metric storage, provisioned dashboards and alert rules | Terminal transcripts or product state |
-| Platform deployment | Host, firewall, persistent storage, shared networks, component composition | Individual ephemeral sandboxes |
+| Host deployment | Host, firewall, persistent storage, shared networks, component composition | Individual ephemeral sandboxes |
 
 The Boxie processes form one service and release family. The sandbox orchestrator is a
 separate process/container and the only component with Docker socket access.
@@ -101,15 +101,18 @@ tools/cli-playground/
   infra/             # product components, manifests, domains, routes and checks
 tools/deploy/        # shared release/configuration/transport commands
 infra/
-  platform/          # shared host, networks, storage and persistence service
+  boxie/
+    postgres/        # Boxie-owned PostgreSQL deployment and persistent storage
+  host/              # shared host, networks and storage provisioning
   observability/     # independent telemetry deployment package
   ingress/           # shared proxy/tunnel process configuration
   environments/
     single-host/     # thin Pulumi project and deployment composition
 ```
 
-Each service owns its infrastructure beside its code from PR1. Its `infra/`
-directory contains provisioning components, validated configuration, Compose
+Each service owns its infrastructure. Application deployment packages remain
+beside their code; Boxie’s PostgreSQL package lives under `infra/boxie/postgres`.
+These directories contain provisioning components, validated configuration, Compose
 manifests, deployment documentation, and smoke checks. Infrastructure dependencies
 stay out of runtime images. The environment composition chooses which components
 to deploy and connects their inputs/outputs; it does not define service internals.
@@ -395,8 +398,9 @@ Keep the initial Pulumi project under `infra/environments/single-host`, with an
 environment per stack. It is a thin composition root over service-owned
 infrastructure and the independently owned shared components. Boxie's provisioning
 components live in `tools/boxie/infra`; Playground's live in
-`tools/cli-playground/infra`. Shared host, networking, storage, and persistence
-definitions live in `infra/platform`. Pulumi owns cloud resources,
+`tools/cli-playground/infra`. Boxie owns PostgreSQL deployment definitions in
+`infra/boxie/postgres`. Shared host, networking, and storage provisioning
+definitions belong in `infra/host`. Pulumi owns cloud resources,
 host/bootstrap identity, firewall rules, persistent disks, and configured DNS.
 It never provisions individual sandboxes. The existing remote Pulumi
 state-backend approach remains separate from application backups. See
@@ -426,7 +430,7 @@ still requires an explicit resource-ownership transfer; directory separation alo
 does not perform that transfer or solve remote artifact/storage access.
 
 Application releases use explicit manifests and separate Compose units for
-platform persistence, Temporal, observability, Boxie, shared ingress, and
+Boxie PostgreSQL, Temporal, observability, Boxie, shared ingress, and
 Playground.
 Assign shared networks, volumes, and proxy process configuration one owner.
 Service manifests and product routes remain in their owning `infra/` directories;
@@ -436,7 +440,7 @@ startup. It must not turn a targeted application release into a global Compose
 update. Shared release tooling must not grow Boxie/Playground-specific branches
 or become a second home for their deployment logic.
 
-Platform ingress owns the dashboard tunnel, Access configuration, and operator
+Shared ingress owns the dashboard tunnel, Access configuration, and operator
 DNS. Playground owns its product hostname and public routes. One release manifest
 versions Boxie's API, workflow worker, and orchestrator together. Independently released
 components declare their dependency/schema compatibility; an application release
@@ -497,7 +501,7 @@ PR. Each stage updates its documentation and runs affected checks.
 | 1 | ♻️ Separate Boxie from CLI Playground | Extract independently runnable Boxie API/orchestrator and generic contracts; inject adapters; keep product policy in Playground; replace direct imports with HTTP/WebSocket client. Establish each service's own `infra/` directory and deployment contract now. A generic consumer can create/attach/stop without PR/SHA/domain fields. Existing Playground E2E behavior works across the service boundary. |
 | 2 | ✨ Add durable Boxie lifecycle with Temporal | Add independent Temporal/PostgreSQL deployment, workflow worker, outbox, reservations, idempotent orchestrator operations, deadlines, cleanup/reconciliation, and same-page reconnect. Retries and worker restarts do not duplicate resources; timeout/disconnect/stop behavior is verified. |
 | 3 | ✨ Add Boxie operational visibility | Add JSON event/correlation schema, collector, VictoriaLogs, Prometheus, Grafana, Access-protected operator routes, dashboards and alert rules. A deliberately failed lifecycle can be diagnosed without terminal contents entering logs. |
-| 4 | ♻️ Compose deployment and harden operations | Wire the service-owned infrastructure into the thin single-host Pulumi environment, finish shared platform components and split CI responsibilities, validate release identity/deadlines, verify fresh installation and independent updates/failure handling, finish operator runbooks and security/resource checks. No migration or full backup system. |
+| 4 | ♻️ Compose deployment and harden operations | Wire the service-owned infrastructure into the thin single-host Pulumi environment, finish shared host components and split CI responsibilities, validate release identity/deadlines, verify fresh installation and independent updates/failure handling, finish operator runbooks and security/resource checks. No migration or full backup system. |
 
 PR1 may retain a minimal direct lifecycle implementation behind the new service
 boundary to keep the extraction runnable. PR2 replaces it; the final system does

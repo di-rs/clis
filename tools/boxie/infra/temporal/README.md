@@ -45,7 +45,7 @@ Provide these read-only certificate directories:
 | `TEMPORAL_OPERATOR_CERTS_DIR` | `operator.pem`, `operator.key`, `frontend-ca.pem` |
 | `TEMPORAL_UI_CERTS_DIR` | `ui-client.pem`, `ui-client.key`, `frontend-ca.pem` |
 
-Set the existing platform's `BOXIE_CONTROL_NETWORK`, `TEMPORAL_DB_PASSWORD`,
+Set the PostgreSQL deployment’s `BOXIE_CONTROL_NETWORK`, `TEMPORAL_DB_PASSWORD`,
 `VISIBILITY_DB_PASSWORD`, and approved immutable `BOXIE_RUNTIME_IMAGE`.
 The two database credentials must be distinct. The
 server binds to its container IP for membership, listens privately, and starts
@@ -54,7 +54,7 @@ credential or Docker socket. UI backend TLS explicitly verifies the server name.
 
 ## Explicit operations
 
-Start the [platform](../../../../infra/platform/README.md) first. From this directory:
+Start the [Boxie PostgreSQL deployment](../../../../infra/boxie/postgres/README.md) first. From this directory:
 
 ```sh
 # Empty pre-created databases only:

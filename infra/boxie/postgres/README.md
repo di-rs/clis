@@ -1,9 +1,10 @@
-# Private PostgreSQL platform
+# Boxie PostgreSQL deployment
 
-This independently operated package owns persistent PostgreSQL storage. Boxie,
+Boxie owns this independently operated PostgreSQL deployment and its persistent
+storage. The Compose project is `boxie-postgres`. Boxie,
 Temporal persistence, and Temporal visibility each have a distinct database and
 non-superuser login. `init-databases.sql` revokes public database access. Only the
-platform provisioning credential is a superuser; never give it to applications.
+PostgreSQL provisioning credential is a superuser; never give it to applications.
 
 Set `BOXIE_CONTROL_NETWORK` and four independently generated secrets:
 `POSTGRES_PASSWORD`, `BOXIE_DB_PASSWORD`, `TEMPORAL_DB_PASSWORD`, and
@@ -11,7 +12,7 @@ Set `BOXIE_CONTROL_NETWORK` and four independently generated secrets:
 mode 0600. From this directory, run `docker compose up -d --wait`. PostgreSQL
 17.11 is pinned to a multi-platform registry manifest digest in `compose.yml`.
 There are no published host ports. The named control network is internal; attach
-only trusted service containers. The platform has no Docker socket mount.
+only trusted service containers. The PostgreSQL service has no Docker socket mount.
 
 Initialization runs only for an empty volume. Rotate credentials explicitly in
 PostgreSQL and the affected service configuration. Preserve `postgres-data` on
@@ -32,7 +33,7 @@ The unreleased predecessor's custom migration ledger is not an upgrade source.
 Application tables are mapped SQLModel records. Each operation owns an async
 session and transaction; PostgreSQL still enforces constraints, row locks and
 advisory locks. Psycopg is the SQLAlchemy driver, with no separate driver pool.
-Platform role/database provisioning and Temporal's upstream schemas are managed
+PostgreSQL role/database provisioning and Temporal's upstream schemas are managed
 by their respective infrastructure packages.
 
 For development, review Alembic's generated Python revision before applying it:

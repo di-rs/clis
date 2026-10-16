@@ -7,7 +7,7 @@ on:
       - '.github/workflows/boxie-lifecycle.yml'
       - 'tools/cli-playground/**'
       - 'tools/boxie/**'
-      - 'infra/platform/**'
+      - 'infra/boxie/postgres/**'
       - 'coreutils/echor/**'
       - 'utils/**'
       - 'Cargo.toml'

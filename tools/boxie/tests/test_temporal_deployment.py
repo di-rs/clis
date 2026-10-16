@@ -25,12 +25,12 @@ ROOT = Path(__file__).parents[3]
 
 
 def test_private_production_deployment_has_explicit_jobs_and_trust() -> None:
-    platform_path = ROOT / "infra/platform/compose.yml"
-    assert platform_path.exists(), "independent platform deployment missing"
-    platform = yaml.safe_load(platform_path.read_text())
+    postgres_path = ROOT / "infra/boxie/postgres/compose.yml"
+    assert postgres_path.exists(), "Boxie PostgreSQL deployment missing"
+    postgres = yaml.safe_load(postgres_path.read_text())
     temporal = yaml.safe_load((ROOT / "tools/boxie/infra/temporal/compose.yml").read_text())
     versions = json.loads((ROOT / "tools/boxie/infra/temporal/versions.json").read_text())
-    for package in (platform, temporal):
+    for package in (postgres, temporal):
         for name, service in package["services"].items():
             assert not service.get("ports"), "production ports must remain private"
             assert "build" not in service, "operation jobs reuse existing runtime images"

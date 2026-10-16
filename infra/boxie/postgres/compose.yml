@@ -1,10 +1,10 @@
-name: boxie-platform
+name: boxie-postgres
 services:
   postgres:
     image: postgres:17.11@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3
     restart: unless-stopped
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?provide platform administrator password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?provide PostgreSQL administrator password}
       BOXIE_DB_PASSWORD: ${BOXIE_DB_PASSWORD:?provide Boxie database password}
       TEMPORAL_DB_PASSWORD: ${TEMPORAL_DB_PASSWORD:?provide persistence database password}
       VISIBILITY_DB_PASSWORD: ${VISIBILITY_DB_PASSWORD:?provide visibility database password}
