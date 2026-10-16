@@ -125,8 +125,8 @@ built `boxie:lifecycle`, `cli-playground:lifecycle`
 and `clis-playground-sandbox:lifecycle` images, `target/release/echor`, and Chromium.
 `BOXIE_NATIVE_BINARY` may select the native executable. The fixture owns random
 Compose projects, volumes, identity labels and fault proxies. It independently
-kills API, worker, orchestrator and Temporal; tests failed Docker deletion, actual
-artifact COMMIT acknowledgment loss, collector overlap and journal failure across
+kills API, orchestrator (including its embedded workers) and Temporal; tests failed
+Docker deletion, actual artifact COMMIT acknowledgment loss, collector overlap and journal failure across
 orchestrator restart; and replays production histories. Cleanup removes only verified
 owned sandbox IDs and attempts every Compose layer even after a cleanup error.
 

@@ -95,7 +95,7 @@ def main() -> None:
                 return orchestrator.execution_ready
 
             repository = PostgresLifecycle(sessions, orchestrator, config.identity, local_ready)
-            client = await temporal_client(lifecycle, lazy=True)
+            client = await temporal_client(lifecycle)
             credential = read_credential(config.credential_file)
             app = create_orchestrator_app(
                 orchestrator,
