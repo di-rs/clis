@@ -352,11 +352,20 @@ command/environment workflow parameters. Test persisted workflow history and
 logs with sentinel secrets. See [Temporal data handling](https://docs.temporal.io/dataconversion).
 
 Use journald for long-lived service logs, Vector for collection, VictoriaLogs for
-storage, and Grafana for provisioned dashboards. Retain searchable VictoriaLogs
-data for seven days. Journal copies use shorter retention; journal storage and
-Vector buffers have separate bounded disk budgets defined in deployment
-configuration. The seven-day window describes searchable storage, not guaranteed
-delivery of buffered logs. Do not mount Docker's socket into the collector or
+storage, and Grafana for provisioned dashboards. Searchable VictoriaLogs data has
+a seven-day maximum age and a user-selected 256 MiB (268435456 bytes) native
+cleanup target. The selected VictoriaLogs version checks approximately every ten
+seconds and deletes the oldest eligible daily partitions while retaining the
+newest two daily partitions. The user explicitly accepts that these protected
+partitions and periodic cleanup can exceed 256 MiB; this is not a filesystem
+quota or a guaranteed seven-day history window. See
+[VictoriaLogs disk retention](https://docs.victoriametrics.com/victorialogs/#retention-by-disk-space-usage)
+and the [selected cleanup implementation](https://github.com/VictoriaMetrics/VictoriaLogs/blob/v1.53.0/lib/logstorage/storage.go#L769-L842).
+Grafana RAM has a hard 256 MiB maximum, independently of searchable-log storage.
+Journal copies use shorter retention; journal storage and Vector buffers have
+separate bounded disk budgets defined in deployment configuration. These changes
+do not alter SQL lifecycle/idempotency retention or any other service budget.
+Buffered log delivery remains best effort. Do not mount Docker's socket into the collector or
 tail the private binary files of Docker's local
 logging driver. Sandboxes keep their logging driver disabled; the agent owns their
 PTY output. See [Docker journald](https://docs.docker.com/engine/logging/drivers/journald/),

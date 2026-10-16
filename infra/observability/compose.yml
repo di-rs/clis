@@ -122,7 +122,7 @@ services:
     security_opt:
     - no-new-privileges:true
     restart: unless-stopped
-    pids_limit: 128
+    pids_limit: 256
     mem_limit: ${OBS_GRAFANA_MEMORY_BYTES:?Set memory cap}
     logging:
       driver: journald
@@ -138,10 +138,17 @@ services:
         aliases:
         - grafana
     environment:
+      GOGC: '25'
       GF_LOG_LEVEL: info
       GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana-admin
       GF_AUTH_ANONYMOUS_ENABLED: 'false'
+      GF_AUTH_DISABLE_LOGIN_FORM: 'false'
+      GF_SECURITY_COOKIE_SECURE: 'true'
+      GF_PLUGINS_PREINSTALL: ''
+      GF_PLUGINS_PREINSTALL_SYNC: ''
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: ''
       GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_PLUGINS_DISABLE_PLUGINS: elasticsearch,grafana-postgresql-datasource,grafana-pyroscope-datasource,influxdb,jaeger,loki,mssql,mysql,opentsdb,stackdriver,tempo,zipkin
       GF_PLUGINS_PREINSTALL_DISABLED: 'true'
       GF_PLUGINS_PREINSTALL_AUTO_UPDATE: 'false'
       GF_PLUGINS_PLUGIN_ADMIN_ENABLED: 'false'
@@ -150,7 +157,8 @@ services:
       GF_ANALYTICS_REPORTING_ENABLED: 'false'
     volumes:
     - grafana-data:/var/lib/grafana
-    - ${OBS_GRAFANA_PROVISIONING_DIR:?Set owned Grafana provisioning}:/etc/grafana/provisioning:ro
+    - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    - ./grafana/dashboards:/etc/grafana/dashboards:ro
     - ${OBS_GRAFANA_PLUGIN_DIR:?Set verified pinned plugins}:/var/lib/grafana/plugins:ro
     - ${OBS_GRAFANA_ADMIN_PASSWORD_FILE:?Set private Grafana admin file}:/run/secrets/grafana-admin:ro
     tmpfs:

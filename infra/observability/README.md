@@ -179,16 +179,21 @@ best-effort diagnostics, not exactly-once delivery.
 | Runtime journal | 128 MiB |
 | Vector disk buffer | 536870912 bytes; `drop_newest` |
 | Vector HTTP batches | at most 1 MiB and 64 events; flush after 1 second |
-| VictoriaLogs | 7 days, 10 GiB deletion target; `/victoria-logs-data` |
+| VictoriaLogs | 7-day maximum age; 256 MiB (268435456 bytes) cleanup target; `/victoria-logs-data` |
 | Prometheus | 7 days, 2 GB (2147483648 bytes in its binary units) retention; allocate at least 3 GiB for WAL/compaction |
 | Memory caps | Vector 256 MiB; logs 1 GiB; Prometheus 512 MiB; Grafana 256 MiB; node exporter 64 MiB; later tunnel 128 MiB |
 
 The four external volumes are distinct: Vector state/buffer, VictoriaLogs,
 Prometheus, and Grafana. The host/bootstrap owner allocates them and sets ownership
-(Vector 65532:65532, logs/Prometheus 65534:65534, Grafana 472:0). Limits are tunable
-starting settings, **not filesystem quotas or measured capacity**. Seven days is
-a retention objective subject to size-based deletion, not a minimum guaranteed
-history window. PR4 must measure combined headroom with PostgreSQL, Temporal and
+(Vector 65532:65532, logs/Prometheus 65534:65534, Grafana 472:0). Grafana RAM has a hard maximum of 256 MiB; `Budgets` rejects larger values.
+VictoriaLogs uses its native 256 MiB cleanup target: approximately every ten
+seconds it deletes the oldest eligible daily partitions, preserving the newest
+two daily partitions. Those protected partitions and periodic checks can exceed
+the target. The user accepted this tradeoff; it is **not a filesystem quota**.
+Seven days is a maximum age, not a guaranteed history window under size deletion.
+See [VictoriaLogs disk retention](https://docs.victoriametrics.com/victorialogs/#retention-by-disk-space-usage)
+and the [selected 1.53.0 cleanup implementation](https://github.com/VictoriaMetrics/VictoriaLogs/blob/v1.53.0/lib/logstorage/storage.go#L769-L842).
+Other budgets remain independent starting settings, not measured capacity. PR4 must measure combined headroom with PostgreSQL, Temporal and
 eight sandboxes. Journal installation/reload belongs to host bootstrap, not this
 renderer. Application logging must remain independent of collector availability.
 
@@ -233,16 +238,69 @@ real binary-journal permission/cursor/restart/fault, and capacity checks remain
 required before production claims. Synthetic envelope tests do not prove binary
 journal ingestion or cross-boot/power-loss recovery.
 
-Grafana provisioning belongs to the following task. Its owner supplies
-`OBS_GRAFANA_PROVISIONING_DIR`, `OBS_GRAFANA_PLUGIN_DIR`, and
+Grafana assets now belong to this owner. `ObservabilityConfig` requires an explicit
+`grafana_public_url` such as `https://grafana.example.com`, matching the separately
+supplied ingress hostname. `render_config` writes datasource/provider files below
+`grafana/provisioning/{datasources,dashboards}/operators.yml` and the two dashboard
+JSON files below `grafana/dashboards/`. The rendered Compose file mounts those
+relative paths read-only; no external provisioning-directory variable is needed.
+It generates expected-target health for exactly `endpoints.scrapes`, optional
+consumer telemetry only when configured, and filesystem health for every
+`backing_mounts` entry. A Boxie-only deployment does not require Playground.
+
+The release owner supplies `OBS_GRAFANA_PLUGIN_DIR` and
 `OBS_GRAFANA_ADMIN_PASSWORD_FILE`. The plugin directory must be materialized from
 the exact VictoriaLogs 0.32.0 ZIP in `versions.json`, SHA-256 verified before
-extraction and mounted read-only. Prometheus 13.2.3 is bundled in the pinned Grafana
-13.2.4 image. Keep normal plugin signature enforcement enabled; no unsigned-plugin
-exception or automatic preinstall/update is configured. Supply an owned mode-0400
-admin password file readable by UID 472 and a writable owned data volume. Do not
-put credentials in rendered env files. Final login/datasource health, Access,
-origin protection and provisioning tests belong to the Grafana/ingress owner.
+extraction with executable modes preserved, and mounted read-only. Prometheus
+13.2.3 is bundled in the pinned Grafana 13.2.4 image. Normal signature verification
+remains enabled; unsigned loading, automatic preinstall/update and plugin admin
+installation are disabled. Twelve unused bundled datasource backends are explicitly
+disabled; adding another datasource type requires a reviewed configuration change.
+Grafana has a 256-process limit (other collectors retain 128) and a hard
+256 MiB maximum memory limit. `GOGC=25` makes the parent Go runtime collect more
+frequently, trading CPU for lower heap growth. Plugin environment forwarding stays
+disabled, and there is no per-process `GOMEMLIMIT` pretending to enforce the shared
+container budget. A native arm64 fixture passed both dashboards, correlation
+queries and final health under the hard 256 MiB ceiling with no swap allowance;
+this short workload does not establish production headroom. The cap is below
+Grafana's [recommended 512 MB minimum](https://grafana.com/docs/grafana/latest/setup-grafana/installation/#hardware-recommendations);
+native amd64 and combined production load still require acceptance.
+Supply an owned mode-0400 admin password file readable
+by **472:0**, traversable parent directories, and a writable data volume owned by
+472:0. The image entrypoint reads the secret file as that user. Login stays enabled,
+anonymous access/sign-up stay disabled, and secure cookies require public HTTPS.
+No default production password is provided. Never put credentials in rendered env.
+
+Stable datasource UIDs are `boxie-prometheus` and `boxie-victorialogs`; dashboard
+UIDs are `boxie-operations` and `boxie-telemetry`, in folder `boxie-operators`.
+Current panels require a successful scrape within 45 seconds. SQL gauges also
+require the authoritative snapshot's freshness signal (30-second cache expiry).
+Zero remains zero, absent/stale data stays neutral gray Unknown, lazy counters remain unreported,
+and success-only latency with no observations is not zero seconds. Raw counts and
+capacities use neutral colors with readable series labels, so a configured buffer
+maximum cannot trigger Grafana's generic numeric failure threshold. Scrape status
+keeps explicit failure/success mappings; utilization remains a percentage and
+filesystem availability uses the existing 10%/20% disk-pressure boundaries. Rates/increases
+precede aggregation; process counters are estimates, not SQL history. Provisioning
+aggregates may be partial if a producer is missing; producer health is adjacent to provisioning outcomes,
+with all configured scrape targets also shown on the telemetry dashboard. Worker presence uses dependency evidence, never idle
+polling rates. Storage panels show configured backing mounts independently.
+
+The single-select request/sandbox variables discover at most 100 observed UUIDs
+in the selected time range. Empty selection keeps an empty field filter and never
+broadens to all logs. The main lifecycle panel remains useful without selection.
+IDs are ordinary searchable log fields, never metric dimensions. Dropdown regex
+and disabled URL synchronization are UI behavior, not a security boundary;
+free-form paste support is deferred. Failed activity logs and SDK execution
+observations are not a complete attempt ledger. No all-attempt/start/success
+instrumentation is implied. Telemetry losses from services, Vector and storage
+are distinct; pre-Vector journald/Docker losses have no current metric.
+
+Run `uv run --locked pytest infra/observability/tests/test_dashboards.py` for the
+asset/render contract. Actual datasource health, normal plugin acceptance, login,
+PromQL and LogsQL query behavior require the selected local runtime fixture.
+Local arm64 smoke is not native production amd64 capacity or live Access proof;
+see [operator ingress](../ingress/README.md) for remaining activation gates.
 
 [observability.env.example](observability.env.example) lists the caller seams;
 [the fixture](tests/fixtures/observability.env) is nonsecret and deliberately uses

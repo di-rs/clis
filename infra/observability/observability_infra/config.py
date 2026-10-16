@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 
+from observability_infra.dashboards import render_dashboards
+
 _MIB = 1024**2
 _GIB = 1024**3
 _NAME = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}\Z")
@@ -20,6 +22,10 @@ _ASSETS = (
     "versions.json",
     "prometheus.yml",
     "rules/boxie.yml",
+    "grafana/provisioning/datasources.yml",
+    "grafana/provisioning/dashboards.yml",
+    "grafana/dashboards/boxie.json",
+    "grafana/dashboards/telemetry.json",
 )
 
 
@@ -35,7 +41,7 @@ class Budgets:
     vector_batch_events: int = 64
     vector_flush_seconds: int = 1
     logs_retention_days: int = 7
-    logs_disk_bytes: int = 10 * _GIB
+    logs_disk_bytes: int = 256 * _MIB
     prometheus_retention_days: int = 7
     prometheus_retention_bytes: int = 2 * _GIB
     prometheus_allocation_bytes: int = 3 * _GIB
@@ -51,6 +57,8 @@ class Budgets:
             value = getattr(self, field.name)
             if type(value) is not int or not 0 < value <= 2**63 - 1:
                 raise ValueError(f"invalid budget: {field.name}")
+        if self.grafana_memory_bytes > 256 * _MIB:
+            raise ValueError("Grafana memory must not exceed 256 MiB")
         if self.vector_buffer_bytes < 268435488:
             raise ValueError("Vector disk buffer below supported minimum")
         if self.vector_batch_bytes > _MIB or self.vector_batch_events > 64:
@@ -97,6 +105,7 @@ class ObservabilityConfig:
     logs_volume: str
     prometheus_volume: str
     grafana_volume: str
+    grafana_public_url: str
     journal_directory: str = "/var/log/journal"
     machine_id_path: str = "/etc/machine-id"
     backing_mounts: tuple[str, ...] = ("/",)
@@ -117,6 +126,11 @@ class ObservabilityConfig:
         ):
             if not _NAME.fullmatch(getattr(self, field)):
                 raise ValueError(f"invalid literal: {field}")
+        if not re.fullmatch(
+            r"https://(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}",
+            self.grafana_public_url,
+        ):
+            raise ValueError("explicit exact HTTPS Grafana public URL required")
         if self.metrics_network == self.grafana_origin_network:
             raise ValueError("network handles must be distinct")
         volumes = (
@@ -256,7 +270,7 @@ def render_config(config: ObservabilityConfig, destination: Path) -> tuple[Path,
 
     assets_dir must explicitly identify the matching checkout/artifact assets even
     when this package is installed independently. No ambient environment is read.
-    Grafana secret/provisioning/plugin paths are supplied by its separate owner.
+    Grafana secret/plugin paths remain explicit release-owned mount references.
     """
     config.validate_assets()
     b = config.budgets
@@ -272,6 +286,7 @@ def render_config(config: ObservabilityConfig, destination: Path) -> tuple[Path,
         "timeout_secs": b.vector_flush_seconds,
     }
     compose = _yaml(config.assets_dir / "compose.yml")
+    compose["services"]["grafana"]["environment"]["GF_SERVER_ROOT_URL"] = config.grafana_public_url
     compose["services"]["node-exporter"]["command"].append(
         "--collector.filesystem.mount-points-include=^("
         + "|".join(re.escape(m) for m in config.backing_mounts)
@@ -306,6 +321,7 @@ def render_config(config: ObservabilityConfig, destination: Path) -> tuple[Path,
         "prometheus.yml": prom,
         "rules/boxie.yml": rules,
     }
+    contents.update(render_dashboards(config))
     # Build everything in memory before creating even the destination directory.
     destination.mkdir(parents=True, exist_ok=False)
     result = []

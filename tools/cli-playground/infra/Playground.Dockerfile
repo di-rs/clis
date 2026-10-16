@@ -11,6 +11,7 @@ COPY --from=uv /uv /usr/local/bin/uv
 WORKDIR /app
 COPY pyproject.toml uv.lock .python-version ./
 COPY infra/observability/pyproject.toml infra/observability/pyproject.toml
+COPY infra/ingress/pyproject.toml infra/ingress/pyproject.toml
 COPY tools/service-telemetry tools/service-telemetry
 COPY tools/boxie/pyproject.toml tools/boxie/pyproject.toml
 COPY tools/boxie/tests/support/pyproject.toml tools/boxie/tests/support/pyproject.toml

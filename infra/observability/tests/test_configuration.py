@@ -49,6 +49,7 @@ def make_config(**changes: Any) -> Any:
         logs_volume="fixture-logs",
         prometheus_volume="fixture-prometheus",
         grafana_volume="fixture-grafana-data",
+        grafana_public_url="https://grafana.example.com",
         **changes,
     )
 
@@ -85,6 +86,7 @@ def test_invalid_inputs_fail_before_writing(changes: dict[str, Any], tmp_path: P
         ("journal_system_bytes", 0),
         ("journal_runtime_bytes", -1),
         ("logs_disk_bytes", 2**64),
+        ("grafana_memory_bytes", 268435457),
         ("vector_memory_bytes", True),
     ],
 )
@@ -516,3 +518,34 @@ def test_prometheus_binary_gigabyte_retention_renders_exact_bytes(tmp_path: Path
     # Selected v3.15.0 --help: retention GB uses powers of two (1KB = 1024B).
     assert values["OBS_PROMETHEUS_RETENTION_BYTES"] == "2147483648"
     assert values["OBS_PROMETHEUS_ALLOCATION_BYTES"] == "3221225472"
+
+
+def test_user_budget_defaults_reach_rendered_limits(tmp_path: Path) -> None:
+    from observability_infra.config import Budgets, render_config
+
+    budgets = Budgets()
+    assert budgets.logs_disk_bytes == 268435456
+    assert budgets.logs_retention_days == 7
+    assert budgets.grafana_memory_bytes == 268435456
+    assert dataclasses.replace(budgets, grafana_memory_bytes=268435455)
+    render_config(make_config(), tmp_path / "out")
+    env = dict(
+        line.split("=", 1) for line in (tmp_path / "out/observability.env").read_text().splitlines()
+    )
+    assert env["OBS_LOGS_DISK_BYTES"] == "268435456"
+    assert env["OBS_LOGS_RETENTION_DAYS"] == "7"
+    assert env["OBS_GRAFANA_MEMORY_BYTES"] == "268435456"
+    services = yaml.safe_load((tmp_path / "out/compose.yml").read_text())["services"]
+    assert (
+        "-retention.maxDiskSpaceUsageBytes=${OBS_LOGS_DISK_BYTES}"
+        in services["victorialogs"]["command"]
+    )
+    assert "-retentionPeriod=${OBS_LOGS_RETENTION_DAYS}d" in services["victorialogs"]["command"]
+    assert services["grafana"]["mem_limit"] == "${OBS_GRAFANA_MEMORY_BYTES:?Set memory cap}"
+    for example in (
+        OWNER / "observability.env.example",
+        OWNER / "tests/fixtures/observability.env",
+    ):
+        assert "OBS_LOGS_DISK_BYTES=268435456" in example.read_text()
+        assert "OBS_LOGS_RETENTION_DAYS=7" in example.read_text()
+        assert "OBS_GRAFANA_MEMORY_BYTES=268435456" in example.read_text()
