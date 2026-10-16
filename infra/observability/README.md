@@ -74,7 +74,10 @@ executable; the sink ID is `storage`. Vector 0.59 disk `drop_newest` omits
 intentional-drop accounting. The selected supported chain uses disk stage 0
 with `overflow`, followed by memory stage 1 with `max_events: 1` and
 `drop_newest`. Its real memory-stage intentional counter exposes overflow loss;
-disk-stage unprocessable drops remain separate. `increase` can miss the first-ever loss before the
+disk-stage unprocessable drops remain separate. The pinned runtime derives its
+`buffer_type` label from the first stage, so both stages emit `buffer_type="disk"`.
+The semantic memory tail is selected by `stage="1"`, while disk occupancy uses
+`stage="0"`; filters and queries preserve these literal labels. `increase` can miss the first-ever loss before the
 first observed counter sample; absence is not proof of zero drops. Display the
 native lifetime counter alongside the rate. The disk maximum gauge reports the
 configured storage ceiling, while unread-record capacity subtracts the pinned

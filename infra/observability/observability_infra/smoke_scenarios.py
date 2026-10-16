@@ -748,7 +748,7 @@ class Scenario:
         if maximum != 268435488:
             raise RuntimeError("native disk configured capacity differs")
         drops = stage_metric(
-            metrics, "vector_buffer_discarded_events_total", "memory", "1", intentional="true"
+            metrics, "vector_buffer_discarded_events_total", "disk", "1", intentional="true"
         )
         delta = None if drops is None or baseline_drops is None else drops - baseline_drops
         info = json.loads(await self.command("docker", "inspect", str(self.flood_id)))[0]
@@ -806,7 +806,7 @@ class Scenario:
             "drop_metric_labels": {
                 "component_id": "storage",
                 "buffer_id": "storage",
-                "buffer_type": "memory",
+                "buffer_type": "disk",
                 "stage": "1",
                 "intentional": "true",
             },
@@ -830,7 +830,7 @@ class Scenario:
         pressure_started = time.time()
         baseline = await self.telemetry.metrics("vector")
         drops = stage_metric(
-            baseline, "vector_buffer_discarded_events_total", "memory", "1", intentional="true"
+            baseline, "vector_buffer_discarded_events_total", "disk", "1", intentional="true"
         )
         if vector:
             sink = await asyncio.to_thread(self.telemetry.container, "victorialogs")
@@ -902,7 +902,7 @@ class Scenario:
             "job": "vector",
             "component_id": "storage",
             "buffer_id": "storage",
-            "buffer_type": "memory",
+            "buffer_type": "disk",
             "stage": "1",
             "intentional": "true",
         }

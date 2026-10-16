@@ -587,11 +587,21 @@ def test_exact_memory_tail_and_disk_metrics_do_not_collide(tmp_path: Path) -> No
         "intentional": "true",
     }
     disk = relabel(base | {"buffer_type": "disk", "stage": "0"}, rules)
-    tail = relabel(base | {"buffer_type": "memory", "stage": "1"}, rules)
+    tail = relabel(base | {"buffer_type": "disk", "stage": "1"}, rules)
     assert disk is not None and tail is not None and disk != tail
-    for kind, stage in [("disk", "1"), ("memory", "0"), ("memory", "2")]:
+    for kind, stage in [("disk", "2"), ("memory", "0"), ("memory", "1")]:
         assert relabel(base | {"buffer_type": kind, "stage": stage}, rules) is None
     assert (
-        relabel(base | {"buffer_type": "memory", "stage": "1", "component_id": "foreign"}, rules)
+        relabel(base | {"buffer_type": "disk", "stage": "1", "component_id": "foreign"}, rules)
         is None
     )
+    fixture = json.loads((OWNER / "tests/fixtures/vector-chain-native.json").read_text())
+    retained = []
+    for sample in fixture["samples"]:
+        labels = relabel({"__name__": sample["name"], **sample["labels"]}, rules)
+        if sample["name"] == "vector_buffer_max_size_events":
+            assert labels is None  # Diagnostic probe family is outside the scrape allowlist.
+            continue
+        assert labels is not None
+        retained.append(json.dumps(labels, sort_keys=True))
+    assert len(retained) == len(set(retained))

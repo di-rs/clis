@@ -3,6 +3,7 @@
 import asyncio
 import json
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock
 from uuid import UUID
 
@@ -32,7 +33,7 @@ def pressure_scenario(tmp_path: Path) -> Scenario:
 
 def metrics(size: float, dropped: float) -> dict[str, list[dict[str, object]]]:
     disk = {"component_id": "storage", "buffer_id": "storage", "buffer_type": "disk", "stage": "0"}
-    tail = dict(disk, buffer_type="memory", stage="1", intentional="true")
+    tail = dict(disk, buffer_type="disk", stage="1", intentional="true")
     return {
         "vector_buffer_size_bytes": [{"labels": disk, "value": size}],
         "vector_buffer_max_size_bytes": [{"labels": disk, "value": 268435488}],
@@ -124,7 +125,7 @@ def test_actual_prometheus_drop_visibility_is_separate_and_strict(
         "job": "vector",
         "component_id": "storage",
         "buffer_id": "storage",
-        "buffer_type": "memory",
+        "buffer_type": "disk",
         "stage": "1",
         "intentional": "true",
     }
@@ -176,3 +177,15 @@ def test_new_counter_after_absent_baseline_is_not_a_measured_delta(tmp_path: Pat
     assert observation["latest"]["memory_tail_intentional_discarded"] == 19
     assert observation["latest"]["discarded_delta"] is None
     assert observation["peak_discarded_delta"] is None
+
+
+def test_selected_chain_metric_labels_select_real_tail_counter(tmp_path: Path) -> None:
+    fixture = json.loads((Path(__file__).parent / "fixtures/vector-chain-native.json").read_text())
+    observed: dict[str, list[dict[str, Any]]] = {}
+    for sample in fixture["samples"]:
+        observed.setdefault(sample["name"], []).append(sample)
+    scenario = pressure_scenario(tmp_path)
+    size, drops = asyncio.run(scenario.buffer_pressure(observed, None))
+    assert size == 134217416
+    assert drops == 68930
+    assert scenario.observations["vector_pressure"]["drop_metric_labels"]["buffer_type"] == "disk"

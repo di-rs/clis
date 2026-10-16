@@ -151,7 +151,7 @@ tests:
 - name: intentional newest loss alerts
   interval: 15s
   input_series:
-  - series: vector_buffer_discarded_events_total{job="vector",instance="vector:9598",component_id="storage",buffer_id="storage",buffer_type="memory",stage="1",intentional="true"}
+  - series: vector_buffer_discarded_events_total{job="vector",instance="vector:9598",component_id="storage",buffer_id="storage",buffer_type="disk",stage="1",intentional="true"}
     values: 0+1x40
   alert_rule_test:
   - eval_time: 2m
@@ -165,7 +165,7 @@ tests:
         instance: vector:9598
         component_id: storage
         severity: warning
-        buffer_type: memory
+        buffer_type: disk
         stage: '1'
         intentional: 'true'
 - name: counter reset alone is not loss

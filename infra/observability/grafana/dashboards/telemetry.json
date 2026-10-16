@@ -586,7 +586,7 @@
             "uid": "boxie-prometheus"
           },
           "editorMode": "code",
-          "expr": "(vector_buffer_discarded_events_total{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"memory\",stage=\"1\",intentional=\"true\"}) and on(job,instance) ((up{job=~\"vector\"} == 1) and (time() - timestamp(up{job=~\"vector\"}) < 45))",
+          "expr": "(vector_buffer_discarded_events_total{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"disk\",stage=\"1\",intentional=\"true\"}) and on(job,instance) ((up{job=~\"vector\"} == 1) and (time() - timestamp(up{job=~\"vector\"}) < 45))",
           "range": false,
           "instant": true,
           "legendFormat": "Memory overflow {{intentional}}"
@@ -676,7 +676,7 @@
             "uid": "boxie-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by(job,instance,component_id,intentional) ((increase(vector_buffer_discarded_events_total{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"memory\",stage=\"1\",intentional=\"true\"}[5m])) and on(job,instance) ((up{job=~\"vector\"} == 1) and (time() - timestamp(up{job=~\"vector\"}) < 45)))",
+          "expr": "sum by(job,instance,component_id,intentional) ((increase(vector_buffer_discarded_events_total{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"disk\",stage=\"1\",intentional=\"true\"}[5m])) and on(job,instance) ((up{job=~\"vector\"} == 1) and (time() - timestamp(up{job=~\"vector\"}) < 45)))",
           "range": false,
           "instant": true,
           "legendFormat": "Memory overflow {{intentional}}"

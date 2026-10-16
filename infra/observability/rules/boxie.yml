@@ -139,7 +139,7 @@ groups:
     labels:
       severity: warning
   - alert: CollectorDropsIncreasing
-    expr: sum by(job,instance,component_id,buffer_type,stage,intentional) (increase(vector_buffer_discarded_events_total{job="vector",component_id="storage",buffer_id="storage",buffer_type="memory",stage="1",intentional="true"}[5m]) or increase(vector_buffer_discarded_events_total{job="vector",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0",intentional="false"}[5m]))
+    expr: sum by(job,instance,component_id,buffer_type,stage,intentional) (increase(vector_buffer_discarded_events_total{job="vector",component_id="storage",buffer_id="storage",buffer_type="disk",stage="1",intentional="true"}[5m]) or increase(vector_buffer_discarded_events_total{job="vector",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0",intentional="false"}[5m]))
       > 0
     for: 2m
     labels:
