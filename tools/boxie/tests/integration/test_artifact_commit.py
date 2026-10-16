@@ -10,10 +10,12 @@ from uuid import uuid4
 
 import psycopg
 import pytest
+from boxie.persistence.database import database as session_database
+from boxie.persistence.models import Artifact
 from boxie.persistence.postgres_artifacts import PostgresArtifactStore
 from boxie_test_support.orchestrator import bundle
-from psycopg.rows import dict_row
-from psycopg_pool import AsyncConnectionPool
+from sqlalchemy.exc import DBAPIError
+from sqlmodel import select
 from test_postgres import OWNER, database
 
 from integration.faults import Faults
@@ -28,7 +30,7 @@ def test_committed_metadata_survives_lost_ack_and_competing_collection(
     async def exercise() -> None:
         if loss == "deadline":
             monkeypatch.setattr("boxie.persistence.postgres_artifacts.OPERATION_SECONDS", 0.3)
-        async with database(postgres_dsn, tmp_path) as (_, _, direct_pool, _):
+        async with database(postgres_dsn, tmp_path) as (_, _, direct_sessions, _):
             info = psycopg.conninfo.conninfo_to_dict(postgres_dsn)
             faults = Faults(tmp_path / "faults", str(info["host"]), int(str(info["port"])))
             server = await asyncio.start_server(faults.postgres, "127.0.0.1", 0)
@@ -38,11 +40,9 @@ def test_committed_metadata_survives_lost_ack_and_competing_collection(
             dsn = psycopg.conninfo.make_conninfo("", **info)
             async with (
                 server,
-                AsyncConnectionPool[psycopg.AsyncConnection[dict[str, Any]]](
-                    dsn, kwargs={"row_factory": dict_row}
-                ) as pool,
+                session_database(dsn) as sessions,
             ):
-                store = PostgresArtifactStore(pool, tmp_path / "bytes")
+                store = PostgresArtifactStore(sessions, tmp_path / "bytes")
                 identifier, data = uuid4(), bundle({"proof": b"committed"})
 
                 async def chunks() -> Any:
@@ -57,14 +57,10 @@ def test_committed_metadata_survives_lost_ack_and_competing_collection(
                     async with asyncio.timeout(10):
                         while not (faults.root / "commit_seen").exists():
                             await asyncio.sleep(0.01)
-                    async with direct_pool.connection() as conn:
-                        row = await (
-                            await conn.execute(
-                                "SELECT storage_id FROM artifacts WHERE id=%s", (identifier,)
-                            )
-                        ).fetchone()
+                    async with direct_sessions() as session:
+                        row = await session.get(Artifact, identifier)
                     assert row is not None
-                    path = store.root / str(row["storage_id"])
+                    path = store.root / str(row.storage_id)
                     assert (path / "files/proof").read_bytes() == b"committed"
                     os.utime(path, (time.time() - 7200,) * 2)
                     collection = asyncio.create_task(store.collect_orphans(minimum_age_seconds=60))
@@ -72,7 +68,7 @@ def test_committed_metadata_survives_lost_ack_and_competing_collection(
                     assert not collection.done() and path.exists()
                     if loss == "disconnect":
                         (faults.root / "hold_commit").unlink()
-                        with pytest.raises(psycopg.OperationalError):
+                        with pytest.raises(DBAPIError):
                             await asyncio.wait_for(upload, 10)
                     else:
                         from boxie.domain.errors import BoxieError
@@ -88,7 +84,7 @@ def test_committed_metadata_survives_lost_ack_and_competing_collection(
                         assert await store.collect_orphans(minimum_age_seconds=60) == 0
                     else:
                         assert await asyncio.wait_for(collection, 10) == 0
-                    restarted = PostgresArtifactStore(direct_pool, store.root)
+                    restarted = PostgresArtifactStore(direct_sessions, store.root)
                     assert await restarted.collect_orphans(minimum_age_seconds=60) == 0
                     retry = await restarted.put(
                         OWNER, identifier, hashlib.sha256(data).hexdigest(), chunks()
@@ -153,13 +149,13 @@ def test_disconnected_upload_waiter_and_collector_have_one_total_deadline(
     from boxie_test_support.orchestrator import Clock
 
     async def exercise() -> None:
-        async with database(postgres_dsn, tmp_path) as (_, store, pool, config):
+        async with database(postgres_dsn, tmp_path) as (_, store, sessions, config):
             monkeypatch.setattr(
                 "boxie.persistence.postgres_artifacts.OPERATION_SECONDS", 0.15, raising=False
             )
             clock = Clock()
             orchestrator = DurableOrchestrator(
-                config, Daemon(), store.path, PostgresStartGuard(pool), clock, clock.monotonic
+                config, Daemon(), store.path, PostgresStartGuard(sessions), clock, clock.monotonic
             )
             reporter = ObservationReporter("http://127.0.0.1:1", b"unused")
             app = create_durable_orchestrator_app(
@@ -202,7 +198,7 @@ def test_cancelled_invalid_and_oversized_uploads_never_publish(
     from boxie.persistence.artifacts import ArtifactLimits
 
     async def exercise() -> None:
-        async with database(postgres_dsn, tmp_path) as (_, store, pool, _):
+        async with database(postgres_dsn, tmp_path) as (_, store, sessions, _):
 
             async def interrupted() -> Any:
                 yield b"first chunk"
@@ -218,12 +214,14 @@ def test_cancelled_invalid_and_oversized_uploads_never_publish(
             with pytest.raises(BoxieError) as mismatch:
                 await store.put(OWNER, uuid4(), "0" * 64, chunks())
             assert mismatch.value.status == 422
-            limited = PostgresArtifactStore(pool, store.root, ArtifactLimits(compressed_bytes=10))
+            limited = PostgresArtifactStore(
+                sessions, store.root, ArtifactLimits(compressed_bytes=10)
+            )
             with pytest.raises(BoxieError) as oversized:
                 await limited.put(OWNER, uuid4(), hashlib.sha256(data).hexdigest(), chunks())
             assert oversized.value.status == 413
             assert not list(store.root.iterdir())
-            async with pool.connection() as conn:
-                assert await (await conn.execute("SELECT id FROM artifacts")).fetchall() == []
+            async with sessions() as session:
+                assert (await session.exec(select(Artifact))).all() == []
 
     asyncio.run(exercise())

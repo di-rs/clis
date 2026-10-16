@@ -295,7 +295,7 @@ reconciliation, concurrent idempotency, and artifact retention. These tests do
 not claim a live Linux gVisor deployment has been exercised.
 
 The 2026-10-15 compatibility gate verified CPython 3.15.0 with `temporalio==1.34.0`,
-`psycopg==3.3.6`, `psycopg-binary==3.3.6`, and `psycopg-pool==3.3.3` on macOS arm64,
+`psycopg==3.3.6` and `psycopg-binary==3.3.6` on macOS arm64,
 native Linux arm64, and emulated Linux amd64. Real Temporal worker execution,
 cancellation, graceful worker replacement, and replay of four exported histories
 passed on each platform. That gate did not exercise PostgreSQL transactions or

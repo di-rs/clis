@@ -124,6 +124,15 @@ for name in ({forbidden!r}, 'boxie_infra', 'playground_infra', 'boxie_test_suppo
     if module == "boxie":
         probe += (
             "import boxie.bootstrap.api, boxie.bootstrap.orchestrator, boxie.bootstrap.worker\n"
+            "from io import StringIO\n"
+            "from alembic import command\n"
+            "from boxie.persistence.migrate import migration_config\n"
+            "output = StringIO()\n"
+            "config = migration_config('postgresql://localhost/boxie')\n"
+            "config.output_buffer = output\n"
+            "assert pathlib.Path(config.get_main_option('script_location'), 'script.py.mako').is_file()\n"
+            "command.upgrade(config, 'head', sql=True)\n"
+            "assert 'CREATE TABLE sandboxes' in output.getvalue()\n"
         )
     else:
         # Real installed assets via ASGI HTTP, without pytest/httpx or source imports.

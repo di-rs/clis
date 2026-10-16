@@ -5,153 +5,142 @@ from collections.abc import Awaitable, Callable
 from typing import Literal
 from uuid import UUID
 
-import psycopg
+from sqlalchemy import func
+from sqlmodel import col, select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from boxie.domain.lifecycle import EnsureRequest
 from boxie.domain.models import TerminationReason
-from boxie.persistence.postgres import Pool, Row
+from boxie.persistence.database import SessionFactory
+from boxie.persistence.models import Artifact, CapacitySlot, Sandbox, SandboxArtifactRef
 from boxie.sandbox.protocol import SnapshotWire, spec_wire
 
 
+def matches(row: Sandbox, request: EnsureRequest) -> bool:
+    return (
+        row.consumer_id == request.principal.consumer_id
+        and row.installation_id == request.identity.installation_id
+        and row.host_id == request.identity.host_id
+        and row.generation == request.ref.generation
+        and row.spec == spec_wire(request.spec).model_dump(mode="json")
+        and row.snapshot
+        == SnapshotWire.from_domain(request.profile_snapshot).model_dump(mode="json")
+        and row.accepted_at == request.accepted_at
+        and row.absolute_deadline == request.absolute_deadline
+    )
+
+
 class PostgresStartGuard:
-    def __init__(self, pool: Pool, timeout: float = 20) -> None:
+    def __init__(self, sessions: SessionFactory, timeout: float = 20) -> None:
         if not 0 < timeout <= 60:
             raise ValueError("bounded start timeout required")
-        self.pool, self.timeout = pool, timeout
+        self.sessions, self.timeout = sessions, timeout
 
-    async def _allowed(
-        self, conn: psycopg.AsyncConnection[Row], request: EnsureRequest, boot_id: UUID
-    ) -> bool:
-        row = await (
-            await conn.execute(
-                """SELECT * FROM sandboxes WHERE id=%s AND consumer_id=%s
-            AND installation_id=%s AND host_id=%s AND generation=%s AND orchestrator_boot_id=%s
-            AND NOT desired_stop AND cleaned_at IS NULL
-            AND state IN ('accepted','provisioning','ready')
-            AND absolute_deadline > clock_timestamp() FOR UPDATE""",
-                (
-                    request.ref.id,
-                    request.principal.consumer_id,
-                    request.identity.installation_id,
-                    request.identity.host_id,
-                    request.ref.generation,
-                    boot_id,
-                ),
+    async def _allowed(self, session: AsyncSession, request: EnsureRequest, boot_id: UUID) -> bool:
+        row = (
+            await session.exec(
+                select(Sandbox)
+                .where(
+                    Sandbox.id == request.ref.id,
+                    Sandbox.consumer_id == request.principal.consumer_id,
+                    Sandbox.installation_id == request.identity.installation_id,
+                    Sandbox.host_id == request.identity.host_id,
+                    Sandbox.generation == request.ref.generation,
+                    Sandbox.orchestrator_boot_id == boot_id,
+                    col(Sandbox.desired_stop).is_(False),
+                    col(Sandbox.cleaned_at).is_(None),
+                    col(Sandbox.state).in_(["accepted", "provisioning", "ready"]),
+                    Sandbox.absolute_deadline > func.clock_timestamp(),
+                )
+                .with_for_update()
             )
-        ).fetchone()
-        if row is None:
+        ).one_or_none()
+        if row is None or not matches(row, request):
             return False
-        if (
-            row["spec"] != spec_wire(request.spec).model_dump(mode="json")
-            or row["snapshot"]
-            != SnapshotWire.from_domain(request.profile_snapshot).model_dump(mode="json")
-            or row["accepted_at"] != request.accepted_at
-            or row["absolute_deadline"] != request.absolute_deadline
-        ):
-            return False
-        reference = await (
-            await conn.execute(
-                "SELECT r.sandbox_id FROM sandbox_artifact_refs r JOIN artifacts a ON a.id=r.artifact_id WHERE r.sandbox_id=%s AND r.artifact_id=%s AND a.consumer_id=%s",
-                (request.ref.id, request.spec.artifact_id, request.principal.consumer_id),
+        return (
+            await session.exec(
+                select(SandboxArtifactRef.sandbox_id)
+                .join(Artifact, col(Artifact.id) == col(SandboxArtifactRef.artifact_id))
+                .where(
+                    SandboxArtifactRef.sandbox_id == request.ref.id,
+                    SandboxArtifactRef.artifact_id == request.spec.artifact_id,
+                    Artifact.consumer_id == request.principal.consumer_id,
+                )
             )
-        ).fetchone()
-        return reference is not None
+        ).first() is not None
 
     async def initialization(
         self, request: EnsureRequest, boot_id: UUID
     ) -> Literal["execute"] | TerminationReason | None:
-        async with asyncio.timeout(self.timeout):
-            async with self.pool.connection() as conn:
-                row = await (
-                    await conn.execute(
-                        """SELECT s.*, absolute_deadline > clock_timestamp() AS fresh,
-                    EXISTS (SELECT 1 FROM capacity_slots c WHERE c.sandbox_id=s.id) AS reserved,
-                    EXISTS (SELECT 1 FROM sandbox_artifact_refs r WHERE r.sandbox_id=s.id AND r.artifact_id=%s) AS retained
-                    FROM sandboxes s WHERE id=%s AND consumer_id=%s AND installation_id=%s AND host_id=%s AND generation=%s AND orchestrator_boot_id=%s AND cleaned_at IS NULL""",
-                        (
-                            request.spec.artifact_id,
-                            request.ref.id,
-                            request.principal.consumer_id,
-                            request.identity.installation_id,
-                            request.identity.host_id,
-                            request.ref.generation,
-                            boot_id,
-                        ),
+        async with asyncio.timeout(self.timeout), self.sessions() as session:
+            result = (
+                await session.exec(
+                    select(
+                        Sandbox,
+                        (Sandbox.absolute_deadline > func.clock_timestamp()),
+                        select(CapacitySlot).where(CapacitySlot.sandbox_id == Sandbox.id).exists(),
+                        select(SandboxArtifactRef)
+                        .where(
+                            SandboxArtifactRef.sandbox_id == Sandbox.id,
+                            SandboxArtifactRef.artifact_id == request.spec.artifact_id,
+                        )
+                        .exists(),
+                    ).where(
+                        Sandbox.id == request.ref.id,
+                        Sandbox.orchestrator_boot_id == boot_id,
+                        col(Sandbox.cleaned_at).is_(None),
                     )
-                ).fetchone()
-        if (
-            row is None
-            or not row["reserved"]
-            or not row["retained"]
-            or (
-                row["spec"] != spec_wire(request.spec).model_dump(mode="json")
-                or row["snapshot"]
-                != SnapshotWire.from_domain(request.profile_snapshot).model_dump(mode="json")
-                or row["accepted_at"] != request.accepted_at
-                or row["absolute_deadline"] != request.absolute_deadline
-            )
-        ):
+                )
+            ).one_or_none()
+        if result is None:
             return None
-        if (
-            not row["desired_stop"]
-            and row["fresh"]
-            and row["state"] in ("accepted", "provisioning", "ready")
-        ):
+        row, fresh, reserved, retained = result
+        if not matches(row, request) or not reserved or not retained:
+            return None
+        if fresh and not row.desired_stop and row.state in ("accepted", "provisioning", "ready"):
             return "execute"
         return (
-            TerminationReason(row["reason"])
-            if row["reason"]
-            else (TerminationReason.REQUESTED if row["desired_stop"] else TerminationReason.EXPIRED)
+            TerminationReason(row.reason)
+            if row.reason
+            else (TerminationReason.REQUESTED if row.desired_stop else TerminationReason.EXPIRED)
         )
 
     async def terminal_receipt(self, request: EnsureRequest) -> bool:
-        """SQL finality survives boot changes and retry-row purging.
-
-        The caller separately proves durable local absence and settled callbacks.
-        A missing row is safe only because all new local records require initialization.
-        """
-        async with asyncio.timeout(self.timeout):
-            async with self.pool.connection() as conn:
-                row = await (
-                    await conn.execute(
-                        """SELECT s.*, NOT EXISTS (SELECT 1 FROM capacity_slots c WHERE c.sandbox_id=s.id) AS no_slot,
-                    NOT EXISTS (SELECT 1 FROM sandbox_artifact_refs r WHERE r.sandbox_id=s.id) AS no_ref
-                    FROM sandboxes s WHERE id=%s""",
-                        (request.ref.id,),
-                    )
-                ).fetchone()
-        if row is None:
+        """SQL finality survives boot changes and retry-row purging."""
+        async with asyncio.timeout(self.timeout), self.sessions() as session:
+            result = (
+                await session.exec(
+                    select(
+                        Sandbox,
+                        select(CapacitySlot).where(CapacitySlot.sandbox_id == Sandbox.id).exists(),
+                        select(SandboxArtifactRef)
+                        .where(SandboxArtifactRef.sandbox_id == Sandbox.id)
+                        .exists(),
+                    ).where(Sandbox.id == request.ref.id)
+                )
+            ).one_or_none()
+        if result is None:
             return True
+        row, reserved, retained = result
         return bool(
-            row["consumer_id"] == request.principal.consumer_id
-            and row["installation_id"] == request.identity.installation_id
-            and row["host_id"] == request.identity.host_id
-            and row["generation"] == request.ref.generation
-            and row["spec"] == spec_wire(request.spec).model_dump(mode="json")
-            and row["snapshot"]
-            == SnapshotWire.from_domain(request.profile_snapshot).model_dump(mode="json")
-            and row["accepted_at"] == request.accepted_at
-            and row["absolute_deadline"] == request.absolute_deadline
-            and row["cleaned_at"] is not None
-            and row["state"] in ("terminated", "failed")
-            and not row["cleanup_pending"]
-            and row["no_slot"]
-            and row["no_ref"]
+            matches(row, request)
+            and row.cleaned_at is not None
+            and row.state in ("terminated", "failed")
+            and not row.cleanup_pending
+            and not reserved
+            and not retained
         )
 
     async def start_allowed(self, request: EnsureRequest, boot_id: UUID) -> bool:
-        async with asyncio.timeout(self.timeout):
-            async with self.pool.connection() as conn, conn.transaction():
-                return await self._allowed(conn, request, boot_id)
+        async with asyncio.timeout(self.timeout), self.sessions() as session, session.begin():
+            return await self._allowed(session, request, boot_id)
 
     async def run_start_if_allowed(
         self, request: EnsureRequest, boot_id: UUID, start: Callable[[], Awaitable[None]]
     ) -> bool:
-        # Only this bounded callback runs under the row lock. Create/attach never do.
-        # A lost connection/cancelled callback is uncertain, never proof of no side effect.
-        async with asyncio.timeout(self.timeout):
-            async with self.pool.connection() as conn, conn.transaction():
-                if not await self._allowed(conn, request, boot_id):
-                    return False
-                await start()
-                return True
+        # Only the bounded final start runs under the lock; create/attach never do.
+        async with asyncio.timeout(self.timeout), self.sessions() as session, session.begin():
+            if not await self._allowed(session, request, boot_id):
+                return False
+            await start()
+            return True

@@ -14,9 +14,9 @@ from boxie.api.app import ApiConfig, create_app
 from boxie.bootstrap.config import DurableConfig, read_credential
 from boxie.bootstrap.durable import (
     Dependencies,
+    database_for,
     durable_config,
     orchestrator_identity,
-    pool_for,
     temporal_client,
 )
 from boxie.domain.models import OrchestratorIdentity
@@ -75,7 +75,7 @@ def main() -> None:
         # only new admission depends on that probe. Worker startup stays eager.
         temporal = await temporal_client(config.durable, lazy=True)
         async with (
-            pool_for(config.durable.postgres_dsn_file) as pool,
+            database_for(config.durable.postgres_dsn_file) as sessions,
             DurableOrchestratorClient(
                 config.orchestrator_url,
                 config.orchestrator_credential,
@@ -83,7 +83,7 @@ def main() -> None:
             ) as orchestrator,
         ):
             lifecycle = PostgresLifecycle(
-                pool, orchestrator, config.identity, Dependencies(orchestrator, temporal)
+                sessions, orchestrator, config.identity, Dependencies(orchestrator, temporal)
             )
             app = create_app(
                 config.api,

@@ -11,7 +11,7 @@ from pathlib import Path
 import uvicorn
 
 from boxie.bootstrap.config import OrchestratorConfig, read_credential
-from boxie.bootstrap.durable import pool_for
+from boxie.bootstrap.durable import database_for
 from boxie.persistence.postgres_artifacts import PostgresArtifactStore
 from boxie.persistence.start_guard import PostgresStartGuard
 from boxie.sandbox.docker import DockerBackend
@@ -31,13 +31,13 @@ def main() -> None:
     dsn_file, api_url = config.postgres_dsn_file, config.api_url
 
     async def run() -> None:
-        async with pool_for(dsn_file) as pool:
-            artifacts = PostgresArtifactStore(pool, config.data_dir / "artifacts")
+        async with database_for(dsn_file) as sessions:
+            artifacts = PostgresArtifactStore(sessions, config.data_dir / "artifacts")
             orchestrator = DurableOrchestrator(
                 config,
                 DockerBackend(config.docker_timeout),
                 artifacts.path,
-                PostgresStartGuard(pool),
+                PostgresStartGuard(sessions),
                 lambda: datetime.now(UTC),
                 time.monotonic,
             )

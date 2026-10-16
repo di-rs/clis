@@ -8,7 +8,7 @@ cluster administrators; the namespace is organizational, not an RBAC boundary.
 
 Prepare a mode-0600 Boxie database DSN file (a PostgreSQL URI or libpq DSN). The
 Boxie, Temporal persistence and visibility credentials must remain distinct.
-Apply Boxie migrations explicitly from the installed Boxie environment:
+Apply Boxie Alembic revisions explicitly from the installed Boxie environment:
 
 ```sh
 uv run --locked python -m boxie.persistence.migrate --dsn-file /etc/boxie/postgres-dsn.secret
@@ -40,8 +40,9 @@ Separately, a new undelivered command older than 30 seconds or backlog of 100
 rejects new admission. Matching retries, status and stop still use SQL when
 dependencies are unhealthy. Stop requires the normal API DELETE, never Temporal termination.
 Workers can restart without closing orchestrator-owned terminals. Cleanup failures retain
-capacity and artifact references and retry durably every 30 seconds after each
-bounded cycle. Only fenced physical absence can release accounting.
+capacity and artifact references. Temporal retries the stop and removal activities
+durably, with backoff capped at 10 seconds and no overall cleanup timeout. Only
+fenced physical absence can release accounting.
 
 The orchestrator publishes authenticated `PUT /internal/observations` with its orchestrator
 credential. Consumer credentials cannot publish facts. Input reports coalesce for

@@ -17,11 +17,5 @@
     "image": "temporalio/ui:2.56.0@sha256:66d55d383bfb334ee0781f21a3b36c865b3f0f2262491a070bb2143394e9fe88",
     "release": "https://github.com/temporalio/ui/releases/tag/v2.56.0",
     "arm64_manifest": "sha256:d2240ecc69118b8c5b8319ed687dd051f83500300fdd6522d5de65296f40b213"
-  },
-  "bootstrap_parser": {
-    "version": "1.8.1",
-    "image": "ghcr.io/jqlang/jq:1.8.1@sha256:4f34c6d23f4b1372ac789752cc955dc67c2ae177eb1b5860b75cdc5091ce6f91",
-    "arm64_manifest": "sha256:b323402a916c1765a0726cfc671829de36a84cb753e594066e0e37dc6f8bca1b",
-    "release": "https://github.com/jqlang/jq/releases/tag/jq-1.8.1"
   }
 }

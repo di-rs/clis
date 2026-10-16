@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
+from sqlmodel import col, select
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 from temporalio.worker import ActivityInboundInterceptor, ExecuteActivityInput, Interceptor
@@ -18,6 +19,7 @@ from boxie.domain.lifecycle import (
     SandboxRef,
 )
 from boxie.domain.models import SandboxState, TerminationReason
+from boxie.persistence.models import OrchestratorObservationRecord, Sandbox
 from boxie.persistence.postgres import PostgresLifecycle
 from boxie.sandbox.durable_client import DurableOrchestratorClient
 from boxie.temporal.contracts import LifecycleFacts, StopRequest
@@ -46,6 +48,10 @@ class SafeActivityInbound(ActivityInboundInterceptor):
             }:
                 category = error.type
                 non_retryable = error.non_retryable
+            # Cleanup has no terminal failure: accepted ownership must survive
+            # even malformed or temporarily missing dependency state.
+            if activity.info().activity_type in {"request_stop", "remove_sandbox"}:
+                non_retryable = False
             # Sanitize before SDK logging, including nested context and details.
             raise ApplicationError(
                 "lifecycle operation pending" if not non_retryable else "lifecycle request stopped",
@@ -91,30 +97,32 @@ class LifecycleActivities:
     @activity.defn
     async def load_request(self, sandbox_id: str) -> LifecycleFacts:
         request = await self._request(sandbox_id)
-        async with self.repository.pool.connection() as conn:
-            row = await (
-                await conn.execute(
-                    """SELECT s.cleaned_at,s.state,o.ready_at,o.last_input_at,o.disconnected_at
-                FROM sandboxes s LEFT JOIN orchestrator_observations o ON o.sandbox_id=s.id
-                WHERE s.id=%s""",
-                    (request.sandbox_id,),
+        async with self.repository.sessions() as session:
+            row, observation = (
+                await session.exec(
+                    select(Sandbox, OrchestratorObservationRecord)
+                    .outerjoin(
+                        OrchestratorObservationRecord,
+                        col(OrchestratorObservationRecord.sandbox_id) == col(Sandbox.id),
+                    )
+                    .where(Sandbox.id == request.sandbox_id)
                 )
-            ).fetchone()
-        assert row is not None
+            ).one()
         deadlines = [request.absolute_deadline]
-        if row["ready_at"]:
+        if observation is not None and observation.ready_at:
             deadlines.append(
-                (row["last_input_at"] or row["ready_at"])
+                (observation.last_input_at or observation.ready_at)
                 + timedelta(seconds=request.spec.policy.idle_seconds)
             )
-        if row["disconnected_at"]:
+        if observation is not None and observation.disconnected_at:
             deadlines.append(
-                row["disconnected_at"] + timedelta(seconds=request.spec.policy.disconnect_seconds)
+                observation.disconnected_at
+                + timedelta(seconds=request.spec.policy.disconnect_seconds)
             )
         return LifecycleFacts(
             request.absolute_deadline.timestamp(),
-            request.desired_stop or row["state"] in ("terminating", "terminated", "failed"),
-            row["cleaned_at"] is not None,
+            request.desired_stop or row.state in ("terminating", "terminated", "failed"),
+            row.cleaned_at is not None,
             min(deadlines).timestamp(),
         )
 
@@ -233,20 +241,10 @@ class LifecycleActivities:
             await self.orchestrator.ensure_execution(EnsureRequest.from_durable(request), boot)
             observation = await self.orchestrator.remove_execution(request, boot)
         await self._record(observation)
-        if not observation.removal_confirmed:
+        # A racing boot transition or newer observation can reject the report.
+        # Activity completion must prove committed SQL finality, not only RPC success.
+        if not (await self.load_request(sandbox_id)).cleaned:
             raise ApplicationError("physical cleanup pending", type="CleanupPending")
-
-    @activity.defn
-    async def record_observation(self, sandbox_id: str) -> None:
-        request = await self._request(sandbox_id)
-        boot = await self._bind(request)
-        await self._record(await self.orchestrator.inspect_execution(request, boot))
-
-    @activity.defn
-    async def confirm_removed(self, sandbox_id: str) -> bool:
-        # Orchestrator confirmation was persisted atomically with release; activity replay
-        # after a lost SQL acknowledgement is a read, never a second release.
-        return (await self.load_request(sandbox_id)).cleaned
 
     def registered(self) -> list[Any]:
         return [
@@ -256,6 +254,4 @@ class LifecycleActivities:
             self.expire_if_current,
             self.request_stop,
             self.remove_sandbox,
-            self.record_observation,
-            self.confirm_removed,
         ]

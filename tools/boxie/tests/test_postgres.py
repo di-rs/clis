@@ -6,12 +6,17 @@ import importlib.util
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import TracebackType
 from typing import Any
 from uuid import uuid4
 
 import psycopg
 import pytest
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
+from boxie.bootstrap.config import OrchestratorConfig
 from boxie.domain.errors import BoxieError
 from boxie.domain.models import (
     OrchestratorIdentity,
@@ -20,32 +25,52 @@ from boxie.domain.models import (
     SandboxState,
     TerminationReason,
 )
+from boxie.persistence.database import SessionFactory
+from boxie.persistence.database import database as session_database
+from boxie.persistence.migrate import migrate
+from boxie.persistence.models import (
+    Artifact,
+    CapacitySlot,
+    OrchestratorObservationRecord,
+    Outbox,
+    Sandbox,
+    SandboxArtifactRef,
+)
+from boxie.persistence.postgres import PostgresLifecycle
+from boxie.persistence.postgres_artifacts import PostgresArtifactStore
 from boxie_test_support.orchestrator import Clock, bundle, configuration
 from boxie_test_support.terminal_network import network
+from database_support import add_check
 from integration.conftest import postgres_dsn as postgres_dsn
 from integration.conftest import postgres_server as postgres_server
-from psycopg.rows import dict_row
-from psycopg_pool import AsyncConnectionPool, PoolClosed, TooManyRequests
+from sqlalchemy import (
+    Column,
+    Integer,
+    MetaData,
+    Table,
+    create_engine,
+    delete,
+    func,
+    inspect,
+    update,
+)
+from sqlalchemy.exc import DBAPIError, IntegrityError, ResourceClosedError
+from sqlalchemy.exc import TimeoutError as PoolTimeout
+from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlmodel import col, select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 pytestmark = pytest.mark.integration
 MIGRATIONS = Path(__file__).parents[1] / "src/boxie/persistence/migrations"
 OWNER = Principal("one")
 
 
-def adapters() -> tuple[Any, Any, Any]:
-    assert importlib.util.find_spec("boxie.persistence.postgres") is not None, (
-        "durable admission missing"
-    )
-    from boxie.persistence.migrate import migrate
-    from boxie.persistence.postgres import PostgresLifecycle
-    from boxie.persistence.postgres_artifacts import PostgresArtifactStore
-
-    return migrate, PostgresLifecycle, PostgresArtifactStore
-
-
 @asynccontextmanager
-async def database(dsn: str, root: Path) -> AsyncIterator[tuple[Any, Any, Any, Any]]:
-    migrate, lifecycle_type, artifact_type = adapters()
+async def database(
+    dsn: str, root: Path
+) -> AsyncIterator[
+    tuple[PostgresLifecycle, PostgresArtifactStore, SessionFactory, OrchestratorConfig]
+]:
     await asyncio.to_thread(migrate, dsn, MIGRATIONS)
     config = configuration(root)
     from boxie.sandbox.client import OrchestratorClient
@@ -54,19 +79,17 @@ async def database(dsn: str, root: Path) -> AsyncIterator[tuple[Any, Any, Any, A
         async with OrchestratorClient(
             harness.orchestrator_url, b"orchestrator-test-secret"
         ) as resolver:
-            async with AsyncConnectionPool(
-                dsn, min_size=1, max_size=24, kwargs={"row_factory": dict_row}
-            ) as pool:
+            async with session_database(dsn, pool_size=24) as sessions:
 
                 async def healthy() -> bool:
                     return True
 
-                lifecycle = lifecycle_type(pool, resolver, config.identity, healthy)
-                artifacts = artifact_type(pool, root / "durable-artifacts")
-                yield lifecycle, artifacts, pool, config
+                lifecycle = PostgresLifecycle(sessions, resolver, config.identity, healthy)
+                artifacts = PostgresArtifactStore(sessions, root / "durable-artifacts")
+                yield lifecycle, artifacts, sessions, config
 
 
-async def upload(artifacts: Any) -> SandboxSpec:
+async def upload(artifacts: PostgresArtifactStore) -> SandboxSpec:
     content = bundle()
 
     async def chunks() -> AsyncIterator[bytes]:
@@ -76,23 +99,31 @@ async def upload(artifacts: Any) -> SandboxSpec:
     return SandboxSpec(result.artifact.id, "shell", ("/bin/sh",), {})
 
 
-async def counts(pool: Any) -> tuple[int, int, int, int]:
+async def counts(sessions: SessionFactory) -> tuple[int, int, int, int]:
     """Admission/slot/reference/command counts; observation notifications tested separately."""
-    async with pool.connection() as conn:
-        result = []
-        for query in (
-            "SELECT count(*) AS n FROM sandboxes",
-            "SELECT count(*) AS n FROM capacity_slots WHERE sandbox_id IS NOT NULL",
-            "SELECT count(*) AS n FROM sandbox_artifact_refs",
-            "SELECT count(*) AS n FROM outbox WHERE kind IN ('start','stop')",
-        ):
-            result.append((await (await conn.execute(query)).fetchone())["n"])
-        return tuple(result)
+    async with sessions() as session:
+        sandboxes = await session.scalar(select(func.count()).select_from(Sandbox))
+        slots = await session.scalar(
+            select(func.count())
+            .select_from(CapacitySlot)
+            .where(col(CapacitySlot.sandbox_id).is_not(None))
+        )
+        references = await session.scalar(select(func.count()).select_from(SandboxArtifactRef))
+        commands = await session.scalar(
+            select(func.count()).select_from(Outbox).where(col(Outbox.kind).in_(("start", "stop")))
+        )
+        assert (
+            sandboxes is not None
+            and slots is not None
+            and references is not None
+            and commands is not None
+        )
+        return sandboxes, slots, references, commands
 
 
 def test_nine_concurrent_creates_reserve_exactly_eight(postgres_dsn: str, tmp_path: Path) -> None:
     async def exercise() -> None:
-        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, _):
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, _):
             spec = await upload(artifacts)
             result = await asyncio.gather(
                 *(life.submit(OWNER, str(i), spec) for i in range(9)), return_exceptions=True
@@ -100,7 +131,7 @@ def test_nine_concurrent_creates_reserve_exactly_eight(postgres_dsn: str, tmp_pa
             assert sum(not isinstance(item, Exception) for item in result) == 8
             errors = [item for item in result if isinstance(item, BoxieError)]
             assert len(errors) == 1 and errors[0].status == 429
-            assert await counts(pool) == (8, 8, 8, 8)
+            assert await counts(sessions) == (8, 8, 8, 8)
 
     asyncio.run(exercise())
 
@@ -111,11 +142,11 @@ def test_identical_retries_old_snapshot_and_conflicting_key(
     async def exercise() -> None:
         import json
 
-        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
             spec = await upload(artifacts)
             views = await asyncio.gather(*(life.submit(OWNER, "same", spec) for _ in range(20)))
             assert len({item.id for item in views}) == 1
-            assert await counts(pool) == (1, 1, 1, 1)
+            assert await counts(sessions) == (1, 1, 1, 1)
             first = await life.load_request(views[0].id)
             data = json.loads(config.profiles_file.read_text())
             data["shell"]["image_digest"] = "example.org/shell@sha256:" + "4" * 64
@@ -153,20 +184,20 @@ def test_stop_before_dispatch_is_durable_and_retains_accounting(
     postgres_dsn: str, tmp_path: Path
 ) -> None:
     async def exercise() -> None:
-        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, _):
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, _):
             view = await life.submit(OWNER, "stop", await upload(artifacts))
             stopped = await life.terminate(OWNER, view.id, TerminationReason.REQUESTED)
             assert stopped.state == SandboxState.TERMINATING and stopped.cleanup_pending
             assert (await life.load_request(view.id)).desired_stop
             await life.terminate(OWNER, view.id, TerminationReason.REQUESTED)
-            assert await counts(pool) == (1, 1, 1, 2)
+            assert await counts(sessions) == (1, 1, 1, 2)
 
     asyncio.run(exercise())
 
 
 def test_retirement_races_admission_without_losing_files(postgres_dsn: str, tmp_path: Path) -> None:
     async def exercise() -> None:
-        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, _):
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, _):
             spec = await upload(artifacts)
             outcomes = await asyncio.gather(
                 life.submit(OWNER, "race", spec),
@@ -176,11 +207,11 @@ def test_retirement_races_admission_without_losing_files(postgres_dsn: str, tmp_
             view: Any = outcomes[0]
             if isinstance(view, BoxieError):
                 assert view.status == 409
-                assert await counts(pool) == (0, 0, 0, 0)
+                assert await counts(sessions) == (0, 0, 0, 0)
             else:
                 assert not isinstance(view, Exception)
                 assert (await artifacts.path(OWNER, spec.artifact_id)).is_dir()
-                assert await counts(pool) == (1, 1, 1, 1)
+                assert await counts(sessions) == (1, 1, 1, 1)
             with pytest.raises(BoxieError):
                 await life.submit(OWNER, "after", spec)
 
@@ -189,57 +220,74 @@ def test_retirement_races_admission_without_losing_files(postgres_dsn: str, tmp_
 
 def test_outbox_failure_rolls_back_all_admission_writes(postgres_dsn: str, tmp_path: Path) -> None:
     async def exercise() -> None:
-        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, _):
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, _):
             spec = await upload(artifacts)
-            async with pool.connection() as conn:
-                await conn.execute(
-                    "ALTER TABLE outbox ADD CONSTRAINT injected_failure CHECK (kind <> 'start')"
-                )
-            with pytest.raises(psycopg.errors.CheckViolation):
+            await add_check(sessions, col(Outbox.kind) != "start", "injected_failure")
+            with pytest.raises(IntegrityError) as rejected:
                 await life.submit(OWNER, "rollback", spec)
-            assert await counts(pool) == (0, 0, 0, 0)
+            assert isinstance(rejected.value.orig, psycopg.errors.CheckViolation)
+            assert rejected.value.orig.diag.constraint_name == "injected_failure"
+            assert await counts(sessions) == (0, 0, 0, 0)
 
     asyncio.run(exercise())
 
 
-def test_migrations_are_checksummed_atomic_and_serialized(
+def test_alembic_upgrades_are_idempotent_and_failed_revision_is_atomic(
     postgres_dsn: str, tmp_path: Path
 ) -> None:
-    migrate, _, _ = adapters()
+    import shutil
+
+    from boxie.persistence.database import database_url
+    from boxie.persistence.migrate import migrate
+
     migrations = tmp_path / "migrations"
-    migrations.mkdir()
-    first = migrations / "001_initial.sql"
-    first.write_text("CREATE TABLE durable_test (id integer PRIMARY KEY);")
-
-    async def concurrent() -> None:
-        await asyncio.gather(
-            *(asyncio.to_thread(migrate, postgres_dsn, migrations) for _ in range(4))
+    shutil.copytree(MIGRATIONS, migrations)
+    migrate(postgres_dsn, migrations)
+    migrate(postgres_dsn, migrations)
+    head = ScriptDirectory(str(migrations)).get_current_head()
+    assert head is not None
+    engine = create_engine(database_url(postgres_dsn))
+    try:
+        with engine.connect() as connection:
+            assert MigrationContext.configure(connection).get_current_revision() == head
+            assert {
+                "alembic_version",
+                "artifacts",
+                "sandboxes",
+                "capacity_slots",
+                "sandbox_artifact_refs",
+                "outbox",
+                "orchestrator_observations",
+            } <= set(inspect(connection).get_table_names())
+        (migrations / "versions" / "failed_revision.py").write_text(
+            "from alembic import op\n"
+            "import sqlalchemy as sa\n"
+            "revision = 'failed_revision'\n"
+            f"down_revision = {head!r}\n"
+            "branch_labels = None\n"
+            "depends_on = None\n"
+            "def upgrade():\n"
+            "    op.create_table('half_applied', sa.Column('id', sa.Integer(), primary_key=True))\n"
+            "    raise RuntimeError('injected revision failure')\n"
+            "def downgrade():\n"
+            "    op.drop_table('half_applied')\n"
         )
-
-    asyncio.run(concurrent())
-    first.write_text("CREATE TABLE changed (id integer);")
-    with pytest.raises(ValueError, match="checksum"):
-        migrate(postgres_dsn, migrations)
-    first.write_text("CREATE TABLE durable_test (id integer PRIMARY KEY);")
-    (migrations / "002_failed.sql").write_text(
-        "CREATE TABLE half_applied (id integer); SELECT 1/0;"
-    )
-    with pytest.raises(psycopg.errors.DivisionByZero):
-        migrate(postgres_dsn, migrations)
-    with psycopg.connect(postgres_dsn) as conn:
-        assert conn.execute("SELECT to_regclass('half_applied')").fetchone() == (None,)
-        assert conn.execute("SELECT count(*) FROM schema_migrations").fetchone() == (1,)
+        with pytest.raises(RuntimeError, match="injected revision failure"):
+            migrate(postgres_dsn, migrations)
+        with engine.connect() as connection:
+            assert not inspect(connection).has_table("half_applied")
+            assert MigrationContext.configure(connection).get_current_revision() == head
+    finally:
+        engine.dispose()
 
 
 def test_only_fenced_confirmed_removal_releases_capacity_and_references(
     postgres_dsn: str, tmp_path: Path
 ) -> None:
     async def exercise() -> None:
-        from datetime import UTC, datetime
-
         from boxie.domain.lifecycle import OrchestratorObservation
 
-        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
             view = await life.submit(OWNER, "fence", await upload(artifacts))
             assert not view.cleanup_pending
             boot = uuid4()
@@ -257,7 +305,7 @@ def test_only_fenced_confirmed_removal_releases_capacity_and_references(
                 False,
             )
             assert await life.record_observation(observation)
-            assert await counts(pool) == (1, 1, 1, 1)
+            assert await counts(sessions) == (1, 1, 1, 1)
             assert (await life.get(OWNER, view.id)).cleanup_pending
             confirmed = replace(
                 observation, event_version=2, removal_confirmed=True, cleanup_pending=False
@@ -270,10 +318,10 @@ def test_only_fenced_confirmed_removal_releases_capacity_and_references(
                 replace(confirmed, event_version=1),
             ):
                 assert not await life.confirm_removed(bad)
-            assert await counts(pool) == (1, 1, 1, 1)
+            assert await counts(sessions) == (1, 1, 1, 1)
             assert await life.confirm_removed(confirmed)
             assert not await life.confirm_removed(confirmed)
-            assert await counts(pool) == (1, 0, 0, 1)
+            assert await counts(sessions) == (1, 0, 0, 1)
             assert not (await life.get(OWNER, view.id)).cleanup_pending
             assert not await life.record_observation(
                 replace(
@@ -288,11 +336,9 @@ def test_retention_never_ages_out_pending_cleanup_or_undelivered_commands(
     postgres_dsn: str, tmp_path: Path
 ) -> None:
     async def exercise() -> None:
-        from datetime import UTC, datetime
-
         from boxie.domain.lifecycle import OrchestratorObservation
 
-        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
             spec = await upload(artifacts)
             cleaned = await life.submit(OWNER, "cleaned", spec)
             pending = await life.submit(OWNER, "pending", spec)
@@ -315,26 +361,28 @@ def test_retention_never_ages_out_pending_cleanup_or_undelivered_commands(
                     cleanup_pending=False,
                 )
             )
-            async with pool.connection() as conn:
-                await conn.execute(
-                    "UPDATE sandboxes SET cleaned_at=clock_timestamp()-interval '8 days' WHERE id=%s",
-                    (cleaned.id,),
+            async with sessions.begin() as session:
+                await session.exec(
+                    update(Sandbox)
+                    .where(col(Sandbox.id) == cleaned.id)
+                    .values(cleaned_at=func.clock_timestamp() - timedelta(days=8))
                 )
-                await conn.execute(
-                    "UPDATE outbox SET created_at=clock_timestamp()-interval '9 days'"
+                await session.exec(
+                    update(Outbox).values(created_at=func.clock_timestamp() - timedelta(days=9))
                 )
             await life.purge_retained()
             assert await life.get(OWNER, cleaned.id)  # undelivered command holds the record
-            async with pool.connection() as conn:
-                await conn.execute(
-                    "UPDATE outbox SET delivered_at=clock_timestamp()-interval '8 days' WHERE sandbox_id=%s",
-                    (cleaned.id,),
+            async with sessions.begin() as session:
+                await session.exec(
+                    update(Outbox)
+                    .where(col(Outbox.sandbox_id) == cleaned.id)
+                    .values(delivered_at=func.clock_timestamp() - timedelta(days=8))
                 )
             await life.purge_retained()
             with pytest.raises(BoxieError):
                 await life.get(OWNER, cleaned.id)
             assert (await life.get(OWNER, pending.id)).cleanup_pending
-            assert await counts(pool) == (1, 1, 1, 2)
+            assert await counts(sessions) == (1, 1, 1, 2)
 
     asyncio.run(exercise())
 
@@ -343,12 +391,12 @@ def test_unhealthy_admission_preserves_retry_status_and_stop(
     postgres_dsn: str, tmp_path: Path
 ) -> None:
     async def exercise() -> None:
-        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, _):
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, _):
             spec = await upload(artifacts)
             view = await life.submit(OWNER, "accepted", spec)
-            async with pool.connection() as conn:
-                await conn.execute(
-                    "UPDATE outbox SET created_at=clock_timestamp()-interval '31 seconds'"
+            async with sessions.begin() as session:
+                await session.exec(
+                    update(Outbox).values(created_at=func.clock_timestamp() - timedelta(seconds=31))
                 )
             assert not await life.ready()
             assert await life.submit(OWNER, "accepted", spec) == view
@@ -371,7 +419,7 @@ def test_published_orphan_and_retirement_deletion_retry(
         import shutil
         import time
 
-        async with database(postgres_dsn, tmp_path) as (_, artifacts, pool, _):
+        async with database(postgres_dsn, tmp_path) as (_, artifacts, sessions, _):
             spec = await upload(artifacts)
             path = await artifacts.path(OWNER, spec.artifact_id)
             real_remove = shutil.rmtree
@@ -396,14 +444,18 @@ def test_published_orphan_and_retirement_deletion_retry(
                 )
             assert retired.value.status == 409
             # A metadata constraint injects a crash-equivalent publication/commit gap.
-            async with pool.connection() as conn:
-                await conn.execute(
-                    "ALTER TABLE artifacts ADD CONSTRAINT publication_failure CHECK (consumer_id <> 'failure') NOT VALID"
-                )
-            with pytest.raises(psycopg.errors.CheckViolation):
+            await add_check(
+                sessions,
+                col(Artifact.consumer_id) != "failure",
+                "publication_failure",
+                not_valid=True,
+            )
+            with pytest.raises(IntegrityError) as rejected:
                 await artifacts.put(
                     Principal("failure"), uuid4(), hashlib.sha256(content).hexdigest(), chunks()
                 )
+            assert isinstance(rejected.value.orig, psycopg.errors.CheckViolation)
+            assert rejected.value.orig.diag.constraint_name == "publication_failure"
             orphans = [p for p in artifacts.root.iterdir() if p.is_dir()]
             assert (
                 len(orphans) == 1
@@ -422,19 +474,15 @@ def test_exhausted_pool_is_503_without_lifecycle_writes(
     postgres_dsn: str, tmp_path: Path, operation: str
 ) -> None:
     async def exercise() -> None:
-        async with database(postgres_dsn, tmp_path) as (life, artifacts, original_pool, _):
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, original_sessions, _):
             spec = await upload(artifacts)
             original = await life.submit(OWNER, "original", spec)
-            async with AsyncConnectionPool(
-                postgres_dsn,
-                min_size=1,
-                max_size=1,
-                timeout=0.05,
-                kwargs={"row_factory": dict_row},
-            ) as limited_pool:
-                await limited_pool.wait()
-                life.pool = limited_pool
-                async with limited_pool.connection():
+            async with session_database(
+                postgres_dsn, pool_size=1, pool_timeout=0.05
+            ) as limited_sessions:
+                life.sessions = limited_sessions
+                async with limited_sessions() as held:
+                    await held.exec(select(1))
                     with pytest.raises(BoxieError) as unavailable:
                         if operation == "submit":
                             await asyncio.wait_for(life.submit(OWNER, "new", spec), 1)
@@ -445,7 +493,7 @@ def test_exhausted_pool_is_503_without_lifecycle_writes(
                                 life.terminate(OWNER, original.id, TerminationReason.REQUESTED), 1
                             )
                     assert unavailable.value.status == 503
-                assert await counts(original_pool) == (1, 1, 1, 1)
+                assert await counts(original_sessions) == (1, 1, 1, 1)
                 assert await life.get(OWNER, original.id) == original
                 assert await life.submit(OWNER, "original", spec) == original
 
@@ -461,11 +509,11 @@ def test_exhausted_pool_is_503_without_lifecycle_writes(
         (psycopg.errors.AdminShutdown, True),
         (psycopg.errors.LockNotAvailable, True),
         (psycopg.errors.SerializationFailure, True),
-        (TooManyRequests, True),
+        (PoolTimeout, True),
         (psycopg.errors.CheckViolation, False),
         (psycopg.errors.UndefinedTable, False),
         (psycopg.errors.InvalidPassword, False),
-        (PoolClosed, False),
+        (ResourceClosedError, False),
     ],
 )
 def test_consumer_database_error_boundary_never_retries(
@@ -473,32 +521,39 @@ def test_consumer_database_error_boundary_never_retries(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     operation: str,
-    error_type: type[psycopg.Error],
+    error_type: type[Exception],
     unavailable: bool,
 ) -> None:
     async def exercise() -> None:
-        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, _):
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, _):
             spec = await upload(artifacts)
             original = await life.submit(OWNER, "original", spec)
             calls = 0
-            real_connection = pool.connection
+            error = error_type("injected database boundary failure")
+            injected = DBAPIError(None, None, error) if isinstance(error, psycopg.Error) else error
 
-            @asynccontextmanager
-            async def failed_connection() -> AsyncIterator[Any]:
-                nonlocal calls
-                calls += 1
-                # Failure on context exit models loss of acknowledgement after
-                # a committed operation, where replay must be left to the caller.
-                async with real_connection() as conn:
-                    yield conn
-                raise error_type("injected database boundary failure")
+            class FailedSession(AsyncSession):
+                async def __aexit__(
+                    self,
+                    exc_type: type[BaseException] | None,
+                    exc_value: BaseException | None,
+                    traceback: TracebackType | None,
+                ) -> None:
+                    nonlocal calls
+                    await super().__aexit__(exc_type, exc_value, traceback)
+                    calls += 1
+                    # The transaction has committed: caller retries own ambiguous outcomes.
+                    raise injected
 
+            failed_sessions = async_sessionmaker(
+                bind=sessions.kw["bind"], class_=FailedSession, expire_on_commit=False
+            )
             with monkeypatch.context() as patch:
-                patch.setattr(pool, "connection", failed_connection)
+                patch.setattr(life, "sessions", failed_sessions)
                 if unavailable:
                     expected: type[Exception] = BoxieError
                 else:
-                    expected = error_type
+                    expected = type(injected)
                 with pytest.raises(expected) as failure:
                     if operation == "submit":
                         await life.submit(OWNER, "new", spec)
@@ -516,12 +571,12 @@ def test_consumer_database_error_boundary_never_retries(
                 if operation == "terminate"
                 else (1, 1, 1, 1)
             )
-            assert await counts(pool) == expected_counts
+            assert await counts(sessions) == expected_counts
             if operation == "submit":
                 # A caller can safely retry the key after the ambiguous response.
                 retry = await life.submit(OWNER, "new", spec)
                 assert retry.id != original.id
-                assert await counts(pool) == expected_counts
+                assert await counts(sessions) == expected_counts
 
     asyncio.run(exercise())
 
@@ -530,7 +585,7 @@ def test_final_start_guard_serializes_stop_and_validates_durable_request(
     postgres_dsn: str, tmp_path: Path
 ) -> None:
     async def exercise() -> None:
-        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
             assert importlib.util.find_spec("boxie.persistence.start_guard"), (
                 "final-start guard missing"
             )
@@ -541,7 +596,7 @@ def test_final_start_guard_serializes_stop_and_validates_durable_request(
             boot = uuid4()
             await life.bind_orchestrator_boot(OWNER, config.identity, view.id, 1, None, boot)
             request = EnsureRequest.from_durable(await life.load_request(view.id))
-            guard = PostgresStartGuard(pool, timeout=1)
+            guard = PostgresStartGuard(sessions, timeout=1)
             entered, release = asyncio.Event(), asyncio.Event()
             starts = 0
 
@@ -570,7 +625,7 @@ def test_final_start_guard_serializes_stop_and_validates_durable_request(
             assert not await guard.start_allowed(request, boot)
             assert not await guard.run_start_if_allowed(request, boot, start)
             assert starts == 1
-            assert await counts(pool) == (1, 1, 1, 2)
+            assert await counts(sessions) == (1, 1, 1, 2)
 
     asyncio.run(exercise())
 
@@ -582,36 +637,47 @@ def test_start_guard_timeout_and_lost_connection_retain_reservations(
         from boxie.domain.lifecycle import EnsureRequest
         from boxie.persistence.start_guard import PostgresStartGuard
 
-        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
             view = await life.submit(OWNER, "timeout", await upload(artifacts))
             boot = uuid4()
             await life.bind_orchestrator_boot(OWNER, config.identity, view.id, 1, None, boot)
             request = EnsureRequest.from_durable(await life.load_request(view.id))
-            guard = PostgresStartGuard(pool, timeout=0.05)
+            guard = PostgresStartGuard(sessions, timeout=0.05)
 
             async def stuck() -> None:
                 await asyncio.Event().wait()
 
             with pytest.raises(TimeoutError):
                 await guard.run_start_if_allowed(request, boot, stuck)
-            assert await counts(pool) == (1, 1, 1, 1)
+            assert await counts(sessions) == (1, 1, 1, 1)
 
             # A real server-side connection termination during the callback models
             # guard loss; the row lock cannot promise atomic DB/Docker execution.
             async def disconnect() -> None:
-                async with pool.connection() as other:
-                    row = await (
-                        await other.execute("""SELECT pid FROM pg_stat_activity
-                        WHERE datname=current_database() AND pid<>pg_backend_pid()
-                        AND state='idle in transaction' AND query LIKE '%sandbox_artifact_refs%'""")
-                    ).fetchone()
-                    assert row is not None
-                    await other.execute("SELECT pg_terminate_backend(%s)", (row["pid"],))
+                activity = Table(
+                    "pg_stat_activity",
+                    MetaData(),
+                    Column("pid", Integer),
+                    Column("datname"),
+                    Column("state"),
+                    Column("query"),
+                )
+                async with sessions.begin() as other:
+                    pid = await other.scalar(
+                        select(activity.c.pid).where(
+                            activity.c.datname == func.current_database(),
+                            activity.c.pid != func.pg_backend_pid(),
+                            activity.c.state == "idle in transaction",
+                            activity.c.query.like("%sandbox_artifact_refs%"),
+                        )
+                    )
+                    assert pid is not None
+                    assert await other.scalar(select(func.pg_terminate_backend(pid)))
 
             guard.timeout = 1
-            with pytest.raises(psycopg.OperationalError):
+            with pytest.raises(DBAPIError):
                 await guard.run_start_if_allowed(request, boot, disconnect)
-            assert await counts(pool) == (1, 1, 1, 1)
+            assert await counts(sessions) == (1, 1, 1, 1)
             await life.terminate(OWNER, view.id, TerminationReason.REQUESTED)
             assert not await guard.run_start_if_allowed(request, boot, stuck)
 
@@ -622,20 +688,18 @@ def test_durable_orchestrator_and_postgres_release_only_after_reconciled_absence
     postgres_dsn: str, tmp_path: Path
 ) -> None:
     async def exercise() -> None:
-        from datetime import UTC, datetime
-
         from boxie.domain.lifecycle import EnsureRequest
         from boxie.persistence.start_guard import PostgresStartGuard
         from boxie.sandbox.lifecycle import DurableOrchestrator
         from test_orchestrator_lifecycle import Daemon, settled
 
-        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
             view = await life.submit(OWNER, "real-persistence", await upload(artifacts))
             clock = Clock()
             clock.now = datetime.now(UTC)
             daemon = Daemon()
             orchestrator = DurableOrchestrator(
-                config, daemon, artifacts.path, PostgresStartGuard(pool), clock, clock.monotonic
+                config, daemon, artifacts.path, PostgresStartGuard(sessions), clock, clock.monotonic
             )
             await life.bind_orchestrator_boot(
                 OWNER, config.identity, view.id, 1, None, orchestrator.boot_id
@@ -644,18 +708,18 @@ def test_durable_orchestrator_and_postgres_release_only_after_reconciled_absence
             await orchestrator.ensure(request)
             observation = await settled(orchestrator, request.ref, SandboxState.READY)
             assert await life.record_observation(observation)
-            assert await counts(pool) == (1, 1, 1, 1)
+            assert await counts(sessions) == (1, 1, 1, 1)
             daemon.unreachable = True
             pending = await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
             assert pending.cleanup_pending
             assert await life.record_observation(pending)
-            assert await counts(pool) == (1, 1, 1, 1)
+            assert await counts(sessions) == (1, 1, 1, 1)
             daemon.unreachable = False
             await orchestrator.reconcile()
             removed = await orchestrator.inspect(request.ref)
             assert removed.removal_confirmed
             assert await life.confirm_removed(removed)
-            assert await counts(pool) == (1, 0, 0, 1)
+            assert await counts(sessions) == (1, 0, 0, 1)
             await orchestrator.close()
 
     asyncio.run(exercise())
@@ -668,16 +732,16 @@ def test_start_guard_requires_retained_artifact_reference(
         from boxie.domain.lifecycle import EnsureRequest
         from boxie.persistence.start_guard import PostgresStartGuard
 
-        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
             view = await life.submit(OWNER, "reference", await upload(artifacts))
             boot = uuid4()
             await life.bind_orchestrator_boot(OWNER, config.identity, view.id, 1, None, boot)
             request = EnsureRequest.from_durable(await life.load_request(view.id))
-            guard = PostgresStartGuard(pool)
+            guard = PostgresStartGuard(sessions)
             assert await guard.start_allowed(request, boot)
-            async with pool.connection() as conn:
-                await conn.execute(
-                    "DELETE FROM sandbox_artifact_refs WHERE sandbox_id=%s", (view.id,)
+            async with sessions.begin() as session:
+                await session.exec(
+                    delete(SandboxArtifactRef).where(col(SandboxArtifactRef.sandbox_id) == view.id)
                 )
             assert (await artifacts.path(OWNER, request.spec.artifact_id)).is_dir()
             assert not await guard.start_allowed(request, boot)
@@ -694,20 +758,18 @@ def test_journal_outage_expires_container_but_retains_sql_accounting_until_durab
     postgres_dsn: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def exercise() -> None:
-        from datetime import UTC, datetime
-
         from boxie.domain.lifecycle import EnsureRequest
         from boxie.persistence.start_guard import PostgresStartGuard
         from boxie.sandbox.lifecycle import DurableOrchestrator
         from test_orchestrator_lifecycle import Daemon, settled
 
-        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
             view = await life.submit(OWNER, "journal-outage", await upload(artifacts))
             clock = Clock()
             clock.now = datetime.now(UTC)
             daemon = Daemon()
             orchestrator = DurableOrchestrator(
-                config, daemon, artifacts.path, PostgresStartGuard(pool), clock, clock.monotonic
+                config, daemon, artifacts.path, PostgresStartGuard(sessions), clock, clock.monotonic
             )
             await life.bind_orchestrator_boot(
                 OWNER, config.identity, view.id, 1, None, orchestrator.boot_id
@@ -734,14 +796,14 @@ def test_journal_outage_expires_container_but_retains_sql_accounting_until_durab
                 assert pending.cleanup_pending and not pending.removal_confirmed
                 assert not orchestrator.execution_ready
                 assert await life.record_observation(pending)
-                assert await counts(pool) == (1, 1, 1, 1)
+                assert await counts(sessions) == (1, 1, 1, 1)
                 with pytest.raises(ValueError, match="explicit physical removal"):
                     await life.confirm_removed(pending)
                 monkeypatch.setattr(orchestrator.journal, "save", original_save)
                 removed = await settled(orchestrator, request.ref, SandboxState.TERMINATED)
                 assert removed.removal_confirmed and not removed.cleanup_pending
                 assert await life.confirm_removed(removed)
-                assert await counts(pool) == (1, 0, 0, 1)
+                assert await counts(sessions) == (1, 0, 0, 1)
             finally:
                 monkeypatch.setattr(orchestrator.journal, "save", original_save)
                 await orchestrator.close()
@@ -753,7 +815,7 @@ def test_journal_outage_expires_container_but_retains_sql_accounting_until_durab
 def test_terminal_receipt_survives_prior_boot_and_retry_row_purge(
     postgres_dsn: str, tmp_path: Path, purged: bool
 ) -> None:
-    from datetime import UTC, datetime, timedelta
+    from datetime import timedelta
 
     from boxie.domain.lifecycle import EnsureRequest
     from boxie.persistence.start_guard import PostgresStartGuard
@@ -762,11 +824,11 @@ def test_terminal_receipt_survives_prior_boot_and_retry_row_purge(
     from test_orchestrator_lifecycle import settled
 
     async def exercise() -> None:
-        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
             view = await life.submit(OWNER, "receipt", await upload(artifacts))
             clock, daemon = Clock(), Daemon()
             clock.now = datetime.now(UTC)
-            guard = PostgresStartGuard(pool)
+            guard = PostgresStartGuard(sessions)
             orchestrator = DurableOrchestrator(
                 config, daemon, artifacts.path, guard, clock, clock.monotonic
             )
@@ -780,7 +842,6 @@ def test_terminal_receipt_survives_prior_boot_and_retry_row_purge(
             observation = await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
             assert await life.record_observation(observation)
             assert await guard.terminal_receipt(request)
-            from dataclasses import replace
 
             assert not await guard.terminal_receipt(
                 replace(request, principal=Principal("foreign"))
@@ -791,14 +852,16 @@ def test_terminal_receipt_survives_prior_boot_and_retry_row_purge(
             assert await guard.initialization(request, orchestrator.boot_id) is None
             await orchestrator.close()
             if purged:
-                async with pool.connection() as conn:
-                    await conn.execute(
-                        "UPDATE outbox SET delivered_at=clock_timestamp()-interval '8 days' WHERE sandbox_id=%s",
-                        (view.id,),
+                async with sessions.begin() as session:
+                    await session.exec(
+                        update(Outbox)
+                        .where(col(Outbox.sandbox_id) == view.id)
+                        .values(delivered_at=func.clock_timestamp() - timedelta(days=8))
                     )
-                    await conn.execute(
-                        "UPDATE sandboxes SET cleaned_at=clock_timestamp()-interval '8 days' WHERE id=%s",
-                        (view.id,),
+                    await session.exec(
+                        update(Sandbox)
+                        .where(col(Sandbox.id) == view.id)
+                        .values(cleaned_at=func.clock_timestamp() - timedelta(days=8))
                     )
                 await life.purge_retained()
             restarted = DurableOrchestrator(
@@ -821,8 +884,6 @@ def test_failed_restart_journal_projection_waits_for_authenticated_inspection(
     """A failed save emits no push; the next worker inspection repairs SQL truth."""
 
     async def exercise() -> None:
-        from datetime import UTC, datetime
-
         import httpx
         from boxie.domain.lifecycle import EnsureRequest
         from boxie.persistence.start_guard import PostgresStartGuard
@@ -836,11 +897,11 @@ def test_failed_restart_journal_projection_waits_for_authenticated_inspection(
         from temporalio.exceptions import ApplicationError
         from test_orchestrator_lifecycle import Daemon, settled
 
-        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
             view = await life.submit(OWNER, "restart-journal", await upload(artifacts))
             clock, daemon = Clock(), Daemon()
             clock.now = datetime.now(UTC)
-            guard = PostgresStartGuard(pool)
+            guard = PostgresStartGuard(sessions)
             original = DurableOrchestrator(
                 config, daemon, artifacts.path, guard, clock, clock.monotonic
             )
@@ -893,7 +954,7 @@ def test_failed_restart_journal_projection_waits_for_authenticated_inspection(
                         assert pending.cleanup_pending and not pending.removal_confirmed
                         assert pending.boot_id != ready.boot_id
                         assert not reporter.latest  # Failed saves cannot publish finality.
-                        assert await counts(pool) == (1, 1, 1, restart + 1)
+                        assert await counts(sessions) == (1, 1, 1, restart + 1)
                         if restart == 0:
                             # This is the native failure's premature visibility assumption.
                             stale = await life.get(OWNER, view.id)
@@ -927,15 +988,12 @@ def test_failed_restart_journal_projection_waits_for_authenticated_inspection(
                                         in_flight.state == SandboxState.TERMINATING
                                         and in_flight.cleanup_pending
                                     )
-                                    async with pool.connection() as conn:
-                                        row = await (
-                                            await conn.execute(
-                                                "SELECT * FROM orchestrator_observations WHERE sandbox_id=%s",
-                                                (view.id,),
-                                            )
-                                        ).fetchone()
+                                    async with sessions.begin() as session:
+                                        row = await session.get(
+                                            OrchestratorObservationRecord, view.id
+                                        )
                                     assert row is None
-                                    assert await counts(pool) == (1, 1, 1, 2)
+                                    assert await counts(sessions) == (1, 1, 1, 2)
                                 finally:
                                     release.set()
                                 with pytest.raises(ApplicationError) as error:
@@ -950,7 +1008,7 @@ def test_failed_restart_journal_projection_waits_for_authenticated_inspection(
                             await life.load_request(view.id)
                         ).orchestrator_boot_id == orchestrator.boot_id
                         assert not await life.record_observation(ready)
-                        assert await counts(pool) == (1, 1, 1, restart + 1)
+                        assert await counts(sessions) == (1, 1, 1, restart + 1)
                         print(
                             f"restart {restart + 1}: authenticated boot, pending SQL, slot/ref retained; {'inspection repair' if restart == 0 else 'cleanup retry with no observation while RPC in flight'}"
                         )
@@ -977,7 +1035,7 @@ def test_failed_restart_journal_projection_waits_for_authenticated_inspection(
                     recovered.boot_id,
                 )
                 assert await life.confirm_removed(removed)
-                assert await counts(pool) == (1, 0, 0, 2)
+                assert await counts(sessions) == (1, 0, 0, 2)
             finally:
                 # Restore saves only during teardown, after every accounting assertion.
                 monkeypatch.undo()

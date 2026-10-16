@@ -1,12 +1,9 @@
-"""Explicit, checksum-verified test-server input; never resolve mutable defaults."""
+"""Real SQL and authenticated HTTP adapters for the production Temporal worker."""
 
 # The fixture uses the real SQL authority, authenticated HTTP adapters and
 # production worker. Only the orchestrator's Docker port is substituted here.
 import asyncio
-import hashlib
 import json
-import os
-import platform
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -15,8 +12,8 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-import psycopg
 from boxie.api.app import ApiConfig, create_app
+from boxie.persistence.database import database
 from boxie.persistence.migrate import migrate
 from boxie.persistence.outbox import PostgresOutbox
 from boxie.persistence.postgres import PostgresLifecycle
@@ -30,27 +27,10 @@ from boxie.temporal.activities import LifecycleActivities
 from boxie.temporal.dispatcher import OutboxDispatcher
 from boxie_test_support.api import CONSUMER_AUTH, serve
 from boxie_test_support.orchestrator import configuration
-from psycopg.rows import dict_row
-from psycopg_pool import AsyncConnectionPool
+from temporal_test_server import test_server_path as test_server_path
 from temporalio.client import Client
 from test_orchestrator_lifecycle import Daemon
 from test_postgres import MIGRATIONS
-
-VARIANTS = {("Darwin", "arm64"): "macOS_arm64", ("Linux", "x86_64"): "linux_amd64"}
-PINS = json.loads((Path(__file__).with_name("test-server-pins.json")).read_text())["artifacts"]
-
-
-def test_server_path() -> Path:
-    path = Path(os.environ.get("BOXIE_TEST_SERVER", "/missing/BOXIE_TEST_SERVER"))
-    variant = VARIANTS.get((platform.system(), platform.machine()))
-    expected = next((entry["binary_sha256"] for entry in PINS if entry["variant"] == variant), None)
-    if expected is None or not path.is_file():
-        raise RuntimeError(
-            "set BOXIE_TEST_SERVER to the pinned 1.40.0 executable for this platform"
-        )
-    if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
-        raise RuntimeError("test server executable checksum differs from pinned 1.40.0")
-    return path
 
 
 @asynccontextmanager
@@ -62,15 +42,13 @@ async def durable_stack(dsn: str, root: Path, client: Client, queue: str) -> Asy
     profiles["shell"]["commands"].append(["/bin/sh", "-c", "SECRET-COMMAND"])
     config.profiles_file.write_text(json.dumps(profiles))
     daemon = Daemon()
-    async with AsyncConnectionPool[psycopg.AsyncConnection[dict[str, Any]]](
-        dsn, min_size=1, max_size=20, kwargs={"row_factory": dict_row}
-    ) as pool:
-        artifacts = PostgresArtifactStore(pool, root / "sql-artifacts")
+    async with database(dsn, pool_size=20) as sessions:
+        artifacts = PostgresArtifactStore(sessions, root / "sql-artifacts")
         orchestrator = DurableOrchestrator(
             config,
             daemon,
             artifacts.path,
-            PostgresStartGuard(pool),
+            PostgresStartGuard(sessions),
             lambda: datetime.now(UTC),
             time.monotonic,
         )
@@ -84,7 +62,7 @@ async def durable_stack(dsn: str, root: Path, client: Client, queue: str) -> Asy
                 orchestrator_url, b"orchestrator-test-secret", timeout=2
             ) as control,
         ):
-            life = PostgresLifecycle(pool, control, config.identity, control.ready)
+            life = PostgresLifecycle(sessions, control, config.identity, control.ready)
             api = create_app(
                 ApiConfig("test", {"one": b"consumer-one-secret"}),
                 life,
@@ -99,5 +77,5 @@ async def durable_stack(dsn: str, root: Path, client: Client, queue: str) -> Asy
             ):
                 reporter.client.base_url = httpx.URL(url)
                 activities = LifecycleActivities(life, control)
-                dispatcher = OutboxDispatcher(PostgresOutbox(pool), client, queue)
-                yield http, life, orchestrator, daemon, pool, activities, dispatcher
+                dispatcher = OutboxDispatcher(PostgresOutbox(sessions), client, queue)
+                yield http, life, orchestrator, daemon, sessions, activities, dispatcher

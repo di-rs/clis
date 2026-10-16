@@ -65,7 +65,7 @@ operators may separately approve the
 immutable product sandbox image digest. Profiles are never consumer uploads.
 
 Complete the required [durable runtime prerequisites](durable-runtime.md) first,
-including explicit SQL migrations, namespace setup, and API/worker mTLS identities.
+including explicit Alembic revisions, namespace setup, and API/worker mTLS identities.
 Generate all three process JSON files (substitute your installation UUID and paths):
 
 ```sh

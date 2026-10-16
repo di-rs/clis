@@ -3,15 +3,20 @@
 import asyncio
 import importlib
 import json
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import pytest
+from boxie.persistence.models import OrchestratorObservationRecord, Outbox
 from boxie_test_support.terminal_network import attach
+from database_support import add_check
 from integration.conftest import postgres_dsn as postgres_dsn
 from integration.conftest import postgres_server as postgres_server
 from integration.conftest import temporal_stack as temporal_stack
+from sqlalchemy import func, insert, update
+from sqlmodel import col, select
 from temporalio.client import Client
 from test_postgres import OWNER, database, upload
 from test_temporal_deployment import tls
@@ -29,17 +34,19 @@ def test_accepted_before_ack_is_redelivered_to_one_run(
         client = await Client.connect(
             temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-worker")
         )
-        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, _config):
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, _config):
             sandbox = await life.submit(OWNER, "once", await upload(artifacts))
-            store = PostgresOutbox(pool)
+            store = PostgresOutbox(sessions)
             dispatcher = module.OutboxDispatcher(store, client, "outbox-" + uuid4().hex)
             event = (await store.claim("first"))[0]
             await dispatcher.deliver(event)  # dispatcher dies here: no acknowledgment
             handle = client.get_workflow_handle(f"boxie/sandbox/{sandbox.id}")
             first = (await handle.describe()).run_id
-            async with pool.connection() as conn:
-                await conn.execute(
-                    "UPDATE outbox SET lease_expires_at=clock_timestamp()-interval '1 second'"
+            async with sessions.begin() as session:
+                await session.exec(
+                    update(Outbox).values(
+                        lease_expires_at=func.clock_timestamp() - timedelta(seconds=1)
+                    )
                 )
             retried = (await store.claim("replacement"))[0]
             assert not await store.acknowledge(event)
@@ -173,7 +180,7 @@ def test_workflow_cleanup_preserves_first_termination_cause(
             life,
             orchestrator,
             daemon,
-            pool,
+            sessions,
             activities,
             _dispatcher,
         ):
@@ -208,7 +215,7 @@ def test_workflow_cleanup_preserves_first_termination_cause(
                 assert response.status_code == 200
                 assert response.json() == {"accepted": accepted}
                 assert (await life.get(OWNER, sid)).reason == expected
-            assert (await counts(pool))[1:3] == (1, 1)
+            assert (await counts(sessions))[1:3] == (1, 1)
             async with lifecycle_worker(client, activities, task_queue=queue):
                 handle = await client.start_workflow(
                     SandboxLifecycle.run,
@@ -221,7 +228,7 @@ def test_workflow_cleanup_preserves_first_termination_cause(
             assert final.reason == expected
             assert final.state == SandboxState.TERMINATED and not final.cleanup_pending
             assert (await life.load_request(sid)).desired_stop
-            assert await counts(pool) == (1, 0, 0, 2)
+            assert await counts(sessions) == (1, 0, 0, 2)
             assert daemon.creates == 0 and not daemon.resources
 
     asyncio.run(exercise())
@@ -256,7 +263,7 @@ def test_runnable_stack_preserves_accounting_and_worker_replacement(
             life,
             orchestrator,
             daemon,
-            pool,
+            sessions,
             activities,
             dispatcher,
         ):
@@ -355,7 +362,7 @@ def test_runnable_stack_preserves_accounting_and_worker_replacement(
                                 break
                             await asyncio.sleep(0.02)
                         assert orchestrator.records[sid].cleanup_pending
-                        assert (await counts(pool))[1:3] == (1, 1)
+                        assert (await counts(sessions))[1:3] == (1, 1)
                         daemon.unreachable = False
                         await ws.close()
                     handle = client.get_workflow_handle(
@@ -366,7 +373,7 @@ def test_runnable_stack_preserves_accounting_and_worker_replacement(
                     )
                     result = await asyncio.wait_for(handle.result(), 40)
                     assert result.cleaned
-                    assert (await counts(pool))[1:3] == (0, 0)
+                    assert (await counts(sessions))[1:3] == (0, 0)
                     assert not daemon.resources
                     assert daemon.creates == (0 if stop_first else 1)
                     history = await handle.fetch_history()
@@ -412,7 +419,7 @@ def test_actual_api_worker_processes_recover_worker_loss(
             life,
             orchestrator,
             daemon,
-            pool,
+            sessions,
             activities,
             _dispatcher,
         ):
@@ -754,7 +761,7 @@ def test_authenticated_observations_are_atomic_and_fenced(
             life,
             orchestrator,
             _daemon,
-            pool,
+            sessions,
             _activities,
             _dispatcher,
         ):
@@ -791,27 +798,21 @@ def test_authenticated_observations_are_atomic_and_fenced(
                     headers=orchestrator_headers,
                 )
                 assert response.json() == {"accepted": False}
-            async with pool.connection() as conn:
+            async with sessions() as session:
+                observation_record = await session.get(OrchestratorObservationRecord, sid)
+                assert observation_record is not None and observation_record.event_version == 10
                 assert (
-                    await (
-                        await conn.execute(
-                            "SELECT event_version FROM orchestrator_observations WHERE sandbox_id=%s",
-                            (sid,),
-                        )
-                    ).fetchone()
-                )["event_version"] == 10
-                assert (
-                    await (
-                        await conn.execute(
-                            "SELECT count(*) AS n FROM outbox WHERE sandbox_id=%s AND kind='observation'",
-                            (sid,),
-                        )
-                    ).fetchone()
-                )["n"] == 1
-                # Transaction rollback must also roll back the projected fact.
-                await conn.execute(
-                    "ALTER TABLE outbox ADD CONSTRAINT reject_reports CHECK (kind != 'observation') NOT VALID"
+                    await session.scalar(
+                        select(func.count())
+                        .select_from(Outbox)
+                        .where(col(Outbox.sandbox_id) == sid, col(Outbox.kind) == "observation")
+                    )
+                    == 1
                 )
+            # Transaction rollback must also roll back the projected fact.
+            await add_check(
+                sessions, col(Outbox.kind) != "observation", "reject_reports", not_valid=True
+            )
             response = await http.put(
                 "/internal/observations",
                 json=ObservationWire.from_domain(replace(observation, event_version=11)).model_dump(
@@ -820,15 +821,9 @@ def test_authenticated_observations_are_atomic_and_fenced(
                 headers=orchestrator_headers,
             )
             assert response.status_code == 500
-            async with pool.connection() as conn:
-                assert (
-                    await (
-                        await conn.execute(
-                            "SELECT event_version FROM orchestrator_observations WHERE sandbox_id=%s",
-                            (sid,),
-                        )
-                    ).fetchone()
-                )["event_version"] == 10
+            async with sessions() as session:
+                observation_record = await session.get(OrchestratorObservationRecord, sid)
+                assert observation_record is not None and observation_record.event_version == 10
 
     asyncio.run(exercise())
 
@@ -848,9 +843,9 @@ def test_timeout_closed_delivery_and_bounded_claims(
         client = await Client.connect(
             temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-worker")
         )
-        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, config):
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
             sandbox = await life.submit(OWNER, "timeout", await upload(artifacts))
-            store = PostgresOutbox(pool)
+            store = PostgresOutbox(sessions)
             dispatcher = OutboxDispatcher(store, client, "no-worker-" + uuid4().hex)
             event = (await store.claim("timeout"))[0]
             original = client.start_workflow
@@ -894,11 +889,15 @@ def test_timeout_closed_delivery_and_bounded_claims(
             assert (await handle.describe()).run_id == run_id
             # Use another retained request for bounded claims and slow RPC concurrency.
             live = await life.submit(OWNER, "batch", await upload(artifacts))
-            async with pool.connection() as conn:
+            async with sessions.begin() as session:
                 for index in range(34):
-                    await conn.execute(
-                        "INSERT INTO outbox(id,deduplication_key,sandbox_id,kind) VALUES (%s,%s,%s,'observation')",
-                        (uuid4(), f"batch-{index}", live.id),
+                    await session.exec(
+                        insert(Outbox).values(
+                            id=uuid4(),
+                            deduplication_key=f"batch-{index}",
+                            sandbox_id=live.id,
+                            kind="observation",
+                        )
                     )
             active = maximum = calls = 0
 
@@ -919,9 +918,11 @@ def test_timeout_closed_delivery_and_bounded_claims(
             assert 1 < maximum <= 8 and calls <= 32
             claimed = await store.claim("expired")
             assert 1 <= len(claimed) <= 32
-            async with pool.connection() as conn:
-                await conn.execute(
-                    "UPDATE outbox SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE lease_owner='expired'"
+            async with sessions.begin() as session:
+                await session.exec(
+                    update(Outbox)
+                    .where(col(Outbox.lease_owner) == "expired")
+                    .values(lease_expires_at=func.clock_timestamp() - timedelta(seconds=1))
                 )
             with pytest.raises(RuntimeError, match="claim expired"):
                 await dispatcher.deliver(claimed[0])
@@ -986,14 +987,18 @@ def test_backlog_threshold_preserves_matching_retry_status_and_stop(
         from boxie.domain.errors import BoxieError
         from boxie.domain.models import TerminationReason
 
-        async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, _config):
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, _config):
             spec = await upload(artifacts)
             first = await life.submit(OWNER, "original", spec)
-            async with pool.connection() as conn:
+            async with sessions.begin() as session:
                 for index in range(98):
-                    await conn.execute(
-                        "INSERT INTO outbox(id,deduplication_key,sandbox_id,kind) VALUES (%s,%s,%s,'start')",
-                        (uuid4(), f"readiness-{index}", first.id),
+                    await session.exec(
+                        insert(Outbox).values(
+                            id=uuid4(),
+                            deduplication_key=f"readiness-{index}",
+                            sandbox_id=first.id,
+                            kind="start",
+                        )
                     )
             assert await life.ready()  # backlog 99
             await life.submit(OWNER, "at-99", spec)
@@ -1006,16 +1011,21 @@ def test_backlog_threshold_preserves_matching_retry_status_and_stop(
             assert (
                 await life.terminate(OWNER, first.id, TerminationReason.REQUESTED)
             ).cleanup_pending
-            async with pool.connection() as conn:
-                await conn.execute("UPDATE outbox SET delivered_at=clock_timestamp()")
-                await conn.execute(
-                    "UPDATE outbox SET delivered_at=NULL,created_at=clock_timestamp()-interval '29 seconds' WHERE deduplication_key=%s",
-                    (f"{first.id}:start",),
+            async with sessions.begin() as session:
+                await session.exec(update(Outbox).values(delivered_at=func.clock_timestamp()))
+                await session.exec(
+                    update(Outbox)
+                    .where(col(Outbox.deduplication_key) == f"{first.id}:start")
+                    .values(
+                        delivered_at=None, created_at=func.clock_timestamp() - timedelta(seconds=29)
+                    )
                 )
             assert await life.ready()
-            async with pool.connection() as conn:
-                await conn.execute(
-                    "UPDATE outbox SET created_at=clock_timestamp()-interval '31 seconds' WHERE delivered_at IS NULL"
+            async with sessions.begin() as session:
+                await session.exec(
+                    update(Outbox)
+                    .where(col(Outbox.delivered_at).is_(None))
+                    .values(created_at=func.clock_timestamp() - timedelta(seconds=31))
                 )
             assert not await life.ready()
 
@@ -1045,7 +1055,7 @@ def test_workflow_cancel_retains_uncertain_create_until_actual_removal(
             life,
             orchestrator,
             daemon,
-            pool,
+            sessions,
             activities,
             dispatcher,
         ):
@@ -1067,12 +1077,12 @@ def test_workflow_cancel_retains_uncertain_create_until_actual_removal(
                         await asyncio.sleep(0.01)
                     else:
                         raise AssertionError("cancellation stop not persisted")
-                    assert (await counts(pool))[1:3] == (1, 1)
+                    assert (await counts(sessions))[1:3] == (1, 1)
                     assert not orchestrator.records[sid].removal_confirmed
                     gate.set()  # Earlier 404s cannot settle this still-running create.
                     assert (await asyncio.wait_for(handle.result(), 30)).cleaned
                     assert daemon.creates == 1 and not daemon.started and not daemon.resources
-                    assert (await counts(pool))[1:3] == (0, 0)
+                    assert (await counts(sessions))[1:3] == (0, 0)
                     history = await handle.fetch_history()
                     (tmp_path / "cancel-accounting.json").write_text(history.to_json())
                     await Replayer(workflows=[SandboxLifecycle]).replay_workflow(history)

@@ -8,12 +8,21 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
+from boxie.persistence.models import (
+    Artifact,
+    CapacitySlot,
+    OrchestratorObservationRecord,
+    Sandbox,
+    SandboxArtifactRef,
+)
 from boxie.temporal.workflows import SandboxLifecycle
 from boxie_test_support.orchestrator import bundle
+from sqlalchemy import and_, func
+from sqlmodel import col, select
 from temporalio.client import Client
 from temporalio.worker import Replayer
 from test_temporal_deployment import tls
@@ -71,10 +80,21 @@ async def create(client: httpx.AsyncClient, artifact: str, key: str) -> str:
     return str(response.json()["id"])
 
 
-def accounting(stack: LifecycleStack, identifier: str, count: int) -> None:
-    rows = stack.rows(
-        "SELECT (SELECT count(*) FROM capacity_slots WHERE sandbox_id=%s) AS slots, (SELECT count(*) FROM sandbox_artifact_refs WHERE sandbox_id=%s) AS refs",
-        (identifier, identifier),
+async def accounting(stack: LifecycleStack, identifier: str, count: int) -> None:
+    sid = UUID(identifier)
+    rows = await stack.rows(
+        select(
+            select(func.count())
+            .select_from(CapacitySlot)
+            .where(col(CapacitySlot.sandbox_id) == sid)
+            .scalar_subquery()
+            .label("slots"),
+            select(func.count())
+            .select_from(SandboxArtifactRef)
+            .where(col(SandboxArtifactRef.sandbox_id) == sid)
+            .scalar_subquery()
+            .label("refs"),
+        )
     )
     assert rows == [{"slots": count, "refs": count}]
 
@@ -90,12 +110,23 @@ async def pending_after_restart(
     # Its durable SQL stop remains authoritative even with no observation row.
     async with asyncio.timeout(90):
         while True:
-            accounting(stack, identifier, 1)
-            rows = stack.rows(
-                """SELECT s.orchestrator_boot_id, s.state, s.cleanup_pending, o.removal_confirmed
-                FROM sandboxes s LEFT JOIN orchestrator_observations o
-                ON o.sandbox_id=s.id AND o.boot_id=s.orchestrator_boot_id WHERE s.id=%s""",
-                (identifier,),
+            await accounting(stack, identifier, 1)
+            rows = await stack.rows(
+                select(
+                    Sandbox.orchestrator_boot_id,
+                    Sandbox.state,
+                    Sandbox.cleanup_pending,
+                    OrchestratorObservationRecord.removal_confirmed,
+                )
+                .outerjoin(
+                    OrchestratorObservationRecord,
+                    and_(
+                        col(OrchestratorObservationRecord.sandbox_id) == col(Sandbox.id),
+                        col(OrchestratorObservationRecord.boot_id)
+                        == col(Sandbox.orchestrator_boot_id),
+                    ),
+                )
+                .where(col(Sandbox.id) == UUID(identifier))
             )
             if rows and rows[0]["orchestrator_boot_id"] == boot:
                 assert not rows[0]["removal_confirmed"]
@@ -124,7 +155,7 @@ def test_process_loss_failed_delete_and_history_replay(lifecycle_stack: Lifecycl
                 key = uuid4().hex
                 identifier = await create(client, artifact, key)
                 original = await until(client, identifier, "ready")
-                accounting(stack, identifier, 1)
+                await accounting(stack, identifier, 1)
                 assert stack.children()
                 stack.fault("fail_delete", True)
                 await asyncio.to_thread(stack.process, service, "kill")
@@ -139,18 +170,18 @@ def test_process_loss_failed_delete_and_history_replay(lifecycle_stack: Lifecycl
                     current["cleanup_pending"]
                     and current["absolute_deadline"] == original["absolute_deadline"]
                 )
-                accounting(stack, identifier, 1)
+                await accounting(stack, identifier, 1)
                 if service != "api":
                     await asyncio.to_thread(stack.process, service, "start")
                 async with asyncio.timeout(60):
                     while not (stack.root / "faults/delete_seen").exists():
                         await asyncio.sleep(0.1)
                 assert stack.children()
-                accounting(stack, identifier, 1)
+                await accounting(stack, identifier, 1)
                 stack.fault("fail_delete", False)
                 (stack.root / "faults/delete_seen").unlink(missing_ok=True)
                 await until(client, identifier, "terminated")
-                accounting(stack, identifier, 0)
+                await accounting(stack, identifier, 0)
                 assert not stack.children()
                 handle = temporal.get_workflow_handle("boxie/sandbox/" + identifier)
                 await asyncio.wait_for(handle.result(), 60)
@@ -198,8 +229,12 @@ def test_successful_artifact_commit_lost_ack_collector_overlap_and_orchestrator_
                 async with asyncio.timeout(20):
                     while not (stack.root / "faults/commit_seen").exists():
                         await asyncio.sleep(0.05)
-                row = stack.rows(
-                    "SELECT storage_id, digest FROM artifacts WHERE id=%s", (artifact,)
+                row = (
+                    await stack.rows(
+                        select(Artifact.storage_id, Artifact.digest).where(
+                            col(Artifact.id) == UUID(artifact)
+                        )
+                    )
                 )[0]
                 storage = stack.root / "data/artifacts" / str(row["storage_id"])
                 assert (
@@ -234,12 +269,12 @@ def test_successful_artifact_commit_lost_ack_collector_overlap_and_orchestrator_
                 ).read_bytes() == b"committed bytes survive lost acknowledgment\n"
                 identifier = await create(client, artifact, uuid4().hex)
                 await until(client, identifier, "ready")
-                accounting(stack, identifier, 1)
+                await accounting(stack, identifier, 1)
                 await client.delete(f"/v1/artifacts/{artifact}")
                 assert storage.exists()
                 await client.delete(f"/v1/sandboxes/{identifier}")
                 await until(client, identifier, "terminated")
-                accounting(stack, identifier, 0)
+                await accounting(stack, identifier, 0)
                 async with asyncio.timeout(40):
                     while storage.exists():
                         await asyncio.sleep(0.2)
@@ -273,7 +308,7 @@ def test_sustained_journal_failure_across_orchestrator_restart(
                         await asyncio.sleep(0.1)
             else:
                 await until(client, identifier, "ready")
-            accounting(stack, identifier, 1)
+            await accounting(stack, identifier, 1)
             assert stack.children()
             await asyncio.to_thread(stack.process, "orchestrator", "kill")
             stack.env["BOXIE_TEST_DATA_MODE"] = "ro"
@@ -312,12 +347,12 @@ def test_sustained_journal_failure_across_orchestrator_restart(
                 # Discovery/deletion during a failed save was never durable. A new
                 # boot sees unknown create + absence and must retain the reservation.
                 await pending_after_restart(stack, client, identifier)
-                accounting(stack, identifier, 1)
+                await accounting(stack, identifier, 1)
                 assert not stack.children()
                 # Only fixture teardown disposes of this entire owned environment.
             else:
                 await until(client, identifier, "terminated")
-                accounting(stack, identifier, 0)
+                await accounting(stack, identifier, 0)
                 assert not stack.children()
                 await asyncio.to_thread(stack.wait_ready)
                 await client.delete(f"/v1/artifacts/{artifact}")
@@ -341,13 +376,13 @@ def test_unknown_create_ack_loss_recovers_with_durable_discovery(
             async with asyncio.timeout(40):
                 while not (stack.root / "faults/create_seen").exists():
                     await asyncio.sleep(0.1)
-            accounting(stack, identifier, 1)
+            await accounting(stack, identifier, 1)
             assert stack.children()
             await asyncio.to_thread(stack.process, "orchestrator", "kill")
             stack.fault("hold_create", False)
             await asyncio.to_thread(stack.process, "orchestrator", "start")
             await until(client, identifier, "terminated")
-            accounting(stack, identifier, 0)
+            await accounting(stack, identifier, 0)
             assert not stack.children()
             await client.delete(f"/v1/artifacts/{artifact}")
 

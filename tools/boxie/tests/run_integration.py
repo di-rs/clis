@@ -11,7 +11,9 @@ import secrets
 import shutil
 import socket
 import subprocess
+import sys
 import time
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -54,6 +56,10 @@ class ProductionStack:
             TEMPORAL_OPERATOR_CERTS_DIR=str(root / "operator"),
             TEMPORAL_UI_CERTS_DIR=str(root / "ui"),
         )
+        # Compose resolves the operations-only image even when that service is
+        # unused. This fixture executes bootstrap with the installed host SDK;
+        # LifecycleStack replaces this with its built runtime for application jobs.
+        self.env.setdefault("BOXIE_RUNTIME_IMAGE", "boxie:lifecycle")
         self.address = ""
         self.ui_address = ""
         self.pg_port = ""
@@ -186,10 +192,6 @@ class ProductionStack:
         self.write_overrides()
         self.compose("platform", "up", "--detach", "--wait", "--wait-timeout", "90")
         self.pg_port = self.compose("platform", "port", "postgres", "5432").rsplit(":", 1)[1]
-        self.compose("temporal", "build", "bootstrap")
-        self.compose(
-            "temporal", "run", "--rm", "--entrypoint", "/usr/local/bin/jq", "bootstrap", "--version"
-        )
         self.compose("temporal", "run", "--rm", "schema", "setup")
         # Exercise upgrade path independently from first-install setup.
         self.compose("temporal", "run", "--rm", "schema", "update")
@@ -199,7 +201,7 @@ class ProductionStack:
         last_error = ""
         for _ in range(10):
             try:
-                self.compose("temporal", "run", "--rm", "bootstrap")
+                self.bootstrap()
                 break
             except RuntimeError as error:
                 last_error = str(error)
@@ -212,19 +214,34 @@ class ProductionStack:
                 + "\n"
                 + self.compose("temporal", "logs", "--tail", "100")
             )
-        self.compose("temporal", "run", "--rm", "bootstrap")
+        self.bootstrap()
         self.evidence = {
             "server": command(
                 ["docker", "version", "--format", "{{.Server.Version}} {{.Server.Arch}}"]
             ),
-            "bootstrap_local_image_id": command(
-                ["docker", "image", "inspect", self.temporal + "-bootstrap", "--format", "{{.Id}}"]
-            ),
+            "bootstrap_sdk": version("temporalio"),
             "images": json.loads((ROOT / "infra/temporal/versions.json").read_text()),
             "schema": "fresh setup and explicit update succeeded for distinct databases",
             "namespace": "bootstrap succeeded twice and checked seven-day retention",
         }
         (self.root / "evidence.json").write_text(json.dumps(self.evidence, indent=2))
+
+    def bootstrap(self) -> str:
+        return command(
+            [
+                sys.executable,
+                "-m",
+                "boxie.bootstrap.temporal",
+                "--address",
+                self.address,
+                "--ca-file",
+                str(self.root / "operator/frontend-ca.pem"),
+                "--cert-file",
+                str(self.root / "operator/operator.pem"),
+                "--key-file",
+                str(self.root / "operator/operator.key"),
+            ]
+        )
 
     def close(self) -> None:
         failures: list[str] = []

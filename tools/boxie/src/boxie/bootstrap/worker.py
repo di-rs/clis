@@ -13,9 +13,9 @@ from temporalio.worker import Worker
 from boxie.bootstrap.config import read_credential
 from boxie.bootstrap.durable import (
     Dependencies,
+    database_for,
     durable_config,
     orchestrator_identity,
-    pool_for,
     temporal_client,
 )
 from boxie.persistence.outbox import PostgresOutbox
@@ -51,7 +51,7 @@ def main() -> None:
     async def run() -> None:
         client = await temporal_client(config)
         async with (
-            pool_for(config.postgres_dsn_file) as pool,
+            database_for(config.postgres_dsn_file) as sessions,
             DurableOrchestratorClient(
                 settings["orchestrator_url"],
                 read_credential(Path(settings["orchestrator_credential_file"])),
@@ -59,13 +59,13 @@ def main() -> None:
             ) as orchestrator,
         ):
             repository = PostgresLifecycle(
-                pool,
+                sessions,
                 orchestrator,
                 orchestrator_identity(settings["identity"]),
                 Dependencies(orchestrator, client),
             )
             activities = LifecycleActivities(repository, orchestrator)
-            dispatcher = OutboxDispatcher(PostgresOutbox(pool), client)
+            dispatcher = OutboxDispatcher(PostgresOutbox(sessions), client)
             stopped = asyncio.Event()
             loop = asyncio.get_running_loop()
             for sig in (signal.SIGINT, signal.SIGTERM):

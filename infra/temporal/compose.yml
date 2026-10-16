@@ -30,12 +30,10 @@ services:
   bootstrap:
     profiles: [operations]
     networks: [control]
-    build:
-      context: .
-      dockerfile: admin-tools.Dockerfile
-    entrypoint: [/bin/sh, /scripts/bootstrap.sh]
+    image: ${BOXIE_RUNTIME_IMAGE:?provide approved immutable Boxie runtime image}
+    user: "1000:1000"
+    entrypoint: [python, -m, boxie.bootstrap.temporal]
     volumes:
-      - ./bootstrap.sh:/scripts/bootstrap.sh:ro
       - ${TEMPORAL_OPERATOR_CERTS_DIR:?provide operator certificate directory}:/certs:ro
   ui:
     image: temporalio/ui:2.56.0@sha256:66d55d383bfb334ee0781f21a3b36c865b3f0f2262491a070bb2143394e9fe88

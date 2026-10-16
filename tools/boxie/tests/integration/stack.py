@@ -10,10 +10,10 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import httpx
-import psycopg
+from boxie.persistence.database import database
 from boxie.persistence.migrate import migrate
-from psycopg.rows import dict_row
 from run_integration import ROOT, ProductionStack, command
+from sqlalchemy.sql import Select
 
 
 class LifecycleStack(ProductionStack):
@@ -230,9 +230,10 @@ with httpx.Client(headers={'Authorization': 'Bearer ' + credential}, timeout=1, 
         else:
             self.runtime_command(action, service)
 
-    def rows(self, query: str, args: tuple[object, ...] = ()) -> list[dict[str, Any]]:
-        with psycopg.connect(self.dsn, row_factory=dict_row) as conn:
-            return conn.execute(query, args).fetchall()
+    async def rows(self, statement: Select[Any]) -> list[dict[str, Any]]:
+        async with database(self.dsn) as sessions, sessions() as session:
+            connection = await session.connection()
+            return [dict(row) for row in (await connection.execute(statement)).mappings()]
 
     def children(self) -> list[str]:
         ids = command(

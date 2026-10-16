@@ -1,10 +1,16 @@
-"""Short transactional SKIP LOCKED claims; every acknowledgment is owner fenced."""
+"""Short SKIP LOCKED transactions with owner-fenced acknowledgements."""
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import cast
 from uuid import UUID
 
-from boxie.persistence.postgres import Pool
+from sqlalchemy import func, or_
+from sqlmodel import col, select
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from boxie.persistence.database import SessionFactory
+from boxie.persistence.models import CapacitySlot, Outbox, Sandbox, SandboxArtifactRef
 
 
 @dataclass(frozen=True)
@@ -17,71 +23,97 @@ class OutboxEvent:
 
 
 class PostgresOutbox:
-    def __init__(self, pool: Pool) -> None:
-        self.pool = pool
+    def __init__(self, sessions: SessionFactory) -> None:
+        self.sessions = sessions
 
     async def claim(self, owner: str) -> list[OutboxEvent]:
-        async with self.pool.connection() as conn, conn.transaction():
-            rows = await (
-                await conn.execute(
-                    """WITH pending AS (
-                SELECT id FROM outbox WHERE delivered_at IS NULL
-                AND next_attempt_at <= clock_timestamp()
-                AND (lease_expires_at IS NULL OR lease_expires_at <= clock_timestamp())
-                ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 32)
-                UPDATE outbox o SET lease_owner=%s,
-                lease_expires_at=clock_timestamp()+interval '30 seconds',attempts=attempts+1
-                FROM pending WHERE o.id=pending.id
-                RETURNING o.id,o.sandbox_id,o.lease_owner,o.lease_expires_at,o.attempts""",
-                    (owner,),
+        async with self.sessions() as session, session.begin():
+            rows = (
+                await session.exec(
+                    select(Outbox)
+                    .where(
+                        col(Outbox.delivered_at).is_(None),
+                        Outbox.next_attempt_at <= func.clock_timestamp(),
+                        or_(
+                            col(Outbox.lease_expires_at).is_(None),
+                            col(Outbox.lease_expires_at) <= func.clock_timestamp(),
+                        ),
+                    )
+                    .order_by(col(Outbox.created_at), col(Outbox.id))
+                    .with_for_update(skip_locked=True)
+                    .limit(32)
                 )
-            ).fetchall()
-            return [OutboxEvent(**row) for row in rows]
+            ).all()
+            now = cast(datetime, await session.scalar(select(func.clock_timestamp())))
+            events = []
+            for row in rows:
+                row.lease_owner, row.lease_expires_at = owner, now + timedelta(seconds=30)
+                row.attempts += 1
+                events.append(
+                    OutboxEvent(row.id, row.sandbox_id, owner, row.lease_expires_at, row.attempts)
+                )
+            return events
+
+    @staticmethod
+    async def _owned(session: AsyncSession, event: OutboxEvent) -> Outbox | None:
+        return (
+            await session.exec(
+                select(Outbox)
+                .where(
+                    Outbox.id == event.id,
+                    Outbox.lease_owner == event.lease_owner,
+                    col(Outbox.lease_expires_at) > func.clock_timestamp(),
+                    col(Outbox.delivered_at).is_(None),
+                )
+                .with_for_update()
+            )
+        ).one_or_none()
 
     async def valid(self, event: OutboxEvent) -> bool:
-        async with self.pool.connection() as conn:
-            row = await (
-                await conn.execute(
-                    """SELECT id FROM outbox WHERE id=%s
-                AND lease_owner=%s AND lease_expires_at>clock_timestamp()+interval '5 seconds'
-                AND delivered_at IS NULL""",
-                    (event.id, event.lease_owner),
+        async with self.sessions() as session:
+            return (
+                await session.exec(
+                    select(Outbox.id).where(
+                        Outbox.id == event.id,
+                        Outbox.lease_owner == event.lease_owner,
+                        col(Outbox.lease_expires_at)
+                        > func.clock_timestamp() + timedelta(seconds=5),
+                        col(Outbox.delivered_at).is_(None),
+                    )
                 )
-            ).fetchone()
-            return row is not None
+            ).first() is not None
 
     async def acknowledge(self, event: OutboxEvent) -> bool:
-        async with self.pool.connection() as conn:
-            row = await (
-                await conn.execute(
-                    """UPDATE outbox SET delivered_at=clock_timestamp(),
-                lease_owner=NULL,lease_expires_at=NULL WHERE id=%s AND lease_owner=%s
-                AND lease_expires_at>clock_timestamp() AND delivered_at IS NULL RETURNING id""",
-                    (event.id, event.lease_owner),
-                )
-            ).fetchone()
-            return row is not None
+        async with self.sessions() as session, session.begin():
+            row = await self._owned(session, event)
+            if row is None:
+                return False
+            row.delivered_at = cast(datetime, await session.scalar(select(func.clock_timestamp())))
+            row.lease_owner, row.lease_expires_at = None, None
+            return True
 
     async def retry(self, event: OutboxEvent) -> None:
-        delay = min(30, 2 ** min(5, event.attempts - 1))
-        async with self.pool.connection() as conn:
-            await conn.execute(
-                """UPDATE outbox SET lease_owner=NULL,lease_expires_at=NULL,
-                next_attempt_at=clock_timestamp()+%s*interval '1 second'
-                WHERE id=%s AND lease_owner=%s AND lease_expires_at>clock_timestamp()
-                AND delivered_at IS NULL""",
-                (delay, event.id, event.lease_owner),
-            )
+        async with self.sessions() as session, session.begin():
+            row = await self._owned(session, event)
+            if row is not None:
+                now = cast(datetime, await session.scalar(select(func.clock_timestamp())))
+                row.lease_owner, row.lease_expires_at = None, None
+                row.next_attempt_at = now + timedelta(
+                    seconds=min(30, 2 ** min(5, event.attempts - 1))
+                )
 
     async def confirmed_terminal(self, sandbox_id: UUID) -> bool:
-        async with self.pool.connection() as conn:
-            row = await (
-                await conn.execute(
-                    """SELECT id FROM sandboxes s WHERE id=%s
-                AND cleaned_at IS NOT NULL AND NOT cleanup_pending
-                AND NOT EXISTS(SELECT 1 FROM capacity_slots c WHERE c.sandbox_id=s.id)
-                AND NOT EXISTS(SELECT 1 FROM sandbox_artifact_refs r WHERE r.sandbox_id=s.id)""",
-                    (sandbox_id,),
+        async with self.sessions() as session:
+            return (
+                await session.exec(
+                    select(Sandbox.id).where(
+                        Sandbox.id == sandbox_id,
+                        col(Sandbox.cleaned_at).is_not(None),
+                        col(Sandbox.cleanup_pending).is_(False),
+                        ~select(CapacitySlot).where(CapacitySlot.sandbox_id == Sandbox.id).exists(),
+                        ~select(SandboxArtifactRef)
+                        .where(SandboxArtifactRef.sandbox_id == Sandbox.id)
+                        .exists(),
+                    )
                 )
-            ).fetchone()
-            return row is not None
+            ).first() is not None

@@ -11,6 +11,7 @@ from uuid import UUID
 from fastapi import FastAPI, Header, Query, Request, Response, WebSocket
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlmodel import select
 from starlette.middleware.base import RequestResponseEndpoint
 
 from boxie.domain.errors import BoxieError
@@ -101,8 +102,8 @@ def create_durable_orchestrator_app(
         try:
             async with asyncio.timeout(5):
                 docker_ready = await orchestrator.docker.ready()
-                async with artifacts.pool.connection() as conn:
-                    await conn.execute("SELECT 1")
+                async with artifacts.sessions() as session:
+                    await session.exec(select(1))
                 sql_ready = True
         except Exception:
             docker_ready = sql_ready = False

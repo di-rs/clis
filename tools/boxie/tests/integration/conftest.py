@@ -53,6 +53,8 @@ def postgres_server() -> Iterator[str]:
 @pytest.fixture
 def postgres_dsn(postgres_server: str) -> Iterator[str]:
     # Each test owns a database and a non-superuser role, including concurrent tests.
+    # These administration-only statements provision the database itself; application
+    # tables are accessed exclusively through SQLModel sessions in the tests.
     name = "boxie_" + uuid4().hex
     password = secrets.token_hex(24)
     with psycopg.connect(postgres_server, autocommit=True) as conn:

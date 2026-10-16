@@ -18,20 +18,35 @@ PostgreSQL and the affected service configuration. Preserve `postgres-data` on
 releases and ordinary shutdown: **never use `docker compose down --volumes` in
 production**. There is no legacy-state migration or backup implementation here.
 
-Apply Boxie's SQL release explicitly with the installed service environment:
+Apply Boxie's Alembic revisions explicitly with the installed service environment:
 
 ```sh
 python -m boxie.persistence.migrate --dsn-file /run/secrets/boxie-dsn
 ```
 
-The DSN uses the `boxie` role/database, with a connection timeout appropriate to
-the private network. Migrations serialize under a PostgreSQL advisory lock,
-verify the SHA-256 of every previously applied migration, and commit each new
-numbered migration atomically. API startup must never perform migrations.
+The DSN uses the `boxie` role/database. Alembic records applied revisions and
+upgrades the schema transactionally. Run one migration job at a time before
+starting updated service processes; API startup never performs migrations.
+The unreleased predecessor's custom migration ledger is not an upgrade source.
 
-The current service bootstraps remain direct until the coordinated PR2 cutover;
-SQL adapters are explicitly injected by tests. A later cutover must switch
-admission, agent artifacts, fenced operations, and worker dispatch together.
+Application tables are mapped SQLModel records. Each operation owns an async
+session and transaction; PostgreSQL still enforces constraints, row locks and
+advisory locks. Psycopg is the SQLAlchemy driver, with no separate driver pool.
+Platform role/database provisioning and Temporal's upstream schemas are managed
+by their respective infrastructure packages.
+
+For development, review Alembic's generated Python revision before applying it:
+
+```sh
+BOXIE_POSTGRES_DSN_FILE=/path/to/development-dsn uv run --locked alembic \
+  -c tools/boxie/alembic.ini revision --autogenerate -m "Describe schema change"
+BOXIE_POSTGRES_DSN_FILE=/path/to/development-dsn uv run --locked alembic \
+  -c tools/boxie/alembic.ini check
+```
+
+Use Alembic schema operations and SQLAlchemy expressions in revisions; do not
+introduce SQL strings. Revisions and the environment are packaged in the Boxie
+wheel so the explicit upgrade command also works outside the checkout.
 
 ## Retention and ownership
 

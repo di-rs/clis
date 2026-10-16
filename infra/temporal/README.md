@@ -2,13 +2,11 @@
 
 This package runs the production Temporal server, never a development server.
 [versions.json](versions.json) records the verified upstream releases and exact
-multi-platform image identities: server/admin-tools 1.32.0, UI 2.56.0, and jq
-1.8.1 for the thin bootstrap helper. The admin image bundles Temporal CLI 1.9.0.
-Schema jobs use the unchanged upstream admin-tools image. Only bootstrap uses
-[admin-tools.Dockerfile](admin-tools.Dockerfile), which copies the static `/jq`
-from the digest-pinned upstream image and verifies it executes. Build this helper
-explicitly. Its local image ID is evidence of a local build, not a published
-registry digest; publishing infrastructure images is outside this package's tests.
+multi-platform image identities: server/admin-tools 1.32.0 and UI 2.56.0.
+Schema jobs use the unchanged upstream admin-tools image and its schema tool.
+Namespace bootstrap reuses the approved immutable `BOXIE_RUNTIME_IMAGE` with
+Boxie's pinned Temporal Python SDK and requires no separate helper image. The
+bootstrap job explicitly retains the prior operator UID/GID `1000:1000`.
 
 ## Trust and private transport
 
@@ -44,8 +42,9 @@ Provide these read-only certificate directories:
 | `TEMPORAL_OPERATOR_CERTS_DIR` | `operator.pem`, `operator.key`, `frontend-ca.pem` |
 | `TEMPORAL_UI_CERTS_DIR` | `ui-client.pem`, `ui-client.key`, `frontend-ca.pem` |
 
-Set the existing platform's `BOXIE_CONTROL_NETWORK`, `TEMPORAL_DB_PASSWORD`, and
-`VISIBILITY_DB_PASSWORD`. The two database credentials must be distinct. The
+Set the existing platform's `BOXIE_CONTROL_NETWORK`, `TEMPORAL_DB_PASSWORD`,
+`VISIBILITY_DB_PASSWORD`, and approved immutable `BOXIE_RUNTIME_IMAGE`.
+The two database credentials must be distinct. The
 server binds to its container IP for membership, listens privately, and starts
 frontend/history/matching/worker roles explicitly. It receives no Boxie database
 credential or Docker socket. UI backend TLS explicitly verifies the server name.
@@ -55,7 +54,6 @@ credential or Docker socket. UI backend TLS explicitly verifies the server name.
 Start the [platform](../platform/README.md) first. From this directory:
 
 ```sh
-docker compose build bootstrap
 # Empty pre-created databases only:
 docker compose run --rm schema setup
 docker compose up -d temporal ui
@@ -68,13 +66,17 @@ server version. Schema errors fail the operation; there are no overwrite/drop
 flags and no schema jobs tied to API startup. Persistence and visibility schemas
 are upgraded using their separate least-privilege database credentials.
 
-Bootstrap first requires authenticated cluster health and a successful complete
-namespace list. The pinned CLI exhausts pagination. Only confirmed absence causes
-creation; a creation race is followed by a fresh successful describe. Structured
-JSON parsing verifies the namespace name, registered state, and seven-day
-retention. Transport/auth/list/parse failures never become namespace absence.
+Bootstrap calls the SDK's typed namespace describe/register service methods over
+mTLS. Only the `NOT_FOUND` RPC status causes registration; only `ALREADY_EXISTS`
+is accepted as a concurrent registration race. A fresh describe after registration
+verifies the namespace name, registered state and seven-day retention.
+Transport and authentication failures propagate without becoming namespace absence.
 Running bootstrap repeatedly is safe and verifies existing retention rather than
 silently changing it.
+After successful verification, the operator command waits 20 seconds for namespace
+cache propagation, including when a previous bootstrap was interrupted. Temporal
+[documents registration taking up to 15 seconds](https://docs.temporal.io/self-hosted-guide/namespaces).
+The grace does not substitute for the workflow readiness check below.
 
 Frontend health alone does not prove workflow readiness. Check the Boxie
 namespace and workflow/activity execution before opening new admission. The SQL
@@ -93,7 +95,9 @@ UV_CACHE_DIR=/tmp/boxie-uv-cache uv run --locked pytest -m integration tools/box
 UV_CACHE_DIR=/tmp/boxie-uv-cache uv run --locked python tools/boxie/tests/run_integration.py
 ```
 
-The integration harness requires Docker/Compose/build support and OpenSSL. It
+The integration harness requires Docker/Compose support and OpenSSL. It invokes
+the namespace command with the installed pinned SDK and operator certificate;
+production invokes the same module from the approved Boxie runtime image. It
 creates isolated projects, fresh databases, two-day test certificates, and
 loopback-only port overrides. Its test bridge permits those host clients; the
 production network remains internal and publishes no ports. Test keys are
@@ -123,5 +127,5 @@ proxies and read-only journal mounts exercise process loss and truthful accounti
 - [TLS configuration](https://docs.temporal.io/references/service-configuration#tls)
 - [mTLS deployment guidance](https://docs.temporal.io/self-hosted-guide/security#client-connections)
 - [Pinned authorizer selection](https://github.com/temporalio/temporal/blob/v1.32.0/common/authorization/authorizer.go)
-- [Pinned CLI namespace pagination](https://github.com/temporalio/cli/blob/v1.9.0/internal/temporalcli/commands.operator_namespace.go)
-- [Static jq image construction](https://github.com/jqlang/jq/blob/jq-1.8.1/Dockerfile)
+- [Pinned SDK cancellation and activity usage](https://github.com/temporalio/sdk-python/blob/1.34.0/README.md)
+- [Typed workflow service API](https://python.temporal.io/temporalio.service.WorkflowService.html)
