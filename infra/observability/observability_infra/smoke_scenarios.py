@@ -7,6 +7,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -14,7 +15,7 @@ from uuid import UUID, uuid4
 from observability_infra.smoke_application import REPO, Application
 from observability_infra.smoke_runtime import event_identities, evidence
 from observability_infra.smoke_telemetry import Telemetry
-from observability_infra.smoke_watchdog import process_identity
+from observability_infra.smoke_watchdog import process_identity, restoration_valid
 
 SCENARIOS = (
     "lifecycle-failure",
@@ -39,6 +40,25 @@ def total(metrics: dict[str, list[dict[str, Any]]], name: str) -> float:
     )
 
 
+def sequence_observation(emitted: int, accepted: set[str], delivered: list[str]) -> dict[str, Any]:
+    if not 0 <= emitted <= 32:
+        raise ValueError("bounded journal probe required")
+    expected = {str(UUID(int=n)) for n in range(1, emitted + 1)}
+    stored = set(delivered)
+    return {
+        "emitted": emitted,
+        "accepted_identities": sorted(accepted & expected),
+        "stored_identities": sorted(stored & expected),
+        "stored_rows": len(delivered),
+        "stored_duplicates": len(delivered) - len(stored),
+        "emitted_not_observed_in_journal": len(expected - accepted),
+        "emitted_not_observed_in_storage": len(expected - stored),
+        "accepted_not_observed_in_storage": len((accepted & expected) - stored),
+        "exactly_once": False,
+        "interpretation": "bounded observation, not a final loss or complete delivery guarantee",
+    }
+
+
 class Scenario:
     def __init__(self, name: str, application: Application, telemetry: Telemetry) -> None:
         self.name, self.app, self.telemetry = name, application, telemetry
@@ -48,9 +68,15 @@ class Scenario:
         self.manifest = self.root / ("watch-" + name + ".json")
         self.flood_id: str | None = None
         self.flood_instance = str(uuid4())
+        self.probe_instance = str(uuid4())
 
     async def command(self, *args: str) -> str:
-        return await asyncio.to_thread(self.commands.run, list(args), env=self.app.stack.env)
+        return await asyncio.to_thread(
+            self.commands.run,
+            list(args),
+            env=dict(self.app.stack.env, LC_ALL="C"),
+            empty_journal_ok=args[0] == "journalctl",
+        )
 
     async def arm(self, data: dict[str, Any]) -> None:
         data["restore_at"] = self.commands.deadline.end - self.commands.deadline.reserve + 2
@@ -75,11 +101,37 @@ class Scenario:
                 raise RuntimeError("independent restoration watchdog failed")
             restored = json.loads(path.read_text())
             self.observations["restoration"] = restored
-            if not all(restored.values()):
+            if not restoration_valid(json.loads(self.manifest.read_text()), restored):
                 raise RuntimeError("independent restoration incomplete")
         if self.flood_id:
             await self.command("docker", "rm", "--force", self.flood_id)
             self.flood_id = None
+        if (
+            self.name in ("journal-stopped", "journal-enospc")
+            and "journal_during" in self.observations
+        ):
+            # Give the restored pipeline a bounded observation window, not a delivery promise.
+            until = time.monotonic() + min(5, self.commands.deadline.remaining(restoring=True) / 3)
+            while True:
+                after = await self.journal_observation()
+                if (
+                    after["sequence"]["emitted_not_observed_in_storage"] == 0
+                    or time.monotonic() >= until
+                ):
+                    break
+                await asyncio.sleep(0.2)
+            self.observations["journal_after"] = after
+            before = self.observations["journal_before"]
+            during = self.observations["journal_during"]
+            self.observations["journal_storage_changes"] = {
+                "runtime_growth_observed": during["runtime"]["bytes"] > before["runtime"]["bytes"],
+                "persistent_files_removed_during": sorted(
+                    set(before["persistent"]["inodes"]) - set(during["persistent"]["inodes"])
+                ),
+                "persistent_bytes_delta_during": during["persistent"]["bytes"]
+                - before["persistent"]["bytes"],
+                "runtime_is_collected": False,
+            }
         self.app.stack.fault("fail_create", False)
         if self.name == "producer-pipe":
             for name in ("blocked-stdout", "stop-api"):
@@ -146,8 +198,20 @@ class Scenario:
             "/flood.py",
             self.flood_instance,
             str(limit),
+            *([self.probe_instance] if self.name in ("journal-stopped", "journal-enospc") else []),
         )
         self.observations["flood_id"] = self.flood_id
+        if self.name in ("journal-stopped", "journal-enospc"):
+            while True:
+                path = self.root / "control/emitted.json"
+                counter = json.loads(path.read_text()) if path.exists() else {}
+                if (
+                    counter.get("probe_instance") == self.probe_instance
+                    and counter.get("probe_emitted") == 32
+                ):
+                    break
+                self.commands.deadline.remaining()
+                await asyncio.sleep(0.1)
 
     async def progress(self, sandbox: str) -> None:
         self.observations.setdefault("progress", []).append(await self.app.progress(sandbox))
@@ -217,7 +281,37 @@ class Scenario:
         self.observations["same_container_id"] = identifier
         self.observations["checkpoint_after"] = self.telemetry.checkpoint()
 
+    async def wait_failed_metric(self, committed_at: float) -> None:
+        # Require a positive value from a scrape after this operation began.
+        query = (
+            '(boxie_sandboxes{state="failed"} >= 1) and '
+            f'(timestamp(boxie_sandboxes{{state="failed"}}) >= {committed_at})'
+        )
+        while True:
+            metric = json.loads(
+                await self.telemetry.query("prometheus", "/api/v1/query", params={"query": query})
+            )
+            if any(float(item["value"][1]) >= 1 for item in metric["data"]["result"]):
+                return
+            await asyncio.sleep(0.2)
+
+    async def terminal_privacy(self) -> None:
+        sandbox = await self.app.provision()
+        progress = await self.app.progress(sandbox)
+        if progress.get("terminal_marker_observed") is not True:
+            raise RuntimeError("terminal privacy marker was not exercised")
+        await self.telemetry.wait_logs(f'sandbox_id:"{sandbox}" AND event:"terminal.detached"')
+        inspected = await self.telemetry.inspect_privacy(self.app.sentinels, sandbox)
+        self.observations["terminal_privacy"] = {
+            "sandbox_id": sandbox,
+            "exercised": True,
+            "progress": progress,
+            "surfaces": inspected,
+        }
+
     async def failure_case(self) -> None:
+        await self.terminal_privacy()
+        committed_at = time.time()
         self.app.stack.fault("fail_create", True)
         sandbox = await self.app.provision(failed=True)
         if not (self.app.stack.root / "faults/failed_create_seen").exists():
@@ -237,23 +331,7 @@ class Scenario:
             raise RuntimeError("server request correlation missing")
         for request in request_ids:
             await self.telemetry.wait_logs(f'request_id:"{request}"')
-        # Query the cached authoritative metric independently of the direct SQL read.
-        metric = json.loads(
-            await self.telemetry.query(
-                "prometheus", "/api/v1/query", params={"query": 'boxie_sandboxes{state="failed"}'}
-            )
-        )
-        while not metric["data"]["result"]:
-            await asyncio.sleep(0.2)
-            metric = json.loads(
-                await self.telemetry.query(
-                    "prometheus",
-                    "/api/v1/query",
-                    params={"query": 'boxie_sandboxes{state="failed"}'},
-                )
-            )
-        if not any(float(item["value"][1]) >= 1 for item in metric["data"]["result"]):
-            raise RuntimeError("authoritative failed metric missing")
+        await self.wait_failed_metric(committed_at)
         rules = json.loads(await self.telemetry.query("prometheus", "/api/v1/rules"))
         if not rules["data"]["groups"] or any(
             rule.get("health") != "ok"
@@ -280,7 +358,60 @@ class Scenario:
             self.app.sentinels, sandbox
         )
 
+    async def journal_observation(self) -> dict[str, Any]:
+        ownership = json.loads((self.root / "ownership.json").read_text())
+        journal_name = Path(ownership["journal_path"]).name
+        if not journal_name.endswith("." + self.root.name):
+            raise RuntimeError("foreign runtime journal path")
+        accepted: set[str] = set()
+        observations: dict[str, Any] = {}
+        for name, directory in (
+            ("persistent", self.root / "journal"),
+            ("runtime", Path("/run/log/journal") / journal_name),
+        ):
+            files = list(directory.glob("*.journal*"))
+            if len(files) > 128:
+                raise RuntimeError("journal observation file bound exceeded")
+            stats = []
+            for path in files:
+                try:
+                    stats.append(path.stat())
+                except FileNotFoundError:
+                    pass  # Rotation/deletion is itself part of this observation interval.
+            identities: set[str] = set()
+            if files:
+                text = await self.command(
+                    "journalctl",
+                    "--directory=" + str(directory),
+                    "--no-pager",
+                    "--output=cat",
+                    "--grep=" + self.probe_instance,
+                    "--lines=100",
+                )
+                identities = event_identities(text, self.probe_instance)
+                accepted |= identities
+            observations[name] = {
+                "files": len(files),
+                "bytes": sum(item.st_size for item in stats),
+                "inodes": sorted(item.st_ino for item in stats),
+                "accepted_probe": sorted(identities),
+                "free": os.statvfs(directory).f_bavail * os.statvfs(directory).f_frsize
+                if directory.exists()
+                else None,
+            }
+        counter = self.root / "control/emitted.json"
+        emitted = json.loads(counter.read_text()) if counter.exists() else {}
+        own = emitted.get("instance") == self.flood_instance
+        count = int(emitted.get("probe_emitted", 0)) if own else 0
+        records = await self.telemetry.logs(f'instance_id:"{self.probe_instance}"')
+        observations["sequence"] = sequence_observation(
+            count, accepted, [str(item["operation_id"]) for item in records]
+        )
+        observations["pressure_emitted_lower_bound"] = int(emitted["emitted"]) if own else 0
+        return observations
+
     async def journal_stopped(self, sandbox: str) -> None:
+        self.observations["journal_before"] = await self.journal_observation()
         unit = f"systemd-journald@{self.root.name}.service"
         pid = int(await self.command("systemctl", "show", unit, "--property=MainPID", "--value"))
         identity = process_identity(pid)
@@ -298,11 +429,14 @@ class Scenario:
             or Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] != "T"
         ):
             raise RuntimeError("journal fault ended before progress barrier")
+        self.observations["journal_during"] = await self.journal_observation()
         self.observations["receiver_stopped_through_probes"] = True
         self.observations["docker_drop_counter"] = "not exported; no invented drop metric"
 
     async def exhaustion(self, sandbox: str) -> None:
         vector = self.name == "vector-enospc"
+        if not vector:
+            self.observations["journal_before"] = await self.journal_observation()
         directory = self.root / ("vector" if vector else "journal")
         filler = directory / ("filler-" + self.name)
         with filler.open("xb"):
@@ -353,6 +487,8 @@ class Scenario:
             self.observations["persistent_free_during_fault"] = (
                 os.statvfs(directory).f_bavail * os.statvfs(directory).f_frsize
             )
+        if not vector:
+            self.observations["journal_during"] = await self.journal_observation()
         filler.unlink()
         if vector:
             identifier = await asyncio.to_thread(self.telemetry.container, "vector")

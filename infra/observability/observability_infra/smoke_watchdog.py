@@ -7,6 +7,7 @@ import os
 import signal
 import time
 from pathlib import Path
+from typing import Any
 
 from observability_infra.smoke_runtime import Commands, Deadline, evidence
 
@@ -26,34 +27,80 @@ def resume(pid: int, identity: str) -> bool:
         return False
 
 
+def restore_once(manifest: Path, commands: Commands) -> dict[str, bool]:
+    """Retry only the exact identities registered before the fault."""
+    data = json.loads(manifest.read_text())
+    results: dict[str, bool] = {}
+    if "pid" in data:
+        results["journal_resumed"] = resume(int(data["pid"]), str(data["start"]))
+    if "fillers" in data:
+        results["filler_removed"] = True
+    for item in data.get("fillers", []):
+        path = Path(item["path"])
+        try:
+            if path.parent not in (manifest.parent / "journal", manifest.parent / "vector"):
+                raise ValueError("foreign filler path")
+            if path.exists() and path.stat().st_ino == item["inode"]:
+                path.unlink()
+            results["filler_removed"] &= not path.exists()
+        except OSError, ValueError:
+            results["filler_removed"] = False
+    if "sink" in data:
+        results["sink_started"] = False
+        try:
+            env = dict(os.environ, DOCKER_HOST="unix://" + str(manifest.parent / "docker.sock"))
+            info = json.loads(commands.run(["docker", "inspect", data["sink"]], env=env))[0]
+            if (
+                info["Id"] != data["sink"]
+                or info["Config"]["Labels"].get("com.docker.compose.project")
+                != manifest.parent.name + "-telemetry"
+            ):
+                raise ValueError("foreign sink identity")
+            commands.run(["docker", "start", data["sink"]], env=env)
+            results["sink_started"] = True
+        except RuntimeError, TimeoutError, ValueError, OSError, KeyError:
+            pass
+    return results
+
+
+def restoration_valid(data: dict[str, Any], result: dict[str, Any]) -> bool:
+    expected = {"journal_resumed"} if "pid" in data else set()
+    expected |= {"filler_removed"} if "fillers" in data else set()
+    expected |= {"sink_started"} if "sink" in data else set()
+    return (
+        bool(expected)
+        and set(result) == expected
+        and all(value is True for value in result.values())
+    )
+
+
+def restore_registered(
+    manifest: Path, commands: Commands, *, wait_seconds: float = 22
+) -> dict[str, Any]:
+    data = json.loads(manifest.read_text())
+    manifest.with_suffix(".restore").touch()
+    path = manifest.with_suffix(".result.json")
+    until = time.monotonic() + min(wait_seconds, commands.deadline.remaining(restoring=True))
+    while not path.exists() and time.monotonic() < until:
+        time.sleep(0.1)
+    previous = json.loads(path.read_text()) if path.exists() else None
+    if isinstance(previous, dict) and restoration_valid(data, previous):
+        return {"restored": True, "watchdog": previous, "fallback": None}
+    fallback = restore_once(manifest, commands)
+    return {
+        "restored": restoration_valid(data, fallback),
+        "watchdog": previous,
+        "fallback": fallback,
+    }
+
+
 def watch(manifest: Path) -> None:
     data = json.loads(manifest.read_text())
-    # Manifest contains one exact selected journal process and deadline only.
     end = float(data["restore_at"])
     trigger = manifest.with_suffix(".restore")
     while time.monotonic() < end and not trigger.exists():
         time.sleep(min(0.1, max(0, end - time.monotonic())))
-    results: dict[str, bool] = {}
-    if "pid" in data:
-        results["journal_resumed"] = resume(int(data["pid"]), str(data["start"]))
-    for item in data.get("fillers", []):
-        path = Path(item["path"])
-        if path.parent not in (manifest.parent / "journal", manifest.parent / "vector"):
-            raise ValueError("foreign filler path")
-        if path.exists() and path.stat().st_ino == item["inode"]:
-            path.unlink()
-        results["filler_removed"] = not path.exists()
-    if "sink" in data:
-        commands = Commands(Deadline(20, reserve=1))
-        env = dict(os.environ, DOCKER_HOST="unix://" + str(manifest.parent / "docker.sock"))
-        info = json.loads(commands.run(["docker", "inspect", data["sink"]], env=env))[0]
-        if (
-            info["Config"]["Labels"].get("com.docker.compose.project")
-            != manifest.parent.name + "-telemetry"
-        ):
-            raise ValueError("foreign sink identity")
-        commands.run(["docker", "start", data["sink"]], env=env)
-        results["sink_started"] = True
+    results = restore_once(manifest, Commands(Deadline(20, reserve=1)))
     evidence(manifest.with_suffix(".result.json"), results)
 
 

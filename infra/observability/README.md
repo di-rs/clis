@@ -432,3 +432,12 @@ maximum age and the native 256 MiB VictoriaLogs cleanup target are checked in th
 running fixture; newest-partition protection and periodic overshoot remain the
 accepted storage tradeoff. Live Access, published collector identity, production
 mount/network topology and combined capacity remain activation gates.
+
+Failed setup additionally exports bounded `setup-diagnostics.json` before teardown:
+operation, exit code, elapsed time, fixed error classifications, Docker/Compose
+versions and allowlisted container/image/network state. It excludes environment
+values, health-check output and raw command logs. Journal stop/ENOSPC reports
+separate 32-event probe identities from the pressure flood, compare persistent and
+runtime journal observations with stored records, and retain missing/duplicate
+counts as bounded observations rather than final delivery guarantees. An unresolved
+watchdog identity or restoration failure withholds teardown and remains a failure.

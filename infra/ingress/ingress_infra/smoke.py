@@ -1,8 +1,10 @@
 """Probe explicit authorized existing Access routes; never create cloud resources."""
 
 import argparse
+import errno
 import ipaddress
 import json
+import ssl
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +12,24 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
+
+
+def connection_prevented(error: BaseException) -> bool:
+    """Only transport refusal/unreachability proves this gate, never failed TLS."""
+    chain: list[BaseException] = []
+    current: BaseException | None = error
+    while current is not None and current not in chain:
+        chain.append(current)
+        current = current.__cause__ or current.__context__
+    if any(isinstance(item, ssl.SSLError) for item in chain):
+        return False
+    return any(
+        isinstance(item, (ConnectionRefusedError, httpx.ConnectTimeout))
+        or isinstance(item, OSError)
+        and item.errno
+        in {errno.ECONNREFUSED, errno.ETIMEDOUT, errno.EHOSTUNREACH, errno.ENETUNREACH}
+        for item in chain
+    )
 
 
 @dataclass(frozen=True)
@@ -74,7 +94,8 @@ def run_smoke(
 
         for name, cookie in (
             ("unauthenticated", ""),
-            ("forged", "eyJhbGciOiJub25lIn0.eyJzdWIiOiJmb3JnZWQifQ."),
+            # Deliberately unsigned alg=none/sub=forged test input, never a credential.
+            ("forged", "eyJhbGciOiJub25lIn0.eyJzdWIiOiJmb3JnZWQifQ."),  # gitleaks:allow
             ("wrong_audience", config.wrong_audience_cookie.read_text().strip()),
         ):
             response = request(config.url, cookie)
@@ -94,7 +115,9 @@ def run_smoke(
         for index, origin in enumerate(config.direct_origins):
             try:
                 request(origin)
-            except httpx.ConnectError, httpx.ConnectTimeout:
+            except (httpx.ConnectError, httpx.ConnectTimeout) as error:
+                if not connection_prevented(error):
+                    raise RuntimeError("direct origin connection prevention unproved") from None
                 statuses[f"direct_origin_{index}"] = "connection prevented"
             else:
                 raise RuntimeError("direct origin reachable, including application login responses")

@@ -29,7 +29,11 @@ def test_native_published_endpoint_survives_process_restart(
     )
     if service == "temporal":
         ProductionStack(tmp_path).write_overrides()
-        override = yaml.safe_load((tmp_path / "temporal-override.yml").read_text())
+        # This read extracts only the port scalar, without applying Compose merges.
+        # Keep the actual override file/tag unchanged for Docker Compose itself.
+        override = yaml.safe_load(
+            (tmp_path / "temporal-override.yml").read_text().replace("!override", "")
+        )
         publish = override["services"]["temporal"]["ports"][0]
     name = "boxie-port-" + uuid4().hex
     script = """
@@ -84,3 +88,27 @@ HTTPServer(('0.0.0.0', int(sys.argv[1])), Handler).serve_forever()
                 pytest.fail("restarted endpoint unreachable; this is not a dependency 503")
     finally:
         command(["docker", "rm", "--force", "--volumes", name])
+
+
+def test_temporal_publish_parser_reaches_docker_without_removing_compose_tags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+
+    class ReachedDocker(Exception):
+        pass
+
+    calls: list[list[str]] = []
+
+    def stop_at_docker(args: list[str]) -> str:
+        calls.append(args)
+        if args[1] == "run":
+            raise ReachedDocker
+        return ""
+
+    monkeypatch.setattr(sys.modules[__name__], "command", stop_at_docker)
+    with pytest.raises(ReachedDocker):
+        test_native_published_endpoint_survives_process_restart(tmp_path, "temporal", 7233)
+    publish = calls[0][calls[0].index("--publish") + 1]
+    assert publish.startswith("127.0.0.1:") and publish.endswith(":7233")
+    assert "logging: !override" in (tmp_path / "temporal-override.yml").read_text()

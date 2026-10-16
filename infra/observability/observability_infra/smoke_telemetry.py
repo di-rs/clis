@@ -285,9 +285,12 @@ class Telemetry:
                 "bytes": stat.f_blocks * stat.f_frsize,
                 "free": stat.f_bavail * stat.f_frsize,
             }
-        ownership = json.loads((self.root / "ownership.json").read_text())
+        resources = Resources(self.root, self.commands)
         result["systemd"] = {}
-        for unit, cgroup in ownership["systemd_cgroups"].items():
+        for unit in (resources.unit, resources.journal_unit):
+            cgroup = resources.owned_cgroup(unit)
+            resources.state.setdefault("systemd_cgroups", {})[unit] = cgroup
+            resources.save()
             base = Path("/sys/fs/cgroup") / cgroup.lstrip("/")
             result["systemd"][unit] = {
                 name: (base / name).read_text().strip()

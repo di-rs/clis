@@ -192,7 +192,7 @@ class Application:
                 return view
             await asyncio.sleep(0.1)
 
-    async def progress(self, sandbox: str) -> dict[str, float]:
+    async def progress(self, sandbox: str) -> dict[str, float | bool]:
         started = time.monotonic()
         await self.request("GET", "/v1/sandboxes/" + sandbox)
         http_seconds = time.monotonic() - started
@@ -232,7 +232,11 @@ class Application:
                     if not data or len(result) + len(data) > 65536:
                         raise RuntimeError("terminal privacy roundtrip failed")
                     result.extend(data)
-        return {"http_seconds": http_seconds, "roundtrip_seconds": time.monotonic() - started}
+        return {
+            "http_seconds": http_seconds,
+            "roundtrip_seconds": time.monotonic() - started,
+            "terminal_marker_observed": True,
+        }
 
     def committed(self, sandbox: str) -> dict[str, Any]:
         self.deadline.remaining()

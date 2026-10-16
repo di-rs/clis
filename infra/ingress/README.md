@@ -115,3 +115,7 @@ review DNS/network membership separately. Cookie contents are never emitted.
 Without `--config`, it exits 2 with an explicit outstanding activation gate.
 Mock tests cover classification only. No authorized environment is currently
 available, so live Access verification remains outstanding.
+
+Direct-origin certificate/TLS errors do not prove network prevention. Only an
+observed connection refusal, unreachable network/host, or connection timeout can
+satisfy that gate; other transport failures leave it unproved.

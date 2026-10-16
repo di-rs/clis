@@ -254,3 +254,302 @@ def test_smoke_overlay_renders_real_journal_and_owned_socket(
     ]
     assert len(socket) == 1
     assert socket[0]["source"] == str(tmp_path / "docker.sock")
+
+
+def test_failed_metric_waits_through_cached_zero() -> None:
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from observability_infra.smoke_scenarios import Scenario
+
+    query = AsyncMock(
+        side_effect=[
+            json.dumps({"data": {"result": [{"value": [1, "0"]}]}}),
+            json.dumps({"data": {"result": [{"value": [2, "1"]}]}}),
+        ]
+    )
+    scenario = object.__new__(Scenario)
+    scenario.telemetry = SimpleNamespace(query=query)  # type: ignore[assignment]
+    asyncio.run(scenario.wait_failed_metric(1))
+    assert query.await_count == 2
+    assert "timestamp(" in query.call_args.kwargs["params"]["query"]
+
+
+def test_terminal_privacy_requires_exercised_marker_before_inspection() -> None:
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from observability_infra.smoke_scenarios import Scenario
+
+    order: list[str] = []
+
+    async def progress(sandbox: str) -> dict[str, bool]:
+        order.append("terminal")
+        return {"terminal_marker_observed": True}
+
+    async def inspect(*args: object) -> dict[str, int]:
+        assert order == ["terminal"]
+        return {"decoded_records": 1}
+
+    scenario = object.__new__(Scenario)
+    scenario.app = SimpleNamespace(
+        provision=AsyncMock(return_value="success"), progress=progress, sentinels=("private",)
+    )  # type: ignore[assignment]
+    scenario.telemetry = SimpleNamespace(wait_logs=AsyncMock(), inspect_privacy=inspect)  # type: ignore[assignment]
+    scenario.observations = {}
+    asyncio.run(scenario.terminal_privacy())
+    assert scenario.observations["terminal_privacy"]["exercised"] is True
+
+
+def test_cgroup_resolution_waits_for_namespace_activation_and_rejects_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from observability_infra.smoke_resources import Resources
+    from observability_infra.smoke_runtime import Commands, Deadline
+
+    resources = Resources(
+        Path("/var/tmp/boxie-observability-0123456789ab"), Commands(Deadline(2, reserve=0.1))
+    )
+    unit = resources.journal_unit
+    values = iter(["", f"/system.slice/{unit}"])
+
+    def command(args: list[str], **kwargs: object) -> str:
+        if "--property=ControlGroup" in args:
+            return next(values)
+        return "1234"
+
+    monkeypatch.setattr(resources.commands, "run", command)
+    original = Path.read_text
+    monkeypatch.setattr(
+        Path,
+        "read_text",
+        lambda path, *a, **kw: (
+            f"0::/system.slice/{unit}\n"
+            if str(path) == "/proc/1234/cgroup"
+            else original(path, *a, **kw)
+        ),
+    )
+    assert resources.owned_cgroup(unit) == f"/system.slice/{unit}"
+    monkeypatch.setattr(resources.commands, "run", lambda *a, **kw: "/")
+    with pytest.raises(RuntimeError, match="cgroup"):
+        resources.owned_cgroup(unit)
+
+
+def test_restoration_fallback_rejects_false_and_missing_results(tmp_path: Path) -> None:
+    from observability_infra.smoke_runtime import Commands, Deadline
+    from observability_infra.smoke_watchdog import restore_registered
+
+    (tmp_path / "journal").mkdir()
+    filler = tmp_path / "journal/filler"
+    filler.write_text("foreign replacement")
+    manifest = tmp_path / "watch-journal-enospc.json"
+    manifest.write_text(
+        json.dumps({"fillers": [{"path": str(filler), "inode": filler.stat().st_ino + 1}]})
+    )
+    for previous in (None, {"filler_removed": False}):
+        if previous is not None:
+            manifest.with_suffix(".result.json").write_text(json.dumps(previous))
+        result = restore_registered(manifest, Commands(Deadline(2, reserve=0.1)), wait_seconds=0)
+        assert result["restored"] is False
+        assert result["fallback"]["filler_removed"] is False
+        assert filler.read_text() == "foreign replacement"
+
+
+def test_sequence_observation_reports_missing_and_duplicates_without_exactly_once() -> None:
+    from observability_infra.smoke_scenarios import sequence_observation
+
+    one = "00000000-0000-0000-0000-000000000001"
+    two = "00000000-0000-0000-0000-000000000002"
+    observed = sequence_observation(3, {one, two}, [one, one])
+    assert observed["emitted_not_observed_in_journal"] == 1
+    assert observed["accepted_not_observed_in_storage"] == 1
+    assert observed["stored_duplicates"] == 1
+    assert observed["exactly_once"] is False
+
+
+@pytest.mark.parametrize("prior", [None, {"filler_removed": False}])
+def test_outer_cleanup_never_tears_down_an_unrestored_fault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prior: dict[str, bool] | None
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from observability_infra import smoke
+    from observability_infra.smoke_watchdog import restore_registered
+
+    (tmp_path / "ownership.json").write_text("{}")
+    (tmp_path / "journal").mkdir()
+    filler = tmp_path / "journal/filler"
+    filler.write_text("replacement")
+    manifest = tmp_path / "watch-journal-enospc.json"
+    manifest.write_text(json.dumps({"fillers": [{"path": str(filler), "inode": -1}]}))
+    if prior is not None:
+        manifest.with_suffix(".result.json").write_text(json.dumps(prior))
+    close = Mock()
+    monkeypatch.setattr(smoke, "require_ephemeral_runner", lambda: None)
+    monkeypatch.setattr(
+        smoke, "Resources", lambda *args: SimpleNamespace(state={"mounts": {}}, close=close)
+    )
+    monkeypatch.setattr(
+        smoke,
+        "restore_registered",
+        lambda path, commands: restore_registered(path, commands, wait_seconds=0),
+    )
+    with pytest.raises(RuntimeError, match="teardown withheld"):
+        smoke.cleanup(tmp_path)
+    close.assert_not_called()
+    report = json.loads((tmp_path / "cleanup.json").read_text())
+    assert report["restorations"][manifest.name]["restored"] is False
+    assert filler.exists()
+
+
+def test_outer_cleanup_preserves_resource_failure_detail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from observability_infra import smoke
+
+    (tmp_path / "ownership.json").write_text("{}")
+
+    def close() -> None:
+        (tmp_path / "cleanup.json").write_text(
+            json.dumps({"errors": ["owned-loop-busy"], "mounts_remaining": ["owned-mount"]})
+        )
+        raise RuntimeError("cleanup failed")
+
+    monkeypatch.setattr(smoke, "require_ephemeral_runner", lambda: None)
+    monkeypatch.setattr(smoke, "Resources", lambda *args: SimpleNamespace(close=close))
+    with pytest.raises(RuntimeError, match="cleanup incomplete"):
+        smoke.cleanup(tmp_path)
+    report = json.loads((tmp_path / "cleanup.json").read_text())
+    assert report["errors"] == ["owned-loop-busy"]
+    assert report["mounts_remaining"] == ["owned-mount"]
+
+
+def test_failed_command_diagnostic_is_bounded_and_does_not_disclose_output() -> None:
+    from observability_infra.smoke_runtime import Commands, Deadline
+
+    runner = Commands(Deadline(2, reserve=0.1))
+    with pytest.raises(RuntimeError):
+        runner.run([sys.executable, "-c", "print('SECRET_SENTINEL manifest unknown'); exit(7)"])
+    detail = runner.last_failure
+    assert detail is not None
+    assert detail["returncode"] == 7
+    assert detail["classification"] == ["image_manifest"]
+    assert "SECRET_SENTINEL" not in json.dumps(detail)
+    assert "-c" not in json.dumps(detail)
+
+
+def test_setup_diagnostics_exports_only_allowlisted_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from observability_infra import smoke_diagnostics
+
+    secret = "PRIVATE_ENV_HEALTH_OUTPUT"
+
+    def run(self: object, args: list[str], **kwargs: object) -> str:
+        if args[1] == "info":
+            return json.dumps(
+                {
+                    "DockerRootDir": str(tmp_path / "docker-data"),
+                    "Labels": ["io.boxie.test.owner=" + tmp_path.name],
+                }
+            )
+        if args[1] == "version" or args[1:3] == ["compose", "version"]:
+            return "29.0.0"
+        if args[1] == "ps":
+            return "a" * 64
+        if args[1] == "inspect":
+            return json.dumps(
+                [
+                    {
+                        "Id": "a" * 64,
+                        "Image": "sha256:" + "b" * 64,
+                        "Config": {"Env": [secret]},
+                        "State": {
+                            "Status": "exited",
+                            "ExitCode": 4,
+                            "OOMKilled": False,
+                            "Health": {"Status": "unhealthy", "Output": secret},
+                        },
+                    }
+                ]
+            )
+        return ""
+
+    monkeypatch.setattr("observability_infra.smoke_diagnostics.Commands.run", run)
+    stack = SimpleNamespace(
+        env={}, platform="owned-platform", temporal="owned-temporal", runtime="owned-runtime"
+    )
+    smoke_diagnostics.setup_diagnostics(tmp_path, stack, {"returncode": 1})
+    output = (tmp_path / "setup-diagnostics.json").read_text()
+    assert secret not in output
+    assert json.loads(output)["containers"][0]["exit_code"] == 4
+
+
+def test_journal_observation_separates_runtime_and_persistent_acceptance(tmp_path: Path) -> None:
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from observability_infra.smoke_scenarios import Scenario
+
+    (tmp_path / "journal").mkdir()
+    (tmp_path / "journal/sample.journal").write_bytes(
+        b"binary placeholder for filesystem stats only"
+    )
+    (tmp_path / "control").mkdir()
+    (tmp_path / "ownership.json").write_text(
+        json.dumps({"journal_path": "/owned/machine." + tmp_path.name})
+    )
+    instance = "11111111-1111-4111-8111-111111111111"
+    one = "00000000-0000-0000-0000-000000000001"
+    (tmp_path / "control/emitted.json").write_text(
+        json.dumps({"instance": "pressure", "emitted": 1000, "probe_emitted": 3})
+    )
+    scenario = object.__new__(Scenario)
+    scenario.root = tmp_path
+    scenario.probe_instance = instance
+    scenario.flood_instance = "pressure"
+    scenario.command = AsyncMock(  # type: ignore[method-assign]
+        return_value=json.dumps({"instance_id": instance, "operation_id": one})
+    )
+    scenario.telemetry = SimpleNamespace(
+        logs=AsyncMock(return_value=[{"operation_id": one}, {"operation_id": one}])
+    )  # type: ignore[assignment]
+    report = asyncio.run(scenario.journal_observation())
+    assert report["persistent"]["accepted_probe"] == [one]
+    assert report["runtime"]["files"] == 0
+    assert report["sequence"]["emitted_not_observed_in_journal"] == 2
+    assert report["sequence"]["stored_duplicates"] == 1
+    assert report["pressure_emitted_lower_bound"] == 1000
+
+
+@pytest.mark.parametrize(
+    "output,code,empty",
+    [
+        ("-- No entries --", 1, True),
+        ("Permission denied", 1, False),
+        ("-- No entries --", 2, False),
+    ],
+)
+def test_empty_journal_query_does_not_hide_read_errors(
+    tmp_path: Path, output: str, code: int, empty: bool
+) -> None:
+    from observability_infra.smoke_runtime import Commands, Deadline
+
+    executable = tmp_path / "journalctl"
+    executable.write_text("#!/bin/sh\nprintf '%s\\n' '" + output + "'\nexit " + str(code) + "\n")
+    executable.chmod(0o700)
+    runner = Commands(Deadline(2, reserve=0.1))
+    args = [str(executable), "--grep=probe"]
+    if empty:
+        assert runner.run(args, empty_journal_ok=True) == ""
+    else:
+        with pytest.raises(RuntimeError):
+            runner.run(args, empty_journal_ok=True)

@@ -12,7 +12,6 @@ import json
 import os
 import resource
 import shutil
-import time
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,10 +24,12 @@ from observability_infra.smoke_application import (
     save_stack,
     stack_at,
 )
+from observability_infra.smoke_diagnostics import setup_diagnostics
 from observability_infra.smoke_resources import Resources, require_ephemeral_runner
 from observability_infra.smoke_runtime import Commands, Deadline, evidence
 from observability_infra.smoke_scenarios import SCENARIOS, Scenario
 from observability_infra.smoke_telemetry import Telemetry
+from observability_infra.smoke_watchdog import restore_registered
 
 
 @dataclass(frozen=True)
@@ -178,6 +179,7 @@ def prepare(root: Path, timeout_seconds: float = 1200) -> None:
                         "progress": progress,
                         "real_sandbox_records": len(records),
                         "sandbox": sandbox,
+                        "resources": await asyncio.to_thread(telemetry.resources),
                     },
                 )
 
@@ -193,6 +195,8 @@ def prepare(root: Path, timeout_seconds: float = 1200) -> None:
         )
     except Exception as error:
         if root.exists():
+            if stack is not None:
+                setup_diagnostics(root, stack, commands.last_failure)
             evidence(
                 root / "setup.json",
                 {
@@ -221,16 +225,27 @@ def cleanup(root: Path) -> None:
     commands.restoring = True
     resources = Resources(root, commands)
     errors: list[str] = []
-    # Wake/confirm independent restorers before any Docker operation.
+    restorations: dict[str, Any] = {}
     for path in root.glob("watch-*.json"):
         if path.name.endswith(".result.json"):
             continue
-        path.with_suffix(".restore").touch()
-        until = time.monotonic() + min(22, commands.deadline.remaining(restoring=True))
-        while not path.with_suffix(".result.json").exists() and time.monotonic() < until:
-            time.sleep(0.1)
-        if not path.with_suffix(".result.json").exists():
-            errors.append("watchdog restoration result missing")
+        try:
+            restorations[path.name] = restore_registered(path, commands)
+        except Exception as error:
+            restorations[path.name] = {"restored": False, "error_type": type(error).__name__}
+    if any(item["restored"] is not True for item in restorations.values()):
+        evidence(
+            root / "cleanup.json",
+            {
+                "status": "failed",
+                "restorations": restorations,
+                "errors": ["fault restoration incomplete; teardown withheld"],
+                "mounts_remaining": [
+                    path for path in resources.state["mounts"] if os.path.ismount(path)
+                ],
+            },
+        )
+        raise RuntimeError("fault restoration incomplete; teardown withheld")
     stack = stack_at(root, commands) if (root / "application-private.json").exists() else None
     if stack:
         telemetry = Telemetry(root, commands, stack)
@@ -250,7 +265,10 @@ def cleanup(root: Path) -> None:
         result = resources.close()
     except Exception as error:
         errors.append(type(error).__name__)
-        result = {"status": "failed"}
+        path = root / "cleanup.json"
+        result = json.loads(path.read_text()) if path.exists() else {}
+        result["status"] = "failed"
+    result["restorations"] = restorations
     result["application_cleanup_errors"] = errors
     evidence(root / "cleanup.json", result)
     if errors:
@@ -268,6 +286,7 @@ def export_evidence(root: Path, destination: Path) -> None:
     names = [
         "ownership.json",
         "setup.json",
+        "setup-diagnostics.json",
         "preflight.json",
         "collector-provenance.json",
         "cleanup.json",

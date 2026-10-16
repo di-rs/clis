@@ -67,3 +67,36 @@ def test_unconfigured_module_is_an_explicit_nonpassing_exit() -> None:
         b'{"status": "outstanding", "activation_ready": false, '
         b'"reason": "authorized existing Access environment not configured"}\n'
     )
+
+
+@pytest.mark.parametrize("failure,blocked", [("certificate", False), ("refused", True)])
+def test_direct_origin_distinguishes_tls_failure_from_refused_tcp(
+    tmp_path: Path, failure: str, blocked: bool
+) -> None:
+    import ssl
+
+    smoke = importlib.import_module("ingress_infra.smoke")
+    valid, wrong = tmp_path / "valid", tmp_path / "wrong"
+    valid.write_text("valid-private")
+    wrong.write_text("wrong-private")
+    config = smoke.AccessSmokeConfig(
+        "https://grafana.example.com/api/health", valid, wrong, ("https://192.0.2.1/",), "database"
+    )
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "192.0.2.1":
+            cause = (
+                ssl.SSLCertVerificationError("IP address mismatch")
+                if failure == "certificate"
+                else ConnectionRefusedError(61, "connection refused")
+            )
+            raise httpx.ConnectError("connection failed") from cause
+        if "valid-private" in request.headers.get("cookie", ""):
+            return httpx.Response(200, text="database")
+        return httpx.Response(403)
+
+    if blocked:
+        assert smoke.run_smoke(config, transport=httpx.MockTransport(reply))["activation_ready"]
+    else:
+        with pytest.raises(RuntimeError, match="direct origin"):
+            smoke.run_smoke(config, transport=httpx.MockTransport(reply))

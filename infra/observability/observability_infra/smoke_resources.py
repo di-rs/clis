@@ -185,6 +185,28 @@ class Resources:
         )
         self.save()
 
+    def owned_cgroup(self, unit: str) -> str:
+        if unit not in (self.unit, self.journal_unit):
+            raise RuntimeError("foreign owned cgroup unit")
+        while True:
+            cgroup = self.commands.run(
+                ["systemctl", "show", unit, "--property=ControlGroup", "--value"]
+            )
+            if cgroup:
+                break
+            self.commands.deadline.remaining(restoring=self.commands.restoring)
+            time.sleep(0.1)  # Namespace journald can activate only after the first log writer.
+        path = Path(cgroup)
+        if not path.is_absolute() or path.name != unit or ".." in path.parts:
+            raise RuntimeError("empty/root/foreign owned cgroup")
+        pid = self.commands.run(["systemctl", "show", unit, "--property=MainPID", "--value"])
+        if not pid.isdecimal() or int(pid) <= 0:
+            raise RuntimeError("owned cgroup has no active service process")
+        membership = Path(f"/proc/{pid}/cgroup").read_text().strip()
+        if membership != "0::" + cgroup:
+            raise RuntimeError("owned service cgroup membership mismatch")
+        return cgroup
+
     def close(self) -> dict[str, Any]:
         require_ephemeral_runner()
         errors: list[str] = []

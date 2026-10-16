@@ -30,6 +30,66 @@ class Deadline:
         return time.monotonic() - self.started
 
 
+def command_diagnostic(args: list[str], output: bytes, code: int, elapsed: float) -> dict[str, Any]:
+    # Fixed signatures retain actionable categories without exporting arbitrary output.
+    text = output.decode("utf-8", errors="replace").lower()
+    signatures = {
+        "image_manifest": ("manifest unknown", "no matching manifest", "manifest not found"),
+        "registry_auth": ("unauthorized", "pull access denied", "authentication required"),
+        "registry_limit": ("toomanyrequests", "rate limit"),
+        "network_pool": ("address pools", "pool overlaps", "address space"),
+        "network_bridge": (
+            "failed to create network",
+            "failed to create bridge",
+            "iptables",
+            "nftables",
+        ),
+        "port_allocation": ("port is already allocated", "address already in use"),
+        "compose_configuration": (
+            "invalid interpolation",
+            "required variable",
+            "validating ",
+            "unknown flag",
+            "unknown command",
+        ),
+        "unhealthy": ("unhealthy", "didn't become healthy", "did not become healthy"),
+        "permission": ("permission denied", "operation not permitted"),
+        "mount": ("error mounting", "invalid mount", "mount denied"),
+        "runtime": ("failed to create shim", "oci runtime", "failed to start shim"),
+        "capacity": ("no space left", "out of memory", "cannot allocate memory"),
+        "connection": (
+            "connection refused",
+            "connection reset",
+            "i/o timeout",
+            "context deadline exceeded",
+        ),
+    }
+    executable = Path(args[0]).name
+    operation = (
+        executable if executable in {"docker", "systemctl", "journalctl", "cargo"} else "subprocess"
+    )
+    if executable == "docker" and "compose" in args:
+        operation += ".compose." + next(
+            (
+                value
+                for value in ("up", "down", "config", "logs", "exec", "ps", "port")
+                if value in args
+            ),
+            "other",
+        )
+    return {
+        "operation": operation,
+        "returncode": code,
+        "elapsed_seconds": elapsed,
+        "classification": [
+            name for name, tokens in signatures.items() if any(token in text for token in tokens)
+        ]
+        or ["unclassified"],
+        "captured_bytes": len(output),
+        "raw_output_exported": False,
+    }
+
+
 class Commands:
     """Capture a small result; never put command arguments/output in exceptions."""
 
@@ -37,8 +97,12 @@ class Commands:
         self.deadline = deadline
         self.output_limit = output_limit
         self.restoring = False
+        self.last_failure: dict[str, Any] | None = None
 
-    def run(self, args: list[str], *, env: dict[str, str] | None = None) -> str:
+    def run(
+        self, args: list[str], *, env: dict[str, str] | None = None, empty_journal_ok: bool = False
+    ) -> str:
+        started = time.monotonic()
         restoring = self.restoring
         self.deadline.remaining(restoring=restoring)
         process = subprocess.Popen(
@@ -64,7 +128,20 @@ class Commands:
                             if len(output) > self.output_limit:
                                 raise RuntimeError("smoke command output limit exceeded")
                 process.wait(timeout=self.deadline.remaining(restoring=restoring))
+            # journalctl --grep returns 1 for its exact no-match message. Other
+            # exit-1 diagnostics (including permissions) must remain failures.
+            if (
+                empty_journal_ok
+                and Path(args[0]).name == "journalctl"
+                and any(arg.startswith("--grep=") for arg in args)
+                and process.returncode == 1
+                and output.strip() == b"-- No entries --"
+            ):
+                return ""
             if process.returncode:
+                self.last_failure = command_diagnostic(
+                    args, bytes(output), process.returncode, time.monotonic() - started
+                )
                 raise RuntimeError(f"smoke command exit {process.returncode}")
             return output.decode("utf-8", errors="replace").strip()
         finally:
