@@ -4,10 +4,14 @@ requires-python = ">=3.15"
 
 [manifest]
 members = [
+    "boxie",
+    "boxie-infra",
+    "boxie-test-support",
     "cli-bench",
     "cli-playground",
     "cli-testing-policy",
     "clis-tools",
+    "playground-infra",
 ]
 
 [[package]]
@@ -187,6 +191,65 @@ wheels = [
 ]
 
 [[package]]
+name = "boxie"
+version = "0.1.0"
+source = { editable = "tools/boxie" }
+dependencies = [
+    { name = "aiodocker" },
+    { name = "aiohttp" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "uvicorn" },
+    { name = "websockets" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiodocker", specifier = ">=0.27,<1" },
+    { name = "aiohttp", specifier = ">=3.13,<4" },
+    { name = "fastapi", specifier = ">=0.128" },
+    { name = "httpx", specifier = ">=0.28" },
+    { name = "pydantic", specifier = ">=2.14,<3" },
+    { name = "uvicorn", specifier = ">=0.40" },
+    { name = "websockets", specifier = ">=16" },
+]
+
+[[package]]
+name = "boxie-infra"
+version = "0.1.0"
+source = { editable = "tools/boxie/infra" }
+dependencies = [
+    { name = "httpx" },
+    { name = "websockets" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.28" },
+    { name = "websockets", specifier = ">=16" },
+]
+
+[[package]]
+name = "boxie-test-support"
+version = "0.1.0"
+source = { editable = "tools/boxie/tests/support" }
+dependencies = [
+    { name = "boxie" },
+    { name = "httpx" },
+    { name = "uvicorn" },
+    { name = "websockets" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "boxie" },
+    { name = "httpx", specifier = ">=0.28" },
+    { name = "uvicorn", specifier = ">=0.40" },
+    { name = "websockets", specifier = ">=16" },
+]
+
+[[package]]
 name = "certifi"
 version = "2026.7.22"
 source = { registry = "https://pypi.org/simple" }
@@ -203,9 +266,9 @@ source = { virtual = "tools/cli-bench" }
 [[package]]
 name = "cli-playground"
 version = "0.1.0"
-source = { virtual = "tools/cli-playground" }
+source = { editable = "tools/cli-playground" }
 dependencies = [
-    { name = "aiodocker" },
+    { name = "aiohttp" },
     { name = "anyio" },
     { name = "fastapi" },
     { name = "pydantic" },
@@ -216,7 +279,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiodocker", specifier = ">=0.27,<1" },
+    { name = "aiohttp", specifier = ">=3.13,<4" },
     { name = "anyio", specifier = ">=4" },
     { name = "fastapi", specifier = ">=0.128" },
     { name = "pydantic", specifier = ">=2.14,<3" },
@@ -246,6 +309,7 @@ source = { virtual = "." }
 
 [package.dev-dependencies]
 dev = [
+    { name = "boxie-test-support" },
     { name = "httpx" },
     { name = "mypy" },
     { name = "pulumi" },
@@ -262,6 +326,7 @@ dev = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "boxie-test-support", editable = "tools/boxie/tests/support" },
     { name = "httpx" },
     { name = "mypy" },
     { name = "pulumi", specifier = "==3.268.0" },
@@ -688,6 +753,33 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/5a/82/42f767fc1c1143d6fd36efb827202a2d997a375e160a71eb2888a925aac1/pathspec-1.1.1.tar.gz", hash = "sha256:17db5ecd524104a120e173814c90367a96a98d07c45b2e10c2f3919fff91bf5a", size = 135180, upload-time = "2026-04-27T01:46:08.907Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f1/d9/7fb5aa316bc299258e68c73ba3bddbc499654a07f151cba08f6153988714/pathspec-1.1.1-py3-none-any.whl", hash = "sha256:a00ce642f577bf7f473932318056212bc4f8bfdf53128c78bbd5af0b9b20b189", size = 57328, upload-time = "2026-04-27T01:46:07.06Z" },
+]
+
+[[package]]
+name = "playground-infra"
+version = "0.1.0"
+source = { editable = "tools/cli-playground/infra" }
+dependencies = [
+    { name = "boxie-infra" },
+    { name = "cli-playground" },
+    { name = "pulumi" },
+    { name = "pulumi-cloudflare" },
+    { name = "pulumi-hcloud" },
+    { name = "pulumi-tls" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "boxie-infra" },
+    { name = "cli-playground" },
+    { name = "pulumi", specifier = "==3.268.0" },
+    { name = "pulumi-cloudflare", specifier = "==6.22.1" },
+    { name = "pulumi-hcloud", specifier = "==1.43.1" },
+    { name = "pulumi-tls", specifier = "==5.6.2" },
+    { name = "pydantic", specifier = ">=2.14,<3" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
 ]
 
 [[package]]

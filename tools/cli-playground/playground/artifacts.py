@@ -1,5 +1,6 @@
 """Bounded ZIP bundles of flat Linux executable names; no archive paths are extracted."""
 
+import hashlib
 import io
 import re
 import shutil
@@ -73,3 +74,17 @@ def stage_archive(source: Path, destination: Path, max_binary_bytes: int) -> lis
                 out.write(header)
                 shutil.copyfileobj(incoming, out, length=65536)
     return sorted(member.filename for member in members)
+
+
+def canonical_archive(staged: Path, clis: list[str], destination: Path) -> str:
+    """Hash deterministic bytes so ZIP timestamps cannot change publication identity."""
+    with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_STORED) as bundle:
+        for cli in sorted(clis):
+            info = zipfile.ZipInfo(cli, date_time=(1980, 1, 1, 0, 0, 0))
+            info.external_attr = 0o100555 << 16
+            with bundle.open(info, "w") as entry, (staged / cli).open("rb") as source:
+                shutil.copyfileobj(source, entry)
+    if destination.stat().st_size > MAX_ARCHIVE:
+        raise OverflowError("canonical artifact exceeds upload limit")
+    with destination.open("rb") as source:
+        return hashlib.file_digest(source, "sha256").hexdigest()

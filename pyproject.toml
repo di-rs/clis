@@ -6,6 +6,7 @@ dependencies = []
 
 [dependency-groups]
 dev = [
+    "boxie-test-support",
     "httpx",
     "mypy",
     "pulumi==3.268.0",
@@ -23,7 +24,7 @@ package = false
 required-version = ">=0.13.0"
 
 [tool.uv.workspace]
-members = ["tools/cli-bench", "tools/cli-playground", "tools/cli-testing"]
+members = ["tools/boxie", "tools/boxie/tests/support", "tools/cli-playground", "tools/boxie/infra", "tools/cli-playground/infra", "tools/cli-bench", "tools/cli-testing"]
 
 [tool.ruff]
 target-version = "py315"
@@ -36,10 +37,17 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
 python_version = "3.15"
 plugins = ["pydantic.mypy"]
 files = ["tools"]
-mypy_path = "tools"
+mypy_path = ["tools"]
 strict = true
 
 [tool.pytest]
-testpaths = ["tools/ci/tests", "tools/cli-bench/tests", "tools/cli-playground/tests", "tools/cli-testing/tests"]
-pythonpath = ["tools", "tools/cli-bench", "tools/cli-playground"]
-addopts = ["--strict-config", "--strict-markers"]
+testpaths = ["tools/boxie/tests", "tools/ci/tests", "tools/cli-bench/tests", "tools/cli-playground/tests", "tools/cli-testing/tests"]
+pythonpath = ["tools", "tools/cli-bench"]
+addopts = ["--strict-config", "--strict-markers", "-m", "not integration"]
+markers = ["integration: real isolated builds/installations and external-tool checks; prerequisites required"]
+
+[tool.uv.sources]
+boxie = { workspace = true }
+boxie-test-support = { workspace = true }
+cli-playground = { workspace = true }
+boxie-infra = { workspace = true }

@@ -42,7 +42,7 @@ jobs:
         with:
           pulumi-version: '3.268.0'
       - name: Validate and configure the production stack
-        run: uv run --locked python tools/cli-playground/infra/ci.py configure
+        run: uv run --locked python -m playground_infra.ci configure
       - name: Provision Hetzner and Cloudflare DNS
         working-directory: tools/cli-playground/infra
         run: |
@@ -50,16 +50,3 @@ jobs:
           pulumi stack select production --create --secrets-provider passphrase --non-interactive
           pulumi preview --refresh --non-interactive --diff
           pulumi up --yes --refresh --non-interactive --suppress-outputs
-  release:
-    needs: provision
-    permissions:
-      contents: read
-      packages: write
-    # ./ resolves this caller's commit; actionlint 1.7.12 lacks the newer $/ syntax.
-    uses: ./.github/workflows/cli-playground-release.yml # zizmor: ignore[self-repository]
-    secrets:
-      CLOUDFLARE_DNS_API_TOKEN: ${{ secrets.CLOUDFLARE_DNS_API_TOKEN }}
-      PLAYGROUND_DEPLOY_TOKEN: ${{ secrets.PLAYGROUND_DEPLOY_TOKEN }}
-      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
-      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

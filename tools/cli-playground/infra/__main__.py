@@ -1,12 +1,7 @@
 """Run with pulumi preview/up from this directory after root uv sync."""
 
-import sys
-from pathlib import Path
-
 import pulumi
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from infra.host import HostConfig, provision  # noqa: E402
+from playground_infra.host import HostConfig, provision
 
 config = pulumi.Config()
 

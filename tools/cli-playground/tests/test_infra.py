@@ -8,7 +8,7 @@ from typing import Any, Never
 import pulumi
 import pytest
 import yaml
-from infra.host import HostConfig, provision
+from playground_infra.host import HostConfig, provision
 from pulumi.runtime.settings import get_root_resource, reset_options
 from pulumi.runtime.stack import Stack
 
@@ -203,11 +203,12 @@ async def test_generated_ssh_identity_and_host_key_keep_private_material_secret(
 
 def test_production_routes_preview_hosts_with_dns_challenge_and_proxy_only_credentials() -> None:
     root = Path(__file__).resolve().parents[1]
-    compose = yaml.safe_load((root / "compose.production.yml").read_text())
+    compose = yaml.safe_load((root / "infra/compose.production.yml").read_text())
     gateway = compose["services"]["gateway"]
     assert gateway["environment"]["PLAYGROUND_PREVIEW_DOMAIN"] == "${PLAYGROUND_DOMAIN}"
     assert not any("CLOUDFLARE" in key or key.startswith("CF_") for key in gateway["environment"])
-    assert gateway["environment"]["PLAYGROUND_SANDBOX_RUNTIME"] == "runsc"
+    assert "PLAYGROUND_BOXIE_URL" in gateway["environment"]
+    assert "PLAYGROUND_SANDBOX_RUNTIME" not in gateway["environment"]
     proxy = compose["services"]["proxy"]
     assert (
         "--certificatesresolvers.preview.acme.dnschallenge.provider=cloudflare" in proxy["command"]
@@ -235,7 +236,7 @@ def test_production_routes_preview_hosts_with_dns_challenge_and_proxy_only_crede
 
 def test_gateway_healthcheck_uses_public_url_host(monkeypatch: pytest.MonkeyPatch) -> None:
     root = Path(__file__).resolve().parents[1]
-    compose = yaml.safe_load((root / "compose.production.yml").read_text())
+    compose = yaml.safe_load((root / "infra/compose.production.yml").read_text())
     command = compose["services"]["gateway"]["healthcheck"]["test"]
     assert command[:3] == ["CMD", "/app/.venv/bin/python", "-c"]
     monkeypatch.setenv("PLAYGROUND_PUBLIC_URL", "https://play.example.com")

@@ -9,14 +9,14 @@ on:
       - 'tools/cli-playground/playground/**'
       - 'tools/cli-playground/frontend/**'
       - 'tools/cli-playground/fixtures/**'
-      - 'tools/cli-playground/Gateway.Dockerfile*'
+      - 'tools/cli-playground/infra/Playground.Dockerfile*'
       - 'tools/cli-playground/Sandbox.Dockerfile*'
       - 'tools/cli-playground/shell.sh'
-      - 'tools/cli-playground/compose.production.yml'
+      - 'tools/cli-playground/infra/compose.production.yml'
       - 'tools/cli-playground/pyproject.toml'
-      - 'tools/cli-playground/infra/deploy.py'
+      - 'tools/cli-playground/infra/playground_infra/deploy.py'
       - 'tools/cli-playground/infra/deploy.sh'
-      - 'tools/cli-playground/infra/ci.py'
+      - 'tools/cli-playground/infra/playground_infra/ci.py'
       - 'tools/cli-playground/infra/routes.yml'
       - '.github/workflows/cli-playground-release.yml'
       - 'pyproject.toml'
@@ -67,6 +67,10 @@ jobs:
     env:
       DOCKER_BUILD_RECORD_UPLOAD: 'false'
     steps:
+      - name: Production activation unavailable until PR4
+        run: |
+          echo "Production activation is unavailable after the Boxie split; split-service release/deployment support lands in PR4. Use the documented local Compose units for validation." >&2
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
@@ -96,7 +100,7 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          file: tools/cli-playground/Gateway.Dockerfile
+          file: tools/cli-playground/infra/Playground.Dockerfile
           platforms: linux/amd64
           push: true
           tags: ${{ steps.images.outputs.gateway }}:${{ steps.images.outputs.tag }}
@@ -199,4 +203,4 @@ jobs:
           GATEWAY_IMAGE: ${{ needs.release.outputs.gateway_image }}
           SANDBOX_IMAGE: ${{ needs.release.outputs.sandbox_image }}
           GHCR_TOKEN: ${{ github.token }}
-        run: uv run --locked python tools/cli-playground/infra/ci.py deploy
+        run: uv run --locked python -m playground_infra.ci deploy

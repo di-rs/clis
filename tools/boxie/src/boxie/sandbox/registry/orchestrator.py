@@ -1,0 +1,314 @@
+"""Persistent PR1 admission authority and deterministic sandbox ownership."""
+
+import asyncio
+import hashlib
+import json
+import logging
+from collections.abc import Callable, Mapping
+from datetime import datetime, timedelta
+from uuid import UUID, uuid4
+
+from boxie.bootstrap.config import OrchestratorConfig
+from boxie.domain.errors import BoxieError
+from boxie.domain.models import (
+    OrchestratorIdentity,
+    Principal,
+    ProfileSnapshot,
+    SandboxSpec,
+    SandboxState,
+    SandboxView,
+    TerminationReason,
+)
+from boxie.domain.policy import validate_policy
+from boxie.persistence.artifacts import ArtifactStore
+from boxie.persistence.atomic import atomic_write
+from boxie.sandbox.docker import DockerPort
+from boxie.sandbox.profiles import ProfileRegistry
+from boxie.sandbox.protocol import IdentityWire, SnapshotWire, spec_wire
+from boxie.sandbox.registry.records import FINAL, LiveDeadlines, Record, RegistryFile
+from boxie.sandbox.registry.resources import cleanup, provision
+from boxie.sandbox.terminal import Terminal
+
+logger = logging.getLogger(__name__)
+
+
+class Orchestrator:
+    def __init__(
+        self,
+        config: OrchestratorConfig,
+        docker: DockerPort,
+        artifacts: ArtifactStore,
+        clock: Callable[[], datetime],
+        monotonic: Callable[[], float],
+    ) -> None:
+        self.config, self.docker, self.artifacts, self.clock = config, docker, artifacts, clock
+        self.monotonic = monotonic
+        self._deadlines: dict[UUID, LiveDeadlines] = {}
+        self.profiles = ProfileRegistry(config.profiles_file, config.data_dir / "profiles")
+        self.path = config.data_dir / "registry.json"
+        self.identity = IdentityWire(
+            installation_id=config.identity.installation_id, host_id=config.identity.host_id
+        )
+        self.records: dict[UUID, Record] = {}
+        if self.path.exists():
+            saved = RegistryFile.model_validate_json(self.path.read_bytes())
+            if saved.identity != self.identity:
+                raise ValueError(
+                    "orchestrator installation identity differs from persisted registry"
+                )
+            self.records = {record.id: record for record in saved.records}
+        self._admission = asyncio.Lock()
+        self._operations: dict[UUID, asyncio.Lock] = {}
+        self._workers: dict[UUID, asyncio.Task[None]] = {}
+        self._cleanup_tasks: dict[UUID, asyncio.Task[SandboxView]] = {}
+        self.terminals: dict[UUID, Terminal] = {}
+        self._sweeper: asyncio.Task[None] | None = None
+        self._stopping = False
+        self._save()
+
+    def _save(self) -> None:
+        atomic_write(
+            self.path,
+            RegistryFile(identity=self.identity, records=list(self.records.values()))
+            .model_dump_json()
+            .encode(),
+        )
+
+    @property
+    def reserved_count(self) -> int:
+        return sum(record.state not in FINAL for record in self.records.values())
+
+    def artifact_exists(self, artifact_id: str | UUID) -> bool:
+        return self.artifacts.exists(UUID(str(artifact_id)))
+
+    def resolve_profile(
+        self, profile_id: str, command: tuple[str, ...], env: Mapping[str, str]
+    ) -> ProfileSnapshot:
+        return self.profiles.resolve_profile(profile_id, command, env)
+
+    def owned(self, principal: Principal, sandbox_id: UUID) -> Record:
+        record = self.records.get(sandbox_id)
+        if record is None or record.consumer_id != principal.consumer_id:
+            raise BoxieError(404, "sandbox not found")
+        return record
+
+    def _controlled(
+        self, identity: OrchestratorIdentity, sandbox_id: UUID, generation: int
+    ) -> Record:
+        record = self.records.get(sandbox_id)
+        if record is None or identity != self.config.identity or generation != record.generation:
+            raise BoxieError(404, "sandbox generation not found")
+        return record
+
+    async def submit(
+        self, principal: Principal, idempotency_key: str, spec: SandboxSpec
+    ) -> SandboxView:
+        # Wire validation also applies to direct callers and canonical fingerprints.
+        body = spec_wire(spec)
+        validate_policy(spec.policy, self.config.policy_maximum)
+        fingerprint = hashlib.sha256(
+            json.dumps(body.model_dump(mode="json"), sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        async with self._admission:
+            if self._stopping:
+                raise BoxieError(503, "orchestrator is stopping")
+            for record in self.records.values():
+                if (
+                    record.consumer_id == principal.consumer_id
+                    and record.idempotency_key == idempotency_key
+                ):
+                    if record.fingerprint != fingerprint:
+                        raise BoxieError(409, "idempotency key reused with a different request")
+                    return record.view()
+            snapshot = self.resolve_profile(spec.profile_id, spec.command, spec.env)
+            # Check retirement before capacity so retired artifacts cannot be resurrected.
+            self.artifacts.path(principal, spec.artifact_id)
+            if self.reserved_count >= self.config.max_sandboxes:
+                raise BoxieError(429, "sandbox capacity exhausted")
+            now = self.clock()
+            record = Record(
+                id=uuid4(),
+                consumer_id=principal.consumer_id,
+                idempotency_key=idempotency_key,
+                fingerprint=fingerprint,
+                spec=body,
+                snapshot=SnapshotWire.from_domain(snapshot),
+                identity=self.identity,
+                created_at=now,
+                absolute_deadline=now + timedelta(seconds=spec.policy.max_seconds),
+            )
+            # Record intent first. No await may separate intent/reference persistence from
+            # scheduling Docker; restart handles any crash in this sequence conservatively.
+            self.records[record.id] = record
+            self._deadlines[record.id] = LiveDeadlines(self.monotonic() + spec.policy.max_seconds)
+            self._save()
+            try:
+                self.artifacts.retain(principal, spec.artifact_id, record.name)
+            except Exception:
+                del self.records[record.id]
+                del self._deadlines[record.id]
+                self._save()
+                raise
+            self._workers[record.id] = asyncio.create_task(self._provision(record))
+            return record.view()
+
+    async def get(self, principal: Principal, sandbox_id: UUID) -> SandboxView:
+        return self.owned(principal, sandbox_id).view()
+
+    async def inspect(
+        self, identity: OrchestratorIdentity, sandbox_id: UUID, generation: int
+    ) -> SandboxView:
+        return self._controlled(identity, sandbox_id, generation).view()
+
+    async def ensure(
+        self,
+        identity: OrchestratorIdentity,
+        sandbox_id: UUID,
+        generation: int,
+        snapshot: ProfileSnapshot,
+        artifact_id: UUID,
+        deadline: datetime,
+    ) -> SandboxView:
+        record = self._controlled(identity, sandbox_id, generation)
+        self.profiles.validate_snapshot(snapshot)
+        if (
+            record.snapshot.domain() != snapshot
+            or record.spec.artifact_id != artifact_id
+            or record.absolute_deadline != deadline
+        ):
+            raise BoxieError(409, "ensure differs from admitted sandbox")
+        # PR1 ensure only retries an already-admitted intent; it never admits a new ID.
+        if record.state == SandboxState.ACCEPTED and record.id not in self._workers:
+            self._workers[record.id] = asyncio.create_task(self._provision(record))
+        return record.view()
+
+    async def terminate(
+        self, principal: Principal, sandbox_id: UUID, reason: TerminationReason
+    ) -> SandboxView:
+        record = self.owned(principal, sandbox_id)
+        return await self.remove(self.config.identity, sandbox_id, record.generation, reason)
+
+    async def remove(
+        self,
+        identity: OrchestratorIdentity,
+        sandbox_id: UUID,
+        generation: int,
+        reason: TerminationReason,
+        *,
+        conditional: bool = False,
+    ) -> SandboxView:
+        record = self._controlled(identity, sandbox_id, generation)
+        worker = self._workers.get(record.id)
+        if worker and not worker.done() and worker is not asyncio.current_task():
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
+        return await self._cleanup(record, reason, conditional=conditional)
+
+    async def start(self) -> None:
+        # Reconcile only persisted, precisely owned resources, never daemon-wide deletion.
+        for record in self.records.values():
+            if record.state not in FINAL:
+                await self._cleanup(record, TerminationReason.ORCHESTRATOR_RESTART)
+            else:
+                self.artifacts.release(record.principal, record.spec.artifact_id, record.name)
+        self._sweeper = asyncio.create_task(self._sweep_loop())
+
+    async def _sweep_loop(self) -> None:
+        while True:
+            await asyncio.sleep(self.config.sweep_seconds)
+            now = self.monotonic()
+            for record in list(self.records.values()):
+                if record.state in FINAL:
+                    continue
+                reason = None
+                if record.cleanup_pending:
+                    reason = record.reason or TerminationReason.REQUESTED
+                else:
+                    reason = self._expiry_reason(record, now)
+                if reason:
+                    pending = self._cleanup_tasks.get(record.id)
+                    if pending is None or pending.done():
+                        if pending is not None:
+                            pending.result()
+                        self._cleanup_tasks[record.id] = asyncio.create_task(
+                            self.remove(
+                                self.config.identity,
+                                record.id,
+                                record.generation,
+                                reason,
+                                conditional=not record.cleanup_pending
+                                and reason
+                                in {TerminationReason.IDLE, TerminationReason.DISCONNECTED},
+                            )
+                        )
+
+    def _expiry_reason(self, record: Record, now: float) -> TerminationReason | None:
+        deadlines = self._deadlines[record.id]
+        if now >= deadlines.absolute:
+            return TerminationReason.EXPIRED
+        if deadlines.disconnect is not None and now >= deadlines.disconnect:
+            return TerminationReason.DISCONNECTED
+        if deadlines.idle is not None and now >= deadlines.idle:
+            return TerminationReason.IDLE
+        return None
+
+    def validate_attachment(self, record: Record) -> None:
+        if (
+            record.state != SandboxState.READY
+            or record.disconnected_at is not None
+            or self._expiry_reason(record, self.monotonic()) is not None
+        ):
+            raise BoxieError(409, "terminal is unavailable")
+
+    def attach(self, record: Record) -> None:
+        # Acceptance may yield across expiry. Revalidate and clear without yielding.
+        self.validate_attachment(record)
+        self._deadlines[record.id].disconnect = None
+
+    def accepted_input(self, record: Record) -> None:
+        if record.state != SandboxState.READY:
+            return
+        now = self.monotonic()
+        deadlines = self._deadlines[record.id]
+        if now >= deadlines.absolute:
+            return
+        deadlines.idle = now + record.spec.policy.idle_seconds
+        record.idle_deadline = self.clock() + timedelta(seconds=record.spec.policy.idle_seconds)
+        # Live enforcement uses monotonic deadlines; restart cleans up all active records.
+        # Do not serialize and fsync the entire history for each terminal input frame.
+
+    def disconnected(self, record: Record) -> None:
+        if record.state == SandboxState.READY and record.disconnected_at is None:
+            record.disconnected_at = self.clock()
+            self._deadlines[record.id].disconnect = (
+                self.monotonic() + record.spec.policy.disconnect_seconds
+            )
+            self._save()
+
+    async def close(self) -> None:
+        self._stopping = True
+        if self._sweeper:
+            self._sweeper.cancel()
+            await asyncio.gather(self._sweeper, return_exceptions=True)
+        await asyncio.gather(
+            *(
+                self.remove(
+                    self.config.identity,
+                    record.id,
+                    record.generation,
+                    TerminationReason.ORCHESTRATOR_SHUTDOWN,
+                )
+                for record in self.records.values()
+                if record.state not in FINAL
+            )
+        )
+        await asyncio.gather(*self._cleanup_tasks.values())
+        await self.docker.close()
+
+    async def _provision(self, record: Record) -> None:
+        await provision(self, record)
+
+    async def _cleanup(
+        self, record: Record, reason: TerminationReason, *, conditional: bool = False
+    ) -> SandboxView:
+        return await cleanup(self, record, reason, conditional=conditional)

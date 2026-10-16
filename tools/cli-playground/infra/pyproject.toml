@@ -1,0 +1,13 @@
+[project]
+name = "playground-infra"
+version = "0.1.0"
+requires-python = ">=3.15"
+dependencies = ["cli-playground", "boxie-infra", "pydantic>=2.14,<3", "pyyaml>=6.0.3", "pulumi==3.268.0", "pulumi-cloudflare==6.22.1", "pulumi-hcloud==1.43.1", "pulumi-tls==5.6.2"]
+
+[build-system]
+requires = ["uv_build==0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+module-name = "playground_infra"

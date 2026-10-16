@@ -5,12 +5,8 @@ on:
     branches: [master]
     paths:
       - '.github/workflows/cli-playground-sandbox.yml'
-      - 'tools/cli-playground/playground/**'
-      - 'tools/cli-playground/Sandbox.Dockerfile*'
-      - 'tools/cli-playground/shell.sh'
-      - 'tools/cli-playground/fixtures/**'
-      - 'tools/cli-playground/infra/bootstrap.sh'
-      - 'tools/cli-playground/infra/smoke.py'
+      - 'tools/cli-playground/**'
+      - 'tools/boxie/**'
       - 'coreutils/echor/**'
       - 'utils/**'
       - 'Cargo.toml'
@@ -18,6 +14,7 @@ on:
       - 'rust-toolchain.toml'
       - 'pyproject.toml'
       - 'uv.lock'
+      - '.python-version'
   workflow_dispatch:
 
 permissions:
@@ -56,7 +53,11 @@ jobs:
         run: |
           docker build -f tools/cli-playground/Sandbox.Dockerfile -t clis-playground-sandbox:smoke .
           cargo build --locked --release --package echor
-      - name: Exercise the production PTY session through gVisor
+      - name: Build isolated service images
         run: |
-          uv run --locked --all-packages --no-dev --directory tools/cli-playground \
-            python -m infra.smoke --image clis-playground-sandbox:smoke --binary "$PWD/target/release/echor"
+          docker build -f tools/boxie/infra/Runtime.Dockerfile -t boxie:smoke .
+          docker build -f tools/cli-playground/infra/Playground.Dockerfile -t cli-playground:smoke .
+      - name: Exercise private generic and product terminals through real gVisor
+        run: |
+          uv sync --locked --all-packages
+          bash tools/boxie/infra/smoke.sh

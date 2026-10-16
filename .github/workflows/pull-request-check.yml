@@ -96,6 +96,11 @@ jobs:
       - run: pnpm check
       - run: pnpm test
       - run: pnpm build
+      - name: Verify isolated service distributions and Compose topology
+        working-directory: .
+        run: |
+          uv sync --locked --all-packages
+          uv run --locked pytest tools/boxie/tests/test_packaging.py -m integration
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:browser
       - run: git diff --exit-code

@@ -42,43 +42,21 @@ def test_only_manual_setup_can_provision_cloud_resources() -> None:
     runtime_commands = "\n".join(step.get("run", "") for step in deployment["steps"])
     assert "pulumi preview --refresh" in provision_commands
     assert "pulumi up --yes --refresh" in provision_commands
-    assert "ci.py deploy" in runtime_commands
+    assert "playground_infra.ci deploy" in runtime_commands
     assert "pulumi up" not in runtime_commands
     assert "pulumi preview" not in runtime_commands
     assert not (WORKFLOWS / "cli-playground-state.yml").exists()
 
 
-def test_initial_setup_and_releases_share_immutable_deployment_and_secret_forwarding() -> None:
+def test_setup_only_provisions_and_release_is_explicitly_unavailable() -> None:
     setup = workflow("setup")
     release = workflow("release")
-    assert setup["jobs"]["release"]["uses"] == "./.github/workflows/cli-playground-release.yml"
-    assert setup["jobs"]["release"]["needs"] == "provision"
+    assert set(setup["jobs"]) == {"provision"}
     assert release["jobs"]["deploy"]["needs"] == "release"
-    for caller in (setup["jobs"]["release"],):
-        assert caller["secrets"] == {
-            name: "${{ secrets." + name + " }}" for name in DEPLOYMENT_SECRETS
-        }
-    for called in (release,):
-        assert set(called["on"]["workflow_call"]["secrets"]) == DEPLOYMENT_SECRETS
-        assert all(
-            secret["required"] == "true"
-            for secret in called["on"]["workflow_call"]["secrets"].values()
-        )
-    deployment = release["jobs"]["deploy"]
-    apply_release = deployment["steps"][-1]
-    assert apply_release["env"] == {
-        "RELEASE_REVISION": "${{ needs.release.outputs.revision }}",
-        "GATEWAY_IMAGE": "${{ needs.release.outputs.gateway_image }}",
-        "SANDBOX_IMAGE": "${{ needs.release.outputs.sandbox_image }}",
-        "GHCR_TOKEN": "${{ github.token }}",
-    }
-    assert (
-        deployment["env"]["CLOUDFLARE_DNS_API_TOKEN"] == "${{ secrets.CLOUDFLARE_DNS_API_TOKEN }}"
-    )
-    outputs = release["jobs"]["release"]["outputs"]
-    assert outputs["revision"] == "${{ github.sha }}"
-    assert outputs["gateway_image"].endswith("@${{ steps.gateway.outputs.digest }}")
-    assert outputs["sandbox_image"].endswith("@${{ steps.sandbox.outputs.digest }}")
+    first = release["jobs"]["release"]["steps"][0]
+    assert "Production activation is unavailable" in first["run"]
+    assert "exit 1" in first["run"]
+    assert set(release["on"]["workflow_call"]["secrets"]) == DEPLOYMENT_SECRETS
 
 
 def test_auto_release_is_opt_in_and_does_not_restart_runtime_for_ordinary_cli_changes() -> None:
@@ -94,7 +72,7 @@ def test_auto_release_is_opt_in_and_does_not_restart_runtime_for_ordinary_cli_ch
     paths = release["on"]["push"]["paths"]
     assert "tools/cli-playground/playground/**" in paths
     assert "tools/cli-playground/frontend/**" in paths
-    assert "tools/cli-playground/compose.production.yml" in paths
+    assert "tools/cli-playground/infra/compose.production.yml" in paths
     assert "tools/cli-playground/infra/host.py" not in paths
     assert not any(path.startswith(("coreutils/", "utils/", "docs/")) for path in paths)
     assert "tools/cli-playground/**" not in paths

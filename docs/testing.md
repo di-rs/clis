@@ -59,8 +59,11 @@ pnpm --dir tools/cli-playground/frontend exec playwright install chromium
 pnpm --dir tools/cli-playground/frontend test:browser
 ```
 
-Gateway and infrastructure tests run with the shared Python suite. The playground
-README covers Docker and gVisor smoke checks; unit tests need no Docker daemon.
+Playground product tests, Boxie service tests and both infrastructure packages run
+with the shared Python suite. Default tests replace the Docker boundary and need
+no Docker daemon. The [Boxie infrastructure guide](../tools/boxie/infra/README.md)
+covers the separate native Linux/gVisor smoke; Playground consumes Boxie's private
+HTTP/WebSocket API and owns no Docker access.
 
 ## Check reporting
 
@@ -68,3 +71,31 @@ Run `git diff --check`. For new documentation, pass `--files PATH` to the releva
 prek hook so untracked files are checked. Report commands, outcomes and any
 unverified platforms or missing tools. Reuse passing checks while the relevant
 files and environment remain unchanged; documentation-only edits need no Rust run.
+
+## Independent service packaging
+
+Ordinary pytest excludes the `integration` marker and requires no built frontend
+or Docker. After a real frontend build, explicitly run:
+
+```sh
+pnpm --dir tools/cli-playground/frontend build
+uv run --locked pytest tools/boxie/tests/test_packaging.py -m integration
+```
+
+These checks build each service sdist/wheel, install it with only locked runtime
+dependencies into a fresh environment, import outside the checkout, serve actual
+installed UI assets, and resolve all four Compose manifests. Missing prerequisites
+fail. The PR frontend job runs this gate. Image builds and native Linux/gVisor
+smoke are separate checks; ordinary Docker/runc is not gVisor evidence.
+
+Unprivileged PR quality, frontend, sandbox, binary-build and affected benchmark
+checks also accept the intermediate bases `refactor/boxie-service`,
+`feat/boxie-temporal` and `feat/boxie-observability`. Benchmark selection still
+runs only affected or explicitly requested suites. Privileged publication and
+deployment retain their trusted default-branch boundaries.
+
+PR1 uses a transitional direct lifecycle with orchestrator-local admission and recovery.
+PR2 replaces this authority with PostgreSQL and Temporal; begin it only after
+PR1's required checks, including native Linux amd64/runsc, pass. Mocked checks,
+isolated package installs and local Compose health checks do not establish cloud
+provisioning, DNS/Access or production activation readiness.

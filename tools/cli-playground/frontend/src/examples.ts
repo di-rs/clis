@@ -82,7 +82,7 @@ export function examplesFor(cli: string): Example[] {
     const separator = args.startsWith(";") || !args ? "" : " ";
     return {
       label,
-      command: `/opt/preview/bin/${cli}${separator}${args}`,
+      command: `/opt/artifact/${cli}${separator}${args}`,
       display: `${cli}${separator}${args}`,
     };
   });

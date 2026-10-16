@@ -9,11 +9,12 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from infra import deploy
 from playground import app as playground_app
 from playground.app import create_app
 from playground.config import Settings
+from playground_infra import deploy
 
+from .boxie_fake import FakeBoxie
 from .helpers import APP_ENV, GATEWAY_IMAGE, SANDBOX_IMAGE, git_commit, protected
 
 
@@ -30,10 +31,13 @@ def api_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
         data_dir=tmp_path / "data",
         public_url="https://play.example",
         deploy_token="test-deployment-token",
-        sandbox_image="clis-sandbox:test",
+        boxie_url="http://boxie.internal",
+        boxie_credential_file=tmp_path / "boxie.secret",
         max_binary_bytes=128,
     )
-    with TestClient(create_app(settings), base_url=settings.public_url) as client:
+    with TestClient(
+        create_app(settings, boxie=FakeBoxie()), base_url=settings.public_url
+    ) as client:
         yield client
 
 
@@ -43,9 +47,8 @@ def docker_settings(tmp_path: Path) -> Settings:
         data_dir=tmp_path / "data",
         public_url="https://play.example",
         deploy_token="test-deployment-token",
-        sandbox_image="clis-sandbox:test",
-        max_sessions=1,
-        session_seconds=5,
+        boxie_url="http://boxie.internal",
+        boxie_credential_file=tmp_path / "boxie.secret",
     )
 
 
@@ -62,7 +65,8 @@ def configured_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
         "PLAYGROUND_DATA_DIR": str(tmp_path / "data"),
         "PLAYGROUND_PUBLIC_URL": "https://play.example/",
         "PLAYGROUND_DEPLOY_TOKEN": "private-deployment-token",
-        "PLAYGROUND_SANDBOX_IMAGE": "sandbox:test",
+        "PLAYGROUND_BOXIE_URL": "http://boxie.internal",
+        "PLAYGROUND_BOXIE_CREDENTIAL_FILE": str(tmp_path / "boxie.secret"),
     }.items():
         monkeypatch.setenv(name, value)
 
@@ -81,15 +85,15 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
     source.mkdir(parents=True)
     (source / "infra").mkdir()
     for name in (
-        "compose.production.yml",
+        "infra/compose.production.yml",
         "infra/routes.yml",
-        "Gateway.Dockerfile",
+        "infra/Playground.Dockerfile",
         "Sandbox.Dockerfile",
     ):
         (source / name).write_text("committed source\n")
     assert deploy.__file__ is not None
     (source / "infra/deploy.sh").write_text(
-        (Path(deploy.__file__).parent / "deploy.sh").read_text()
+        (Path(deploy.__file__).parent.parent / "deploy.sh").read_text()
     )
     subprocess.run(["git", "init", "-q", str(root)], check=True)
     subprocess.run(["git", "-C", str(root), "add", "."], check=True)

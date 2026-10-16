@@ -1,0 +1,3 @@
+# Historical architecture prose: the generic API rule matched consumer/idempotency
+# identity after the API requests phrase. Scope this exception to that one finding.
+a15e10d7db55925abe71e39f342f63ee9e01498b:docs/superpowers/specs/2026-10-15-boxie-design.md:generic-api-key:171

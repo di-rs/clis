@@ -23,6 +23,7 @@ const currentBuild = {
 };
 
 type ClientMessage =
+  | { type: "auth"; credential: string }
   | { type: "input"; data: string }
   | { type: "resize"; cols: number; rows: number };
 
@@ -30,20 +31,61 @@ interface Session {
   socket: WebSocketRoute;
   messages: ClientMessage[];
   closed: boolean;
+  deleted: boolean;
 }
 
 async function mockTerminal(page: Page, identifier = environmentId): Promise<Session[]> {
   const sessions: Session[] = [];
+  let created = 0;
+  await page.route(`**/api/environments/${identifier}/sessions`, async (route) => {
+    const { revision } = route.request().postDataJSON() as { revision: string };
+    created++;
+    await route.fulfill({
+      status: 201,
+      json: {
+        id: `00000000-0000-4000-8000-${String(created).padStart(12, "0")}`,
+        preview_id: identifier,
+        revision,
+        credential: "a".repeat(43),
+        absolute_deadline: "2099-01-01T01:00:00Z",
+        state: "ready",
+        reason: null,
+      },
+    });
+  });
+  await page.route(`**/api/environments/${identifier}/sessions/*`, async (route) => {
+    expect(route.request().method()).toBe("DELETE");
+    expect(route.request().headers()["authorization"]).toBe(`Bearer ${"a".repeat(43)}`);
+    const id = route.request().url().split("/").at(-1);
+    const session = sessions.find(
+      (item) => new URL(item.socket.url()).searchParams.get("session_id") === id,
+    );
+    if (session) session.deleted = true;
+    await route.fulfill({ json: { state: "terminating" } });
+  });
   await page.routeWebSocket(
     (url) => url.pathname === `/ws/${identifier}`,
     (socket) => {
-      const session: Session = { socket, messages: [], closed: false };
+      const session: Session = { socket, messages: [], closed: false, deleted: false };
       socket.onMessage((message) => {
         expect(typeof message).toBe("string");
         expect(message.length).toBeLessThanOrEqual(16_384);
-        expect(Buffer.byteLength(message)).toBeLessThan(65_536);
+        expect(Buffer.byteLength(message)).toBeLessThanOrEqual(16_384);
         // The production client owns this protocol; the double records its frames.
-        session.messages.push(JSON.parse(message.toString()) as ClientMessage);
+        const data = JSON.parse(message.toString()) as ClientMessage;
+        if (session.messages.length === 0) {
+          expect(data).toEqual({ type: "auth", credential: "a".repeat(43) });
+          expect(socket.url()).not.toContain("a".repeat(43));
+          socket.send(
+            JSON.stringify({
+              type: "authenticated",
+              state: "ready",
+              absolute_deadline: "2099-01-01T01:00:00Z",
+              reason: null,
+            }),
+          );
+        }
+        session.messages.push(data);
       });
       socket.onClose(() => {
         session.closed = true;
@@ -72,9 +114,15 @@ test("loads the production terminal, fits the viewport, and inserts commands wit
 }) => {
   const sessions = await openPlayground(page);
   const session = sessions[0];
-  expect(new URL(session.socket.url()).searchParams.get("sha")).toBe(metadata.sha);
+  expect(new URL(session.socket.url()).searchParams.get("revision")).toBe(metadata.sha);
   await expect(page).toHaveTitle("catr / CLI playground");
   await expect(page.locator("#meta-pr")).toHaveText("#42");
+  await expect(page.locator("#session-expiry")).toHaveAttribute("datetime", "2099-01-01T01:00:00Z");
+  expect(
+    await page.evaluate(() =>
+      [...Object.values(localStorage), ...Object.values(sessionStorage)].join(""),
+    ),
+  ).not.toContain("a".repeat(43));
   await expect(page.locator("#meta-sha")).toHaveText("0123456");
   await expect
     .poll(() =>
@@ -91,27 +139,25 @@ test("loads the production terminal, fits the viewport, and inserts commands wit
     .toBe(true);
 
   await page.getByRole("button", { name: "Insert catr --help: Explore the options" }).click();
-  await expect.poll(() => inputs(session)).toEqual(["/opt/preview/bin/catr --help"]);
+  await expect.poll(() => inputs(session)).toEqual(["/opt/artifact/catr --help"]);
   await page.keyboard.press("Enter");
-  await expect.poll(() => inputs(session)).toEqual(["/opt/preview/bin/catr --help", "\r"]);
+  await expect.poll(() => inputs(session)).toEqual(["/opt/artifact/catr --help", "\r"]);
 
   await page.getByRole("button", { name: "Insert command to read welcome.txt" }).click();
   await expect
     .poll(() => inputs(session))
-    .toEqual(["/opt/preview/bin/catr --help", "\r", "cat welcome.txt"]);
+    .toEqual(["/opt/artifact/catr --help", "\r", "cat welcome.txt"]);
 
   await page.locator("summary").click();
   await page.getByRole("button", { name: "Insert cat welcome.txt | wc -l: Pipe output" }).click();
   await expect
     .poll(() => inputs(session))
-    .toEqual(["/opt/preview/bin/catr --help", "\r", "cat welcome.txt", "cat welcome.txt | wc -l"]);
+    .toEqual(["/opt/artifact/catr --help", "\r", "cat welcome.txt", "cat welcome.txt | wc -l"]);
 
   await page.keyboard.type(" && printf 'manual'");
   await expect
     .poll(() => inputs(session).join(""))
-    .toBe(
-      "/opt/preview/bin/catr --help\rcat welcome.txtcat welcome.txt | wc -l && printf 'manual'",
-    );
+    .toBe("/opt/artifact/catr --help\rcat welcome.txtcat welcome.txt | wc -l && printf 'manual'");
 });
 
 for (const count of [3, 5, 10]) {
@@ -139,7 +185,7 @@ for (const count of [3, 5, 10]) {
     await page
       .getByRole("button", { name: `Insert ${target} --help: Explore the options` })
       .click();
-    await expect.poll(() => inputs(session)).toEqual([`/opt/preview/bin/${target} --help`]);
+    await expect.poll(() => inputs(session)).toEqual([`/opt/artifact/${target} --help`]);
     expect(session.closed).toBe(false);
     expect(sessions).toHaveLength(1);
     await expect
@@ -189,8 +235,9 @@ for (const action of ["Reset session", "Start new session"]) {
     ).toBeEnabled();
     await expect(page).toHaveURL(previewPath);
     await expect.poll(() => sessions.length).toBe(2);
-    expect(new URL(sessions[1].socket.url()).searchParams.get("sha")).toBe("b".repeat(40));
+    expect(new URL(sessions[1].socket.url()).searchParams.get("revision")).toBe("b".repeat(40));
     expect(sessions[0].closed).toBe(true);
+    await expect.poll(() => sessions[0].deleted).toBe(true);
   });
 }
 
@@ -208,7 +255,7 @@ test("a rejected stale revision can reload metadata and reconnect at the same UR
   await page.getByRole("button", { name: "Start new session" }).click();
   await expect(page.locator("#meta-sha")).toHaveText("bbbbbbb");
   await expect.poll(() => sessions.length).toBe(2);
-  expect(new URL(sessions[1].socket.url()).searchParams.get("sha")).toBe("b".repeat(40));
+  expect(new URL(sessions[1].socket.url()).searchParams.get("revision")).toBe("b".repeat(40));
   await expect(page.locator("#connection-status")).toHaveText("Connected");
   await expect(page).toHaveURL(previewPath);
 });
@@ -325,7 +372,7 @@ test("a failed newer build labels the retained session and polling errors leave 
   failRequest = true;
   await page.clock.fastForward(10_000);
   await page.getByRole("button", { name: "Insert catr --help: Explore the options" }).click();
-  await expect.poll(() => inputs(sessions[0])).toEqual(["/opt/preview/bin/catr --help"]);
+  await expect.poll(() => inputs(sessions[0])).toEqual(["/opt/artifact/catr --help"]);
   expect(sessions).toHaveLength(1);
   expect(sessions[0].closed).toBe(false);
 });

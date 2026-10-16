@@ -1,8 +1,8 @@
 """Validated artifact metadata and the public preview/terminal protocol."""
 
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Annotated, Literal
+from uuid import UUID
 
 from pydantic import (
     BaseModel,
@@ -12,7 +12,6 @@ from pydantic import (
     StringConstraints,
     TypeAdapter,
     field_validator,
-    model_validator,
 )
 
 from playground.artifacts import CLI_PATTERN, MAX_CLIS
@@ -58,13 +57,9 @@ class ArtifactIdentity(BaseModel):
 class ArtifactMetadata(ArtifactIdentity):
     clis: Annotated[list[CliName], Field(min_length=1, max_length=MAX_CLIS)]
     expires_at: FiniteFloat
-    revision: ArtifactRevision | None = None
-
-    @model_validator(mode="after")
-    def legacy_revision(self) -> ArtifactMetadata:
-        if self.revision is None:
-            object.__setattr__(self, "revision", self.sha)
-        return self
+    revision: ArtifactRevision
+    artifact_id: UUID
+    sha256: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 
     @field_validator("clis")
     @classmethod
@@ -76,7 +71,6 @@ class ArtifactMetadata(ArtifactIdentity):
 
 class Environment(ArtifactMetadata):
     id: PreviewId
-    binary_dir: Path
 
     def metadata(self) -> EnvironmentMetadata:
         return EnvironmentMetadata(
@@ -116,18 +110,18 @@ class BuildUpdateResult(EnvironmentMetadata):
 
 
 class TerminalInput(BaseModel):
-    model_config = ConfigDict(strict=True)
+    model_config = ConfigDict(strict=True, extra="forbid")
 
     type: Literal["input"]
     data: str
 
 
 class TerminalResize(BaseModel):
-    model_config = ConfigDict(strict=True)
+    model_config = ConfigDict(strict=True, extra="forbid")
 
     type: Literal["resize"]
-    cols: int
-    rows: int
+    cols: Annotated[int, Field(ge=1, le=500)]
+    rows: Annotated[int, Field(ge=1, le=300)]
 
 
 terminal_message = TypeAdapter(

@@ -1,0 +1,57 @@
+# Independently resolvable; automated production activation unavailable until PR4.
+name: ${BOXIE_PROJECT_NAME:-boxie}
+services:
+  api:
+    image: ${BOXIE_RUNTIME_IMAGE:?Set approved immutable Boxie image}
+    command:
+    - boxie-api
+    - --config
+    - /etc/boxie/api.json
+    volumes:
+    - ${BOXIE_API_CONFIG:?Set API config file}:/etc/boxie/api.json:ro
+    - ${BOXIE_ORCHESTRATOR_CREDENTIAL_FILE:?Set orchestrator credential file}:/run/secrets/orchestrator:ro
+    - ${BOXIE_CONSUMER_CREDENTIAL_FILE:?Set consumer credential file}:/run/secrets/consumer:ro
+    networks:
+      consumer:
+        aliases:
+        - ${BOXIE_API_ALIAS:-boxie-api}
+      control: {}
+    read_only: true
+    tmpfs:
+    - /tmp
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    init: true
+    restart: unless-stopped
+  orchestrator:
+    image: ${BOXIE_RUNTIME_IMAGE:?Set approved immutable Boxie image}
+    command:
+    - boxie-orchestrator
+    - --config
+    - /etc/boxie/orchestrator.json
+    volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+    - ${BOXIE_DATA_DIR:?Set absolute daemon host data directory}:${BOXIE_DATA_DIR}
+    - ${BOXIE_ORCHESTRATOR_CONFIG:?Set orchestrator config file}:/etc/boxie/orchestrator.json:ro
+    - ${BOXIE_PROFILES_FILE:?Set approved profiles file}:/etc/boxie/profiles.json:ro
+    - ${BOXIE_ORCHESTRATOR_CREDENTIAL_FILE}:/run/secrets/orchestrator:ro
+    networks:
+    - control
+    read_only: true
+    tmpfs:
+    - /tmp
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    init: true
+    restart: unless-stopped
+networks:
+  consumer:
+    external: true
+    name: ${BOXIE_CONSUMER_NETWORK:?Set private consumer network}
+  control:
+    external: true
+    name: ${BOXIE_CONTROL_NETWORK:?Set private control network}

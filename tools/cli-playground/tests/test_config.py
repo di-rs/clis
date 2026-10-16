@@ -1,5 +1,7 @@
 """Settings validate environment input before the gateway starts."""
 
+from pathlib import Path
+
 import pytest
 from playground.config import Settings
 from playground.storage import EnvironmentStore
@@ -36,11 +38,9 @@ def test_preview_domain_requires_https() -> None:
 def test_preview_urls_and_hosts_remain_scoped_to_one_preview() -> None:
     settings = Settings(preview_domain="play.example")
     identifier = "a" * 32
-    assert settings.preview_url(identifier) == (
-        "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.play.example/p/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    )
+    assert settings.preview_url(identifier) == f"https://play.example/p/{identifier}"
     assert settings.accepts_host("play.example")
-    assert settings.accepts_host(f"{identifier}.play.example", identifier)
+    assert not settings.accepts_host(f"{identifier}.play.example", identifier)
     assert not settings.accepts_host("b" * 32 + ".play.example", identifier)
     assert not settings.accepts_host(f"{identifier}.play.example.evil.test", identifier)
 
@@ -62,3 +62,16 @@ def test_readable_pr_hosts_bind_to_the_correct_preview() -> None:
     assert settings.accepts_host("pr-123.play.example", identifier)
     assert not settings.accepts_host("pr-124.play.example", identifier)
     assert not settings.accepts_host("pr-0123.play.example", identifier)
+
+
+@pytest.mark.usefixtures("configured_environment")
+def test_composition_root_rejects_symlinked_consumer_credentials(tmp_path: Path) -> None:
+    from playground.app import create_app
+
+    secret = tmp_path / "actual-secret"
+    secret.write_text("private-boxie-consumer-secret")
+    secret.chmod(0o600)
+    link = tmp_path / "linked-secret"
+    link.symlink_to(secret)
+    with pytest.raises(ValueError, match="private regular"):
+        create_app(Settings(boxie_credential_file=link))
