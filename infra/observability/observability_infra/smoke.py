@@ -26,7 +26,7 @@ from observability_infra.smoke_application import (
 )
 from observability_infra.smoke_diagnostics import setup_diagnostics
 from observability_infra.smoke_resources import Resources, require_ephemeral_runner
-from observability_infra.smoke_runtime import Commands, Deadline, evidence
+from observability_infra.smoke_runtime import Commands, Deadline, cleanup_phase, evidence
 from observability_infra.smoke_scenarios import SCENARIOS, Scenario
 from observability_infra.smoke_telemetry import Telemetry
 from observability_infra.smoke_units import (
@@ -247,6 +247,7 @@ def cleanup(root: Path) -> None:
     resources = Resources(root, commands)
     errors: list[str] = []
     restorations: dict[str, Any] = {}
+    cleanup_phase(root, "restoration")
     for path in root.glob("watch-*.json"):
         if path.name.endswith((".result.json", ".unit.json")):
             continue
@@ -254,6 +255,7 @@ def cleanup(root: Path) -> None:
             restorations[path.name] = restore_registered(path, commands)
         except Exception as error:
             restorations[path.name] = {"restored": False, "error_type": type(error).__name__}
+    cleanup_phase(root, "scenario_units")
     try:
         stop_units(root, commands, (*SCENARIOS, "unit-probe"))
     except Exception as error:
@@ -274,18 +276,23 @@ def cleanup(root: Path) -> None:
     stack = stack_at(root, commands) if (root / "application-private.json").exists() else None
     if stack:
         telemetry = Telemetry(root, commands, stack)
-        for operation in (
-            lambda: (
-                telemetry.compose("down", "--volumes", "--remove-orphans")
-                if telemetry.rendered.exists()
-                else None
+        for phase, operation in (
+            (
+                "telemetry",
+                lambda: (
+                    telemetry.compose("down", "--volumes", "--remove-orphans")
+                    if telemetry.rendered.exists()
+                    else None
+                ),
             ),
-            stack.close,
+            ("application", stack.close),
         ):
             try:
+                cleanup_phase(root, phase)
                 operation()
             except Exception as error:
                 errors.append(type(error).__name__)
+    cleanup_phase(root, "resources")
     try:
         result = resources.close()
     except Exception as error:
@@ -299,15 +306,36 @@ def cleanup(root: Path) -> None:
     evidence(root / "cleanup.json", result)
     if errors:
         raise RuntimeError("owned fixture cleanup incomplete")
+    cleanup_phase(root, "private_files")
     for name in ("application", "application-private.json", "unused-password"):
         path = root / name
         if path.is_dir():
             shutil.rmtree(path)
         else:
             path.unlink(missing_ok=True)
+    cleanup_phase(root, "complete")
 
 
-def export_evidence(root: Path, destination: Path) -> None:
+def record_step(root: Path, scenario: str, exit_code: int) -> None:
+    if scenario not in SCENARIOS or not 0 <= exit_code <= 255:
+        raise ValueError("invalid scenario step result")
+    evidence(
+        root / "scenario-step.json",
+        {
+            "scenario": scenario,
+            "exit_code": exit_code,
+            "report_present": (root / ("scenario-" + scenario + ".json")).is_file(),
+        },
+    )
+
+
+def export_evidence(
+    root: Path,
+    destination: Path,
+    *,
+    setup_outcome: str | None = None,
+    scenario_outcome: str | None = None,
+) -> None:
     # Exact bounded nonsecret allowlist; never upload runtime directories.
     names = [
         "ownership.json",
@@ -317,11 +345,22 @@ def export_evidence(root: Path, destination: Path) -> None:
         "unit-probe.json",
         "collector-provenance.json",
         "cleanup.json",
+        "cleanup-progress.json",
+        "scenario-step.json",
         *("scenario-" + name + ".json" for name in SCENARIOS),
         *("watch-" + name + ".result.json" for name in SCENARIOS),
         *("watch-" + name + ".unit.json" for name in SCENARIOS),
     ]
+    outcomes = {"setup": setup_outcome, "scenarios": scenario_outcome}
+    if any(
+        value not in (None, "success", "failure", "skipped", "cancelled")
+        for value in outcomes.values()
+    ):
+        raise ValueError("invalid workflow step outcome")
     destination.mkdir(parents=True, exist_ok=True)
+    if any(value is not None for value in outcomes.values()):
+        evidence(destination / "workflow-step.json", outcomes)
+        (destination / "workflow-step.json").chmod(0o644)
     for name in names:
         source = root / name
         if source.is_file() and source.stat().st_size <= 262144:
@@ -332,21 +371,38 @@ def export_evidence(root: Path, destination: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("prepare", "scenario", "cleanup", "export"))
+    parser.add_argument(
+        "action", choices=("prepare", "scenario", "cleanup", "export", "record-step")
+    )
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--scenario", choices=SCENARIOS)
     parser.add_argument("--inside-unit", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--evidence-dir", type=Path)
+    parser.add_argument("--exit-code", type=int)
+    parser.add_argument("--setup-outcome", choices=("success", "failure", "skipped", "cancelled"))
+    parser.add_argument(
+        "--scenario-outcome", choices=("success", "failure", "skipped", "cancelled")
+    )
     args = parser.parse_args()
     try:
         if args.action == "prepare":
             prepare(args.root)
         elif args.action == "cleanup":
             cleanup(args.root)
+        elif args.action == "record-step":
+            require_ephemeral_runner()
+            if args.scenario is None or args.exit_code is None:
+                parser.error("record-step requires scenario and exit code")
+            record_step(args.root, args.scenario, args.exit_code)
         elif args.action == "export":
             if not args.evidence_dir:
                 parser.error("export requires --evidence-dir")
-            export_evidence(args.root, args.evidence_dir)
+            export_evidence(
+                args.root,
+                args.evidence_dir,
+                setup_outcome=args.setup_outcome,
+                scenario_outcome=args.scenario_outcome,
+            )
         else:
             if not args.scenario:
                 parser.error("scenario requires --scenario")
@@ -383,6 +439,26 @@ def main() -> None:
             if result.status != "passed":
                 raise SystemExit(1)
     except Exception as error:
+        if args.action == "scenario" and args.scenario and args.root.is_dir():
+            path = args.root / ("scenario-" + args.scenario + ".json")
+            if not path.exists():
+                evidence(
+                    path,
+                    {
+                        "scenario": args.scenario,
+                        "status": "failed",
+                        "stage": "initialization" if args.inside_unit else "launcher",
+                        "error_type": type(error).__name__,
+                        "failure_location": [
+                            {
+                                "file": Path(frame.filename).name,
+                                "function": frame.name,
+                                "line": frame.lineno,
+                            }
+                            for frame in traceback.extract_tb(error.__traceback__)[-8:]
+                        ],
+                    },
+                )
         print(json.dumps({"status": "failed", "error_type": type(error).__name__}))
         raise SystemExit(1) from None
 

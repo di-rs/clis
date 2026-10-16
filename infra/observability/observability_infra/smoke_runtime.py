@@ -193,3 +193,26 @@ def event_identities(text: str, instance: str) -> set[str]:
         if event.get("instance_id") == instance:
             identities.add(str(UUID(event["operation_id"])))
     return identities
+
+
+def cleanup_phase(root: Path, phase: str) -> None:
+    if phase not in {
+        "restoration",
+        "scenario_units",
+        "telemetry",
+        "application",
+        "resources",
+        "owned_inventory",
+        "owned_services",
+        "owned_mounts",
+        "owned_loops",
+        "owned_files",
+        "private_files",
+        "complete",
+    }:
+        raise ValueError("unknown cleanup phase")
+    evidence(
+        root / "cleanup-progress.json",
+        {"phase": phase, "status": "complete" if phase == "complete" else "in_progress"},
+    )
+    print(json.dumps({"cleanup_phase": phase}), flush=True)

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from observability_infra.smoke_containerd import owned_containerd
-from observability_infra.smoke_runtime import Commands, evidence
+from observability_infra.smoke_runtime import Commands, cleanup_phase, evidence
 from observability_infra.smoke_watchdog import process_identity
 
 
@@ -218,11 +218,12 @@ class Resources:
         errors: list[str] = []
         # The scenario watchdog restoration must precede daemon teardown.
         for manifest in self.root.glob("watch-*.json"):
-            if manifest.name.endswith(".result.json"):
+            if manifest.name.endswith((".result.json", ".unit.json")):
                 continue
             manifest.with_suffix(".restore").touch()
         # The daemon itself is an owned boundary. Register discovered exact IDs
         # before removal, including resources created immediately before a setup crash.
+        cleanup_phase(self.root, "owned_inventory")
         if self.socket.exists():
             try:
                 base = ["docker", "--host", "unix://" + str(self.socket)]
@@ -257,6 +258,7 @@ class Resources:
                             errors.append(type(error).__name__ + ":remove:" + kind)
             except (RuntimeError, TimeoutError) as error:
                 errors.append(type(error).__name__ + ":owned-daemon-inventory")
+        cleanup_phase(self.root, "owned_services")
         for unit in (
             self.unit,
             f"systemd-journald@{self.namespace}.socket",
@@ -283,6 +285,7 @@ class Resources:
                     raise RuntimeError("owned containerd still running; retaining mounts")
             except FileNotFoundError:
                 pass
+        cleanup_phase(self.root, "owned_mounts")
         for target in reversed(self.state["mounts"]):
             try:
                 if os.path.ismount(target):
@@ -296,6 +299,7 @@ class Resources:
                     self.commands.run(["umount", target])
             except (RuntimeError, TimeoutError) as error:
                 errors.append(type(error).__name__ + ":unmount:" + target)
+        cleanup_phase(self.root, "owned_loops")
         for device, image in self.state["loops"].items():
             if device in self.state.get("detached", []):
                 continue
@@ -313,6 +317,7 @@ class Resources:
             except (RuntimeError, TimeoutError) as error:
                 errors.append(type(error).__name__ + ":detach:" + device)
         if not errors:
+            cleanup_phase(self.root, "owned_files")
             for name in self.state["files"]:
                 Path(name).unlink(missing_ok=True)
             for name in self.state.get("directories", []):

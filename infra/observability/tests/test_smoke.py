@@ -310,7 +310,7 @@ def test_module_entrypoint_help_is_executable() -> None:
     )
     assert result.returncode == 0
     assert result.stderr == b""
-    assert b"{prepare,scenario,cleanup,export}" in result.stdout
+    assert b"{prepare,scenario,cleanup,export,record-step}" in result.stdout
     assert b"--scenario" in result.stdout
 
 

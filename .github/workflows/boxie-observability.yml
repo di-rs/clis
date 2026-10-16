@@ -62,20 +62,50 @@ jobs:
           uv run --locked pytest infra/observability/tests/test_smoke.py infra/ingress/tests/test_access_smoke.py
           uv run --locked pytest infra/observability/tests/test_smoke.py -m integration
       - name: Build final images and preflight owned journal, daemon, HTTP and PTY
+        id: setup
         timeout-minutes: 21
         run: |
           sudo env "PATH=$PATH" "GITHUB_ACTIONS=$GITHUB_ACTIONS" "RUNNER_ENVIRONMENT=$RUNNER_ENVIRONMENT" \
             timeout --signal=TERM --kill-after=10s 1220s \
             .venv/bin/python -m observability_infra.smoke prepare --root "$BOXIE_SMOKE_ROOT"
       - name: Separately budgeted native fault cases
+        id: scenarios
         timeout-minutes: 28
         run: |
           for scenario in lifecycle-failure collector-restart storage-restart producer-pipe journal-stopped journal-retention journal-enospc vector-full vector-enospc; do
+            scenario_exit=0
             sudo env "PATH=$PATH" "GITHUB_ACTIONS=$GITHUB_ACTIONS" "RUNNER_ENVIRONMENT=$RUNNER_ENVIRONMENT" \
               timeout --signal=TERM --kill-after=5s 185s \
-              .venv/bin/python -m observability_infra.smoke scenario --root "$BOXIE_SMOKE_ROOT" --scenario "$scenario"
+              .venv/bin/python -m observability_infra.smoke scenario --root "$BOXIE_SMOKE_ROOT" --scenario "$scenario" || scenario_exit=$?
+            sudo env "PATH=$PATH" "GITHUB_ACTIONS=$GITHUB_ACTIONS" "RUNNER_ENVIRONMENT=$RUNNER_ENVIRONMENT" \
+              timeout 10s .venv/bin/python -m observability_infra.smoke record-step \
+              --root "$BOXIE_SMOKE_ROOT" --scenario "$scenario" --exit-code "$scenario_exit"
+            if [ "$scenario_exit" -ne 0 ]; then
+              exit "$scenario_exit"
+            fi
           done
+      - name: Preserve bounded evidence before outer cleanup
+        id: evidence_before_cleanup
+        if: ${{ always() && env.BOXIE_SMOKE_ROOT != '' }}
+        timeout-minutes: 1
+        env:
+          SETUP_OUTCOME: ${{ steps.setup.outcome }}
+          SCENARIO_OUTCOME: ${{ steps.scenarios.outcome }}
+        run: |
+          sudo .venv/bin/python -m observability_infra.smoke export \
+            --root "$BOXIE_SMOKE_ROOT" --evidence-dir "$RUNNER_TEMP/boxie-observability-before-cleanup" \
+            --setup-outcome "$SETUP_OUTCOME" --scenario-outcome "$SCENARIO_OUTCOME"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: upload_before_cleanup
+        if: ${{ always() && env.BOXIE_SMOKE_ROOT != '' }}
+        timeout-minutes: 2
+        with:
+          name: boxie-observability-before-cleanup
+          path: ${{ runner.temp }}/boxie-observability-before-cleanup/*.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Restore exact owned resources before runner disposal
+        id: cleanup
         if: ${{ always() && env.BOXIE_SMOKE_ROOT != '' }}
         timeout-minutes: 4
         run: |
@@ -88,6 +118,7 @@ jobs:
           sudo .venv/bin/python -m observability_infra.smoke export \
             --root "$BOXIE_SMOKE_ROOT" --evidence-dir "$RUNNER_TEMP/boxie-observability-evidence"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: upload_after_cleanup
         if: ${{ always() && env.BOXIE_SMOKE_ROOT != '' }}
         with:
           name: boxie-observability-native

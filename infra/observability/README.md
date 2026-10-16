@@ -435,7 +435,11 @@ those resources before teardown. Cleanup continues after individual errors,
 validates mount and loop ownership, and reports failures instead of counting runner
 recycling as restoration. CI uploads only the explicit bounded JSON evidence
 allowlist: ownership, setup/preflight, collector provenance, per-case reports,
-watchdog results and cleanup. It excludes private configuration, certificates,
+watchdog results and cleanup. A separate upload preserves this allowlist before
+outer cleanup, including the scenario exit status and any initialization failure.
+These early reports and cleanup phase markers are partial checkpoints; only the
+final restoration and resource-exit evidence can establish cleanup. The uploads
+exclude private configuration, certificates,
 credentials, Docker configuration, full logs and database contents. Privacy checks
 inspect correlated decoded records and bounded raw journal/diagnostic tails;
 pressure output is synthetic and capped by the owned storage profile.
