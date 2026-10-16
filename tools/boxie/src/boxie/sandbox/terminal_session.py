@@ -59,7 +59,9 @@ async def serve_terminal(websocket: WebSocket, agent: DurableAgent, ref: Sandbox
             raise ValueError("attach too large")
         request = AttachRequest.model_validate_json(text)
         ring.after(request.resume_after)
-        epoch = await agent.attach(ref, resume_after=request.resume_after)
+        epoch = await agent.attach(
+            ref, attachment_order=request.attachment_order, resume_after=request.resume_after
+        )
         # No await between validation/cursor snapshot and registering delivery.
         cursor = request.resume_after
         boundary = ring.tail

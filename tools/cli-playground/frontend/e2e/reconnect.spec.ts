@@ -18,6 +18,7 @@ interface Trace {
   dropResize: boolean;
   duplicateAndClose: boolean;
   cursors: number[];
+  credential: string;
 }
 async function state(
   request: APIRequestContext,
@@ -33,6 +34,7 @@ async function open(page: Page, request: APIRequestContext) {
       dropResize: false,
       duplicateAndClose: false,
       cursors: [] as number[],
+      credential: "",
     };
     Object.assign(window, { terminalTrace: trace });
     const Native = window.WebSocket;
@@ -65,6 +67,7 @@ async function open(page: Page, request: APIRequestContext) {
       send(value: string | Blob | BufferSource) {
         if (typeof value === "string") {
           const frame = JSON.parse(value);
+          if (frame.type === "auth") trace.credential = frame.credential;
           if (frame.type === "input") trace.inputs.push(frame);
           if (frame.type === "attach") trace.cursors.push(frame.resume_after);
           if (trace.dropAck && frame.type === "ack") return;
@@ -327,5 +330,62 @@ test("duplicate frames and pending xterm writes survive transport loss without d
   await expect(screen).toContainText("live");
   expect((await state(request)).sandboxes.find((s) => s.id === first.id)!.epoch).toBe(
     first.epoch + 1,
+  );
+});
+
+test("a viewport above the row limit settles at 300 rows and accepts input", async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 10000 });
+  const first = await open(page, request);
+  const before = (await state(request)).sandboxes.find((s) => s.id === first.id)!;
+  expect(before.sizes.at(-1)![1]).toBe(300);
+  await page.locator(".xterm-helper-textarea").focus();
+  await page.keyboard.type("bounded geometry usable");
+  await expect(page.locator(".xterm-accessibility-tree")).toContainText("bounded geometry usable");
+  await expect(page.locator("#connection-status")).toHaveText("Connected");
+  const after = (await state(request)).sandboxes.find((s) => s.id === first.id)!;
+  expect(after.sizes.length).toBeLessThanOrEqual(before.sizes.length + 1);
+});
+
+test("a delayed obsolete browser attach cannot displace the reconnected terminal", async ({
+  page,
+  request,
+}) => {
+  const first = await open(page, request);
+  await page.evaluate(async () => {
+    const trace = (window as unknown as { terminalTrace: Trace }).terminalTrace;
+    const old = new WebSocket(trace.sockets[0].url);
+    await new Promise<void>((resolve, reject) => {
+      old.addEventListener("open", () =>
+        old.send(JSON.stringify({ type: "auth", credential: trace.credential })),
+      );
+      old.addEventListener("message", (event) => {
+        if (typeof event.data === "string" && JSON.parse(event.data).type === "authenticated")
+          resolve();
+      });
+      old.addEventListener("error", reject);
+    });
+    trace.sockets[0].close();
+  });
+  await expect(page.locator("#connection-status")).toHaveText("Disconnected");
+  await page.getByRole("button", { name: "Reconnect", exact: true }).click();
+  await expect(page.locator("#connection-status")).toHaveText("Connected");
+  const healthy = (await state(request)).sandboxes.find((s) => s.id === first.id)!;
+  await page.evaluate(async () => {
+    const trace = (window as unknown as { terminalTrace: Trace }).terminalTrace;
+    const old = trace.sockets[1];
+    await new Promise<void>((resolve) => {
+      old.addEventListener("close", () => resolve());
+      old.send(JSON.stringify({ type: "attach", resume_after: 0, cols: 80, rows: 24 }));
+    });
+  });
+  await page.locator(".xterm-helper-textarea").focus();
+  await page.keyboard.type("successor remains usable");
+  await expect(page.locator(".xterm-accessibility-tree")).toContainText("successor remains usable");
+  await expect(page.locator("#connection-status")).toHaveText("Connected");
+  expect((await state(request)).sandboxes.find((s) => s.id === first.id)!.epoch).toBe(
+    healthy.epoch,
   );
 });

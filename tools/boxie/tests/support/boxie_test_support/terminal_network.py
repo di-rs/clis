@@ -130,13 +130,14 @@ async def network(root: Path, *, shell: str = "/bin/sh") -> AsyncIterator[Any]:
 
 
 async def attach(
-    socket: Any, *, cursor: int = 0, cols: int = 80, rows: int = 24
+    socket: Any, *, cursor: int = 0, cols: int = 80, rows: int = 24, order: int | None = None
 ) -> tuple[int, bytes]:
     import json
 
-    await socket.send(
-        json.dumps({"type": "attach", "resume_after": cursor, "cols": cols, "rows": rows})
-    )
+    request = {"type": "attach", "resume_after": cursor, "cols": cols, "rows": rows}
+    if order is not None:
+        request["attachment_order"] = order
+    await socket.send(json.dumps(request))
     reply = json.loads(await socket.recv())
     assert reply["type"] == "attached", reply
     epoch = reply["epoch"]

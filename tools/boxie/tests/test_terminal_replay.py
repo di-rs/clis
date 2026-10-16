@@ -38,8 +38,8 @@ def test_reattach_fences_stale_controls_and_terminal_replies_do_not_renew_idle(
         agent, request, daemon, clock, _ = await setup(tmp_path)
         try:
             await settled(agent, request.ref, SandboxState.READY)
-            epoch = await agent.attach(request.ref)
-            newer = await agent.attach(request.ref)
+            epoch = await agent.attach(request.ref, attachment_order=1)
+            newer = await agent.attach(request.ref, attachment_order=2)
             assert newer == epoch + 1
             await agent.detach(request.ref, epoch)
             assert agent.records[request.ref.id].attached
@@ -113,7 +113,15 @@ def test_network_replay_resize_barrier_and_browser_heartbeat(tmp_path: Path) -> 
             )
             async with connect(url, additional_headers={"Authorization": "Bearer secret"}) as old:
                 await old.send(
-                    json.dumps({"type": "attach", "resume_after": 0, "cols": 80, "rows": 24})
+                    json.dumps(
+                        {
+                            "type": "attach",
+                            "attachment_order": 1,
+                            "resume_after": 0,
+                            "cols": 80,
+                            "rows": 24,
+                        }
+                    )
                 )
                 attached = json.loads(await asyncio.wait_for(old.recv(), 1))
                 assert attached["type"] == "attached", attached
@@ -151,7 +159,15 @@ def test_network_replay_resize_barrier_and_browser_heartbeat(tmp_path: Path) -> 
                     url, additional_headers={"Authorization": "Bearer secret"}
                 ) as new:
                     await new.send(
-                        json.dumps({"type": "attach", "resume_after": 2, "cols": 100, "rows": 30})
+                        json.dumps(
+                            {
+                                "type": "attach",
+                                "attachment_order": 2,
+                                "resume_after": 2,
+                                "cols": 100,
+                                "rows": 30,
+                            }
+                        )
                     )
                     successor = json.loads(await new.recv())["epoch"]
                     assert successor > epoch
@@ -201,7 +217,15 @@ def test_terminal_end_during_replay_does_not_wait_for_resize(
                 terminal_url(net.api, identifier), additional_headers=CONSUMER_AUTH
             ) as ws:
                 await ws.send(
-                    json.dumps({"type": "attach", "resume_after": 0, "cols": 80, "rows": 24})
+                    json.dumps(
+                        {
+                            "type": "attach",
+                            "attachment_order": 1,
+                            "resume_after": 0,
+                            "cols": 80,
+                            "rows": 24,
+                        }
+                    )
                 )
                 assert json.loads(await ws.recv())["type"] == "attached"
                 assert json.loads(await ws.recv())["type"] == "geometry"
@@ -261,7 +285,7 @@ def test_failed_resize_releases_output_order_without_recording_unapplied_geometr
         agent, request, daemon, _, _ = await setup(tmp_path, docker_timeout=0.02)
         try:
             await settled(agent, request.ref, SandboxState.READY)
-            epoch = await agent.attach(request.ref)
+            epoch = await agent.attach(request.ref, attachment_order=1)
             stream = next(iter(daemon.streams.values()))
 
             async def resize(cols: int, rows: int) -> None:
@@ -276,8 +300,69 @@ def test_failed_resize_releases_output_order_without_recording_unapplied_geometr
             terminal = agent.terminals[request.ref.id]
             await asyncio.wait_for(terminal.replay.changed.wait(), 0.2)
             assert terminal.replay.after(0)[0].geometry == (80, 24)
-            assert await agent.attach(request.ref) == epoch + 1
+            assert await agent.attach(request.ref, attachment_order=2) == epoch + 1
         finally:
+            await agent.close()
+
+    asyncio.run(exercise())
+
+
+def test_attachment_order_persists_and_preserves_cursor_and_journal_failure_fences(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from boxie.sandbox.execution import ExecutionJournal
+
+    async def exercise() -> None:
+        agent, request, _, _, _ = await setup(tmp_path)
+        original_save = agent.journal.save
+        try:
+            await settled(agent, request.ref, SandboxState.READY)
+            epoch = await agent.attach(request.ref, attachment_order=3, resume_after=0)
+            saved = ExecutionJournal(agent.journal.path, agent.config.identity).records[
+                request.ref.id
+            ]
+            assert (
+                saved.attachment_order == 3 and saved.attachment_epoch == epoch and saved.attached
+            )
+            snapshot = agent.records[request.ref.id].model_dump()
+            deadlines = vars(agent.deadlines[request.ref.id]).copy()
+            for order in (1, 3):
+                with pytest.raises(BoxieError):
+                    await agent.attach(request.ref, attachment_order=order, resume_after=0)
+            with pytest.raises(ValueError):
+                await agent.attach(request.ref, attachment_order=4, resume_after=999)
+            assert agent.records[request.ref.id].model_dump() == snapshot
+            assert vars(agent.deadlines[request.ref.id]) == deadlines
+            newer = await agent.attach(request.ref, attachment_order=4, resume_after=0)
+            await agent.detach(request.ref, epoch)
+            assert agent.records[request.ref.id].attached
+            assert newer == epoch + 1
+
+            def failed_save() -> None:
+                raise OSError("journal unavailable")
+
+            monkeypatch.setattr(agent.journal, "save", failed_save)
+            with pytest.raises(OSError):
+                await agent.attach(request.ref, attachment_order=5, resume_after=0)
+            assert not agent.execution_ready
+            with pytest.raises(BoxieError):
+                await agent.attach(request.ref, attachment_order=6, resume_after=0)
+            saved = ExecutionJournal(agent.journal.path, agent.config.identity).records[
+                request.ref.id
+            ]
+            assert saved.attachment_order == 4 and saved.attachment_epoch == newer
+            monkeypatch.setattr(agent.journal, "save", original_save)
+            # Same full-journal recovery boundary as the supervised sweeper.
+            agent._save()
+            saved = ExecutionJournal(agent.journal.path, agent.config.identity).records[
+                request.ref.id
+            ]
+            assert saved.attachment_order == 5
+            with pytest.raises(BoxieError):
+                await agent.attach(request.ref, attachment_order=5, resume_after=0)
+            await agent.attach(request.ref, attachment_order=6, resume_after=0)
+        finally:
+            monkeypatch.setattr(agent.journal, "save", original_save)
             await agent.close()
 
     asyncio.run(exercise())

@@ -20,6 +20,12 @@ class AttachRequest(WireModel):
     rows: Annotated[int, Field(ge=1, le=300)]
 
 
+class UpstreamAttach(AttachRequest):
+    """Consumer ordering belongs to the product, never to the browser."""
+
+    attachment_order: Epoch
+
+
 class Input(WireModel):
     type: Literal["input"]
     epoch: Epoch

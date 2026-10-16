@@ -99,10 +99,20 @@ rejected. Invalid bodies return 422, conflicting retries 409, capacity exhaustio
 idempotency records, capacity and terminal draining.
 
 Terminal attachments start with a JSON text frame
-`{"type":"attach","resume_after":0,"cols":80,"rows":24}`. The response
+`{"type":"attach","attachment_order":1,"resume_after":0,"cols":80,"rows":24}`. The response
 `{"type":"attached","epoch":1}` fences subsequent controls. Input carries
 `{"type":"input","epoch":1,"source":"user","data":"echo hello\n"}`;
 parser-generated replies use `source: terminal` and do not renew idle time.
+The consumer allocates a strictly increasing `attachment_order` per sandbox
+execution (1–9007199254740991). The agent persists the highest accepted order with
+its attachment state before returning success. Equal/older orders fail before any
+epoch or grace change, even when an older request was already in flight through a
+relay. A new attempt or retry after an uncertain result must use a higher order;
+repeating an accepted order is rejected, not an idempotent attach replay. A failed
+cursor validation does not consume the order. Journal failure exposes no successful
+attachment and disables execution readiness until the pending state is persisted.
+Playground supplies this value from its durable page claim; browser frames cannot
+select or override it.
 ACK, resize, heartbeat and detach also carry the current epoch. Controls are at
 most 16 KiB of UTF-8 including JSON, columns are 1–500 and rows 1–300.
 

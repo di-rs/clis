@@ -118,13 +118,16 @@ export function createSession({ terminal, input, geometry, prepare, onState }: S
     }
     if (chunk) send({ type: "input", epoch, source, data: chunk });
   });
-  function requestSize() {
-    if (!epoch || resizing) return;
+  function measuredSize(): Size {
     const size = geometry.measure();
-    resizing = {
+    return {
       cols: Math.max(1, Math.min(500, size.cols)),
       rows: Math.max(1, Math.min(300, size.rows)),
     };
+  }
+  function requestSize() {
+    if (!epoch || resizing) return;
+    resizing = measuredSize();
     update({ ...state, phase: "connecting", label: "Synchronizing", canReconnect: false });
     send({ type: "resize", epoch, ...resizing });
   }
@@ -270,7 +273,7 @@ export function createSession({ terminal, input, geometry, prepare, onState }: S
               canReconnect: false,
             });
             terminal.focus();
-            const desired = geometry.measure();
+            const desired = measuredSize();
             if (desired.cols !== synced.cols || desired.rows !== synced.rows) requestSize();
           });
         } else if (

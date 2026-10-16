@@ -338,3 +338,38 @@ it("stops a late page admission without opening a socket after disposal", async 
   expect(stopped).toBe(1);
   expect(opened).toBe(0);
 });
+
+it.each([
+  [500, 300, 500, 300],
+  [501, 24, 500, 24],
+  [80, 301, 80, 300],
+  [501, 301, 500, 300],
+  [0, 24, 1, 24],
+  [80, 0, 80, 1],
+])(
+  "settles measured geometry %i x %i at bounded %i x %i",
+  async (cols, rows, boundedCols, boundedRows) => {
+    const t = setup();
+    t.resize(cols, rows);
+    await t.start();
+    t.socket().control({ type: "replay_complete", epoch: 1, sequence: 0 });
+    expect(t.socket().sent.at(-1)).toEqual({
+      type: "resize",
+      epoch: 1,
+      cols: boundedCols,
+      rows: boundedRows,
+    });
+    t.socket().control({ type: "resized", epoch: 1, cols: boundedCols, rows: boundedRows });
+    expect(t.socket().sent.filter((frame) => frame.type === "resize")).toHaveLength(1);
+    expect(t.states.at(-1)?.phase).toBe("connected");
+    expect(t.enabled()).toBe(true);
+    t.terminal.input?.({ source: "user", data: "usable" });
+    expect(t.socket().sent.at(-1)).toEqual({
+      type: "input",
+      epoch: 1,
+      source: "user",
+      data: "usable",
+    });
+    t.session.dispose();
+  },
+);

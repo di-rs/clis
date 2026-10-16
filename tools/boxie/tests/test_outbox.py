@@ -139,7 +139,7 @@ def test_runnable_stack_preserves_accounting_and_worker_replacement(
                             terminal_url(http, identifier),
                             additional_headers={"Authorization": "Bearer consumer-one-secret"},
                         )
-                        epoch, _ = await attach(ws)
+                        epoch, _ = await attach(ws, order=1)
                         await ws.send(
                             json.dumps(
                                 {
@@ -326,7 +326,7 @@ def test_actual_api_worker_processes_recover_worker_loss(
                     async with connect(
                         terminal_url(http, identifier), additional_headers=CONSUMER_AUTH
                     ) as ws:
-                        epoch, _ = await attach(ws)
+                        epoch, _ = await attach(ws, order=1)
                         await ws.send(
                             json.dumps(
                                 {

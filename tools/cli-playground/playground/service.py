@@ -212,6 +212,12 @@ class PlaygroundService:
         self.sessions.claimed(identifier)
         return binding
 
+    def check_attachment_claim(
+        self, preview_id: str, identifier: UUID, revision: str, credential: str, claim: int
+    ) -> None:
+        if self.binding(preview_id, identifier, revision, credential).attachment_claim != claim:
+            raise LookupError("attachment superseded")
+
     def complete_attachment(
         self,
         preview_id: str,

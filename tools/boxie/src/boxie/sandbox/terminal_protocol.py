@@ -12,6 +12,7 @@ Epoch = Annotated[int, Field(ge=1, le=2**53 - 1)]
 
 class AttachRequest(WireModel):
     type: Literal["attach"] = "attach"
+    attachment_order: Epoch
     resume_after: Cursor
     cols: Annotated[int, Field(ge=1, le=500)]
     rows: Annotated[int, Field(ge=1, le=300)]

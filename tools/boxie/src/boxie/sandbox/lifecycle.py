@@ -331,13 +331,18 @@ class DurableAgent:
         ):
             raise BoxieError(409, "terminal attachment is unavailable")
 
-    async def attach(self, ref: SandboxRef, *, resume_after: int | None = None) -> int:
+    async def attach(
+        self, ref: SandboxRef, *, attachment_order: int, resume_after: int | None = None
+    ) -> int:
         # Transport calls this only AFTER websocket.accept succeeds.
         async with self._lock(ref):
             record = self._record(ref)
             self._attachment(record)
+            if not record.attachment_order < attachment_order <= 2**53 - 1:
+                raise BoxieError(409, "terminal attachment order superseded")
             if resume_after is not None:
                 self.terminals[ref.id].replay.after(resume_after)
+            record.attachment_order = attachment_order
             record.attachment_epoch += 1
             record.attached, record.disconnected_at = True, None
             self.deadlines[ref.id].disconnect = None

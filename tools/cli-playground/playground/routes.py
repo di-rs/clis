@@ -46,7 +46,14 @@ from playground.models import (
 )
 from playground.service import PlaygroundService, UploadBusyError, UploadTooLargeError
 from playground.storage import ArtifactConflictError
-from playground.terminal_protocol import Attached, TerminalStatus, control, response
+from playground.terminal_protocol import (
+    Attached,
+    AttachRequest,
+    TerminalStatus,
+    UpstreamAttach,
+    control,
+    response,
+)
 
 logger = logging.getLogger(__name__)
 MAX_TERMINAL_OUTPUT_BYTES = 16 * 1024 * 1024
@@ -110,7 +117,10 @@ async def close_terminal(websocket: WebSocket, code: int = 1000) -> None:
 
 
 async def bridge_terminal(
-    websocket: WebSocket, session: TerminalPort, attached: Callable[[], None] | None = None
+    websocket: WebSocket,
+    session: TerminalPort,
+    attached: Callable[[], None] | None = None,
+    prepare_attach: Callable[[AttachRequest], str] | None = None,
 ) -> None:
     async def output() -> None:
         forwarded = 0
@@ -155,8 +165,14 @@ async def bridge_terminal(
             if len(message.encode("utf-8")) > 16384:
                 raise ValueError("terminal message exceeds 16 KiB")
             data = control.validate_json(message)
+            if isinstance(data, AttachRequest):
+                if prepare_attach is None:
+                    raise ValueError("attachment ordering is required")
+                wire = prepare_attach(data)
+            else:
+                wire = data.model_dump_json()
             async with asyncio.timeout(TERMINAL_SEND_TIMEOUT):
-                await session.send(data.model_dump_json())
+                await session.send(wire)
 
     tasks = [asyncio.create_task(output()), asyncio.create_task(inputs())]
     try:
@@ -374,7 +390,17 @@ def create_router(service: PlaygroundService, static_dir: Path) -> APIRouter:
                     )
                     attached = True
 
-                await bridge_terminal(websocket, upstream, complete)
+                def prepare_attach(request: AttachRequest) -> str:
+                    service.check_attachment_claim(
+                        identifier, session_id, revision, auth.credential, binding.attachment_claim
+                    )
+                    # An upstream send may already be in flight when a newer claim
+                    # wins. The agent's persisted ordering fence is authoritative.
+                    return UpstreamAttach(
+                        **request.model_dump(), attachment_order=binding.attachment_claim
+                    ).model_dump_json()
+
+                await bridge_terminal(websocket, upstream, complete, prepare_attach)
 
         except WebSocketDisconnect, asyncio.CancelledError:
             return

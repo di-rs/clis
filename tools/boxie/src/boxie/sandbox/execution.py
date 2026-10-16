@@ -35,6 +35,7 @@ class ExecutionRecord(WireModel):
     last_input_at: datetime | None = None
     disconnected_at: datetime | None = None
     control_lease_until: datetime
+    attachment_order: int = Field(default=0, ge=0, le=2**53 - 1)
     attachment_epoch: int = 0
     attached: bool = False
     output_bytes: int = 0

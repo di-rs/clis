@@ -58,7 +58,7 @@ def test_input_and_attachment_fences_and_absolute_deadline(tmp_path: Path) -> No
         from boxie.domain.lifecycle import ExpiryRequest
 
         ready = await settled(agent, request.ref, SandboxState.READY)
-        epoch = await agent.attach(request.ref)
+        epoch = await agent.attach(request.ref, attachment_order=1)
         stale = ExpiryRequest(
             request.ref, TerminationReason.IDLE, ready.event_version, agent.boot_id
         )
@@ -82,7 +82,7 @@ def test_input_and_attachment_fences_and_absolute_deadline(tmp_path: Path) -> No
         clock.advance(29)
         current = await agent.inspect(request.ref)
         stale_detach = replace(stale_detach, observed_event_version=current.event_version)
-        newer = await agent.attach(request.ref)
+        newer = await agent.attach(request.ref, attachment_order=2)
         assert newer > epoch
         await agent.detach(request.ref, epoch)
         with pytest.raises(BoxieError):
@@ -232,7 +232,7 @@ def test_never_attached_grace_and_lease_cannot_be_extended_by_consumer(tmp_path:
         # Failed websocket acceptance never calls attach: original READY grace remains.
         clock.advance(89)
         assert (await agent.inspect(request.ref)).disconnected_at == ready.ready_at
-        epoch = await agent.attach(request.ref)
+        epoch = await agent.attach(request.ref, attachment_order=1)
         await agent.write(request.ref, epoch, b"consumer is active")
         clock.advance(1)
         await agent.reconcile()
@@ -314,7 +314,7 @@ def test_absolute_expiry_and_stop_cannot_be_deferred_by_blocked_terminal_write(
     async def exercise() -> None:
         agent, request, daemon, clock, _ = await setup(tmp_path, docker_timeout=0.02)
         ready = await settled(agent, request.ref, SandboxState.READY)
-        epoch = await agent.attach(request.ref)
+        epoch = await agent.attach(request.ref, attachment_order=1)
         entered = asyncio.Event()
 
         async def blocked_write(data: bytes) -> None:
