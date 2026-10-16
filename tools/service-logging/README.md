@@ -1,14 +1,16 @@
 # Bounded service logging
 
 Boxie and CLI Playground declare this small Python dependency independently.
-Each service owns its templates, request middleware and process assembly. The
+Each service owns its templates and assembles its HTTP middleware and process.
+A small neutral ASGI helper owns the common request context/timing/emission. The
 shared producer owns validated context, JSON rendering, bounded transport and
 sanitized process error hooks. The [event schema](../../infra/observability/event.schema.json)
 is the cross-service contract. No metrics dependency or exporter is installed.
 
 `bootstrap_logging(LogSettings(...))` is an explicit process-root operation.
-It duplicates an owned stdout pipe, makes the duplicate non-inheritable and
-nonblocking, and redirects fd 1 and fd 2 to `/dev/null` without flushing. The
+It duplicates an owned stdout pipe into a descriptor above 2, keeping it separate
+from takeover even if stdin or stderr is closed. It makes the duplicate
+non-inheritable and nonblocking, and redirects fd 1 and fd 2 to `/dev/null` without flushing. The
 launcher must close all unused write-end aliases: `dup` shares file-status flags.
 Only the writer owns/closes the sink. Children needing output must use explicit
 pipes or PTYs; they must never inherit the sink. App factories and imports never

@@ -393,3 +393,155 @@ runtime.close()
         event["event"] == "request_completed" and event.get("outcome") == "succeeded"
         for event in events
     )
+
+
+@pytest.mark.parametrize("closed_fds", [(2,), (0, 2), (0,)])
+def test_pipe_sink_avoids_all_standard_descriptors(
+    tmp_path: Path,
+    closed_fds: tuple[int, ...],
+) -> None:
+    evidence = tmp_path / "descriptors.json"
+    code = f"""
+import json, os, stat
+from dataclasses import asdict
+from pathlib import Path
+from boxie.observability.logging import LogSettings, bootstrap_logging
+original = os.fstat(1)
+for fd in {closed_fds!r}: os.close(fd)
+runtime = bootstrap_logging(LogSettings(service="boxie", role="api"))
+sink = runtime._sink
+assert sink is not None
+actual = os.fstat(sink)
+identity = {{
+    "fd": sink,
+    "same_pipe": (actual.st_dev, actual.st_ino) == (original.st_dev, original.st_ino),
+    "fifo": stat.S_ISFIFO(actual.st_mode),
+    "inheritable": os.get_inheritable(sink),
+    "blocking": os.get_blocking(sink),
+}}
+runtime.emit("request_completed")
+runtime.close()
+redirects = {{}}
+for fd in (1, 2):
+    try: redirects[str(fd)] = stat.S_ISCHR(os.fstat(fd).st_mode)
+    except OSError: redirects[str(fd)] = False
+Path({str(evidence)!r}).write_text(json.dumps({{"sink":identity,"stats":asdict(runtime.stats),"redirects":redirects}}))
+"""
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=5)
+    assert result.returncode == 0, result.stderr
+    measured = json.loads(evidence.read_text())
+    assert measured["sink"]["fd"] >= 3, measured
+    assert measured["sink"]["same_pipe"] and measured["sink"]["fifo"], measured
+    assert not measured["sink"]["inheritable"] and not measured["sink"]["blocking"], measured
+    assert measured["redirects"] == {"1": True, "2": True}, measured
+    events = records(result)
+    assert len(events) == measured["stats"]["delivered_count"] == 1
+    assert events[0]["event"] == "request_completed"
+    assert measured["stats"]["dropped_count"] == 0
+    assert measured["stats"]["sink_state"] == "closed"
+
+
+@pytest.mark.parametrize("closed_fds", [(1,), (0, 1, 2)])
+def test_missing_stdout_remains_nonfatal_and_redirects_survive_close(
+    tmp_path: Path,
+    closed_fds: tuple[int, ...],
+) -> None:
+    evidence = tmp_path / "disabled.json"
+    code = f"""
+import json, os, stat
+from dataclasses import asdict
+from pathlib import Path
+from boxie.observability.logging import LogSettings, bootstrap_logging
+for fd in {closed_fds!r}: os.close(fd)
+runtime = bootstrap_logging(LogSettings(service="boxie", role="api"))
+runtime.emit("request_completed")
+runtime.close()
+assert all(stat.S_ISCHR(os.fstat(fd).st_mode) for fd in (1, 2))
+os.write(1, b"SENTINEL"); os.write(2, b"SENTINEL")
+Path({str(evidence)!r}).write_text(json.dumps(asdict(runtime.stats)))
+"""
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=5)
+    assert result.returncode == 0
+    assert result.stdout == result.stderr == ""
+    stats = json.loads(evidence.read_text())
+    assert stats["sink_state"] == "unavailable"
+    assert stats["delivered_count"] == 0 and stats["dropped_count"] == 1
+    assert dict(stats["drops"])["disabled"] == 1
+
+
+@pytest.mark.parametrize(
+    "module,service,role",
+    [
+        ("boxie.observability.logging", "boxie", "api"),
+        ("playground.observability", "cli-playground", "gateway"),
+    ],
+)
+def test_request_boundaries_isolate_reset_and_sanitize_context(
+    module: str,
+    service: str,
+    role: str,
+) -> None:
+    code = f"""
+import asyncio, importlib
+from uuid import UUID
+from service_logging.context import bind_context, current_context
+assembly = importlib.import_module({module!r})
+runtime = assembly.bootstrap_logging(assembly.LogSettings(service={service!r}, role={role!r}))
+secret = {SECRET!r}
+seen = {{}}
+parent_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+async def downstream(scope, receive, send):
+    assert scope["headers"] == [(b"x-request-id", secret.encode())]
+    assert scope["query_string"] == secret.encode()
+    identity = current_context().get("request_id")
+    if scope["type"] != "http":
+        assert identity == parent_id
+        return
+    assert str(UUID(identity)) == identity and identity != parent_id
+    await asyncio.sleep(.01)
+    assert current_context()["request_id"] == identity
+    seen[scope["case"]] = identity
+    if scope["case"] == "failure": raise RuntimeError(secret)
+    if scope["case"] == "cancelled": raise asyncio.CancelledError()
+    await send({{"type":"http.response.start","status":200}})
+    await send({{"type":"http.response.body","body":b"ok"}})
+app = assembly.RequestLogging(downstream)
+async def request(case):
+    received = []
+    async def receive(): return {{"type":"http.request","body":secret.encode()}}
+    async def send(message): received.append(message)
+    scope = {{"type":"websocket" if case == "websocket" else "http", "case":case,
+             "headers":[(b"x-request-id",secret.encode())], "query_string":secret.encode()}}
+    with bind_context(request_id=parent_id):
+        try:
+            await app(scope, receive, send)
+        except RuntimeError as error:
+            assert case == "failure" and error.args == (secret,)
+        except asyncio.CancelledError:
+            assert case == "cancelled"
+        else:
+            assert case not in ("failure","cancelled")
+            if case != "websocket": assert received[0]["status"] == 200
+        assert current_context()["request_id"] == parent_id
+    assert "request_id" not in current_context()
+async def run():
+    await asyncio.gather(*(request(case) for case in ("success", "other", "failure", "cancelled", "websocket")))
+    assert len(set(seen.values())) == 4
+asyncio.run(run())
+runtime.emit("request_completed")
+runtime.close()
+"""
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=5)
+    events = records(result)
+    assert SECRET not in result.stdout
+    assert all(event["service"] == service and event["role"] == role for event in events)
+    assert len(events) == 4  # Two success, one error, one post-request unbound event.
+    correlated = [event for event in events if "request_id" in event]
+    assert len(correlated) == len({event["request_id"] for event in correlated}) == 3
+    assert "request_id" not in events[-1]
+    failures = [event for event in events if event["event"] == "request_failed"]
+    assert len(failures) == 1
+    assert failures[0]["outcome"] == "failed" and failures[0]["error_type"] == "RuntimeError"
+    assert all(
+        "duration_ms" in event for event in correlated if event["event"] == "request_completed"
+    )

@@ -7,6 +7,7 @@ are unsupported: delivery disables without refusing application startup.
 
 import asyncio
 import atexit
+import fcntl
 import logging
 import math
 import os
@@ -367,7 +368,9 @@ def configure_logging(
             try:
                 if stat.S_ISFIFO(os.fstat(1).st_mode):
                     limit = min(8192, os.fpathconf(1, "PC_PIPE_BUF"))
-                    sink = os.dup(1)
+                    # Never allocate the owned sink as stdin/stdout/stderr: those
+                    # slots may be closed and takeover will replace fd1/fd2.
+                    sink = fcntl.fcntl(1, fcntl.F_DUPFD_CLOEXEC, 3)
                     os.set_inheritable(sink, False)
                     os.set_blocking(sink, False)
                     state = "enabled"

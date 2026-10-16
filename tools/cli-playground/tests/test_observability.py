@@ -11,10 +11,19 @@ def test_independent_json_producer() -> None:
             sys.executable,
             "-c",
             """
-import sys
-from playground.observability import LogSettings, bootstrap_logging
+import asyncio, sys
+from playground.observability import LogSettings, RequestLogging, bootstrap_logging
+from service_logging.context import current_context
 runtime = bootstrap_logging(LogSettings(service="cli-playground", role="gateway"))
-runtime.emit("request_completed")
+async def downstream(scope, receive, send):
+    assert current_context()["request_id"] != "SENTINEL-request-header"
+    await send({"type":"http.response.body","body":b"ok"})
+async def receive(): return {"type":"http.request"}
+async def send(message): assert message["body"] == b"ok"
+asyncio.run(RequestLogging(downstream)(
+    {"type":"http", "headers":[(b"x-request-id",b"SENTINEL-request-header")]}, receive, send
+))
+assert not current_context()
 runtime.close()
 assert not any(name == "boxie" or name.startswith("boxie.") for name in sys.modules)
 """,
@@ -28,6 +37,8 @@ assert not any(name == "boxie" or name.startswith("boxie.") for name in sys.modu
     event = json.loads(result.stdout)
     assert event["schema_version"] == 1
     assert event["service"] == "cli-playground"
+    assert event["event"] == "request_completed" and "request_id" in event
+    assert "SENTINEL" not in result.stdout
 
 
 def test_entrypoint_catches_configuration_errors() -> None:
