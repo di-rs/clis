@@ -37,6 +37,23 @@ regular files with mode `0600`: one agent credential and one consumer credential
 Do not put credentials in URLs. The API reads both files; the agent only reads its
 own credential. A consumer receives only its own credential.
 
+Linux bind mounts preserve numeric ownership. The current Boxie runtime image
+runs as UID 0; with `cap_drop: ALL`, it cannot bypass another UID's file
+permissions. Provision its agent/consumer credentials, database DSN and dedicated
+Temporal private keys as reader-owned regular files with mode `0600` (UID 0 for
+the current production manifests). Keep secret mounts read-only. Public
+certificates and configuration must also be readable by their service UID, and
+each containing directory must permit traversal. Create `BOXIE_DATA_DIR` and
+its `profiles` subdirectory with the agent's UID and owner write/traverse access
+before starting Compose; Docker-created bind-source directories can have the
+wrong owner. The pinned Temporal server, operator and UI images use UID 1000;
+their private keys must be owned by that reader with mode `0600` as well.
+Do not compensate with group/world access or additional DAC capabilities.
+
+PR4 provisioning must enforce these per-service UID, private-file and writable
+directory contracts, including consumer credential delivery and key rotation.
+The configuration generator writes paths only; it does not provision ownership.
+
 Copy [profiles.example.json](profiles.example.json) to the configured profiles
 file, replacing its placeholder digest with the immutable Docker image ID or
 registry digest for an approved shell image. For example, after pulling
@@ -90,6 +107,23 @@ root/artifact, capabilities, no-new-privileges, resource limits, tmpfs, disabled
 Docker logs and confirmed container deletion. The product smoke also checks the
 native Rust CLI, fixtures, pipes/redirection, resize and Ctrl-C. Ordinary Docker
 image builds or fake-daemon E2Es do not count as this platform check.
+
+The lifecycle fixture runs API, worker and agent as the runner's numeric UID:GID
+so its private files and writable storage share one owner. Its Linux-volume DAC
+regression resolves the actual test Compose mounts and checks readable private
+credentials, immutable secret mounts, writable data/profiles and rejected unsafe
+credentials. Run it with the freshly built runtime image:
+
+```sh
+uv run --locked pytest -m integration tools/boxie/tests/test_native_permissions.py
+```
+
+This probe can verify Linux ownership on an arm64 Docker host, but only the native
+amd64/runsc lifecycle workflow proves the full lifecycle. The existing disposable
+Temporal server/operator/UI fixture keys remain mode `0644` to support their
+unchanged UID-1000 images and host-side test readers; this is a fixture limitation,
+not the production provisioning policy. API/worker and host-only client fixture
+keys are mode `0600`.
 
 A consumer-network operator can run `python -m boxie_infra.smoke --boxie-url
 http://boxie-api:8090 --credential-file /private/consumer.secret` with the `smoke`

@@ -2,14 +2,17 @@
 services:
   api:
     extends: {file: compose.yml, service: api}
+    user: ${BOXIE_TEST_USER:?Set fixture owner UID:GID}
     restart: "no"
     ports: ["127.0.0.1::8090"]
   worker:
     extends: {file: compose.yml, service: worker}
+    user: ${BOXIE_TEST_USER:?Set fixture owner UID:GID}
     restart: "no"
   agent:
     command: [python, /fixture/agent_fixture.py, --config, /etc/boxie/agent.json]
     extends: {file: compose.yml, service: agent}
+    user: ${BOXIE_TEST_USER:?Set fixture owner UID:GID}
     restart: "no"
     environment:
       DOCKER_HOST: unix:///faults/docker.sock

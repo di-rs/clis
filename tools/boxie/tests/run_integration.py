@@ -148,8 +148,9 @@ class ProductionStack:
                     str(cert),
                 ]
             )
-            # Disposable fixture keys only: container UID 1000 needs bind-mount read.
-            key.chmod(0o644)
+            # Host tests and lifecycle API/worker share the fixture owner's UID.
+            # The unchanged Temporal server/operator/UI fixture images use UID 1000.
+            key.chmod(0o600 if directory == "clients" else 0o644)
         for directory in ("server", "operator", "ui", "clients"):
             shutil.copy(ca / "frontend.pem", self.root / directory / "frontend-ca.pem")
         for name in ("internode", "client"):

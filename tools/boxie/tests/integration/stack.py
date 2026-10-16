@@ -29,6 +29,9 @@ class LifecycleStack(ProductionStack):
         self.binary = Path(os.environ.get("BOXIE_NATIVE_BINARY", ROOT / "target/release/echor"))
         self.env.update(
             BOXIE_TEST_ROOT=str(root),
+            # Bind-mounted private files and writable storage belong to this runner.
+            # UID 0 with cap_drop ALL cannot bypass another UID's mode-0600 files.
+            BOXIE_TEST_USER=f"{os.getuid()}:{os.getgid()}",
             BOXIE_TEST_AGENT_SCRIPT=str(Path(__file__).with_name("agent_fixture.py")),
             BOXIE_TEST_FAULTS_SCRIPT=str(Path(__file__).with_name("faults.py")),
             BOXIE_RUNTIME_IMAGE=os.environ.get("BOXIE_RUNTIME_IMAGE", "boxie:lifecycle"),
@@ -89,7 +92,8 @@ class LifecycleStack(ProductionStack):
             )
             path.chmod(0o600)
         migrate(self.dsn, ROOT / "tools/boxie/src/boxie/persistence/migrations")
-        (self.root / "data").mkdir()
+        # Compose's nested profiles bind must not create a root-owned directory.
+        (self.root / "data/profiles").mkdir(parents=True, mode=0o700)
         (self.root / "faults").mkdir()
         profiles = json.loads(
             (ROOT / "tools/cli-playground/infra/profiles/playground.json").read_text()
