@@ -38,7 +38,7 @@ async def retained_archive(
     for path in journal_paths(directory):
         if "@" not in path.name or not path.name.endswith(".journal"):
             continue
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
         try:
             before = os.fstat(fd)
             expected = file_identity(before)

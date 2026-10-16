@@ -69,7 +69,7 @@ def test_retained_file_requires_unlink_not_rename_and_always_closes(
         os.fstat(observed_fd)
 
 
-@pytest.mark.parametrize("failure", ["replace", "query", "wrong_instance", "symlink"])
+@pytest.mark.parametrize("failure", ["replace", "query", "wrong_instance", "symlink", "fifo"])
 def test_baseline_lookup_failure_never_proves_retention_and_closes_fd(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
@@ -78,10 +78,15 @@ def test_baseline_lookup_failure_never_proves_retention_and_closes_fd(
     if failure == "symlink":
         path.rename(tmp_path / "target")
         path.symlink_to(tmp_path / "target")
+    if failure == "fifo":
+        path.unlink()
+        os.mkfifo(path)
     opened: list[int] = []
     real_open = os.open
 
     def tracked_open(*args: Any, **kwargs: Any) -> int:
+        if failure == "fifo":
+            assert args[1] & os.O_NONBLOCK  # Fail before a regressed FIFO open can block.
         fd = real_open(*args, **kwargs)
         opened.append(fd)
         return fd
