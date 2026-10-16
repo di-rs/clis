@@ -13,6 +13,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from observability_infra.smoke_application import REPO, Application
+from observability_infra.smoke_pipe_api import validate_shutdown
 from observability_infra.smoke_runtime import event_identities, evidence
 from observability_infra.smoke_telemetry import Telemetry
 from observability_infra.smoke_units import transient_command, unit_name
@@ -606,6 +607,8 @@ class Scenario:
         while not (control / "pipe-active.json").exists():
             self.commands.deadline.remaining()
             await asyncio.sleep(0.1)
+        active = json.loads((control / "pipe-active.json").read_text())
+        self.observations["pipe_active"] = active
         metrics_url = "http://" + await asyncio.to_thread(
             self.app.stack.runtime_command, "port", "api", "9101"
         )
@@ -643,9 +646,8 @@ class Scenario:
             self.commands.deadline.remaining()
             await asyncio.sleep(0.1)
         result = json.loads((control / "pipe-exit.json").read_text())
-        if result["forced"] or result["exit"] != 0 or result["seconds"] > 8:
-            raise RuntimeError("production API did not shut down while stdout unread")
         self.observations["pipe_shutdown"] = result
+        validate_shutdown(active, result)
 
     async def run(self) -> None:
         if self.name == "lifecycle-failure":
