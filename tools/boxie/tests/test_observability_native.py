@@ -26,7 +26,7 @@ def docker(*args: str, input: str | None = None) -> str:
         ["docker", *args], input=input, text=True, capture_output=True, timeout=90
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    return result.stdout.strip()
+    return (result.stdout + result.stderr).strip() if args[0] == "logs" else result.stdout.strip()
 
 
 def substituted(source: Path, destination: Path) -> None:
@@ -278,8 +278,10 @@ def test_failed_lifecycle_is_searchable_after_collector_outage(
         plugins.mkdir()
         with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
             zipped.extractall(plugins)
-        for path in plugins.rglob("*"):
-            path.chmod(0o755 if path.is_dir() or path.name.startswith("gpx_") else 0o644)
+            for member in zipped.infolist():
+                path = plugins / member.filename
+                executable = bool((member.external_attr >> 16) & 0o111)
+                path.chmod(0o755 if path.is_dir() or executable else 0o644)
         grafana = start(
             "grafana",
             PINS["images"]["grafana"]["image"],
@@ -289,6 +291,8 @@ def test_failed_lifecycle_is_searchable_after_collector_outage(
             "268435456",
             "-e",
             "GF_SECURITY_ADMIN_PASSWORD=smoke-only-password",
+            "-e",
+            "GOGC=25",
             "-e",
             "GF_PLUGINS_PREINSTALL_DISABLED=true",
             "-v",

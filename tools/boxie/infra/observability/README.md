@@ -35,7 +35,8 @@ persistent storage, restart journald, and check `journalctl --disk-usage`.
 
 Provision a private Grafana admin password file readable by UID 472. Install the
 VictoriaLogs datasource plugin from the URL in `versions.json`, verify its SHA256,
-and unpack it to `OBS_GRAFANA_PLUGIN_DIR`. Grafana uses only this mounted plugin;
+and unpack it to `OBS_GRAFANA_PLUGIN_DIR`, preserving the archive executable bits
+for its backend binaries. Grafana uses only this mounted plugin;
 startup downloads and anonymous access are disabled.
 
 Substitute the three nonsecret Prometheus values with the system `envsubst` tool.
