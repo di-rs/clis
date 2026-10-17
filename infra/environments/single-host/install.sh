@@ -21,9 +21,15 @@ for app in boxie playground; do
     target="/opt/clis/releases/$app/$run"
     if [[ ! -d $target ]]; then
         install -d -m 0700 "$(dirname "$target")"
-        cp -a "$release" "$target"
+        package=boxie
+        [[ $app != playground ]] || package=cli-playground
+        install -d -m 0700 "$target/tools/$package"
+        cp -a "$release/tools/$package/infra" "$target/tools/$package/infra"
+        cp "$release/image.env" "$release/revision" "$target/"
     fi
 done
+bash "$release/tools/boxie/infra/credentials.sh" /etc/clis/boxie
+python3 "$release/tools/cli-playground/infra/playground_infra/installation.py" "$release"
 bash "/opt/clis/releases/boxie/$run/tools/boxie/infra/install.sh" "/opt/clis/releases/boxie/$run"
 bash "/opt/clis/releases/playground/$run/tools/cli-playground/infra/install.sh" "/opt/clis/releases/playground/$run"
 bash "/opt/clis/releases/playground/$run/tools/cli-playground/infra/deploy.sh" "/opt/clis/releases/playground/$run"

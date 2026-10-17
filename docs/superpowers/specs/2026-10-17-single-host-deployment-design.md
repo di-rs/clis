@@ -93,10 +93,10 @@ artifacts. Use existing provider-generated SSH host identity for initial trust,
 not unauthenticated `ssh-keyscan`. Supply client trust through SSH known-hosts.
 Keep service certificates and CA keys recoverable separately from runtime access.
 
-There is one explicit handoff after provisioning: the operator uses a local
-helper to install the deployment key/host identity in application environments
+There is one explicit handoff after provisioning: the operator uses documented
+local Pulumi, SSH and GitHub CLI commands to install the deployment key/host identity in application environments
 and the host-generated preview publication token in `playground-preview`.
-The helper uses the operator's existing GitHub authentication, not a repository
+These commands use the operator's existing GitHub authentication, not a repository
 administration token stored in deployment workflows. It must not print secrets.
 Setup can install and verify the services before this handoff; automatic updates
 and preview publication are enabled only afterward. Repeating setup does not
@@ -105,8 +105,10 @@ instruction rather than silently creating inconsistent replacements.
 
 ## Application deployment contract
 
-Use fixed owner scripts and a shared, small transport script. Target approximately
-150–300 lines for application deployment scripts; this is an estimate and review
+Use fixed local owner operations and direct `ssh`/`scp` steps in Actions. Pulumi
+Command resources handle initial installation transport. Application jobs receive
+no Pulumi state credentials. Target approximately
+150-300 lines for application deployment scripts; this is an estimate and review
 budget, not a reason to omit failure handling. Bootstrap, workflows and tests are
 additional. Reconsider the approach before adding a generic Python release engine,
 descriptor schema, custom archive parser or custom process supervisor.
@@ -118,12 +120,14 @@ keep credentials under `/etc/clis/` and data on the protected mount. A release
 contains plain Compose files, nonsecret image assignments and its source SHA.
 Do not build from dirty files or reinterpret user input as shell code.
 
-Use a root-owned transient systemd service for the remote operation with a
-15-minute runtime limit and control-group cleanup. A host-wide `flock` serializes
+Use root-owned systemd template services with `Type=oneshot`,
+`TimeoutStartSec=900`, `KillMode=control-group` and `RemainAfterExit=yes`.
+Each run ID and attempt has a separate service instance with a queryable result. A host-wide `flock` serializes
 mutating installation/deployment/maintenance operations. SSH disconnect does not
 abandon a background shell: the systemd unit completes or times out while holding
 the lock. A reconnect inspects its status. Never report success merely because the
-unit was started. Actions concurrency queues deployments without cancelling them.
+unit was started. Actions concurrency prevents simultaneous workflow deployments without cancelling
+active runs; stale-revision checks handle reordered or superseded pending runs.
 Record interrupted or timed-out operations as requiring inspection; Docker daemon
 effects may outlive a killed client, so the next job must not blindly continue.
 
