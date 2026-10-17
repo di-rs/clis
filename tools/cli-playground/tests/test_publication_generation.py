@@ -84,6 +84,52 @@ def test_corrupt_lifecycle_state_fails_closed(docker_settings: Settings) -> None
         store.lifecycle(123)
 
 
+def test_replayed_close_invalidates_then_reconciles_an_already_open_pr(
+    api_client: TestClient,
+) -> None:
+    from playground.preview.lifecycle import lifecycle
+
+    from .test_preview_ci import REPO, SHA, FakeGitHub
+
+    github = FakeGitHub()
+    github.workflow_runs = [github.run]
+
+    def gateway(
+        base: str,
+        token: str,
+        path: str,
+        *,
+        method: str,
+        data: bytes | None = None,
+        content_type: str = "application/zip",
+    ) -> dict[str, object]:
+        response = api_client.request(
+            method, path, headers={**AUTH, "Content-Type": content_type}, content=data
+        )
+        response.raise_for_status()
+        result: dict[str, object] = response.json()
+        return result
+
+    for action in ("reopened", "closed", "closed"):
+        before = api_client.get("/api/pull-requests/7/lifecycle", headers=AUTH).json()
+        assert lifecycle(github, REPO, 7, action, "https://play.example", "token", gateway=gateway)
+        after = api_client.get("/api/pull-requests/7/lifecycle", headers=AUTH).json()
+        assert after["generation"] > before["generation"]
+        assert not after["closed"]
+        record = api_client.get(
+            "/api/environments/" + EnvironmentStore.identifier(7), headers=AUTH
+        ).json()
+        assert record["sha"] == SHA
+        assert record["expected_generation"] == after["generation"]
+        stale = api_client.post(
+            "/api/environments",
+            params={"sha": SHA, "pr": 7, "expected_generation": before["generation"]},
+            headers=AUTH,
+            content=binary_bundle({"echor": elf_binary()}),
+        )
+        assert stale.status_code == 409
+
+
 def test_generation_invalidated_during_boxie_upload_never_commits(
     docker_settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:

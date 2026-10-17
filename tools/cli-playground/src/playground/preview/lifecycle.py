@@ -28,7 +28,8 @@ def lifecycle(
     state = "closed" if action == "closed" else "open"
     if not current_pull(api, repo, number, state=state):
         # A processed close must invalidate transfers even if GitHub already
-        # reports the same SHA reopened. The later reopen reconciles availability.
+        # reports the same SHA reopened. Reconcile availability after invalidation;
+        # the reopen event may already have finished before this close is replayed.
         if action != "closed" or not current_pull(api, repo, number, state="open"):
             return None
     if not base_url or not token:
@@ -75,14 +76,15 @@ def lifecycle(
         query = urllib.parse.urlencode({"environment": f"cli-playground/pr-{number}"})
         deployments = api.pages(f"repos/{repo}/deployments?{query}")
     except PaginationLimit:
-        return (
-            message + " GitHub deployment status listing reached its pagination limit; "
+        message += (
+            " GitHub deployment status listing reached its pagination limit; "
             "some GitHub statuses may remain active."
         )
+        deployments = []
     for deployment in deployments:
         if deployment.get("environment") != f"cli-playground/pr-{number}":
             continue
-        # Reopening can race with cleanup; its serialized event clears the tombstone.
+        # Reopening can race with cleanup; reconcile the current state below.
         if not current_pull(api, repo, number, state="closed"):
             break
         api.request(
@@ -94,4 +96,6 @@ def lifecycle(
                 "auto_inactive": False,
             },
         )
+    if current_pull(api, repo, number, state="open"):
+        return lifecycle(api, repo, number, "reopened", base_url, token, gateway=gateway)
     return message

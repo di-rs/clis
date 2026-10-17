@@ -323,13 +323,14 @@ def test_failed_batch_never_records_success_or_an_untrusted_link(failure: object
 
 def test_observed_close_invalidates_even_when_github_already_reports_reopened() -> None:
     github = FakeGitHub()
-    gateway = Mock(return_value={"deleted": 0})
+    gateway = Mock(side_effect=[{"deleted": 0}, {"reopened": 7}])
     assert preview_ci.lifecycle(
         github, REPO, 7, "closed", "https://play.example", "token", gateway=gateway
     )
-    gateway.assert_called_once_with(
-        "https://play.example", "token", "/api/pull-requests/7", method="DELETE"
-    )
+    assert [(call.args[2], call.kwargs["method"]) for call in gateway.call_args_list] == [
+        ("/api/pull-requests/7", "DELETE"),
+        ("/api/pull-requests/7/reopen", "POST"),
+    ]
     assert github.writes == []
 
 

@@ -54,6 +54,38 @@ def test_actual_directory_records_are_counted_when_eocd_lies() -> None:
         artifacts.validate_zip_directory(io.BytesIO(data[:start] + directory + footer))
 
 
+def test_ambiguous_end_record_rejected_before_zipfile_construction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed = binary_bundle({"echor": elf_binary()})
+    entry = seed[seed.index(b"PK\x01\x02") : -22]
+    prefix = entry * (artifacts.MAX_CLIS + 1)
+    accepted = struct.pack("<4s4H2LH", b"PK\x05\x06", 0, 0, 1, 1, len(entry), len(prefix), 22)
+    alternate = struct.pack(
+        "<4s4H2LH",
+        b"PK\x05\x06",
+        0,
+        0,
+        artifacts.MAX_CLIS + 2,
+        artifacts.MAX_CLIS + 2,
+        len(prefix) + len(entry) + len(accepted),
+        0,
+        1,
+    )
+    data = prefix + entry + accepted + alternate
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("ZipFile allocated metadata from an alternate end record")
+
+    monkeypatch.setattr(zipfile, "ZipFile", forbidden)
+    with pytest.raises(ValueError):
+        artifacts.binary_archive(data)
+    source = tmp_path / "ambiguous.zip"
+    source.write_bytes(data)
+    with pytest.raises(ValueError):
+        artifacts.stage_archive(source, tmp_path / "out", 1024)
+
+
 def test_valid_zip64_directory_and_position_are_preserved() -> None:
     data = binary_bundle({"echor": elf_binary()})
     end = data.index(b"PK\x05\x06")

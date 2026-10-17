@@ -36,17 +36,19 @@ def validate_zip_directory(source: BinaryIO) -> None:
             raise ValueError("artifact exceeds size limit")
         source.seek(max(0, size - 65557))
         tail = source.read(65557)
-        # EOCD's variable comment may itself contain a signature. Only a record
-        # ending exactly at EOF is a candidate; never trust its count or size yet.
-        index = len(tail)
-        while True:
-            index = tail.rfind(b"PK\x05\x06", 0, index)
-            if index < 0:
-                raise ValueError("invalid ZIP directory")
-            if len(tail) - index >= 22 and index + 22 + struct.unpack_from("<H", tail, index + 20)[
-                0
-            ] == len(tail):
-                break
+        # Match ZipFile's no-comment fast path, then its last-signature search.
+        # Never fall back to an earlier footer: ZipFile would parse another
+        # directory, bypassing the bounds checked here.
+        if tail[-22:-18] == b"PK\x05\x06" and tail[-2:] == b"\x00\x00":
+            index = len(tail) - 22
+        else:
+            index = tail.rfind(b"PK\x05\x06")
+        if (
+            index < 0
+            or len(tail) - index < 22
+            or index + 22 + struct.unpack_from("<H", tail, index + 20)[0] != len(tail)
+        ):
+            raise ValueError("invalid or ambiguous ZIP directory")
         footer = struct.unpack_from("<4s4H2LH", tail, index)
         _, disk, directory_disk, disk_count, count, directory_size, offset, _ = footer
         end = size - len(tail) + index

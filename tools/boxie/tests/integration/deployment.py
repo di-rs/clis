@@ -270,6 +270,7 @@ class DeploymentStack(LifecycleStack):
             config["services"]["gateway"]["environment"]["PLAYGROUND_PUBLIC_URL"] = (
                 "${PLAYGROUND_PUBLIC_URL}"
             )
+            config["services"]["gateway"]["environment"]["PLAYGROUND_PREVIEW_DOMAIN"] = ""
             config["services"]["gateway"]["ports"] = [
                 "127.0.0.1:" + self.env["BOXIE_TEST_PRODUCT_PORT"] + ":8000"
             ]

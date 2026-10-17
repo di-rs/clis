@@ -28,7 +28,7 @@ restore evidence must not be inferred from local tests or skipped draft CI.
 
 | Check | Result/environment |
 | --- | --- |
-| Root locked Python suite | 693 passed; 123 integration cases excluded by the ordinary-test policy |
+| Root locked Python suite after final review fixes | 699 passed; 123 integration cases excluded by the ordinary-test policy |
 | PostgreSQL/Temporal and profile SIGHUP tier | 51 passed against disposable real services |
 | Generic Compose release/rollback plus selected overlay | 1 passed; persistent sentinel and unrelated container preserved |
 | Native Vector/Prometheus/rule/cloudflared validators | 1 passed against pinned upstream tools |
@@ -49,3 +49,15 @@ in the proxy fixture. None establishes provider bootstrap or public activation.
 All local disposable service fixtures completed their cleanup. The Linux SSH
 container was automatically removed. Normal branch work is preserved in PR42;
 no merge or production operation was requested or performed.
+
+The independent review found three defects, each reproduced with a failing
+regression before correction: an alternate ZIP end record could bypass the
+metadata scan; a replayed close event could strand an open PR behind a closed
+tombstone; and the assembled fixture retained an incompatible HTTPS preview
+domain after selecting HTTP loopback. The fixes align ZIP footer selection with
+the downstream reader, reconcile open state through a fresh generation and latest
+build replay, and validate the fixture's adapted origin with the real gateway
+settings parser. The focused review suite passed 84 tests; the full locked Python
+suite passed 699 tests in 93.97 seconds. Lint, formatting and strict typing passed,
+and the corrected Playground runtime image was rebuilt and imported in isolation.
+No minor findings were deferred.
