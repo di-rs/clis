@@ -102,7 +102,8 @@ The integration harness requires Docker/Compose support and OpenSSL. It invokes
 the namespace command with the installed pinned SDK and operator certificate;
 production invokes the same module from the approved Boxie runtime image. It
 creates isolated projects, fresh databases, two-day test certificates, and
-loopback-only port overrides. Its test bridge permits those host clients; the
+loopback-only port overrides. The harness creates and removes its external test
+bridge independently of the service projects. That bridge permits host clients; the
 production network remains internal and publishes no ports. Test keys are
 readable by the disposable container UIDs; this test permission choice is not a
 production key policy. No CA private key is mounted into a runtime container.

@@ -1,22 +1,12 @@
-name: Boxie observability faults
+name: 🔍 Boxie observability faults
 
 on:
   pull_request:
     branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
       - '.github/workflows/boxie-observability.yml'
-      - 'tools/boxie/infra/observability/**'
-      - 'tools/boxie/infra/ingress/**'
-      - 'tools/boxie/infra/postgres/**'
-      - 'tools/boxie/infra/temporal/**'
       - 'tools/boxie/**'
-      - 'tools/cli-playground/Sandbox.Dockerfile*'
-      - 'tools/cli-playground/infra/**'
-      - 'coreutils/echor/**'
-      - 'utils/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'rust-toolchain.toml'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.python-version'
@@ -30,17 +20,21 @@ concurrency:
 
 jobs:
   native:
+    if: ${{ !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci') }}
+    name: 🧪 Verify Linux amd64 observability faults
     runs-on: ubuntu-24.04
     timeout-minutes: 65
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: 📥 Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: 🐍 Set up uv and Python
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: '0.13.0'
           enable-cache: false
-      - name: Install signed runsc without touching the shared Docker daemon
+      - name: 🔍 Install signed runsc without touching the shared Docker daemon
         timeout-minutes: 5
         run: |
           sudo apt-get update
@@ -52,7 +46,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y runsc
           runsc --version
-      - name: Locked workspace and isolated fixture identity
+      - name: 🔍 Locked workspace and isolated fixture identity
         timeout-minutes: 3
         run: |
           uv sync --locked --all-packages
@@ -60,14 +54,14 @@ jobs:
           printf 'BOXIE_SMOKE_ROOT=/var/tmp/boxie-observability-%s\n' "$fixture_suffix" >> "$GITHUB_ENV"
           uv run --locked pytest tools/boxie/infra/observability/tests/test_smoke.py tools/boxie/infra/ingress/tests/test_access_smoke.py
           uv run --locked pytest tools/boxie/infra/observability/tests/test_smoke.py -m integration
-      - name: Build final images and preflight owned journal, daemon, HTTP and PTY
+      - name: 🔍 Build final images and preflight owned journal, daemon, HTTP and PTY
         id: setup
         timeout-minutes: 21
         run: |
           sudo env "PATH=$PATH" "GITHUB_ACTIONS=$GITHUB_ACTIONS" "RUNNER_ENVIRONMENT=$RUNNER_ENVIRONMENT" \
             timeout --signal=TERM --kill-after=10s 1220s \
             .venv/bin/python -m observability_infra.smoke prepare --root "$BOXIE_SMOKE_ROOT"
-      - name: Separately budgeted native fault cases
+      - name: 🔍 Separately budgeted native fault cases
         id: scenarios
         timeout-minutes: 28
         run: |
@@ -83,7 +77,7 @@ jobs:
               exit "$scenario_exit"
             fi
           done
-      - name: Preserve bounded evidence before outer cleanup
+      - name: 🔍 Preserve bounded evidence before outer cleanup
         id: evidence_before_cleanup
         if: ${{ always() && env.BOXIE_SMOKE_ROOT != '' }}
         timeout-minutes: 1
@@ -94,7 +88,8 @@ jobs:
           sudo .venv/bin/python -m observability_infra.smoke export \
             --root "$BOXIE_SMOKE_ROOT" --evidence-dir "$RUNNER_TEMP/boxie-observability-before-cleanup" \
             --setup-outcome "$SETUP_OUTCOME" --scenario-outcome "$SCENARIO_OUTCOME"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - name: 📤 Upload bounded evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         id: upload_before_cleanup
         if: ${{ always() && env.BOXIE_SMOKE_ROOT != '' }}
         timeout-minutes: 2
@@ -103,7 +98,7 @@ jobs:
           path: ${{ runner.temp }}/boxie-observability-before-cleanup/*.json
           if-no-files-found: error
           retention-days: 7
-      - name: Restore exact owned resources before runner disposal
+      - name: 🔍 Restore exact owned resources before runner disposal
         id: cleanup
         if: ${{ always() && env.BOXIE_SMOKE_ROOT != '' }}
         timeout-minutes: 4
@@ -111,12 +106,13 @@ jobs:
           sudo env "PATH=$PATH" "GITHUB_ACTIONS=$GITHUB_ACTIONS" "RUNNER_ENVIRONMENT=$RUNNER_ENVIRONMENT" \
             timeout --signal=TERM --kill-after=5s 190s \
             .venv/bin/python -m observability_infra.smoke cleanup --root "$BOXIE_SMOKE_ROOT"
-      - name: Export bounded nonsecret evidence allowlist
+      - name: 🔍 Export bounded nonsecret evidence allowlist
         if: ${{ always() && env.BOXIE_SMOKE_ROOT != '' }}
         run: |
           sudo .venv/bin/python -m observability_infra.smoke export \
             --root "$BOXIE_SMOKE_ROOT" --evidence-dir "$RUNNER_TEMP/boxie-observability-evidence"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - name: 📤 Upload bounded evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         id: upload_after_cleanup
         if: ${{ always() && env.BOXIE_SMOKE_ROOT != '' }}
         with:

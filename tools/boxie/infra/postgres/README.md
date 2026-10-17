@@ -11,8 +11,17 @@ Set `BOXIE_CONTROL_NETWORK` and four independently generated secrets:
 `VISIBILITY_DB_PASSWORD`. Supply them from operator-owned environment files with
 mode 0600. From this directory, run `docker compose up -d --wait`. PostgreSQL
 17.11 is pinned to a multi-platform registry manifest digest in `compose.yml`.
-There are no published host ports. The named control network is internal; attach
-only trusted service containers. The PostgreSQL service has no Docker socket mount.
+There are no published host ports. Supply the operator-owned internal control
+network before starting PostgreSQL, using the same network as Boxie and Temporal:
+
+```sh
+docker network create --internal "$BOXIE_CONTROL_NETWORK"
+```
+
+Create it once per installation, outside every service's Compose project. All
+projects consume it as an external network, so stopping PostgreSQL cannot own or
+remove their shared network. Attach only trusted service containers. The
+PostgreSQL service has no Docker socket mount.
 
 Initialization runs only for an empty volume. Rotate credentials explicitly in
 PostgreSQL and the affected service configuration. Preserve `postgres-data` on

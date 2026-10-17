@@ -70,6 +70,7 @@ def save_stack(root: Path, stack: Any) -> None:
             "ui_address",
             "pg_port",
             "shared_networks",
+            "network_id",
         )
     }
     path = root / "application-private.json"

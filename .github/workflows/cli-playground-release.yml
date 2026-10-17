@@ -1,4 +1,4 @@
-name: CLI playground release
+name: 🚀 Playground runtime release
 
 # Runtime releases use reviewed default-branch code; PR binaries have a separate flow.
 # PR binary previews use the separate playground build/publish workflows.
@@ -54,6 +54,7 @@ concurrency:
 
 jobs:
   release:
+    name: 📦 Build and publish playground runtime images
     if: ${{ github.ref == 'refs/heads/master' && (github.event_name != 'push' || vars.PLAYGROUND_AUTO_DEPLOY == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -67,15 +68,16 @@ jobs:
     env:
       DOCKER_BUILD_RECORD_UPLOAD: 'false'
     steps:
-      - name: Production activation unavailable until PR4
+      - name: 🚧 Check production activation availability
         run: |
           echo "Production activation is unavailable after the Boxie split; split-service release/deployment support lands in PR4. Use the documented local Compose units for validation." >&2
           exit 1
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: 📥 Check out reviewed release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Choose image names and unique run tag
+      - name: 🏷️ Choose image names and unique release tag
         id: images
         env:
           REPOSITORY: ${{ github.repository }}
@@ -87,15 +89,17 @@ jobs:
             printf 'sandbox=ghcr.io/%s-playground-sandbox\n' "${REPOSITORY,,}"
             printf 'tag=run-%s-%s\n' "$RUN_ID" "$RUN_ATTEMPT"
           } >> "$GITHUB_OUTPUT"
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           cache-binary: false
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      - name: 🔐 Sign in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-      - name: Build and publish the Python gateway and static frontend
+      - name: 🏗️ Build and publish gateway and frontend image
         id: gateway
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -107,7 +111,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-      - name: Build and publish the shared shell sandbox
+      - name: 🏗️ Build and publish shared sandbox image
         id: sandbox
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -119,7 +123,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-      - name: Record the immutable runtime release
+      - name: 📝 Record immutable runtime image digests
         env:
           REVISION: ${{ github.sha }}
           GATEWAY_IMAGE: ${{ steps.images.outputs.gateway }}
@@ -152,7 +156,7 @@ jobs:
                   "The runtime deployment job applies these exact digests to the existing host.\n"
               )
           PY
-      - name: Upload the immutable release manifest
+      - name: 📤 Upload immutable release manifest
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cli-playground-release
@@ -161,6 +165,7 @@ jobs:
           overwrite: true
           retention-days: 30
   deploy:
+    name: 🚀 Deploy playground runtime and verify HTTPS
     needs: release
     if: ${{ github.ref == 'refs/heads/master' }}
     environment: playground
@@ -185,19 +190,23 @@ jobs:
       ACME_EMAIL: ${{ vars.ACME_EMAIL }}
       PLAYGROUND_DEPLOY_TOKEN: ${{ secrets.PLAYGROUND_DEPLOY_TOKEN }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: 📥 Check out reviewed deployment source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: 🐍 Set up uv and Python
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: '0.13.0'
           enable-cache: false
-      - run: uv sync --locked --all-packages
-      - uses: pulumi/setup-pulumi@b374ceb6168550de27c6eba92e01c1a774040e11 # v2
+      - name: 📦 Install locked Python workspace dependencies
+        run: uv sync --locked --all-packages
+      - name: ☁️ Set up Pulumi infrastructure tooling
+        uses: pulumi/setup-pulumi@b374ceb6168550de27c6eba92e01c1a774040e11 # v2
         with:
           pulumi-version: '3.268.0'
-      - name: Deploy immutable images and verify HTTPS
+      - name: 🚀 Deploy immutable images and verify HTTPS
         env:
           RELEASE_REVISION: ${{ needs.release.outputs.revision }}
           GATEWAY_IMAGE: ${{ needs.release.outputs.gateway_image }}

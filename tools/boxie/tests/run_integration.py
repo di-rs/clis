@@ -44,6 +44,7 @@ class ProductionStack:
         self.name = "boxie-integration-" + uuid4().hex[:12]
         self.postgres = self.name + "-postgres"
         self.temporal = self.name + "-temporal"
+        self.network_id: str | None = None
         self.env = dict(os.environ)
         self.env.update(
             {
@@ -189,7 +190,6 @@ class ProductionStack:
             yaml.safe_dump(
                 {
                     "services": {"postgres": {"ports": ["127.0.0.1::5432"]}},
-                    "networks": {"control": {"internal": False}},
                 }
             )
         )
@@ -226,6 +226,11 @@ class ProductionStack:
     def start(self) -> None:
         self.certificates()
         self.write_overrides()
+        # The harness owns this external bridge separately from both projects.
+        # Host-side SQL/Temporal clients require a non-internal disposable bridge.
+        self.network_id = self.command(
+            ["docker", "network", "create", "--label", f"boxie.integration={self.name}", self.name]
+        )
         self.compose("postgres", "up", "--detach", "--wait", "--wait-timeout", "90")
         self.pg_port = self.compose("postgres", "port", "postgres", "5432").rsplit(":", 1)[1]
         for variable in (
@@ -327,6 +332,21 @@ class ProductionStack:
                     if item.get("Labels", {}).get("io.boxie.test.owner") != self.name:
                         raise RuntimeError("refusing cleanup of foreign fixture network")
                     self.command(["docker", "network", "rm", identifier])
+            except Exception as error:
+                failures.append(str(error))
+        if self.network_id is not None:
+            try:
+                item = json.loads(self.command(["docker", "network", "inspect", self.network_id]))[
+                    0
+                ]
+                if (
+                    item["Id"] != self.network_id
+                    or item["Name"] != self.name
+                    or item.get("Labels", {}).get("boxie.integration") != self.name
+                ):
+                    raise RuntimeError("refusing cleanup of foreign control network")
+                self.command(["docker", "network", "rm", self.network_id])
+                self.network_id = None
             except Exception as error:
                 failures.append(str(error))
         if failures:
