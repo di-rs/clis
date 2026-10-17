@@ -26,6 +26,17 @@ undeployed; incompatible live workflows require a separately reviewed drain or
 versioned cutover. No direct-mode data directory upgrade or PTY restart recovery
 is supported.
 
+## Recovery prerequisite for production activation
+
+Backup and restore implementation belongs to the production activation increment.
+Before enabling deployment, demonstrate restoration of all three PostgreSQL
+databases (Boxie, Temporal persistence and Temporal visibility) and Boxie's artifact
+data into a fresh installation, using off-host backups and a documented recovery
+point. Verify application accounting, artifact references and Temporal workflow
+execution after restoration. Keep the state-backend passphrase and required
+certificate material recoverable separately from the running host. Pulumi resource
+protection and same-host Docker volumes do not provide this recovery evidence.
+
 ## Execution and recovery
 
 Admission atomically reserves a capacity slot, artifact reference and command.

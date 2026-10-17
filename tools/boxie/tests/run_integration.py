@@ -38,6 +38,7 @@ class ProductionStack:
         self.name = "boxie-integration-" + uuid4().hex[:12]
         self.postgres = self.name + "-postgres"
         self.temporal = self.name + "-temporal"
+        self.network_id: str | None = None
         self.env = dict(os.environ)
         self.env.update(
             {
@@ -177,7 +178,6 @@ class ProductionStack:
             yaml.safe_dump(
                 {
                     "services": {"postgres": {"ports": ["127.0.0.1::5432"]}},
-                    "networks": {"control": {"internal": False}},
                 }
             )
         )
@@ -195,6 +195,11 @@ class ProductionStack:
     def start(self) -> None:
         self.certificates()
         self.write_overrides()
+        # The harness owns this external bridge separately from both projects.
+        # Host-side SQL/Temporal clients require a non-internal disposable bridge.
+        self.network_id = command(
+            ["docker", "network", "create", "--label", f"boxie.integration={self.name}", self.name]
+        )
         self.compose("postgres", "up", "--detach", "--wait", "--wait-timeout", "90")
         self.pg_port = self.compose("postgres", "port", "postgres", "5432").rsplit(":", 1)[1]
         self.compose("temporal", "run", "--rm", "schema", "setup")
@@ -255,6 +260,12 @@ class ProductionStack:
                     self.compose(package, "down", "--volumes", "--remove-orphans")
                 except Exception as error:
                     failures.append(str(error))
+        if self.network_id is not None:
+            try:
+                command(["docker", "network", "rm", self.network_id])
+                self.network_id = None
+            except Exception as error:
+                failures.append(str(error))
         if failures:
             raise RuntimeError("; ".join(failures))
 

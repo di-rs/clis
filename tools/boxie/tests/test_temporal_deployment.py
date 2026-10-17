@@ -13,6 +13,7 @@ import psycopg
 import pytest
 import yaml
 from google.protobuf.duration_pb2 import Duration
+from run_integration import ProductionStack, command
 from temporal_support import tls
 from temporalio import activity, workflow
 from temporalio.api.namespace.v1 import NamespaceConfig
@@ -22,6 +23,37 @@ from temporalio.service import TLSConfig
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 ROOT = Path(__file__).parents[3]
+
+
+@pytest.mark.integration
+def test_postgres_requires_operator_supplied_control_network(tmp_path: Path) -> None:
+    stack = ProductionStack(tmp_path)
+    stack.write_overrides()
+    try:
+        with pytest.raises(
+            RuntimeError, match="network.*(not found|could not be found|does not exist)"
+        ):
+            stack.compose("postgres", "up", "--detach")
+    finally:
+        stack.close()
+
+
+@pytest.mark.integration
+def test_postgres_preserves_operator_owned_control_network(tmp_path: Path) -> None:
+    stack = ProductionStack(tmp_path)
+    stack.write_overrides()
+    network = stack.env["BOXIE_CONTROL_NETWORK"]
+    command(["docker", "network", "create", "--internal", network])
+    try:
+        stack.compose("postgres", "up", "--detach", "--wait", "--wait-timeout", "90")
+        stack.compose("postgres", "down", "--volumes", "--remove-orphans")
+        info = json.loads(command(["docker", "network", "inspect", network]))
+        assert info[0]["Internal"] is True
+    finally:
+        try:
+            stack.close()
+        finally:
+            command(["docker", "network", "rm", network])
 
 
 def test_private_production_deployment_has_explicit_jobs_and_trust() -> None:
