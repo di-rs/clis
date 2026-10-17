@@ -1,122 +1,111 @@
-name: 🚀 Playground runtime release
+name: 🚀 Playground gateway release
 'on':
   push:
-    branches:
-    - master
+    branches: [master]
     paths:
-    - tools/cli-playground/src/playground/**
-    - tools/cli-playground/frontend/**
-    - tools/cli-playground/fixtures/**
-    - tools/cli-playground/infra/Playground.Dockerfile*
-    - tools/cli-playground/Sandbox.Dockerfile*
-    - tools/cli-playground/shell.sh
-    - tools/cli-playground/infra/compose.production.yml
-    - tools/cli-playground/pyproject.toml
-    - tools/cli-playground/infra/deploy.sh
-    - tools/cli-playground/infra/playground_infra/installation.py
-    - .github/workflows/cli-playground-release.yml
-    - .github/workflows/build-runtime-image.yml
-    - infra/host/submit-release.sh
-    - infra/host/operation.sh
-    - pyproject.toml
-    - uv.lock
-    - .python-version
-    - .dockerignore
+      - tools/cli-playground/src/playground/**
+      - tools/cli-playground/frontend/**
+      - tools/cli-playground/pyproject.toml
+      - tools/cli-playground/infra/Playground.Dockerfile*
+      - tools/cli-playground/infra/compose.production.yml
+      - tools/cli-playground/infra/deploy.sh
+      - tools/cli-playground/infra/routes.yml
+      - .github/workflows/cli-playground-release.yml
+      - .github/workflows/build-runtime-image.yml
+      - pyproject.toml
+      - uv.lock
+      - .python-version
+      - .dockerignore
   workflow_dispatch: {}
 permissions: {}
+concurrency:
+  group: clis-production
+  queue: max
+  cancel-in-progress: false
 jobs:
-  gateway:
+  source:
+    name: 📥 Select current master
+    if: ${{ github.ref == 'refs/heads/master' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.revision.outputs.sha }}
+    steps:
+      - name: 📥 Check out current master
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: master
+          persist-credentials: false
+      - name: 🔎 Record the source commit
+        id: revision
+        run: printf 'sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  build:
+    needs: source
     uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
     with:
       component: playground-gateway
-      revision: ${{ github.sha }}
-    permissions:
-      contents: read
-      packages: write
-  sandbox:
-    uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
-    with:
-      component: playground-sandbox
-      revision: ${{ github.sha }}
+      revision: ${{ needs.source.outputs.sha }}
     permissions:
       contents: read
       packages: write
   deploy:
-    name: Deploy playground
-    needs: [gateway, sandbox]
+    name: 🚀 Update Playground with Compose
+    needs: [source, build]
     if: ${{ github.ref == 'refs/heads/master' && vars.DEPLOYMENT_ACCEPTANCE_PASSED == 'true' && vars.BOXIE_BACKUP_RESTORE_VERIFIED == 'true' && (github.event_name != 'push' || vars.PLAYGROUND_AUTO_DEPLOY == 'true') }}
     environment: playground
     runs-on: ubuntu-24.04
     timeout-minutes: 25
-    concurrency:
-      group: clis-production
-      queue: max
-      cancel-in-progress: false
     permissions:
       contents: read
       packages: read
     steps:
-    - name: Check out reviewed deployment source
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      with:
-        ref: ${{ github.sha }}
-        persist-credentials: false
-        fetch-depth: 0
-    - name: Copy release and run bounded host operation
-      env:
-        GATEWAY_IMAGE: ${{ needs.gateway.outputs.image }}
-        SANDBOX_IMAGE: ${{ needs.sandbox.outputs.image }}
-        GATEWAY_SOURCE_SHA: ${{ needs.gateway.outputs.source_sha }}
-        SANDBOX_SOURCE_SHA: ${{ needs.sandbox.outputs.source_sha }}
-        DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
-        DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-        DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-        GHCR_TOKEN: ${{ github.token }}
-      run: |
-        set -euo pipefail
-        umask 077
-        run="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-        [[ $run =~ ^[0-9]+-[0-9]+$ && $GITHUB_SHA =~ ^[a-f0-9]{40}$ ]]
-        [[ $GATEWAY_SOURCE_SHA == "$GITHUB_SHA" && $SANDBOX_SOURCE_SHA == "$GITHUB_SHA" ]]
-        private=$(mktemp -d)
-        trap 'rm -rf "$private"' EXIT
-        current=$(bash infra/host/submit-release.sh playground --current)
-        [[ $current =~ ^[a-f0-9]{40}$ ]]
-        if git merge-base --is-ancestor "$GITHUB_SHA" "$current"; then
-            echo 'Release superseded by a newer successful deployment.'
-            exit 0
-        fi
-        git merge-base --is-ancestor "$current" "$GITHUB_SHA" || { echo 'Refusing unrelated release history.' >&2; exit 1; }
-        selection=$(python3 tools/boxie/infra/boxie_infra/release_selection.py playground "$current")
-        if [[ $selection != *runtime=true* && $selection != *sandbox=true* ]]; then
-            echo 'No runtime changes since the successful deployment.'
-            exit 0
-        fi
-        [[ $selection == *runtime=true* ]] || GATEWAY_IMAGE=
-        [[ $selection == *sandbox=true* ]] || SANDBOX_IMAGE=
-        mkdir -p "$private/payload/tools/cli-playground"
-        cp -a tools/cli-playground/infra "$private/payload/tools/cli-playground/infra"
-        printf '%s\n' "$GITHUB_SHA" > "$private/payload/revision"
-        printf '%s\n' "$current" > "$private/payload/expected-revision"
-        if [[ -n $GATEWAY_IMAGE ]]; then
-            touch "$private/payload/gateway.changed"
-        else
-            GATEWAY_IMAGE=$(bash infra/host/submit-release.sh playground --gateway-image)
-        fi
-        [[ $GATEWAY_IMAGE =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
-        printf 'PLAYGROUND_IMAGE=%s\n' "$GATEWAY_IMAGE" > "$private/payload/image.env"
-        if [[ -n $SANDBOX_IMAGE ]]; then
-            [[ $SANDBOX_IMAGE =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
-            boxie=$(bash infra/host/submit-release.sh playground --boxie-revision)
-            [[ $boxie =~ ^[a-f0-9]{40}$ ]]
-            printf '%s\n' "$boxie" > "$private/payload/expected-boxie-revision"
-            touch "$private/payload/sandbox.changed"
-        else
-            SANDBOX_IMAGE=$(bash infra/host/submit-release.sh playground --sandbox-image)
-        fi
-        [[ $SANDBOX_IMAGE =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
-        printf 'PLAYGROUND_SANDBOX_IMAGE=%s\n' "$SANDBOX_IMAGE" >> "$private/payload/image.env"
-        # The token is restricted to package reads and never appears in the remote command.
-        mkdir "$private/payload/registry"
-        printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$(printf '%s:%s' "$GITHUB_ACTOR" "$GHCR_TOKEN" | base64 -w0)" > "$private/payload/registry/config.json"
-        bash infra/host/submit-release.sh playground "$private/payload"
+      - name: 📥 Check out the built source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - name: 🚀 Copy gateway files and run Compose
+        env:
+          SOURCE_SHA: ${{ needs.source.outputs.sha }}
+          BUILT_SHA: ${{ needs.build.outputs.source_sha }}
+          GATEWAY_IMAGE: ${{ needs.build.outputs.image }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ $SOURCE_SHA =~ ^[a-f0-9]{40}$ && $BUILT_SHA == "$SOURCE_SHA" ]]
+          [[ $(git rev-parse HEAD) == "$SOURCE_SHA" ]]
+          [[ $GATEWAY_IMAGE =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
+          [[ $DEPLOY_HOST =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+$ ]]
+          [[ $GITHUB_RUN_ID =~ ^[0-9]+$ && $GITHUB_RUN_ATTEMPT =~ ^[0-9]+$ ]]
+          private=$(mktemp -d)
+          trap 'rm -rf "$private"' EXIT
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$private/key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$private/known_hosts"
+          cat > "$private/config" <<SSH
+          Host deployment
+            HostName $DEPLOY_HOST
+            User root
+            IdentityFile $private/key
+            IdentitiesOnly yes
+            UserKnownHostsFile $private/known_hosts
+            StrictHostKeyChecking yes
+            BatchMode yes
+            ConnectTimeout 15
+          SSH
+          remote="/run/clis-playground-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          ssh -F "$private/config" deployment "install -d -m 0700 /opt/clis/playground $remote"
+          scp -F "$private/config" -r tools/cli-playground/infra/. deployment:/opt/clis/playground/
+          sandbox=$(ssh -F "$private/config" deployment "sed -n 's/^PLAYGROUND_SANDBOX_IMAGE=//p' /etc/clis/playground-image.env")
+          [[ $sandbox =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
+          printf 'PLAYGROUND_IMAGE=%s\nPLAYGROUND_SANDBOX_IMAGE=%s\n' "$GATEWAY_IMAGE" "$sandbox" > "$private/image.env"
+          mkdir "$private/registry"
+          printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$(printf '%s:%s' "$GITHUB_ACTOR" "$GHCR_TOKEN" | base64 -w0)" > "$private/registry/config.json"
+          scp -F "$private/config" "$private/image.env" deployment:"$remote/image.env"
+          scp -F "$private/config" -r "$private/registry" deployment:"$remote/registry"
+          ssh -F "$private/config" deployment "set -e; trap 'rm -rf $remote' EXIT; install -m 0600 $remote/image.env /etc/clis/playground-image.env; DOCKER_CONFIG=$remote/registry bash /opt/clis/playground/deploy.sh"

@@ -105,6 +105,12 @@ def test_cloud_init_contains_only_immutable_first_boot_files() -> None:
     assert "/usr/local/sbin/clis-storage-guard" in files
 
 
+def test_bootstrap_prepares_fixed_compose_directories() -> None:
+    bootstrap = (ROOT / "infra/host/bootstrap.sh").read_text()
+    assert "/opt/clis/boxie /opt/clis/playground" in bootstrap
+    assert "/opt/clis/releases" not in bootstrap
+
+
 @pulumi.runtime.test  # type: ignore[untyped-decorator]
 async def test_host_exposes_private_ssh_output_and_attachment() -> None:
     from host_infra.host import HostConfig, provision_resources

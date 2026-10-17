@@ -1,94 +1,114 @@
 name: 🚀 Boxie runtime release
 'on':
   push:
-    branches:
-    - master
+    branches: [master]
     paths:
-    - tools/boxie/src/**
-    - tools/boxie/alembic/**
-    - tools/boxie/pyproject.toml
-    - tools/boxie/infra/boxie_infra/smoke.py
-    - tools/boxie/infra/boxie_infra/terminal.py
-    - tools/boxie/infra/Runtime.Dockerfile*
-    - tools/boxie/infra/compose.production.yml
-    - tools/boxie/infra/compose.operations.yml
-    - tools/boxie/infra/compose.observability.yml
-    - tools/boxie/infra/deploy.sh
-    - .github/workflows/boxie-release.yml
-    - .github/workflows/build-runtime-image.yml
-    - infra/host/submit-release.sh
-    - infra/host/operation.sh
-    - pyproject.toml
-    - uv.lock
-    - .python-version
-    - .dockerignore
+      - tools/boxie/src/**
+      - tools/boxie/alembic/**
+      - tools/boxie/pyproject.toml
+      - tools/boxie/infra/Runtime.Dockerfile*
+      - tools/boxie/infra/compose.production.yml
+      - tools/boxie/infra/compose.operations.yml
+      - tools/boxie/infra/compose.observability.yml
+      - tools/boxie/infra/deploy.sh
+      - tools/boxie/infra/boxie_infra/smoke.py
+      - tools/boxie/infra/boxie_infra/terminal.py
+      - .github/workflows/boxie-release.yml
+      - .github/workflows/build-runtime-image.yml
+      - pyproject.toml
+      - uv.lock
+      - .python-version
+      - .dockerignore
   workflow_dispatch: {}
 permissions: {}
+concurrency:
+  group: clis-production
+  queue: max
+  cancel-in-progress: false
 jobs:
+  source:
+    name: 📥 Select current master
+    if: ${{ github.ref == 'refs/heads/master' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.revision.outputs.sha }}
+    steps:
+      - name: 📥 Check out current master
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: master
+          persist-credentials: false
+      - name: 🔎 Record the source commit
+        id: revision
+        run: printf 'sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   build:
+    needs: source
     uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
     with:
       component: boxie
-      revision: ${{ github.sha }}
+      revision: ${{ needs.source.outputs.sha }}
     permissions:
       contents: read
       packages: write
   deploy:
-    name: Deploy boxie
-    needs: build
+    name: 🚀 Update Boxie with Compose
+    needs: [source, build]
     if: ${{ github.ref == 'refs/heads/master' && vars.DEPLOYMENT_ACCEPTANCE_PASSED == 'true' && vars.BOXIE_BACKUP_RESTORE_VERIFIED == 'true' && (github.event_name != 'push' || vars.BOXIE_AUTO_DEPLOY == 'true') }}
     environment: boxie
     runs-on: ubuntu-24.04
     timeout-minutes: 25
-    concurrency:
-      group: clis-production
-      queue: max
-      cancel-in-progress: false
     permissions:
       contents: read
       packages: read
     steps:
-    - name: Check out reviewed deployment source
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      with:
-        ref: ${{ github.sha }}
-        persist-credentials: false
-        fetch-depth: 0
-    - name: Copy release and run bounded host operation
-      env:
-        RUNTIME_IMAGE: ${{ needs.build.outputs.image }}
-        SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
-        DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
-        DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-        DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-        GHCR_TOKEN: ${{ github.token }}
-      run: |
-        set -euo pipefail
-        umask 077
-        run="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-        [[ $run =~ ^[0-9]+-[0-9]+$ && $GITHUB_SHA =~ ^[a-f0-9]{40}$ ]]
-        [[ $SOURCE_SHA == "$GITHUB_SHA" ]]
-        private=$(mktemp -d)
-        trap 'rm -rf "$private"' EXIT
-        current=$(bash infra/host/submit-release.sh boxie --current)
-        [[ $current =~ ^[a-f0-9]{40}$ ]]
-        if git merge-base --is-ancestor "$GITHUB_SHA" "$current"; then
-            echo 'Release superseded by a newer successful deployment.'
-            exit 0
-        fi
-        git merge-base --is-ancestor "$current" "$GITHUB_SHA" || { echo 'Refusing unrelated release history.' >&2; exit 1; }
-        selection=$(python3 tools/boxie/infra/boxie_infra/release_selection.py boxie "$current")
-        if [[ $selection != *runtime=true* && $selection != *sandbox=true* ]]; then
-            echo 'No runtime changes since the successful deployment.'
-            exit 0
-        fi
-        mkdir -p "$private/payload/tools/boxie"
-        cp -a tools/boxie/infra "$private/payload/tools/boxie/infra"
-        printf '%s\n' "$GITHUB_SHA" > "$private/payload/revision"
-        printf '%s\n' "$current" > "$private/payload/expected-revision"
-        [[ $RUNTIME_IMAGE =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
-        printf 'BOXIE_RUNTIME_IMAGE=%s\n' "$RUNTIME_IMAGE" > "$private/payload/image.env"
-        # The token is restricted to package reads and never appears in the remote command.
-        mkdir "$private/payload/registry"
-        printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$(printf '%s:%s' "$GITHUB_ACTOR" "$GHCR_TOKEN" | base64 -w0)" > "$private/payload/registry/config.json"
-        bash infra/host/submit-release.sh boxie "$private/payload"
+      - name: 📥 Check out the built source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - name: 🚀 Copy Boxie files and run Compose
+        env:
+          SOURCE_SHA: ${{ needs.source.outputs.sha }}
+          BUILT_SHA: ${{ needs.build.outputs.source_sha }}
+          RUNTIME_IMAGE: ${{ needs.build.outputs.image }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ $SOURCE_SHA =~ ^[a-f0-9]{40}$ && $BUILT_SHA == "$SOURCE_SHA" ]]
+          [[ $(git rev-parse HEAD) == "$SOURCE_SHA" ]]
+          [[ $RUNTIME_IMAGE =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
+          [[ $DEPLOY_HOST =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+$ ]]
+          [[ $GITHUB_RUN_ID =~ ^[0-9]+$ && $GITHUB_RUN_ATTEMPT =~ ^[0-9]+$ ]]
+          private=$(mktemp -d)
+          trap 'rm -rf "$private"' EXIT
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$private/key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$private/known_hosts"
+          cat > "$private/config" <<SSH
+          Host deployment
+            HostName $DEPLOY_HOST
+            User root
+            IdentityFile $private/key
+            IdentitiesOnly yes
+            UserKnownHostsFile $private/known_hosts
+            StrictHostKeyChecking yes
+            BatchMode yes
+            ConnectTimeout 15
+          SSH
+          remote="/run/clis-boxie-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          ssh -F "$private/config" deployment "install -d -m 0700 /opt/clis/boxie $remote"
+          scp -F "$private/config" -r tools/boxie/infra/. deployment:/opt/clis/boxie/
+          collector=$(ssh -F "$private/config" deployment "sed -n 's/^OBS_COLLECTOR_IMAGE=//p' /etc/clis/boxie-image.env")
+          [[ $collector =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
+          printf 'BOXIE_RUNTIME_IMAGE=%s\nOBS_COLLECTOR_IMAGE=%s\n' "$RUNTIME_IMAGE" "$collector" > "$private/image.env"
+          mkdir "$private/registry"
+          printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$(printf '%s:%s' "$GITHUB_ACTOR" "$GHCR_TOKEN" | base64 -w0)" > "$private/registry/config.json"
+          scp -F "$private/config" "$private/image.env" deployment:"$remote/image.env"
+          scp -F "$private/config" -r "$private/registry" deployment:"$remote/registry"
+          ssh -F "$private/config" deployment "set -e; trap 'rm -rf $remote' EXIT; install -m 0600 $remote/image.env /etc/clis/boxie-image.env; DOCKER_CONFIG=$remote/registry bash /opt/clis/boxie/deploy.sh $SOURCE_SHA"

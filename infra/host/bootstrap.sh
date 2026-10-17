@@ -55,7 +55,7 @@ else
 fi
 /usr/local/sbin/clis-storage-guard
 install -d -m 0700 /etc/clis /srv/clis/docker /srv/clis/containerd
-install -d -m 0755 /opt/clis/releases /srv/clis/boxie /srv/clis/playground
+install -d -m 0755 /opt/clis/boxie /opt/clis/playground /srv/clis/boxie /srv/clis/playground
 install -d -m 0755 /etc/docker /etc/containerd \
     /etc/systemd/system/docker.service.d /etc/systemd/system/containerd.service.d
 python3 - <<'PYTHON'

@@ -1,4 +1,4 @@
-"""Workflow contracts for privileged setup and ordinary runtime deployments."""
+"""Workflow contracts for privileged setup and ordinary Compose releases."""
 
 import os
 import subprocess
@@ -10,96 +10,91 @@ import pytest
 import yaml
 
 WORKFLOWS = Path(__file__).resolve().parents[3] / ".github/workflows"
-DEPLOYMENT_SECRETS = {
-    "PLAYGROUND_DEPLOY_TOKEN",
-    "PULUMI_CONFIG_PASSPHRASE",
-    "R2_ACCESS_KEY_ID",
-    "R2_SECRET_ACCESS_KEY",
-    "CLOUDFLARE_DNS_API_TOKEN",
-}
+QUEUE = {"group": "clis-production", "queue": "max", "cancel-in-progress": "false"}
 
 
 def workflow(name: str) -> dict[str, Any]:
-    # BaseLoader preserves the Actions 'on' key and expressions as strings.
     result: dict[str, Any] = yaml.load(
         (WORKFLOWS / f"cli-playground-{name}.yml").read_text(), Loader=yaml.BaseLoader
     )
     return result
 
 
-def test_setup_builds_all_images_from_one_revision_before_provisioning() -> None:
+def test_setup_queues_before_selecting_master_and_builds_all_images() -> None:
     setup = workflow("setup")
     assert setup["on"]["workflow_dispatch"] == {}
+    assert setup["concurrency"] == QUEUE
     jobs = setup["jobs"]
-    components = {
+    assert jobs["source"]["steps"][0]["with"]["ref"] == "master"
+    for name, component in {
         "boxie": "boxie",
         "gateway": "playground-gateway",
         "sandbox": "playground-sandbox",
         "collector": "collector",
-    }
-    for name, component in components.items():
+    }.items():
         job = jobs[name]
         assert job["uses"] == "./.github/workflows/build-runtime-image.yml"
-        assert job["with"] == {"component": component, "revision": "${{ github.sha }}"}
-        assert "DEPLOYMENT_ACCEPTANCE_PASSED" not in str(job)
-        assert "BOXIE_BACKUP_RESTORE_VERIFIED" not in str(job)
-    provision = jobs["provision"]
-    assert set(provision["needs"]) == set(components)
-    assert all(f"needs.{name}.outputs.source_sha" in str(provision) for name in components)
-    assert all(f"needs.{name}.outputs.image" in str(provision) for name in components)
+        assert job["needs"] == "source"
+        assert job["with"] == {
+            "component": component,
+            "revision": "${{ needs.source.outputs.sha }}",
+        }
+    assert set(jobs["provision"]["needs"]) == {"source", "boxie", "gateway", "sandbox", "collector"}
+    assert "concurrency" not in jobs["provision"]
 
 
-def test_reusable_builder_maps_fixed_components_and_has_no_deployment_secrets() -> None:
+def test_reusable_builder_uses_fixed_components_without_deployment_secrets() -> None:
     builder = yaml.load((WORKFLOWS / "build-runtime-image.yml").read_text(), Loader=yaml.BaseLoader)
-    assert set(builder["on"]) == {"workflow_call"}
-    assert set(builder["on"]["workflow_call"]["outputs"]) == {"image", "source_sha"}
     job = builder["jobs"]["build"]
+    assert set(builder["on"]) == {"workflow_call"}
     assert job["permissions"] == {"contents": "read", "packages": "write"}
-    assert "refs/heads/master" in job["if"]
-    assert "linux/amd64" in str(job)
-    assert "observability/collector" in str(job)
     assert "Runtime.Dockerfile" in str(job)
     assert "Playground.Dockerfile" in str(job)
     assert "Sandbox.Dockerfile" in str(job)
-    assert not any(secret in str(job) for secret in DEPLOYMENT_SECRETS)
+    assert "observability/collector" in str(job)
+    assert "secrets." not in str(job)
 
 
-@pytest.mark.parametrize("app", ["boxie", "playground"])
-def test_application_release_uses_native_ssh_without_cloud_state(app: str) -> None:
-    path = WORKFLOWS / ("boxie-release.yml" if app == "boxie" else "cli-playground-release.yml")
-    release = yaml.load(path.read_text(), Loader=yaml.BaseLoader)
+@pytest.mark.parametrize(
+    "filename,app",
+    [
+        ("boxie-release.yml", "boxie"),
+        ("cli-playground-release.yml", "playground"),
+        ("cli-playground-sandbox-release.yml", "playground"),
+    ],
+)
+def test_release_uses_one_queue_current_master_and_direct_ssh(filename: str, app: str) -> None:
+    release = yaml.load((WORKFLOWS / filename).read_text(), Loader=yaml.BaseLoader)
+    assert release["concurrency"] == QUEUE
+    assert release["jobs"]["source"]["steps"][0]["with"]["ref"] == "master"
     deployment = release["jobs"]["deploy"]
     assert deployment["environment"] == app
-    assert "github.ref == 'refs/heads/master'" in deployment["if"]
-    assert deployment["concurrency"] == {
-        "group": "clis-production",
-        "queue": "max",
-        "cancel-in-progress": "false",
-    }
-    text = str(deployment)
-    for forbidden in (
-        "PULUMI",
-        "R2_",
-        "AWS_",
-        "HCLOUD",
-        "CLOUDFLARE",
-        "playground_infra.ci deploy",
-    ):
-        assert forbidden not in text
-    commands = "\n".join(step.get("run", "") for step in deployment["steps"])
-    for required in (
-        "infra/host/submit-release.sh",
-        "git merge-base --is-ancestor",
-        "expected-revision",
-    ):
-        assert required in commands
+    assert "concurrency" not in deployment
     gate = deployment["if"]
     assert "DEPLOYMENT_ACCEPTANCE_PASSED" in gate
     assert "BOXIE_BACKUP_RESTORE_VERIFIED" in gate
     assert "AUTO_DEPLOY" in gate
+    commands = "\n".join(step.get("run", "") for step in deployment["steps"])
+    assert "ssh -F" in commands
+    assert "scp -F" in commands
+    assert "submit-release.sh" not in commands
+    assert "release_selection.py" not in commands
+    assert "expected-revision" not in commands
+    assert "PULUMI_" not in str(deployment)
+    assert "R2_" not in str(deployment)
+    assert "HCLOUD" not in str(deployment)
     assert not any(
         path.startswith(("coreutils/", "utils/")) for path in release["on"]["push"]["paths"]
     )
+
+
+def test_gateway_release_does_not_build_sandbox() -> None:
+    gateway = workflow("release")
+    assert "sandbox" not in gateway["jobs"]
+    assert "Sandbox.Dockerfile" not in str(gateway["on"]["push"]["paths"])
+    sandbox = workflow("sandbox-release")
+    assert "Sandbox.Dockerfile" in str(sandbox["on"]["push"]["paths"])
+    assert "fixtures" in str(sandbox["on"]["push"]["paths"])
 
 
 def test_only_manual_setup_can_provision_cloud_resources() -> None:
@@ -107,28 +102,24 @@ def test_only_manual_setup_can_provision_cloud_resources() -> None:
     assert set(setup["on"]) == {"workflow_dispatch"}
     provision = setup["jobs"]["provision"]
     assert provision["environment"] == "platform"
-    assert provision["concurrency"] == {
-        "group": "clis-production",
-        "queue": "max",
-        "cancel-in-progress": "false",
-    }
     assert {"HCLOUD_TOKEN", "CLOUDFLARE_API_TOKEN"} <= set(provision["env"])
     assert any(
         step.get("working-directory") == "infra/environments/single-host"
         for step in provision["steps"]
     )
+    commands = "\n".join(step.get("run", "") for step in provision["steps"])
+    assert commands.index("pulumi up") < commands.index("render_inputs")
+    assert "cloud-init status --wait" in commands
+    assert "install.sh" in commands
+    assert "submit-release.sh" not in commands
 
 
-def test_setup_applies_infrastructure_before_private_ssh_installation() -> None:
-    steps = workflow("setup")["jobs"]["provision"]["steps"]
-    scripts = "\n".join(step.get("run", "") for step in steps)
-    assert "pulumi up" in scripts
-    assert "render_inputs" in scripts
-    assert "submit-release.sh setup" in scripts
-    assert scripts.index("pulumi up") < scripts.index("render_inputs")
-    assert scripts.index("render_inputs") < scripts.index("submit-release.sh setup")
-    assert "config set registryConfig" not in scripts
-    assert "config set cloudflareDnsApiToken" not in scripts
+def test_setup_pulls_all_images_before_starting_boxie() -> None:
+    installer = (WORKFLOWS.parent.parent / "infra/environments/single-host/install.sh").read_text()
+    assert "PLAYGROUND_SANDBOX_IMAGE" in installer
+    assert installer.index('docker pull "$image"') < installer.index(
+        "bash /opt/clis/boxie/install.sh"
+    )
 
 
 def test_preview_controller_keeps_privileged_code_on_the_default_branch() -> None:
@@ -171,12 +162,13 @@ def test_infrastructure_checks_require_trusted_dispatch_or_opted_in_schedule() -
     assert protected["needs"] == "revision"
     assert protected["environment"] == "platform"
     assert protected["permissions"] == {"contents": "read"}
-    assert protected["concurrency"] == {
+    assert check["concurrency"] == {
         "group": "clis-production",
         "queue": "max",
         "cancel-in-progress": "false",
     }
     preview = next(step for step in protected["steps"] if step.get("id") == "preview")
+    assert "concurrency" not in protected
     assert preview["with"]["command"] == "preview"
     assert preview["with"]["upsert"] == "false"
     assert preview["with"]["suppress-outputs"] == "true"
@@ -257,65 +249,6 @@ def test_drift_check_only_previews_refresh_and_preserves_failure_status(
     assert (
         "No drift detected." if exit_code == 0 else "Drift check failed."
     ) in summary.read_text()
-
-
-def test_delayed_release_skips_newer_success_without_copying(tmp_path: Path) -> None:
-    import json
-
-    repository = tmp_path / "repo"
-    repository.mkdir()
-    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-
-    def git(*args: str) -> str:
-        return subprocess.check_output(
-            ["git", "-C", str(repository), *args], env=env, text=True
-        ).strip()
-
-    git("init", "-q")
-    git("config", "user.email", "test@example.com")
-    git("config", "user.name", "Test")
-    git("-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-qm", "older")
-    older = git("rev-parse", "HEAD")
-    git("-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-qm", "newer")
-    newer = git("rev-parse", "HEAD")
-    helper = repository / "infra/host/submit-release.sh"
-    helper.parent.mkdir(parents=True)
-    helper.write_bytes((WORKFLOWS.parent.parent / "infra/host/submit-release.sh").read_bytes())
-    commands = tmp_path / "bin"
-    commands.mkdir()
-    log = tmp_path / "calls"
-    for name in ("ssh", "scp"):
-        executable = commands / name
-        executable.write_text(
-            f'#!{sys.executable}\nimport json, os, sys\nwith open(os.environ["CALLS"], "a") as f: f.write(json.dumps(sys.argv) + "\\n")\nprint(os.environ["CURRENT"])\n'
-        )
-        executable.chmod(0o755)
-    script = workflow("release")["jobs"]["deploy"]["steps"][-1]["run"]
-    result = subprocess.run(
-        ["bash", "-euo", "pipefail", "-c", script],
-        cwd=repository,
-        env={
-            **env,
-            "PATH": str(commands) + ":" + env["PATH"],
-            "CALLS": str(log),
-            "CURRENT": newer,
-            "GITHUB_SHA": older,
-            "GATEWAY_SOURCE_SHA": older,
-            "SANDBOX_SOURCE_SHA": older,
-            "GITHUB_RUN_ID": "1",
-            "GITHUB_RUN_ATTEMPT": "1",
-            "DEPLOY_HOST": "example.com",
-            "DEPLOY_SSH_KEY": "private",
-            "DEPLOY_KNOWN_HOSTS": "known",
-        },
-        text=True,
-        capture_output=True,
-    )
-    assert result.returncode == 0, result.stderr
-    assert "superseded" in result.stdout
-    calls = [json.loads(line) for line in log.read_text().splitlines()]
-    assert len(calls) == 1
-    assert "current/revision" in calls[0][-1]
 
 
 def test_legacy_ssh_transport_has_no_remaining_entrypoints() -> None:

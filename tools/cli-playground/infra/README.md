@@ -1,9 +1,10 @@
 # Playground infrastructure
 
 Use the [shared-host guide](../../../infra/environments/single-host/README.md) for
-setup, SSH credential handoff, release gates and recovery. Routine releases update
-only the gateway. A sandbox-image update coordinates its approved Boxie profile
-and restarts the existing Boxie image before updating the gateway.
+setup, SSH credential handoff, release gates and failure inspection. Routine
+gateway releases leave the proxy and Boxie alone. A separate sandbox release
+updates its approved Boxie profile digest and recreates the orchestrator with the
+current Boxie image.
 
 ## Independent local unit
 

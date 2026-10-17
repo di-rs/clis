@@ -52,9 +52,7 @@ def update_profile(root: Path, source: Path) -> None:
     profiles = json.loads(profiles_path.read_text()) if profiles_path.exists() else {}
     profile = profiles.get("playground")
     if profile is None:
-        profile = json.loads(
-            (source / "tools/cli-playground/infra/profiles/playground.json").read_text()
-        )["playground"]
+        profile = json.loads((source / "profiles/playground.json").read_text())["playground"]
     profile["image_digest"] = os.environ["PLAYGROUND_SANDBOX_IMAGE"]
     profiles["playground"] = profile
     with tempfile.NamedTemporaryFile(mode="w", dir=profiles_path.parent, delete=False) as output:

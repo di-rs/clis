@@ -11,6 +11,10 @@ on:
     - cron: '41 5 * * 1'
 
 permissions: {}
+concurrency:
+  group: clis-production
+  queue: max
+  cancel-in-progress: false
 
 jobs:
   revision:
@@ -52,10 +56,6 @@ jobs:
     environment: platform
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    concurrency:
-      group: clis-production
-      queue: max
-      cancel-in-progress: false
     permissions:
       contents: read
     env:

@@ -1,4 +1,4 @@
-"""A gateway release must leave the proxy and other Compose projects alone."""
+"""Playground gateway and sandbox updates at the command boundary."""
 
 import json
 import os
@@ -21,32 +21,23 @@ def test_gateway_release_targets_only_gateway(tmp_path: Path) -> None:
     config = tmp_path / "config"
     config.mkdir()
     (config / "playground.env").write_text("SETTING=value\n")
-    release = tmp_path / "release"
-    release.mkdir()
-    (release / "gateway.changed").touch()
-    (release / "revision").write_text("a" * 40)
-    (release / "image.env").write_text(
-        "PLAYGROUND_IMAGE=ghcr.io/test/playground@sha256:" + "a" * 64 + "\n"
-    )
-    environment = {
-        **os.environ,
-        "PATH": str(tmp_path) + ":" + os.environ["PATH"],
-        "CALLS": str(log),
-        "CLIS_CONFIG_DIR": str(config),
-    }
-    command = ["bash", str(ROOT / "tools/cli-playground/infra/deploy.sh")]
-    preflight = subprocess.run(
-        [*command, "preflight", str(release)], env=environment, capture_output=True, text=True
-    )
-    assert preflight.returncode == 0, preflight.stderr
-    assert not any(
-        "up" in call for call in [json.loads(line) for line in log.read_text().splitlines()]
-    )
+    image = config / "playground-image.env"
+    image.write_text("PLAYGROUND_IMAGE=ghcr.io/test/gateway@sha256:" + "a" * 64 + "\n")
+    owner = tmp_path / "owner"
+    owner.mkdir()
     result = subprocess.run(
-        [*command, "apply", str(release)], env=environment, capture_output=True, text=True
+        ["bash", str(ROOT / "tools/cli-playground/infra/deploy.sh")],
+        env={
+            **os.environ,
+            "PATH": str(tmp_path) + ":" + os.environ["PATH"],
+            "CALLS": str(log),
+            "CLIS_CONFIG_DIR": str(config),
+            "CLIS_PLAYGROUND_DIR": str(owner),
+        },
+        capture_output=True,
+        text=True,
     )
     assert result.returncode == 0, result.stderr
-    assert (release / "playground.env").read_text() == "SETTING=value\n"
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     updates = [call for call in calls if "up" in call]
     assert len(updates) == 1
@@ -58,69 +49,55 @@ def test_gateway_release_targets_only_gateway(tmp_path: Path) -> None:
 def test_sandbox_update_preserves_boxie_image_and_custom_profile(tmp_path: Path) -> None:
     import shutil
 
-    release = tmp_path / "release"
-    owner = release / "tools/cli-playground/infra/playground_infra"
-    owner.mkdir(parents=True)
-    shutil.copy(ROOT / "tools/cli-playground/infra/playground_infra/installation.py", owner)
-    (release / "revision").write_text("a" * 40)
-    (release / "sandbox.changed").touch()
-    (release / "expected-boxie-revision").write_text("b" * 40)
-    config = tmp_path / "config/boxie"
-    config.mkdir(parents=True)
+    config = tmp_path / "config"
+    boxie = config / "boxie"
+    boxie.mkdir(parents=True)
     profile = {
         "playground": {"image_digest": "old", "commands": [["custom"]], "env": {"TERM": ["custom"]}}
     }
-    (config / "profiles.json").write_text(json.dumps(profile))
-    current = tmp_path / "state/boxie/current"
-    deploy = current / "tools/boxie/infra/deploy.sh"
-    deploy.parent.mkdir(parents=True)
-    deploy.write_text('printf "%s" "$BOXIE_RUNTIME_IMAGE" > "$IMAGE_LOG"\n')
-    image = "ghcr.io/test/boxie@sha256:" + "b" * 64
-    (current / "image.env").write_text("BOXIE_RUNTIME_IMAGE=" + image + "\n")
-    (current / "revision").write_text("b" * 40)
+    (boxie / "profiles.json").write_text(json.dumps(profile))
+    (config / "boxie.env").write_text("")
+    boxie_image = "ghcr.io/test/boxie@sha256:" + "b" * 64
+    (config / "boxie-image.env").write_text("BOXIE_RUNTIME_IMAGE=" + boxie_image + "\n")
+    owner = tmp_path / "owner"
+    (owner / "profiles").mkdir(parents=True)
+    (owner / "playground_infra").mkdir()
+    shutil.copy(
+        ROOT / "tools/cli-playground/infra/playground_infra/installation.py",
+        owner / "playground_infra/installation.py",
+    )
+    (owner / "profiles/playground.json").write_text(json.dumps(profile))
     docker = tmp_path / "docker"
-    docker.write_text('#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$DOCKER_LOG"\n')
+    docker.write_text(
+        f"#!{sys.executable}\nimport json, os, sys\nwith open(os.environ['CALLS'], 'a') as f: f.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+    )
     docker.chmod(0o755)
-    gateway = tmp_path / "state/playground/current"
-    gateway.mkdir(parents=True)
-    (gateway / "playground.env").write_text("SETTING=saved\n")
-    (config.parent / "playground.env").write_text("SETTING=changed\n")
-    (release / "image.env").write_text(
-        "PLAYGROUND_IMAGE=ghcr.io/test/gateway@sha256:" + "d" * 64 + "\n"
-    )
+    log = tmp_path / "calls"
     digest = "ghcr.io/test/sandbox@sha256:" + "c" * 64
-    command = ["bash", str(ROOT / "tools/cli-playground/infra/deploy.sh")]
-    environment = {
-        **os.environ,
-        "DOCKER_LOG": str(tmp_path / "docker.log"),
-        "PATH": str(tmp_path) + ":" + os.environ["PATH"],
-        "CLIS_CONFIG_DIR": str(config.parent),
-        "CLIS_STATE_DIR": str(tmp_path / "state"),
-        "PLAYGROUND_SANDBOX_IMAGE": digest,
-        "IMAGE_LOG": str(tmp_path / "image"),
-    }
-    preflight = subprocess.run(
-        [*command, "preflight", str(release)], env=environment, text=True, capture_output=True
-    )
-    assert preflight.returncode == 0, preflight.stderr
-    assert json.loads((config / "profiles.json").read_text()) == profile
     result = subprocess.run(
-        [*command, "apply", str(release)], env=environment, text=True, capture_output=True
+        ["bash", str(ROOT / "tools/cli-playground/infra/sandbox-release.sh"), digest],
+        env={
+            **os.environ,
+            "PATH": str(tmp_path) + ":" + os.environ["PATH"],
+            "CALLS": str(log),
+            "CLIS_CONFIG_DIR": str(config),
+            "CLIS_PLAYGROUND_DIR": str(owner),
+            "CLIS_BOXIE_DIR": str(tmp_path / "boxie-owner"),
+        },
+        capture_output=True,
+        text=True,
     )
     assert result.returncode == 0, result.stderr
-    assert (tmp_path / "image").read_text() == image
     profile["playground"]["image_digest"] = digest
-    assert json.loads((config / "profiles.json").read_text()) == profile
-
-    assert (release / "playground.env").read_text() == "SETTING=saved\n"
-    assert "compose" not in (tmp_path / "docker.log").read_text()
-    (release / "recovery").touch()
-    result = subprocess.run(
-        [*command, "apply", str(release)], env=environment, text=True, capture_output=True
-    )
-    assert result.returncode == 0, result.stderr
-    assert "up -d" in (tmp_path / "docker.log").read_text()
-    assert (release / "playground.env").read_text() == "SETTING=saved\n"
+    assert json.loads((boxie / "profiles.json").read_text()) == profile
+    calls = [json.loads(line) for line in log.read_text().splitlines()]
+    assert any("pull" in call and digest in call for call in calls)
+    updates = [call for call in calls if "up" in call]
+    assert len(updates) == 1
+    assert updates[0][-1] == "orchestrator"
+    assert "--force-recreate" in updates[0]
+    assert not any("gateway" in call or "api" in call for call in calls)
+    assert (config / "boxie-image.env").read_text() == "BOXIE_RUNTIME_IMAGE=" + boxie_image + "\n"
 
 
 def test_readiness_waits_for_public_tls(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

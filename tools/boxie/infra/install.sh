@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# Called under the host lock by the single-host installation.
+# Initialize persistent dependencies and apply the Boxie image.
 set -euo pipefail
-release=$1
-owner="$release/tools/boxie/infra"
+[[ $# == 2 && $2 =~ ^[a-f0-9]{40}$ ]] || exit 2
+source=$1
+revision=$2
+owner=${CLIS_BOXIE_DIR:-/opt/clis/boxie}
 bash "$owner/credentials.sh" /etc/clis/boxie
 bash "$owner/certificates.sh" /etc/clis/tls
 python3 "$owner/boxie_infra/config.py" --output /etc/clis/boxie --data-dir /srv/clis/boxie \
     --installation-id "$(cat /etc/clis/boxie/installation-id)" --host-id "$(cat /etc/clis/boxie/host-id)" --consumer-id playground
 export OBS_JOURNAL_GROUP_GID
 OBS_JOURNAL_GROUP_GID=$(getent group systemd-journal | cut -d: -f3)
-python3 "$owner/boxie_infra/installation.py" "$release"
+python3 "$owner/boxie_infra/installation.py" "$source"
 install -o 472 -g 0 -m 0600 /etc/clis/boxie/grafana-admin /etc/clis/grafana-admin
 chown 65532:65532 /etc/clis/tunnel.json
 chmod 0600 /etc/clis/tunnel.json
@@ -49,8 +51,7 @@ for _attempt in {1..12}; do
 done
 temporal run --rm --no-deps bootstrap
 # Migration and application startup are shared with routine Boxie deployment.
-bash "$owner/deploy.sh" preflight "$release"
-bash "$owner/deploy.sh" apply "$release"
+bash "$owner/deploy.sh" "$revision"
 if [[ ! -d /etc/clis/grafana-plugins ]]; then
     plugin=$(mktemp -d)
     trap 'rm -rf "$plugin"' EXIT
@@ -64,4 +65,4 @@ if [[ ! -d /etc/clis/grafana-plugins ]]; then
 fi
 timeout 180 docker compose --env-file /etc/clis/boxie.env -f "$owner/observability/compose.yml" up -d --no-build --wait --wait-timeout 150
 timeout 180 docker compose --env-file /etc/clis/boxie.env -f "$owner/ingress/compose.yml" run --rm cloudflared tunnel --config /etc/cloudflared/config.yml ingress validate
-timeout 180 docker compose --env-file /etc/clis/boxie.env -f "$owner/ingress/compose.yml" up -d --no-build
+timeout 180 docker compose --env-file /etc/clis/boxie.env -f "$owner/ingress/compose.yml" up -d --no-build --force-recreate cloudflared

@@ -2,50 +2,72 @@ name: ☁️ Single-host platform setup
 'on':
   workflow_dispatch: {}
 permissions: {}
+concurrency:
+  group: clis-production
+  queue: max
+  cancel-in-progress: false
 jobs:
+  source:
+    name: 📥 Select current master
+    if: ${{ github.ref == 'refs/heads/master' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.revision.outputs.sha }}
+    steps:
+      - name: 📥 Check out current master
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: master
+          persist-credentials: false
+      - name: 🔎 Record the source commit
+        id: revision
+        run: printf 'sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   boxie:
+    needs: source
     uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
     with:
       component: boxie
-      revision: ${{ github.sha }}
+      revision: ${{ needs.source.outputs.sha }}
     permissions:
       contents: read
       packages: write
   gateway:
+    needs: source
     uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
     with:
       component: playground-gateway
-      revision: ${{ github.sha }}
+      revision: ${{ needs.source.outputs.sha }}
     permissions:
       contents: read
       packages: write
   sandbox:
+    needs: source
     uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
     with:
       component: playground-sandbox
-      revision: ${{ github.sha }}
+      revision: ${{ needs.source.outputs.sha }}
     permissions:
       contents: read
       packages: write
   collector:
+    needs: source
     uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
     with:
       component: collector
-      revision: ${{ github.sha }}
+      revision: ${{ needs.source.outputs.sha }}
     permissions:
       contents: read
       packages: write
   provision:
-    name: Provision and install the shared host
-    needs: [boxie, gateway, sandbox, collector]
+    name: ☁️ Provision and install the shared host
+    needs: [source, boxie, gateway, sandbox, collector]
     if: ${{ github.ref == 'refs/heads/master' }}
     environment: platform
     runs-on: ubuntu-24.04
     timeout-minutes: 40
-    concurrency:
-      group: clis-production
-      queue: max
-      cancel-in-progress: false
     permissions:
       contents: read
       packages: read
@@ -64,7 +86,7 @@ jobs:
     - name: 📥 Check out reviewed infrastructure source
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
-        ref: ${{ github.sha }}
+        ref: ${{ needs.source.outputs.sha }}
         persist-credentials: 'false'
     - name: 🐍 Set up uv and Python
       uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
@@ -77,8 +99,9 @@ jobs:
       uses: pulumi/setup-pulumi@b374ceb6168550de27c6eba92e01c1a774040e11
       with:
         pulumi-version: 3.268.0
-    - name: Prepare committed installation files
+    - name: 📦 Prepare committed installation files
       env:
+        SOURCE_SHA: ${{ needs.source.outputs.sha }}
         BOXIE_SOURCE_SHA: ${{ needs.boxie.outputs.source_sha }}
         GATEWAY_SOURCE_SHA: ${{ needs.gateway.outputs.source_sha }}
         SANDBOX_SOURCE_SHA: ${{ needs.sandbox.outputs.source_sha }}
@@ -91,20 +114,21 @@ jobs:
         set -euo pipefail
         umask 077
         for source in "$BOXIE_SOURCE_SHA" "$GATEWAY_SOURCE_SHA" "$SANDBOX_SOURCE_SHA" "$COLLECTOR_SOURCE_SHA"; do
-            [[ $source == "$GITHUB_SHA" ]]
+            [[ $source == "$SOURCE_SHA" ]]
         done
+        [[ $(git rev-parse HEAD) == "$SOURCE_SHA" ]]
         mkdir -p .installation/infra/environments .installation/tools/boxie .installation/tools/cli-playground
-        cp -a infra/host .installation/infra/
         cp -a infra/environments/single-host .installation/infra/environments/
         cp -a tools/boxie/infra .installation/tools/boxie/
         cp -a tools/cli-playground/infra .installation/tools/cli-playground/
-        printf '%s\n' "$GITHUB_SHA" > .installation/revision
+        printf '%s\n' "$SOURCE_SHA" > .installation/revision
         for key in BOXIE_RUNTIME_IMAGE PLAYGROUND_IMAGE PLAYGROUND_SANDBOX_IMAGE OBS_COLLECTOR_IMAGE; do
             value=${!key}
             [[ $value =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
-            printf '%s=%s\n' "$key" "$value" >> .installation/image.env
         done
-    - name: Provision shared infrastructure
+        printf 'BOXIE_RUNTIME_IMAGE=%s\nOBS_COLLECTOR_IMAGE=%s\n' "$BOXIE_RUNTIME_IMAGE" "$OBS_COLLECTOR_IMAGE" > .installation/boxie-image.env
+        printf 'PLAYGROUND_IMAGE=%s\nPLAYGROUND_SANDBOX_IMAGE=%s\n' "$PLAYGROUND_IMAGE" "$PLAYGROUND_SANDBOX_IMAGE" > .installation/playground-image.env
+    - name: ☁️ Provision shared infrastructure
       working-directory: infra/environments/single-host
       run: |
         set -euo pipefail
@@ -128,7 +152,7 @@ jobs:
         PYCODE
         pulumi preview --refresh --non-interactive --diff --suppress-outputs
         pulumi up --yes --refresh --non-interactive --suppress-outputs
-    - name: Render private setup inputs and install over pinned SSH
+    - name: 🔐 Render private setup inputs and install over pinned SSH
       env:
         REGISTRY_TOKEN: ${{ github.token }}
       run: |
@@ -175,8 +199,21 @@ jobs:
         PYCODE
         mkdir -m 0700 .installation/registry
         printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$(printf '%s:%s' "$GITHUB_ACTOR" "$REGISTRY_TOKEN" | base64 -w0)" > .installation/registry/config.json
-        DEPLOY_HOST=$(cat "$private/host")
-        DEPLOY_SSH_KEY=$(cat "$private/key")
-        DEPLOY_KNOWN_HOSTS=$(cat "$private/known_hosts")
-        export DEPLOY_HOST DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS
-        bash infra/host/submit-release.sh setup .installation
+        [[ $GITHUB_RUN_ID =~ ^[0-9]+$ && $GITHUB_RUN_ATTEMPT =~ ^[0-9]+$ ]]
+        host=$(cat "$private/host")
+        cat > "$private/config" <<SSH
+        Host deployment
+          HostName $host
+          User root
+          IdentityFile $private/key
+          IdentitiesOnly yes
+          UserKnownHostsFile $private/known_hosts
+          StrictHostKeyChecking yes
+          BatchMode yes
+          ConnectTimeout 15
+        SSH
+        remote="/run/clis-setup-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+        ssh -F "$private/config" deployment 'cloud-init status --wait >/dev/null'
+        ssh -F "$private/config" deployment "install -d -m 0700 $remote"
+        scp -F "$private/config" -r .installation/. deployment:"$remote/"
+        ssh -F "$private/config" deployment "set -e; trap 'rm -rf $remote' EXIT; DOCKER_CONFIG=$remote/registry bash $remote/infra/environments/single-host/install.sh $remote"

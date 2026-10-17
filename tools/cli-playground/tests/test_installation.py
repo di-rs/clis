@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from boxie_infra.installation import render, write_environment
 from playground_infra.installation import render as render_product
+from playground_infra.installation import update_profile
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -85,6 +86,23 @@ def test_environment_replaces_symlink_without_overwriting_target(tmp_path: Path)
     assert target.read_text() == "keep"
     assert not output.is_symlink()
     assert output.stat().st_mode & 0o777 == 0o600
+
+
+def test_profile_seed_reads_fixed_owner_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = tmp_path / "owner"
+    (owner / "profiles").mkdir(parents=True)
+    (owner / "profiles/playground.json").write_text(
+        json.dumps({"playground": {"commands": [["shell"]], "image_digest": "old"}})
+    )
+    config = tmp_path / "config"
+    (config / "boxie").mkdir(parents=True)
+    monkeypatch.setenv("PLAYGROUND_SANDBOX_IMAGE", "new-digest")
+    update_profile(config, owner)
+    assert json.loads((config / "boxie/profiles.json").read_text()) == {
+        "playground": {"commands": [["shell"]], "image_digest": "new-digest"}
+    }
 
 
 def test_boxie_render_does_not_require_product_settings(

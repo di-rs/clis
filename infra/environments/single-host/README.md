@@ -1,26 +1,15 @@
 # Install and operate the shared host
 
-Use this environment to install Boxie and CLI Playground on one protected Hetzner
-host. Pulumi owns the host, persistent disk, DNS and operator Access applications.
-Its Command provider copies the installation and starts a bounded systemd unit.
-Routine releases use direct `scp` and `ssh` in Actions.
-
-Production activation still requires native Linux acceptance and an off-host
-backup/restore rehearsal. Keep `DEPLOYMENT_ACCEPTANCE_PASSED`,
-`BOXIE_BACKUP_RESTORE_VERIFIED`, `BOXIE_AUTO_DEPLOY` and `PLAYGROUND_AUTO_DEPLOY`
-unset until the corresponding evidence exists. The application release workflows
-check the first two gates even for manual runs. See the
-[Boxie runtime requirements](../../../tools/boxie/infra/runtime.md).
+Use this guide to set up Boxie and CLI Playground on one Hetzner server, then
+inspect a failed release. Pulumi creates the host, disk, DNS and operator Access
+applications. The setup workflow copies the Compose projects and starts them.
+Routine releases run over pinned SSH from GitHub Actions.
 
 ## Prepare the platform environment
 
 Create GitHub environments `platform`, `boxie`, `playground` and
-`playground-preview`. Restrict platform and application deployment to `master`;
-use required reviewers where appropriate. Preview jobs run the default-branch
-controller and treat PR binaries as data. Their environment must allow those
-trusted workflow events.
-
-The `platform` environment holds provisioning credentials:
+`playground-preview`. Restrict deployment to `master`. The platform environment
+holds the following provisioning inputs:
 
 | Setting | Purpose |
 | --- | --- |
@@ -28,17 +17,15 @@ The `platform` environment holds provisioning credentials:
 | Secrets `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | Read/write access to the dedicated state bucket |
 | Secret `PULUMI_CONFIG_PASSPHRASE` | Encrypt state secrets; retain it with the state backup |
 | Secret `HCLOUD_TOKEN` | Read/write access to the dedicated Hetzner project |
-| Secret `CLOUDFLARE_API_TOKEN` | Provision DNS, tunnel and Access applications in the selected account/zone |
-| Secret `CLOUDFLARE_DNS_API_TOKEN` | Zone-scoped DNS edit/read access for ACME renewal |
+| Secret `CLOUDFLARE_API_TOKEN` | Provision DNS, tunnel and Access applications |
+| Secret `CLOUDFLARE_DNS_API_TOKEN` | Zone-scoped DNS edit/read access for ACME |
 | Variable `SINGLE_HOST_CONFIG` | Nonsecret JSON configuration below |
 
-Use a dedicated Cloudflare zone where possible: the renewal token can edit other
-records in its zone. Keep the state bucket, passphrase and resource protection
-when recovering failures. Do not recreate an existing installation in a new
-state backend. Import or migrate existing resources explicitly before adopting
-this `clis` Pulumi project.
+The state bucket must exist before setup. Keep its passphrase and backups outside
+the VM. Use a dedicated Cloudflare zone where possible because the ACME token can
+edit records in its zone. Do not create a new Pulumi state for an existing host.
 
-Example `SINGLE_HOST_CONFIG` (replace every placeholder):
+Example `SINGLE_HOST_CONFIG` (replace the placeholders):
 
 ```json
 {
@@ -55,35 +42,31 @@ Example `SINGLE_HOST_CONFIG` (replace every placeholder):
 ```
 
 Optional settings are `sshPublicKey`, `location` (`nbg1` or `fsn1`), `serverType`
-(default `cx33`), `diskSize` (default 80 GiB) and `protect` (default true). SSH
-allows only public-key authentication. Narrow `sshCidrs` only when both operators
-and deployment runners have an allowed egress address. Only SSH, HTTP, HTTPS and
-ICMP are exposed; the Boxie API and Temporal stay on private Docker networks.
+(default `cx33`), `diskSize` (default 80 GiB) and `protect` (default true). The
+host accepts public-key SSH and exposes only SSH, HTTP, HTTPS and ICMP. Boxie and
+Temporal stay on private Docker networks. Narrow `sshCidrs` only if both operators
+and Actions runners can reach the host.
 
-## Run the initial installation
+## Run setup
 
-Publish approved Linux amd64 images for Boxie, the Playground gateway and sandbox,
-and the [journal collector](../../../tools/boxie/infra/observability/README.md).
-Grant this repository Actions access to private GHCR packages. Run
+Grant this repository Actions access to its private GHCR packages. Run
 [Single-host platform setup](../../../.github/workflows/cli-playground-setup.yml)
-from `master`, supplying all four registry-qualified `image@sha256:…` references.
-This manual workflow can create paid resources.
+from `master`. This manual workflow builds Boxie, the Playground gateway and
+sandbox, and the collector from current `master`; it does not ask for image
+digests. It then runs Pulumi, waits for cloud-init, copies the committed files
+and private settings over SSH, and starts the Compose projects. It can create
+paid cloud resources.
 
-Setup initializes credentials, certificates, PostgreSQL, Temporal schemas and
-namespace, Boxie, monitoring, operator ingress, then Playground. It shares the
-application deployment operations, including migration and readiness checks.
-Reruns preserve complete credentials and database data. Partial credentials stop
-setup for inspection. PostgreSQL and Temporal image/schema upgrades are explicit
-maintenance; application releases do not upgrade those projects.
+Setup generates internal credentials and certificates, initializes PostgreSQL and
+Temporal, starts Boxie and its monitoring and tunnel, then starts Playground and
+its proxy. A rerun keeps existing credentials and data. Partial credentials cause
+setup to fail for inspection. PostgreSQL and Temporal server/schema upgrades stay
+separate from application releases. Cloud-init handles first boot; later edits to
+host bootstrap code do not reinstall an existing server.
 
-Cloud-init prepares the first boot. Explicit setup installs updated operation
-units and runs `systemctl daemon-reload` under the host lock. It is not a substitute
-for host OS or certificate maintenance. Review host replacement plans before
-applying changes to cloud-init; protected resources refuse destructive changes.
-
-A successful workflow establishes only the checks it ran. Confirm public DNS,
-ACME, Access restrictions, resource capacity and off-host restoration on the
-selected host before enabling production release gates. See [acceptance](#acceptance).
+A successful setup run does not establish production readiness by itself. Verify
+DNS, ACME, Access rules, native runsc lifecycle, host capacity and an off-host
+backup restore before enabling release gates.
 
 ## Give application workflows their SSH credentials
 
@@ -126,99 +109,69 @@ All retrieved values are checked before the first GitHub write. If a GitHub writ
 fails, rerun the handoff after correcting permissions; overwriting the same
 settings is safe. Setup never receives your GitHub administration credential.
 Registry authentication uses the workflow's temporary package token, stored in
-private release files; it expires with the token's lifetime.
+temporary files under `/run`; it expires with the token's lifetime.
 
 ## Release and inspect failures
 
-[Boxie releases](../../../.github/workflows/boxie-release.yml) stop API admission,
-verify sandbox deletion, migrate, start the orchestrator, reconcile capacity,
-then start the API and exercise a real terminal lifecycle. Migration or readiness
-failure leaves the operation pending for inspection.
+The [Boxie workflow](../../../.github/workflows/boxie-release.yml) pulls its image,
+stops API and orchestrator, runs Alembic migration, and starts both services with
+the metrics overlay. PostgreSQL and Temporal stay up. Its authenticated readiness
+and terminal smoke checks run before Actions reports success. Pending requests may
+resume after the restart; an empty capacity table is not a release condition.
 
-[Playground releases](../../../.github/workflows/cli-playground-release.yml)
-update only the gateway with `--no-deps`. A sandbox-image change first updates only
-the approved profile's image field and restarts the current Boxie release. Profile
-commands and other custom fields survive. Proxy changes require setup/maintenance.
+The [Playground gateway workflow](../../../.github/workflows/cli-playground-release.yml)
+pulls and recreates only `gateway`. Its proxy stays up. The separate
+[sandbox workflow](../../../.github/workflows/cli-playground-sandbox-release.yml)
+changes the approved Playground profile digest and recreates the current Boxie
+orchestrator. It preserves the current Boxie image and the other profile fields.
+Shared build settings may cause extra application releases.
 
-Workflows build candidate images, then compare source and locked runtime
-dependencies against the last successful host revision. Older or unrelated
-revisions are rejected. The host checks the expected revision again under its
-lock. Actions may replace pending runs; the design does not rely on FIFO order.
+Setup and release workflows share one `clis-production` queue. Each run selects
+current `master` after entering the queue, then builds and deploys that checkout.
+Builds can run before production activation; deployments still require
+`DEPLOYMENT_ACCEPTANCE_PASSED` and `BOXIE_BACKUP_RESTORE_VERIFIED`. Push-triggered
+releases also require `BOXIE_AUTO_DEPLOY` or `PLAYGROUND_AUTO_DEPLOY` for their
+respective application.
 
-The workflow summary names the operation, for example `clis-boxie@123456-1.service`.
-On the host, inspect it with:
-
-```sh
-systemctl show clis-boxie@123456-1.service \
-  -p ActiveState -p SubState -p Result -p ExecMainStatus
-journalctl -u clis-boxie@123456-1.service --no-pager
-cat /srv/clis/deployment/pending /srv/clis/deployment/stage
-readlink -f /srv/clis/deployment/boxie/current
-```
-
-Success requires `Result=success`, `SubState=exited`, zero exit status, the expected
-revision in `current/revision`, and no pending marker. An SSH disconnect gives an
-unknown outcome; inspect the unit before doing anything else. A running unit can
-still finish successfully. The 900-second timeout terminates its control group.
-Timeouts and reboots leave the persistent pending marker, blocking another mutation.
-
-After a failed operation, identify its stage and inspect containers, database
-migration state and capacity records. Confirm no unit still owns the host lock.
-Only then remove `/srv/clis/deployment/pending` and retry with a new numeric
-`run-id-attempt`. Never clear the marker merely because SSH disconnected.
-
-For explicit recovery, copy a saved successful release into a **new** release
-directory, keep its source SHA and image digest, and set `expected-revision` to the
-currently recorded SHA. Check schema compatibility first; never downgrade the
-database. Supply fresh registry authentication for private images. Start the
-matching systemd instance and apply the same success checks. This operator path
-allows an intentional older release; ordinary Actions deployment does not.
-
-For Playground recovery, create a `recovery` marker in the copied directory and
-set `expected-boxie-revision` to Boxie's currently recorded SHA. For example, after
-copying the saved release to `/opt/clis/releases/playground/123456-2`:
+An unsuccessful SSH or Compose command fails the Actions run. On the host, inspect
+services and recent logs before rerunning the job:
 
 ```sh
-release=/opt/clis/releases/playground/123456-2
-test -f "$release/playground.env"
-cat /srv/clis/deployment/playground/current/revision > "$release/expected-revision"
-cat /srv/clis/deployment/boxie/current/revision > "$release/expected-boxie-revision"
-touch "$release/recovery"
-systemctl start clis-playground@123456-2.service
+docker compose --env-file /etc/clis/boxie.env --env-file /etc/clis/boxie-image.env \
+  -f /opt/clis/boxie/compose.production.yml -f /opt/clis/boxie/compose.operations.yml \
+  -f /opt/clis/boxie/compose.observability.yml ps
+docker compose --env-file /etc/clis/boxie.env --env-file /etc/clis/boxie-image.env \
+  -f /opt/clis/boxie/compose.production.yml -f /opt/clis/boxie/compose.operations.yml \
+  -f /opt/clis/boxie/compose.observability.yml logs --tail 100 api orchestrator
+docker compose --env-file /etc/clis/playground.env --env-file /etc/clis/playground-image.env \
+  -f /opt/clis/playground/compose.production.yml ps
 ```
 
-Recovery reapplies both saved image digests and the saved gateway environment,
-even when the saved release originally changed only the sandbox. It preserves
-other profile customizations and restarts the current Boxie image. Check schema
-compatibility and refresh registry authentication before starting the unit.
-For a failed sandbox update, inspect `profiles.before.json` in the attempted
-Playground release before deciding whether to restore that profile.
+A migration failure leaves Boxie's API and orchestrator stopped. Check migration
+output and database state before retrying; do not start an older application
+against a newer schema. After an SSH interruption, first check whether Compose
+finished the operation and whether the application is healthy. Fix the cause and
+rerun the workflow. There is no automatic rollback or separate deployment state
+to clear.
 
-## Acceptance
+## Acceptance and maintenance
 
-Run the local contract tests from the repository root:
+Run local checks from the repository root:
 
 ```sh
 uv sync --locked --all-packages
 uv run --locked pytest infra/host/tests infra/environments/single-host/tests \
-  tools/boxie/tests/test_deployment.py tools/cli-playground/tests/test_deployment.py
-uv run --locked python tools/boxie/tests/run_integration.py
+  tools/boxie/tests/test_deployment.py tools/cli-playground/tests/test_deployment.py \
+  tools/cli-playground/tests/test_infra_workflows.py
 ```
 
-On an authorized disposable native Linux amd64 host, run the
-[runsc and browser tier](../../../docs/testing.md) and validate first installation,
-unchanged rerun, independent updates, migration failure/recovery, SSH interruption,
-unit timeout, missing-disk refusal and reboot persistence. Verify PR artifact
-publication and close/reopen behavior against the resulting public URL. Fake Docker
-command tests and Docker Desktop do not establish these host properties.
+On an authorized native Linux amd64 host, exercise fresh setup, an unchanged
+rerun, each independent release, migration failure and retry, metrics, tunnel
+configuration and preview publication. The local command tests cannot establish
+those host behaviors. The [runtime requirements](../../../tools/boxie/infra/runtime.md)
+include the runsc and backup checks.
 
-The opt-in systemd tests create uniquely named temporary units and remove them
-on exit. On the disposable native host, run as root from this checkout:
-
-```sh
-CLIS_NATIVE_OPERATION_TESTS=1 uv run --locked pytest infra/host/tests/test_native_operation.py
-```
-
-They verify that an operation finishes after its initiating `systemctl` client
-exits and that a shortened unit timeout kills children while retaining the
-pending marker. They do not replace real SSH-disconnection or reboot testing.
+The generated Boxie TLS leaf certificates last 90 days and the CAs last 365 days.
+Plan renewal separately. Maintain an off-host backup and rehearse restoration
+before setting `BOXIE_BACKUP_RESTORE_VERIFIED`; the protected disk alone is not a
+backup.
