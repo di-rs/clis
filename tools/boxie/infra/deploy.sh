@@ -60,4 +60,3 @@ for attempt in range(30):
 else:
     raise SystemExit('Boxie dependencies did not become ready')
 PY
-compose run --rm --no-deps smoke

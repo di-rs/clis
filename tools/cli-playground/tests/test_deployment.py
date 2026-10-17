@@ -92,7 +92,11 @@ def test_sandbox_update_preserves_boxie_image_and_custom_profile(tmp_path: Path)
     assert json.loads((boxie / "profiles.json").read_text()) == profile
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     assert any("pull" in call and digest in call for call in calls)
+    stops = [index for index, call in enumerate(calls) if "stop" in call]
     updates = [call for call in calls if "up" in call]
+    assert len(stops) == 1
+    assert calls[stops[0]][-3:] == ["--timeout", "60", "orchestrator"]
+    assert stops[0] < next(index for index, call in enumerate(calls) if "up" in call)
     assert len(updates) == 1
     assert updates[0][-1] == "orchestrator"
     assert "--force-recreate" in updates[0]

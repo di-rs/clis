@@ -134,7 +134,7 @@ unchanged UID-1000 images and host-side test readers; this is a fixture limitati
 not the production provisioning policy. API/orchestrator and host-only client fixture
 keys are mode `0600`.
 
-The release-only smoke operation also receives Docker access to inspect sandbox
+The operator smoke operation also receives Docker access to inspect sandbox
 security and deletion; Playground never receives that access.
 
 A consumer-network operator can run `python -m boxie_infra.smoke --boxie-url

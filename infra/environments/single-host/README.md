@@ -115,9 +115,10 @@ temporary files under `/run`; it expires with the token's lifetime.
 
 The [Boxie workflow](../../../.github/workflows/boxie-release.yml) pulls its image,
 stops API and orchestrator, runs Alembic migration, and starts both services with
-the metrics overlay. PostgreSQL and Temporal stay up. Its authenticated readiness
-and terminal smoke checks run before Actions reports success. Pending requests may
-resume after the restart; an empty capacity table is not a release condition.
+the metrics overlay. PostgreSQL and Temporal stay up. Authenticated readiness
+must pass before Actions reports success. Pending requests may resume after the
+restart; an empty capacity table is not a release condition. The separate native
+host acceptance run covers terminal allocation and cleanup.
 
 The [Playground gateway workflow](../../../.github/workflows/cli-playground-release.yml)
 pulls and recreates only `gateway`. Its proxy stays up. The separate
