@@ -36,6 +36,19 @@ Follow [Testing](docs/testing.md) for Rust and Python checks and
 Use the root uv workspace and committed lockfile for Python tooling; keep shared
 Ruff and strict mypy configuration at the root.
 
+Run checks directly with `prek run --all-files` before committing. For focused
+checks, use `prek run HOOK_ID --files PATH...`. Use `prek install` to install
+hooks; keep the installed hooks and Gitmoji validation enabled. Do not use
+`git commit` as a test runner or repeatedly retry commits to discover failures.
+
+Tests that invoke Git in temporary repositories must clear inherited
+repository-local Git environment variables in their child processes (see
+`git rev-parse --local-env-vars`) and isolate global/system Git configuration.
+`git -C` alone does not isolate a repository from hook-provided `GIT_DIR`,
+`GIT_WORK_TREE`, or `GIT_INDEX_FILE`. If Git reports an unexpected bare repository,
+inspect configuration origins and the intended repository type before changing
+`core.bare`; restore only verified accidental changes.
+
 Run benchmarks for pull requests only, selecting affected suites or the CLIs
 explicitly requested by the contributor. Do not add benchmark runs on pushes or
 merges to `master`. Treat automatic one-sample runs as execution smoke checks;
