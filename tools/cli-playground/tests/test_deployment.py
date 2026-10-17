@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -71,23 +73,87 @@ def test_sandbox_update_preserves_boxie_image_and_custom_profile(tmp_path: Path)
     (current / "image.env").write_text("BOXIE_RUNTIME_IMAGE=" + image + "\n")
     (current / "revision").write_text("b" * 40)
     docker = tmp_path / "docker"
-    docker.write_text("#!/bin/sh\nexit 0\n")
+    docker.write_text('#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$DOCKER_LOG"\n')
     docker.chmod(0o755)
-    digest = "ghcr.io/test/sandbox@sha256:" + "c" * 64
-    result = subprocess.run(
-        ["bash", str(ROOT / "tools/cli-playground/infra/deploy.sh"), str(release)],
-        env={
-            **os.environ,
-            "PATH": str(tmp_path) + ":" + os.environ["PATH"],
-            "CLIS_CONFIG_DIR": str(config.parent),
-            "CLIS_STATE_DIR": str(tmp_path / "state"),
-            "PLAYGROUND_SANDBOX_IMAGE": digest,
-            "IMAGE_LOG": str(tmp_path / "image"),
-        },
-        text=True,
-        capture_output=True,
+    gateway = tmp_path / "state/playground/current"
+    gateway.mkdir(parents=True)
+    (gateway / "playground.env").write_text("SETTING=saved\n")
+    (config.parent / "playground.env").write_text("SETTING=changed\n")
+    (release / "image.env").write_text(
+        "PLAYGROUND_IMAGE=ghcr.io/test/gateway@sha256:" + "d" * 64 + "\n"
     )
+    digest = "ghcr.io/test/sandbox@sha256:" + "c" * 64
+    command = ["bash", str(ROOT / "tools/cli-playground/infra/deploy.sh"), str(release)]
+    environment = {
+        **os.environ,
+        "DOCKER_LOG": str(tmp_path / "docker.log"),
+        "PATH": str(tmp_path) + ":" + os.environ["PATH"],
+        "CLIS_CONFIG_DIR": str(config.parent),
+        "CLIS_STATE_DIR": str(tmp_path / "state"),
+        "PLAYGROUND_SANDBOX_IMAGE": digest,
+        "IMAGE_LOG": str(tmp_path / "image"),
+    }
+    result = subprocess.run(command, env=environment, text=True, capture_output=True)
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "image").read_text() == image
     profile["playground"]["image_digest"] = digest
     assert json.loads((config / "profiles.json").read_text()) == profile
+
+    assert (release / "playground.env").read_text() == "SETTING=saved\n"
+    assert "compose" not in (tmp_path / "docker.log").read_text()
+    (release / "recovery").touch()
+    result = subprocess.run(command, env=environment, text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+    assert "up -d" in (tmp_path / "docker.log").read_text()
+    assert (release / "playground.env").read_text() == "SETTING=saved\n"
+
+
+def test_readiness_waits_for_public_tls(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from unittest.mock import MagicMock
+    from urllib.error import URLError
+
+    credential = tmp_path / "credential"
+    credential.write_text("token")
+    monkeypatch.setenv("PLAYGROUND_BOXIE_CREDENTIAL_FILE", str(credential))
+    monkeypatch.setenv("PLAYGROUND_BOXIE_URL", "http://boxie")
+    monkeypatch.setenv("PLAYGROUND_PUBLIC_URL", "https://playground")
+    response = MagicMock()
+    response.__enter__.return_value.status = 200
+    request = MagicMock(side_effect=[response, URLError("certificate pending"), response, response])
+    monkeypatch.setattr("urllib.request.urlopen", request)
+    monkeypatch.setattr("time.sleep", lambda _: None)
+    script = (
+        (ROOT / "tools/cli-playground/infra/deploy.sh")
+        .read_text()
+        .split("<<'PY'\n")[1]
+        .split("\nPY")[0]
+    )
+    exec(script, {})
+    assert request.call_count == 4
+
+
+def test_readiness_deadline_reports_public_https(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from unittest.mock import MagicMock
+    from urllib.error import URLError
+
+    credential = tmp_path / "credential"
+    credential.write_text("token")
+    monkeypatch.setenv("PLAYGROUND_BOXIE_CREDENTIAL_FILE", str(credential))
+    monkeypatch.setenv("PLAYGROUND_BOXIE_URL", "http://boxie")
+    monkeypatch.setenv("PLAYGROUND_PUBLIC_URL", "https://playground")
+    response = MagicMock()
+    response.__enter__.return_value.status = 200
+    monkeypatch.setattr(
+        "urllib.request.urlopen", MagicMock(side_effect=[response, URLError("certificate pending")])
+    )
+    monkeypatch.setattr("time.monotonic", MagicMock(side_effect=[0, 301]))
+    script = (
+        (ROOT / "tools/cli-playground/infra/deploy.sh")
+        .read_text()
+        .split("<<'PY'\n")[1]
+        .split("\nPY")[0]
+    )
+    with pytest.raises(SystemExit, match="public HTTPS readiness failed after 300 seconds"):
+        exec(script, {})

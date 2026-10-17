@@ -62,7 +62,22 @@ async def test_setup_uploads_before_start_and_preserves_pinned_trust(tmp_path: P
     copies = [
         value for (kind, _), value in mocks.inputs.items() if kind == "command:remote:CopyToRemote"
     ]
-    assert len(copies) == 4
+    assert len(copies) == 1
+    for name, secret in [
+        ("settings.env", "private-setting"),
+        ("tunnel.json", "private-tunnel"),
+        ("registry-config.json", "registry-token"),
+    ]:
+        writer = mocks.inputs["command:remote:Command", f"installation-{name}"]
+        assert writer["stdin"]["value"] == secret
+        assert secret not in writer["create"]
+        assert writer["create"] == writer["update"]
+        assert "umask 077" in writer["create"]
+        assert "host-123" in writer["triggers"]
+        assert "123-1" in writer["triggers"]
+        assert "a" * 40 in writer["triggers"]
+        assert writer["logging"] == "none"
+        assert writer["addPreviousOutputInEnv"] is False
     assert all(
         value["connection"].get("value", value["connection"])["hostKey"] == "ssh-ed25519 YWJj"
         for value in copies

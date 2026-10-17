@@ -173,6 +173,24 @@ currently recorded SHA. Check schema compatibility first; never downgrade the
 database. Supply fresh registry authentication for private images. Start the
 matching systemd instance and apply the same success checks. This operator path
 allows an intentional older release; ordinary Actions deployment does not.
+
+For Playground recovery, create a `recovery` marker in the copied directory and
+set `expected-boxie-revision` to Boxie's currently recorded SHA. For example, after
+copying the saved release to `/opt/clis/releases/playground/123456-2`:
+
+```sh
+release=/opt/clis/releases/playground/123456-2
+test -f "$release/playground.env"
+cat /srv/clis/deployment/playground/current/revision > "$release/expected-revision"
+cat /srv/clis/deployment/boxie/current/revision > "$release/expected-boxie-revision"
+touch "$release/recovery"
+systemctl start clis-playground@123456-2.service
+```
+
+Recovery reapplies both saved image digests and the saved gateway environment,
+even when the saved release originally changed only the sandbox. It preserves
+other profile customizations and restarts the current Boxie image. Check schema
+compatibility and refresh registry authentication before starting the unit.
 For a failed sandbox update, inspect `profiles.before.json` in the attempted
 Playground release before deciding whether to restore that profile.
 

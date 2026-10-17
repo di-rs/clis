@@ -47,12 +47,18 @@ def provision_installation(
         opts=pulumi.ResourceOptions(depends_on=[prepare]),
     )
     private_files = [
-        remote.CopyToRemote(
+        remote.Command(
             f"installation-{name.replace('/', '-')}",
             connection=connection,
-            source=pulumi.Output.secret(content).apply(pulumi.StringAsset),
-            remote_path=f"{staging}/{name}",
-            opts=pulumi.ResourceOptions(depends_on=[copied]),
+            create=f"umask 077; install -d -m 0700 {staging}/registry && cat > {staging}/{name}",
+            update=f"umask 077; install -d -m 0700 {staging}/registry && cat > {staging}/{name}",
+            stdin=pulumi.Output.secret(content),
+            triggers=[revision, run_id, host_id],
+            logging=remote.Logging.NONE,
+            add_previous_output_in_env=False,
+            opts=pulumi.ResourceOptions(
+                depends_on=[copied], additional_secret_outputs=["stdout", "stderr"]
+            ),
         )
         for name, content in [
             ("settings.env", settings),
@@ -72,15 +78,9 @@ def provision_installation(
         connection=connection,
         create=command,
         update=command,
-        triggers=[
-            archive,
-            revision,
-            run_id,
-            host_id,
-            settings,
-            tunnel_credentials,
-            registry_config,
-        ],
+        # Each setup attempt has a new run ID. Secret stdin belongs to the
+        # writers; unknown secret values in triggers break provider preview.
+        triggers=[archive, revision, run_id, host_id],
         add_previous_output_in_env=False,
         logging=remote.Logging.NONE,
         opts=pulumi.ResourceOptions(
