@@ -156,3 +156,33 @@ def test_unexpected_compression_is_rejected_before_buffering(status: int) -> Non
         publisher.github_request(api, "user", limit=2048)
     assert response.num_bytes_downloaded == 0
     assert body.closed
+
+
+@pytest.mark.parametrize("phase", ["read", "close"])
+@pytest.mark.parametrize("failure", [httpx.ReadError, httpx.ReadTimeout, httpx.RemoteProtocolError])
+def test_stream_transport_failures_are_sanitized(
+    phase: str, failure: type[httpx.HTTPError]
+) -> None:
+    class BrokenBody(httpx.AsyncByteStream):
+        closed = False
+
+        async def __aiter__(self) -> AsyncIterator[bytes]:
+            yield b"partial response"
+            if phase == "read":
+                raise failure("sensitive signed artifact URL")
+
+        async def aclose(self) -> None:
+            self.closed = True
+            if phase == "close":
+                raise failure("sensitive signed artifact URL")
+
+    body = BrokenBody()
+    api = GitHub(
+        "test-token",
+        async_transport=httpx.MockTransport(lambda request: httpx.Response(200, stream=body)),
+    )
+    with pytest.raises(ValueError) as caught:
+        publisher.github_request(api, "repos/owner/name/actions/artifacts/1/zip")
+    assert "sensitive signed artifact URL" not in str(caught.value)
+    assert caught.value.__cause__ is not None
+    assert body.closed

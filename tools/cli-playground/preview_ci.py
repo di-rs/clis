@@ -123,7 +123,7 @@ def github_request[A: BaseAuthStrategy](
 
     try:
         return anyio.run(fetch)
-    except (GitHubException, TimeoutError) as error:
+    except (GitHubException, httpx.HTTPError, TimeoutError) as error:
         # SDK error strings can contain response bodies or signed artifact URLs.
         raise ValueError(
             "GitHub request failed or exceeded its response limit or deadline"
