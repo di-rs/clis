@@ -1,0 +1,13 @@
+services:
+  migrate:
+    image: ${BOXIE_RUNTIME_IMAGE:?Set approved immutable Boxie image}
+    profiles: [operations]
+    entrypoint: [python, -m, boxie.persistence.migrate]
+    command: [--dsn-file, /run/secrets/postgres-dsn]
+    volumes:
+    - ${BOXIE_POSTGRES_DSN_FILE:?Set Boxie database DSN file}:/run/secrets/postgres-dsn:ro
+    networks: [control]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]

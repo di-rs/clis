@@ -5,7 +5,12 @@ case "${1:-}" in
   *) echo 'usage: schema.sh setup|update (setup only for empty databases)' >&2; exit 2 ;;
 esac
 export SQL_PLUGIN=postgres12
-for store in temporal visibility; do
+case "${2:-all}" in
+  temporal|visibility) stores=$2 ;;
+  all) stores='temporal visibility' ;;
+  *) echo 'unknown schema store' >&2; exit 2 ;;
+esac
+for store in $stores; do
   if [ "$store" = temporal ]; then
     export SQL_USER=temporal SQL_DATABASE=temporal SQL_PASSWORD="$TEMPORAL_DB_PASSWORD"
   else
