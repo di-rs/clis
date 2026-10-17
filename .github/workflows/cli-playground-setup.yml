@@ -44,6 +44,7 @@ jobs:
     timeout-minutes: 40
     concurrency:
       group: clis-production
+      queue: max
       cancel-in-progress: false
     permissions:
       contents: read

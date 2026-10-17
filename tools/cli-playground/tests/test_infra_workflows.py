@@ -71,7 +71,11 @@ def test_application_release_uses_native_ssh_without_cloud_state(app: str) -> No
     deployment = release["jobs"]["deploy"]
     assert deployment["environment"] == app
     assert "github.ref == 'refs/heads/master'" in deployment["if"]
-    assert deployment["concurrency"] == {"group": "clis-production", "cancel-in-progress": "false"}
+    assert deployment["concurrency"] == {
+        "group": "clis-production",
+        "queue": "max",
+        "cancel-in-progress": "false",
+    }
     text = str(deployment)
     for forbidden in (
         "PULUMI",
@@ -103,7 +107,11 @@ def test_only_manual_setup_can_provision_cloud_resources() -> None:
     assert set(setup["on"]) == {"workflow_dispatch"}
     provision = setup["jobs"]["provision"]
     assert provision["environment"] == "platform"
-    assert provision["concurrency"]["group"] == "clis-production"
+    assert provision["concurrency"] == {
+        "group": "clis-production",
+        "queue": "max",
+        "cancel-in-progress": "false",
+    }
     assert {"HCLOUD_TOKEN", "CLOUDFLARE_API_TOKEN"} <= set(provision["env"])
     assert any(
         step.get("working-directory") == "infra/environments/single-host"
@@ -151,7 +159,11 @@ def test_infrastructure_checks_require_trusted_dispatch_or_opted_in_schedule() -
     assert protected["needs"] == "revision"
     assert protected["environment"] == "platform"
     assert protected["permissions"] == {"contents": "read"}
-    assert protected["concurrency"]["group"] == "clis-production"
+    assert protected["concurrency"] == {
+        "group": "clis-production",
+        "queue": "max",
+        "cancel-in-progress": "false",
+    }
     preview = next(step for step in protected["steps"] if step.get("id") == "preview")
     assert preview["with"]["command"] == "preview"
     assert preview["with"]["upsert"] == "false"
@@ -228,7 +240,7 @@ def test_drift_check_only_previews_refresh_and_preserves_failure_status(
     ) in summary.read_text()
 
 
-def test_delayed_release_refuses_to_copy_over_newer_success(tmp_path: Path) -> None:
+def test_delayed_release_skips_newer_success_without_copying(tmp_path: Path) -> None:
     import json
 
     repository = tmp_path / "repo"
@@ -280,8 +292,8 @@ def test_delayed_release_refuses_to_copy_over_newer_success(tmp_path: Path) -> N
         text=True,
         capture_output=True,
     )
-    assert result.returncode != 0
-    assert "Refusing to replace a newer" in result.stderr
+    assert result.returncode == 0, result.stderr
+    assert "superseded" in result.stdout
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     assert len(calls) == 1
     assert "current/revision" in calls[0][-1]

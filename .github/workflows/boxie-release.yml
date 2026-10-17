@@ -12,8 +12,12 @@ name: 🚀 Boxie runtime release
     - tools/boxie/infra/Runtime.Dockerfile*
     - tools/boxie/infra/compose.production.yml
     - tools/boxie/infra/compose.operations.yml
+    - tools/boxie/infra/compose.observability.yml
     - tools/boxie/infra/deploy.sh
     - .github/workflows/boxie-release.yml
+    - .github/workflows/build-runtime-image.yml
+    - infra/host/submit-release.sh
+    - infra/host/operation.sh
     - pyproject.toml
     - uv.lock
     - .python-version
@@ -38,6 +42,7 @@ jobs:
     timeout-minutes: 25
     concurrency:
       group: clis-production
+      queue: max
       cancel-in-progress: false
     permissions:
       contents: read
@@ -67,7 +72,11 @@ jobs:
         trap 'rm -rf "$private"' EXIT
         current=$(bash infra/host/submit-release.sh boxie --current)
         [[ $current =~ ^[a-f0-9]{40}$ ]]
-        git merge-base --is-ancestor "$current" "$GITHUB_SHA" || { echo 'Refusing to replace a newer or unrelated release.' >&2; exit 1; }
+        if git merge-base --is-ancestor "$GITHUB_SHA" "$current"; then
+            echo 'Release superseded by a newer successful deployment.'
+            exit 0
+        fi
+        git merge-base --is-ancestor "$current" "$GITHUB_SHA" || { echo 'Refusing unrelated release history.' >&2; exit 1; }
         selection=$(python3 tools/boxie/infra/boxie_infra/release_selection.py boxie "$current")
         if [[ $selection != *runtime=true* && $selection != *sandbox=true* ]]; then
             echo 'No runtime changes since the successful deployment.'

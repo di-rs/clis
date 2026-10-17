@@ -1,44 +1,52 @@
 """Select runtime changes relative to the last successful host revision."""
 
-import json
+import io
+import os
 import re
 import subprocess
 import sys
-import tomllib
-from typing import Any
+import tarfile
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+WORKSPACE_MANIFESTS = {
+    "pyproject.toml",
+    "infra/host/pyproject.toml",
+    "tools/boxie/tests/support/pyproject.toml",
+    "tools/boxie/infra/pyproject.toml",
+    "tools/cli-playground/infra/pyproject.toml",
+    "tools/cli-bench/pyproject.toml",
+    "tools/cli-check/pyproject.toml",
+}
 
 
-def dependency_closure(lock: dict[str, Any], name: str) -> list[dict[str, Any]]:
-    pending: list[dict[str, Any]] = [{"name": name}]
-    seen: set[tuple[str, tuple[str, ...]]] = set()
-    result: dict[str, dict[str, Any]] = {}
-    while pending:
-        dependency = pending.pop()
-        current = dependency["name"]
-        extras = tuple(sorted(dependency.get("extra", [])))
-        if (current, extras) in seen:
-            continue
-        seen.add((current, extras))
-        for package in lock["package"]:
-            if package["name"] != current:
-                continue
-            key = json.dumps(
-                [current, package.get("version"), package.get("source")], sort_keys=True
-            )
-            selected = result.setdefault(
-                key,
-                {
-                    key: value
-                    for key, value in package.items()
-                    if key not in {"dev-dependencies", "optional-dependencies", "metadata"}
-                },
-            )
-            pending.extend(package.get("dependencies", []))
-            for extra in extras:
-                dependencies = package.get("optional-dependencies", {}).get(extra, [])
-                selected.setdefault("optional-dependencies", {})[extra] = dependencies
-                pending.extend(dependencies)
-    return [result[key] for key in sorted(result)]
+def runtime_requirements(source: Path, package: str) -> bytes:
+    """Export the locked production requirements without local workspace paths."""
+    if package not in {"boxie", "cli-playground"}:
+        raise ValueError("Unknown runtime package")
+    return subprocess.check_output(
+        [
+            "uv",
+            "export",
+            "--locked",
+            "--package",
+            package,
+            "--no-dev",
+            "--no-header",
+            "--no-annotate",
+            "--no-emit-workspace",
+            "--offline",
+        ],
+        cwd=source,
+        env={**os.environ, "UV_CACHE_DIR": str(source.parent / "uv-cache")},
+        stderr=subprocess.PIPE,
+    )
+
+
+def _snapshot(revision: str, target: Path) -> None:
+    archive = subprocess.check_output(["git", "archive", "--format=tar", revision])
+    with tarfile.open(fileobj=io.BytesIO(archive)) as contents:
+        contents.extractall(target, filter="data")
 
 
 def changed(app: str, base: str) -> tuple[bool, bool]:
@@ -48,9 +56,12 @@ def changed(app: str, base: str) -> tuple[bool, bool]:
         return True, app == "playground"
     if not re.fullmatch("[a-f0-9]{40}", base):
         raise ValueError("Use a full successful revision")
-    paths = subprocess.check_output(
-        ["git", "diff", "--name-only", base, "HEAD"], text=True
-    ).splitlines()
+    subprocess.run(["git", "merge-base", "--is-ancestor", base, "HEAD"], check=True)
+    paths = set(
+        subprocess.check_output(
+            ["git", "diff", "--name-only", base, "HEAD"], text=True
+        ).splitlines()
+    )
     prefix = "tools/boxie/" if app == "boxie" else "tools/cli-playground/"
     runtime_prefixes = ("src/", "alembic/") if app == "boxie" else ("src/", "frontend/")
     runtime_files = {
@@ -63,8 +74,10 @@ def changed(app: str, base: str) -> tuple[bool, bool]:
         "infra/playground_infra/installation.py",
         "infra/Runtime.Dockerfile" if app == "boxie" else "infra/Playground.Dockerfile",
     }
+    if app == "boxie":
+        runtime_files.add("infra/compose.observability.yml")
     runtime = any(
-        path in {".python-version", ".dockerignore"}
+        path in WORKSPACE_MANIFESTS | {".python-version", ".dockerignore"}
         or path.startswith(tuple(prefix + part for part in runtime_prefixes))
         or path in {prefix + part for part in runtime_files}
         or path.startswith(
@@ -74,18 +87,21 @@ def changed(app: str, base: str) -> tuple[bool, bool]:
         for path in paths
     )
     sandbox = app == "playground" and any(
-        path == prefix + "shell.sh"
+        path in {".dockerignore", prefix + "shell.sh"}
         or path.startswith(prefix + "Sandbox.Dockerfile")
         or path.startswith(prefix + "fixtures/")
         for path in paths
     )
     if "uv.lock" in paths:
-        before = tomllib.loads(
-            subprocess.check_output(["git", "show", f"{base}:uv.lock"], text=True)
-        )
-        after = tomllib.loads(subprocess.check_output(["git", "show", "HEAD:uv.lock"], text=True))
-        package = "boxie" if app == "boxie" else "cli-playground"
-        runtime |= dependency_closure(before, package) != dependency_closure(after, package)
+        with TemporaryDirectory(prefix="clis-runtime-export-") as temporary:
+            root = Path(temporary)
+            before, after = root / "before", root / "after"
+            before.mkdir()
+            after.mkdir()
+            _snapshot(base, before)
+            _snapshot("HEAD", after)
+            package = "boxie" if app == "boxie" else "cli-playground"
+            runtime |= runtime_requirements(before, package) != runtime_requirements(after, package)
     return runtime, sandbox
 
 
