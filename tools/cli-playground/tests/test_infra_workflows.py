@@ -84,13 +84,7 @@ def test_application_release_uses_native_ssh_without_cloud_state(app: str) -> No
         assert forbidden not in text
     commands = "\n".join(step.get("run", "") for step in deployment["steps"])
     for required in (
-        "scp -F",
-        "ssh -F",
-        "StrictHostKeyChecking yes",
-        "systemctl start",
-        "-p Result",
-        "-p SubState",
-        "-p ExecMainStatus",
+        "infra/host/submit-release.sh",
         "git merge-base --is-ancestor",
         "expected-revision",
     ):
@@ -253,6 +247,9 @@ def test_delayed_release_refuses_to_copy_over_newer_success(tmp_path: Path) -> N
     older = git("rev-parse", "HEAD")
     git("-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-qm", "newer")
     newer = git("rev-parse", "HEAD")
+    helper = repository / "infra/host/submit-release.sh"
+    helper.parent.mkdir(parents=True)
+    helper.write_bytes((WORKFLOWS.parent.parent / "infra/host/submit-release.sh").read_bytes())
     commands = tmp_path / "bin"
     commands.mkdir()
     log = tmp_path / "calls"

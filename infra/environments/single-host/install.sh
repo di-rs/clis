@@ -1,27 +1,30 @@
 #!/usr/bin/env bash
 # Root-owned checkout, settings and tunnel credential files are installed by setup.
 set -euo pipefail
-[[ $# == 1 && $1 == /opt/clis/releases/setup/* ]] || { echo 'Use a prepared setup checkout.' >&2; exit 2; }
-release=$1
+[[ $# == 2 && $1 =~ ^(preflight|apply)$ && $2 == /opt/clis/releases/setup/* ]] || { echo 'Use a prepared setup checkout.' >&2; exit 2; }
+phase=$1 release=$2
 /usr/local/sbin/clis-storage-guard
+if [[ $phase == apply ]]; then
 install -d -m 0700 /etc/clis
 install -m 0600 "$release/settings.env" /etc/clis/settings.env
 install -m 0600 "$release/tunnel.json" /etc/clis/tunnel.json
 install -m 0700 "$release/infra/host/operation.sh" /usr/local/sbin/clis-operation
 install -m 0644 "$release"/infra/host/systemd/*.service /etc/systemd/system/
 systemctl daemon-reload
+fi
 set -a
 # shellcheck disable=SC1091
-source /etc/clis/settings.env
+source "$release/settings.env"
 # shellcheck disable=SC1091
 source "$release/image.env"
 set +a
 : "${BOXIE_RUNTIME_IMAGE:?}" "${PLAYGROUND_IMAGE:?}" "${PLAYGROUND_SANDBOX_IMAGE:?}" "${OBS_COLLECTOR_IMAGE:?}"
 for image in "$BOXIE_RUNTIME_IMAGE" "$PLAYGROUND_IMAGE" "$PLAYGROUND_SANDBOX_IMAGE" "$OBS_COLLECTOR_IMAGE"; do
     [[ $image =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]] || { echo 'Use registry-qualified image digests.' >&2; exit 2; }
-    timeout 180 docker pull "$image" >/dev/null
+    if [[ $phase == preflight ]]; then timeout 180 docker pull "$image" >/dev/null; fi
 done
 [[ $(docker info --format '{{if index .Runtimes "runsc"}}runsc{{end}}') == runsc ]]
+if [[ $phase == preflight ]]; then exit 0; fi
 run=$(basename "$release")
 for app in boxie playground; do
     target="/opt/clis/releases/$app/$run"
@@ -39,7 +42,8 @@ python3 "$release/tools/cli-playground/infra/playground_infra/installation.py" "
 bash "/opt/clis/releases/boxie/$run/tools/boxie/infra/install.sh" "/opt/clis/releases/boxie/$run"
 bash "/opt/clis/releases/playground/$run/tools/cli-playground/infra/install.sh" "/opt/clis/releases/playground/$run"
 touch "/opt/clis/releases/playground/$run/gateway.changed"
-bash "/opt/clis/releases/playground/$run/tools/cli-playground/infra/deploy.sh" "/opt/clis/releases/playground/$run"
+bash "/opt/clis/releases/playground/$run/tools/cli-playground/infra/deploy.sh" preflight "/opt/clis/releases/playground/$run"
+bash "/opt/clis/releases/playground/$run/tools/cli-playground/infra/deploy.sh" apply "/opt/clis/releases/playground/$run"
 
 # Only publish application records after the complete installation is healthy.
 python3 - "$run" <<'PYCODE'

@@ -44,18 +44,30 @@ def test_boxie_deployment_stops_only_after_pull_and_leaves_failed_migration_stop
         "BOXIE_RUNTIME_IMAGE=ghcr.io/test/boxie@sha256:" + "a" * 64 + "\n"
     )
     (release / "revision").write_text("a" * 40 + "\n")
-    result = subprocess.run(
-        ["bash", str(ROOT / "tools/boxie/infra/deploy.sh"), str(release)],
-        env={
-            **os.environ,
-            "PATH": str(commands) + ":" + os.environ["PATH"],
-            "CALLS": str(log),
-            "FAILURE": failure,
-            "CLIS_CONFIG_DIR": str(config),
-        },
+    command = ["bash", str(ROOT / "tools/boxie/infra/deploy.sh")]
+    environment = {
+        **os.environ,
+        "PATH": str(commands) + ":" + os.environ["PATH"],
+        "CALLS": str(log),
+        "FAILURE": failure,
+        "CLIS_CONFIG_DIR": str(config),
+    }
+    preflight = subprocess.run(
+        [*command, "preflight", str(release)],
+        env=environment,
         capture_output=True,
         text=True,
     )
+    if failure == "pull":
+        result = preflight
+    else:
+        assert preflight.returncode == 0, preflight.stderr
+        assert not any(
+            "stop" in call for call in [json.loads(line) for line in log.read_text().splitlines()]
+        )
+        result = subprocess.run(
+            [*command, "apply", str(release)], env=environment, capture_output=True, text=True
+        )
     calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
     if failure:
         assert result.returncode == 17, result.stderr
@@ -67,14 +79,8 @@ def test_boxie_deployment_stops_only_after_pull_and_leaves_failed_migration_stop
         saved = (release / "api.json").read_bytes()
         (config / "boxie/api.json").write_text('{"release":"changed","unrelated":"setting"}')
         repeated = subprocess.run(
-            ["bash", str(ROOT / "tools/boxie/infra/deploy.sh"), str(release)],
-            env={
-                **os.environ,
-                "PATH": str(commands) + ":" + os.environ["PATH"],
-                "CALLS": str(log),
-                "FAILURE": "",
-                "CLIS_CONFIG_DIR": str(config),
-            },
+            [*command, "apply", str(release)],
+            env={**environment, "FAILURE": ""},
             capture_output=True,
             text=True,
         )

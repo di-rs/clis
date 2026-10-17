@@ -28,16 +28,22 @@ def test_gateway_release_targets_only_gateway(tmp_path: Path) -> None:
     (release / "image.env").write_text(
         "PLAYGROUND_IMAGE=ghcr.io/test/playground@sha256:" + "a" * 64 + "\n"
     )
+    environment = {
+        **os.environ,
+        "PATH": str(tmp_path) + ":" + os.environ["PATH"],
+        "CALLS": str(log),
+        "CLIS_CONFIG_DIR": str(config),
+    }
+    command = ["bash", str(ROOT / "tools/cli-playground/infra/deploy.sh")]
+    preflight = subprocess.run(
+        [*command, "preflight", str(release)], env=environment, capture_output=True, text=True
+    )
+    assert preflight.returncode == 0, preflight.stderr
+    assert not any(
+        "up" in call for call in [json.loads(line) for line in log.read_text().splitlines()]
+    )
     result = subprocess.run(
-        ["bash", str(ROOT / "tools/cli-playground/infra/deploy.sh"), str(release)],
-        env={
-            **os.environ,
-            "PATH": str(tmp_path) + ":" + os.environ["PATH"],
-            "CALLS": str(log),
-            "CLIS_CONFIG_DIR": str(config),
-        },
-        capture_output=True,
-        text=True,
+        [*command, "apply", str(release)], env=environment, capture_output=True, text=True
     )
     assert result.returncode == 0, result.stderr
     assert (release / "playground.env").read_text() == "SETTING=value\n"
@@ -83,7 +89,7 @@ def test_sandbox_update_preserves_boxie_image_and_custom_profile(tmp_path: Path)
         "PLAYGROUND_IMAGE=ghcr.io/test/gateway@sha256:" + "d" * 64 + "\n"
     )
     digest = "ghcr.io/test/sandbox@sha256:" + "c" * 64
-    command = ["bash", str(ROOT / "tools/cli-playground/infra/deploy.sh"), str(release)]
+    command = ["bash", str(ROOT / "tools/cli-playground/infra/deploy.sh")]
     environment = {
         **os.environ,
         "DOCKER_LOG": str(tmp_path / "docker.log"),
@@ -93,7 +99,14 @@ def test_sandbox_update_preserves_boxie_image_and_custom_profile(tmp_path: Path)
         "PLAYGROUND_SANDBOX_IMAGE": digest,
         "IMAGE_LOG": str(tmp_path / "image"),
     }
-    result = subprocess.run(command, env=environment, text=True, capture_output=True)
+    preflight = subprocess.run(
+        [*command, "preflight", str(release)], env=environment, text=True, capture_output=True
+    )
+    assert preflight.returncode == 0, preflight.stderr
+    assert json.loads((config / "profiles.json").read_text()) == profile
+    result = subprocess.run(
+        [*command, "apply", str(release)], env=environment, text=True, capture_output=True
+    )
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "image").read_text() == image
     profile["playground"]["image_digest"] = digest
@@ -102,7 +115,9 @@ def test_sandbox_update_preserves_boxie_image_and_custom_profile(tmp_path: Path)
     assert (release / "playground.env").read_text() == "SETTING=saved\n"
     assert "compose" not in (tmp_path / "docker.log").read_text()
     (release / "recovery").touch()
-    result = subprocess.run(command, env=environment, text=True, capture_output=True)
+    result = subprocess.run(
+        [*command, "apply", str(release)], env=environment, text=True, capture_output=True
+    )
     assert result.returncode == 0, result.stderr
     assert "up -d" in (tmp_path / "docker.log").read_text()
     assert (release / "playground.env").read_text() == "SETTING=saved\n"

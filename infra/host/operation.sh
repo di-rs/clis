@@ -28,6 +28,7 @@ if [[ $app != setup ]]; then
     [[ ! -e $state/$app/current/revision ]] || current=$(cat "$state/$app/current/revision")
     [[ $(cat "$release/expected-revision") == "$current" ]] || { echo 'Deployment changed since workflow preflight; inspect and retry.' >&2; exit 1; }
 fi
+bash "$release/$script" preflight "$release"
 printf '%s %s %s\n' "$app" "$run" "$revision" > "$state/pending"
 python3 - "$state/pending" "$state" <<'PY'
 import os
@@ -39,10 +40,8 @@ for path in sys.argv[1:]:
     finally:
         os.close(descriptor)
 PY
-export CLIS_STAGE_FILE="$state/stage"
-printf 'running %s\n' "$app" > "$CLIS_STAGE_FILE"
 # A failed process or timeout deliberately keeps the pending marker.
-bash "$release/$script" "$release"
+bash "$release/$script" apply "$release"
 ln -s "$release" "$state/$app/current-$run"
 python3 - "$state/$app/current-$run" "$state/$app/current" <<'PY'
 import os
@@ -54,5 +53,4 @@ try:
 finally:
     os.close(descriptor)
 PY
-printf 'complete %s\n' "$app" > "$CLIS_STAGE_FILE"
 rm "$state/pending"

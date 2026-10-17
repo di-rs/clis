@@ -49,7 +49,8 @@ for _attempt in {1..12}; do
 done
 temporal run --rm --no-deps bootstrap
 # Migration and application startup are shared with routine Boxie deployment.
-bash "$owner/deploy.sh" "$release"
+bash "$owner/deploy.sh" preflight "$release"
+bash "$owner/deploy.sh" apply "$release"
 if [[ ! -d /etc/clis/grafana-plugins ]]; then
     plugin=$(mktemp -d)
     trap 'rm -rf "$plugin"' EXIT

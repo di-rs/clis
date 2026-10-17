@@ -74,25 +74,9 @@ jobs:
         run="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
         [[ $run =~ ^[0-9]+-[0-9]+$ && $GITHUB_SHA =~ ^[a-f0-9]{40}$ ]]
         [[ $GATEWAY_SOURCE_SHA == "$GITHUB_SHA" && $SANDBOX_SOURCE_SHA == "$GITHUB_SHA" ]]
-        [[ $DEPLOY_HOST =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+$ ]]
         private=$(mktemp -d)
         trap 'rm -rf "$private"' EXIT
-        printf '%s\n' "$DEPLOY_SSH_KEY" > "$private/key"
-        printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$private/known_hosts"
-        cat > "$private/config" <<EOF
-        Host deployment
-          HostName $DEPLOY_HOST
-          User root
-          IdentityFile $private/key
-          IdentitiesOnly yes
-          UserKnownHostsFile $private/known_hosts
-          StrictHostKeyChecking yes
-          BatchMode yes
-          ConnectTimeout 15
-          ServerAliveInterval 15
-          ServerAliveCountMax 3
-        EOF
-        current=$(ssh -F "$private/config" deployment 'cat /srv/clis/deployment/playground/current/revision')
+        current=$(bash infra/host/submit-release.sh playground --current)
         [[ $current =~ ^[a-f0-9]{40}$ ]]
         git merge-base --is-ancestor "$current" "$GITHUB_SHA" || { echo 'Refusing to replace a newer or unrelated release.' >&2; exit 1; }
         selection=$(python3 tools/boxie/infra/boxie_infra/release_selection.py playground "$current")
@@ -109,28 +93,22 @@ jobs:
         if [[ -n $GATEWAY_IMAGE ]]; then
             touch "$private/payload/gateway.changed"
         else
-            GATEWAY_IMAGE=$(ssh -F "$private/config" deployment 'sed -n "s/^PLAYGROUND_IMAGE=//p" /srv/clis/deployment/playground/current/image.env')
+            GATEWAY_IMAGE=$(bash infra/host/submit-release.sh playground --gateway-image)
         fi
         [[ $GATEWAY_IMAGE =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
         printf 'PLAYGROUND_IMAGE=%s\n' "$GATEWAY_IMAGE" > "$private/payload/image.env"
         if [[ -n $SANDBOX_IMAGE ]]; then
             [[ $SANDBOX_IMAGE =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
-            boxie=$(ssh -F "$private/config" deployment 'cat /srv/clis/deployment/boxie/current/revision')
+            boxie=$(bash infra/host/submit-release.sh playground --boxie-revision)
             [[ $boxie =~ ^[a-f0-9]{40}$ ]]
             printf '%s\n' "$boxie" > "$private/payload/expected-boxie-revision"
             touch "$private/payload/sandbox.changed"
         else
-            SANDBOX_IMAGE=$(ssh -F "$private/config" deployment 'sed -n "s/^PLAYGROUND_SANDBOX_IMAGE=//p" /srv/clis/deployment/playground/current/image.env')
+            SANDBOX_IMAGE=$(bash infra/host/submit-release.sh playground --sandbox-image)
         fi
         [[ $SANDBOX_IMAGE =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
         printf 'PLAYGROUND_SANDBOX_IMAGE=%s\n' "$SANDBOX_IMAGE" >> "$private/payload/image.env"
         # The token is restricted to package reads and never appears in the remote command.
         mkdir "$private/payload/registry"
         printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$(printf '%s:%s' "$GITHUB_ACTOR" "$GHCR_TOKEN" | base64 -w0)" > "$private/payload/registry/config.json"
-        ssh -F "$private/config" deployment "test ! -e /opt/clis/releases/playground/$run && install -d -m 0700 /opt/clis/staging/playground/$run /opt/clis/releases/playground"
-        scp -F "$private/config" -r "$private/payload" "deployment:/opt/clis/staging/playground/$run/"
-        ssh -F "$private/config" deployment "mv /opt/clis/staging/playground/$run/payload /opt/clis/releases/playground/$run"
-        unit="clis-playground@$run.service"
-        echo "Operation: $unit" >> "$GITHUB_STEP_SUMMARY"
-        ssh -F "$private/config" deployment "systemctl start $unit" || { echo "Operation outcome requires inspection: systemctl show $unit; journalctl -u $unit" >&2; exit 1; }
-        ssh -F "$private/config" deployment "test \"\$(systemctl show $unit -p Result --value)\" = success && test \"\$(systemctl show $unit -p SubState --value)\" = exited && test \"\$(systemctl show $unit -p ExecMainStatus --value)\" = 0 && test \"\$(cat /srv/clis/deployment/playground/current/revision)\" = $GITHUB_SHA && test ! -e /srv/clis/deployment/pending"
+        bash infra/host/submit-release.sh playground "$private/payload"

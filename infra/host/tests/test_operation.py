@@ -15,7 +15,7 @@ def test_operation_records_success_or_preserves_pending(tmp_path: Path, status: 
     release = releases / "boxie/123-1"
     owner = release / "tools/boxie/infra"
     owner.mkdir(parents=True)
-    (owner / "deploy.sh").write_text(f"#!/bin/bash\nexit {status}\n")
+    (owner / "deploy.sh").write_text(f"#!/bin/bash\n[[ $1 == preflight ]] || exit {status}\n")
     (release / "revision").write_text("a" * 40 + "\n")
     (release / "expected-revision").write_text("none\n")
     (release / "image.env").write_text(
@@ -45,6 +45,34 @@ def test_operation_records_success_or_preserves_pending(tmp_path: Path, status: 
         assert not current.exists()
     else:
         assert current.resolve() == release
+
+
+def test_preflight_failure_does_not_create_pending_and_can_retry(tmp_path: Path) -> None:
+    release = tmp_path / "releases/boxie/2-1"
+    owner = release / "tools/boxie/infra"
+    owner.mkdir(parents=True)
+    script = owner / "deploy.sh"
+    script.write_text("[[ $1 != preflight ]] || exit 17\n")
+    (release / "revision").write_text("a" * 40)
+    (release / "expected-revision").write_text("none\n")
+    (release / "image.env").write_text(
+        "BOXIE_RUNTIME_IMAGE=ghcr.io/test/boxie@sha256:" + "b" * 64 + "\n"
+    )
+    state = tmp_path / "state"
+    env = {
+        **os.environ,
+        "CLIS_RELEASE_ROOT": str(tmp_path / "releases"),
+        "CLIS_STATE_DIR": str(state),
+    }
+    command = ["bash", str(ROOT / "infra/host/operation.sh"), "boxie", "2-1"]
+    failed = subprocess.run(command, env=env, capture_output=True, text=True)
+    assert failed.returncode == 17
+    assert not (state / "pending").exists()
+    assert not (state / "boxie/current").exists()
+    script.write_text("exit 0\n")
+    retried = subprocess.run(command, env=env, capture_output=True, text=True)
+    assert retried.returncode == 0, retried.stderr
+    assert (state / "boxie/current").resolve() == release
 
 
 def test_operation_rejects_shell_text_in_instance(tmp_path: Path) -> None:
