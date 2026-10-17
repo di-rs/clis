@@ -76,36 +76,6 @@ def test_owner_settings_use_private_credentials_and_preserve_profiles(
     }
 
 
-def test_failed_secret_handoff_does_not_write_github(tmp_path: Path) -> None:
-    import os
-    import subprocess
-
-    for name, body in (("ssh", "exit 1"), ("gh", 'touch "$MARKER"')):
-        command = tmp_path / name
-        command.write_text("#!/bin/sh\n" + body + "\n")
-        command.chmod(0o755)
-    key = tmp_path / "key"
-    known = tmp_path / "known"
-    key.write_text("private")
-    known.write_text("host key")
-    marker = tmp_path / "written"
-    result = subprocess.run(
-        [
-            "bash",
-            str(ROOT / "infra/environments/single-host/configure-github.sh"),
-            "test/repo",
-            "host.example.com",
-            str(known),
-            str(key),
-        ],
-        env={**os.environ, "PATH": str(tmp_path) + ":" + os.environ["PATH"], "MARKER": str(marker)},
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode != 0
-    assert not marker.exists()
-
-
 def test_environment_replaces_symlink_without_overwriting_target(tmp_path: Path) -> None:
     target = tmp_path / "unrelated"
     target.write_text("keep")

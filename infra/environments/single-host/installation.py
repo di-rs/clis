@@ -61,7 +61,8 @@ def provision_installation(
         ]
     ]
     command = (
-        f"test ! -e {release} && chmod -R go-rwx {staging} && mv {staging} {release} && "
+        f"test ! -e {release} && chmod 0700 {staging} {staging}/registry && "
+        f"chmod 0600 {staging}/settings.env {staging}/tunnel.json {staging}/registry/config.json && mv {staging} {release} && "
         f"systemctl start clis-setup@{run_id}.service && "
         f'test "$(systemctl show clis-setup@{run_id}.service -p Result --value)" = success && '
         f'test "$(cat /srv/clis/deployment/setup/current/revision)" = {revision}'

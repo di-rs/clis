@@ -45,6 +45,8 @@ async def test_setup_uploads_before_start_and_preserves_pinned_trust(tmp_path: P
     values = mocks.inputs["command:remote:Command", "installation"]
     assert values["connection"].get("value", values["connection"])["hostKey"] == "ssh-ed25519 YWJj"
     assert values["create"] == values["update"]
+    assert "chmod -R" not in values["create"]
+    assert "chmod 0600" in values["create"]
     assert "delete" not in values
     triggers = (
         values["triggers"].get("value", [])

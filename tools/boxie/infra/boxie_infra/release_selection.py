@@ -1,5 +1,6 @@
 """Select runtime changes relative to the last successful host revision."""
 
+import json
 import re
 import subprocess
 import sys
@@ -8,23 +9,36 @@ from typing import Any
 
 
 def dependency_closure(lock: dict[str, Any], name: str) -> list[dict[str, Any]]:
-    pending, seen, result = [name], set(), []
+    pending: list[dict[str, Any]] = [{"name": name}]
+    seen: set[tuple[str, tuple[str, ...]]] = set()
+    result: dict[str, dict[str, Any]] = {}
     while pending:
-        current = pending.pop()
-        if current in seen:
+        dependency = pending.pop()
+        current = dependency["name"]
+        extras = tuple(sorted(dependency.get("extra", [])))
+        if (current, extras) in seen:
             continue
-        seen.add(current)
+        seen.add((current, extras))
         for package in lock["package"]:
-            if package["name"] == current:
-                result.append(
-                    {
-                        key: value
-                        for key, value in package.items()
-                        if key not in {"dev-dependencies", "optional-dependencies", "metadata"}
-                    }
-                )
-                pending.extend(item["name"] for item in package.get("dependencies", []))
-    return sorted(result, key=lambda item: (item["name"], item.get("version", "")))
+            if package["name"] != current:
+                continue
+            key = json.dumps(
+                [current, package.get("version"), package.get("source")], sort_keys=True
+            )
+            selected = result.setdefault(
+                key,
+                {
+                    key: value
+                    for key, value in package.items()
+                    if key not in {"dev-dependencies", "optional-dependencies", "metadata"}
+                },
+            )
+            pending.extend(package.get("dependencies", []))
+            for extra in extras:
+                dependencies = package.get("optional-dependencies", {}).get(extra, [])
+                selected.setdefault("optional-dependencies", {})[extra] = dependencies
+                pending.extend(dependencies)
+    return [result[key] for key in sorted(result)]
 
 
 def changed(app: str, base: str) -> tuple[bool, bool]:
@@ -44,16 +58,24 @@ def changed(app: str, base: str) -> tuple[bool, bool]:
         "infra/deploy.sh",
         "infra/compose.production.yml",
         "infra/compose.operations.yml",
+        "infra/boxie_infra/smoke.py",
+        "infra/boxie_infra/terminal.py",
+        "infra/playground_infra/installation.py",
         "infra/Runtime.Dockerfile" if app == "boxie" else "infra/Playground.Dockerfile",
     }
     runtime = any(
-        path == ".python-version"
+        path in {".python-version", ".dockerignore"}
         or path.startswith(tuple(prefix + part for part in runtime_prefixes))
         or path in {prefix + part for part in runtime_files}
+        or path.startswith(
+            prefix
+            + ("infra/Runtime.Dockerfile" if app == "boxie" else "infra/Playground.Dockerfile")
+        )
         for path in paths
     )
     sandbox = app == "playground" and any(
-        path in {prefix + "Sandbox.Dockerfile", prefix + "shell.sh"}
+        path == prefix + "shell.sh"
+        or path.startswith(prefix + "Sandbox.Dockerfile")
         or path.startswith(prefix + "fixtures/")
         for path in paths
     )

@@ -1,4 +1,4 @@
-# Independently resolvable; automated production activation unavailable until PR4.
+# Gateway and proxy are independently operated; activation requires acceptance gates.
 name: ${PLAYGROUND_PROJECT_NAME:-cli-playground}
 services:
   gateway:

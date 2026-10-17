@@ -13,10 +13,12 @@ name: 🚀 Playground runtime release
     - tools/cli-playground/infra/compose.production.yml
     - tools/cli-playground/pyproject.toml
     - tools/cli-playground/infra/deploy.sh
+    - tools/cli-playground/infra/playground_infra/installation.py
     - .github/workflows/cli-playground-release.yml
     - pyproject.toml
     - uv.lock
     - .python-version
+    - .dockerignore
   workflow_dispatch: {}
 permissions: {}
 concurrency:

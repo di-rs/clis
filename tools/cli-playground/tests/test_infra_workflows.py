@@ -93,6 +93,7 @@ def test_preview_controller_keeps_privileged_code_on_the_default_branch() -> Non
     assert preview["permissions"] == {}
     assert set(preview["jobs"]) == {"publish", "lifecycle"}
     for job in preview["jobs"].values():
+        assert job["environment"] == "playground-preview"
         checkout = job["steps"][0]
         assert checkout["with"] == {
             "ref": "${{ github.event.repository.default_branch }}",
@@ -117,9 +118,9 @@ def test_infrastructure_checks_require_trusted_dispatch_or_opted_in_schedule() -
     assert "secrets." not in str(selection)
     protected = check["jobs"]["check"]
     assert protected["needs"] == "revision"
-    assert protected["environment"] == "playground"
+    assert protected["environment"] == "platform"
     assert protected["permissions"] == {"contents": "read"}
-    assert protected["concurrency"]["group"] == "cli-playground-production"
+    assert protected["concurrency"]["group"] == "clis-production"
     preview = next(step for step in protected["steps"] if step.get("id") == "preview")
     assert preview["with"]["command"] == "preview"
     assert preview["with"]["upsert"] == "false"
@@ -248,3 +249,13 @@ def test_delayed_release_refuses_to_copy_over_newer_success(tmp_path: Path) -> N
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     assert len(calls) == 1
     assert "current/revision" in calls[0][-1]
+
+
+def test_legacy_ssh_transport_has_no_remaining_entrypoints() -> None:
+    root = WORKFLOWS.parent.parent
+    for path in (
+        "tools/cli-playground/infra/playground_infra/deploy.py",
+        "tools/cli-playground/infra/playground_infra/ci.py",
+        "infra/environments/single-host/configure-github.sh",
+    ):
+        assert not (root / path).exists()
