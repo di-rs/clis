@@ -133,3 +133,18 @@ proxies and read-only journal mounts exercise process loss and truthful accounti
 - [Pinned authorizer selection](https://github.com/temporalio/temporal/blob/v1.32.0/common/authorization/authorizer.go)
 - [Pinned SDK cancellation and activity usage](https://github.com/temporalio/sdk-python/blob/1.34.0/README.md)
 - [Typed workflow service API](https://python.temporal.io/temporalio.service.WorkflowService.html)
+
+
+## Independently targeted release
+
+Use the protected manual owner workflow with a reviewed full commit SHA and unit
+`temporal`. The fixed operator command uses this directory's native Compose files,
+approved immutable images and private owner inputs. It excludes schema/bootstrap
+and storage-init jobs, records native pins and committed configuration hashes,
+and checks readiness. See the [single-host procedure](../../../../infra/environments/single-host/README.md)
+for host tooling, credential readers, selection and activation limits.
+
+Set `BOXIE_MONITORING=true` only when selecting the native monitoring overlay.
+The owner operation verifies the registered seven-day namespace using the pinned
+SDK and explicit operator mTLS identity. Schema and namespace bootstrap remain
+separate approved operations, with no automatic server/schema rollback promise.

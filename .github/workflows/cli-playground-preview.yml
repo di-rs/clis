@@ -43,7 +43,7 @@ jobs:
           RUN_ID: ${{ github.event.workflow_run.id }}
           PLAYGROUND_URL: ${{ vars.PLAYGROUND_URL }}
           PLAYGROUND_DEPLOY_TOKEN: ${{ secrets.PLAYGROUND_DEPLOY_TOKEN }}
-        run: uv run --locked --no-dev python tools/cli-playground/preview_ci.py publish --repo "$REPOSITORY" --run-id "$RUN_ID"
+        run: uv run --locked --no-dev --package cli-playground --extra ci python -m playground.preview.cli publish --repo "$REPOSITORY" --run-id "$RUN_ID"
   lifecycle:
     name: 🧹 Reconcile playground preview lifecycle
     if: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.repo.full_name == github.repository && github.event.pull_request.base.ref == 'master' && (github.event.action == 'closed' || !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci')) }}
@@ -77,5 +77,5 @@ jobs:
           PLAYGROUND_URL: ${{ vars.PLAYGROUND_URL }}
           PLAYGROUND_DEPLOY_TOKEN: ${{ secrets.PLAYGROUND_DEPLOY_TOKEN }}
         run: |
-          uv run --locked --no-dev python tools/cli-playground/preview_ci.py lifecycle \
+          uv run --locked --no-dev --package cli-playground --extra ci python -m playground.preview.cli lifecycle \
             --repo "$REPOSITORY" --pr "$PR_NUMBER" --action "$PR_ACTION"

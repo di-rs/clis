@@ -1,0 +1,16 @@
+services:
+  vector:
+    image: ${OBS_COLLECTOR_IMAGE:?Set approved immutable collector image}
+volumes:
+  vector-data:
+    external: true
+    name: ${OBS_VECTOR_VOLUME:?Set host-owned Vector volume}
+  logs-data:
+    external: true
+    name: ${OBS_LOGS_VOLUME:?Set host-owned VictoriaLogs volume}
+  prometheus-data:
+    external: true
+    name: ${OBS_PROMETHEUS_VOLUME:?Set host-owned Prometheus volume}
+  grafana-data:
+    external: true
+    name: ${OBS_GRAFANA_VOLUME:?Set host-owned Grafana volume}

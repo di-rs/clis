@@ -111,17 +111,21 @@ class PlaygroundService:
         )
         await self.retry_retirements()
 
-    def update_build(self, pr: int, update: BuildUpdate) -> EnvironmentMetadata:
-        metadata = self.store.update_build(pr, update)
+    def update_build(
+        self, pr: int, update: BuildUpdate, expected_generation: int | None = None
+    ) -> EnvironmentMetadata:
+        metadata = self.store.update_build(pr, update, expected_generation)
         self.collect_artifacts()
         return metadata
 
     async def finish_upload(self, intent: UploadIntent) -> Environment:
         artifact = intent.artifact
         try:
+            self.store.check_generation(artifact.pr, intent.expected_generation)
             await self.boxie.upload(
                 artifact.artifact_id, artifact.sha256, self.sessions.archive(artifact.artifact_id)
             )
+            self.store.check_generation(artifact.pr, intent.expected_generation)
             # Closure cancellation is irreversible even if the PR has since reopened.
             stored = next(
                 item
@@ -137,7 +141,7 @@ class PlaygroundService:
             }:
                 raise ArtifactConflictError("a newer publication superseded this upload")
             # No await between the final stale/closed check and atomic publication.
-            environment = self.store.publish(artifact, intent.build)
+            environment = self.store.publish(artifact, intent.build, intent.expected_generation)
         except ArtifactConflictError:
             self.sessions.retire(artifact.artifact_id)
             self.sessions.uploaded(artifact.artifact_id)
@@ -325,8 +329,16 @@ class PlaygroundService:
         sha: str,
         pr: int,
         build: BuildIdentity | None = None,
+        *,
+        expected_generation: int | None = None,
     ) -> Environment:
         ArtifactIdentity(sha=sha, pr=pr)
+        expected_generation = (
+            self.store.lifecycle(pr).generation
+            if expected_generation is None
+            else expected_generation
+        )
+        self.store.check_generation(pr, expected_generation)
         self.store.check_build(pr, build)
         try:
             await asyncio.wait_for(self.uploads.acquire(), timeout=1)
@@ -373,6 +385,7 @@ class PlaygroundService:
                     raise ValueError("invalid binary bundle") from error
                 # Revisions may expire while the upload body is streaming.
                 await self.cleanup_inactive()
+                self.store.check_generation(pr, expected_generation)
                 self.store.check_build(pr, build)
                 revision = sha if build is None else f"{sha}-{build.run_number}-{build.run_attempt}"
                 existing = self.store.revision(pr, revision)
@@ -406,6 +419,7 @@ class PlaygroundService:
                 )
                 intent = UploadIntent(
                     artifact=metadata,
+                    expected_generation=expected_generation,
                     build=build,
                     previous_revision=current.revision if current else None,
                 )
@@ -416,26 +430,32 @@ class PlaygroundService:
                 shutil.rmtree(temporary, ignore_errors=True)
             self.uploads.release()
 
+    async def _clean_pull_request(self, pr: int, generation: int) -> int:
+        if self.store.lifecycle(pr).generation != generation:
+            return 0
+        identifiers = self.store.for_pull_request(pr)
+        identifiers.add(self.store.identifier(pr))
+        self.sessions.stop_environments(identifiers)
+        self.collect_artifacts()
+        await self.retry_stops()
+        if self.store.lifecycle(pr).generation != generation:
+            return 0
+        removed = self.store.remove(identifiers)
+        await self.retry_retirements()
+        return removed
+
     async def close_pull_request(self, pr: int) -> int:
-        # Publish must see the tombstone even while we wait for its upload lock.
-        self.store.close_pull_request(pr)
+        generation = self.store.close_pull_request(pr)
         self.sessions.cancel_uploads(pr)
         async with self.uploads:
-            identifiers = self.store.for_pull_request(pr)
-            identifiers.add(self.store.identifier(pr))
-            self.sessions.stop_environments(identifiers)
-            self.collect_artifacts()
-            await self.retry_stops()
-            removed = self.store.remove(identifiers)
-            await self.retry_retirements()
-            return removed
+            return await self._clean_pull_request(pr, generation)
 
     async def reopen_pull_request(self, pr: int) -> None:
+        generation = self.store.reopen_pull_request(pr)
+        self.sessions.cancel_uploads(pr)
         async with self.uploads:
-            if self.store.is_closed(pr):
-                # Also completes invalidation if close was interrupted after its tombstone.
-                self.sessions.cancel_uploads(pr)
-            self.store.reopen_pull_request(pr)
+            await self._clean_pull_request(pr, generation)
+            self.store.complete_reopen(pr, generation)
 
     async def metadata(self, identifier: str) -> EnvironmentMetadata | None:
         return self.store.metadata(identifier)

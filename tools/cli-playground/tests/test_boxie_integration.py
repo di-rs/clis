@@ -117,7 +117,7 @@ def test_authenticated_readiness_wait_is_not_an_abandoned_page_response(
             ) as product:
                 response = await product.http.post(
                     "/api/environments",
-                    params={"sha": "a" * 40, "pr": 123},
+                    params={"sha": "a" * 40, "pr": 123, "expected_generation": 0},
                     headers={"Authorization": "Bearer test-deployment-token"},
                     content=binary_bundle({"echor": elf_binary()}),
                 )

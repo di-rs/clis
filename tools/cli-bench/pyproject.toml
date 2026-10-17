@@ -4,5 +4,8 @@ version = "0.1.0"
 requires-python = ">=3.15"
 dependencies = []
 
+[project.optional-dependencies]
+ci = ["clis-ci"]
+
 [tool.uv]
 package = false

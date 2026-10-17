@@ -310,14 +310,29 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime", choices=["runsc"])
     parser.add_argument("--browser", action="store_true")
+    parser.add_argument(
+        "--deployment",
+        action="store_true",
+        help="assembled production-manifest release gate; Linux amd64/runsc/root required",
+    )
+    parser.add_argument(
+        "--capacity",
+        action="store_true",
+        help="include a 120-second eight-sandbox observation on the assembled host",
+    )
     parser.add_argument("pytest_args", nargs="*")
     args = parser.parse_args()
+    if args.capacity:
+        args.deployment = True
+        os.environ["BOXIE_DEPLOYMENT_CAPACITY"] = "1"
     if args.browser and not args.runtime:
         parser.error("--browser requires --runtime runsc")
     if args.browser:
         os.environ["BOXIE_BROWSER"] = "1"
     selected = (
-        ["tools/boxie/tests/integration/test_lifecycle.py"]
+        ["tools/boxie/tests/integration/test_deployment.py"]
+        if args.deployment
+        else ["tools/boxie/tests/integration/test_lifecycle.py"]
         if args.runtime
         else [
             "tools/boxie/tests/test_postgres.py",

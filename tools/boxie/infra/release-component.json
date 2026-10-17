@@ -1,0 +1,54 @@
+{
+  "component": "boxie",
+  "compose_file": "compose.production.yml",
+  "files": [
+    "pre-activate.sh",
+    "compose.observability.yml"
+  ],
+  "services": [
+    "api",
+    "orchestrator"
+  ],
+  "image_variables": {
+    "BOXIE_RUNTIME_IMAGE": [
+      "api",
+      "orchestrator"
+    ]
+  },
+  "required_environment": [
+    "BOXIE_API_ALIAS",
+    "BOXIE_API_CONFIG",
+    "BOXIE_API_TEMPORAL_CERT_FILE",
+    "BOXIE_API_TEMPORAL_KEY_FILE",
+    "BOXIE_CONSUMER_CREDENTIAL_FILE",
+    "BOXIE_CONSUMER_NETWORK",
+    "BOXIE_CONTROL_NETWORK",
+    "BOXIE_DATA_DIR",
+    "BOXIE_DOCKER_GID",
+    "BOXIE_ORCHESTRATOR_CONFIG",
+    "BOXIE_ORCHESTRATOR_CREDENTIAL_FILE",
+    "BOXIE_ORCHESTRATOR_TEMPORAL_CERT_FILE",
+    "BOXIE_ORCHESTRATOR_TEMPORAL_KEY_FILE",
+    "BOXIE_POSTGRES_DSN_FILE",
+    "BOXIE_PROFILES_DIR",
+    "BOXIE_TEMPORAL_CA_FILE"
+  ],
+  "healthchecks": {
+    "api": {
+      "kind": "docker"
+    },
+    "orchestrator": {
+      "kind": "docker"
+    }
+  },
+  "pre_activate": "pre-activate.sh",
+  "compatibility": {
+    "schema": "boxie-alembic-0004",
+    "boxie_api": "v1",
+    "temporal_server": "1.32.0"
+  },
+  "secret_environment": [],
+  "optional_compose_files": {
+    "BOXIE_MONITORING": "compose.observability.yml"
+  }
+}

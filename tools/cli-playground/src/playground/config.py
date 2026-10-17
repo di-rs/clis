@@ -1,7 +1,9 @@
 """Validated deployment configuration; one gateway worker owns the session limit."""
 
 import hashlib
+import os
 import re
+import stat
 from pathlib import Path
 from typing import Self
 from urllib.parse import urlsplit
@@ -96,3 +98,15 @@ class Settings(BaseSettings):
             expected = hashlib.sha256(f"pull-request:{pr_match[1]}".encode()).hexdigest()[:32]
             return identifier is None or identifier == expected
         return False
+
+
+def read_boxie_credential(path: Path) -> str:
+    """Read the private consumer credential under the gateway's existing file policy."""
+    metadata = path.lstat()
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077:
+        raise ValueError("Boxie credential must be a private regular file")
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), "r") as stream:
+        credential = stream.read(4097).strip()
+    if not 16 <= len(credential) <= 4096 or any(not 33 <= ord(c) <= 126 for c in credential):
+        raise ValueError("invalid Boxie credential file")
+    return credential

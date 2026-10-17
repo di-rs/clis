@@ -45,7 +45,7 @@ uv run --locked --package cli-playground uvicorn playground.app:create_app \
 
 No Docker client, Docker socket or Boxie implementation is installed in the
 Playground image. Its server-side consumer credential is not sent to the browser.
-Production activation is unavailable until PR4; setup currently provisions only.
+Production releases use independently supplied Boxie and platform connection outputs.
 The terminal keeps credentials, applied output sequence and screen in page memory.
 Reconnect drains pending xterm writes, resumes retained output exactly once and
 synchronizes geometry before enabling user input. Input typed while disconnected
@@ -60,14 +60,12 @@ when upgrading xterm. This private dependency keeps terminal-generated replies
 working during replay without counting them as user activity. Browser tests drive
 DOM composition events; they do not claim OS-native IME coverage.
 
-## Production transition
+## Production deployment
 
-Production activation is unavailable until PR4. The [hosting reference](infra/README.md)
-retains protected host/DNS provisioning; setup now provisions only. Release and
-all deploy entrypoints fail before state reads, publication or activation. Keep
-automatic release disabled through this transition. Existing preview-controller
-trust boundaries remain unchanged; local Compose and native runsc CI validate the
-split runtime independently.
+The [hosting reference](infra/README.md) describes independent product releases.
+The thin [single-host environment](../../infra/environments/single-host/README.md)
+composes shared infrastructure. Automatic application deployment is opt-in;
+preview-controller trust boundaries remain unchanged.
 
 ## Workflow responsibilities
 
@@ -87,3 +85,21 @@ different trust and credentials.
 See [Testing](../../docs/testing.md) for Python, frontend and browser checks,
 and the [🧪 Boxie lifecycle integration workflow](../../.github/workflows/boxie-lifecycle.yml)
 for real PostgreSQL/Temporal recovery and native Linux/gVisor browser checks.
+
+Trusted preview operations are installed under `playground.preview`; CI installs
+its `ci` extra to use the shared `clis-ci` transport. Source builds require an
+explicit checkout: `python -m playground.preview.cli build --repository . ...`.
+Publication and lifecycle commands use the same module without source discovery.
+
+Before an upload or build write, capture the authenticated
+`GET /api/pull-requests/PR/lifecycle` response. Send its `generation` as the
+`expected_generation` query parameter and require the same value in the response.
+A close or reopen advances the durable generation before waiting for uploads.
+Stale writes return 409 with `stale lifecycle`. Retries keep their original
+captured generation. Lifecycle state lives outside removable preview data, and
+one OS-held data-directory lock prevents competing writers.
+
+This fence rejects publication after a lifecycle event reaches Playground. It
+cannot detect undelivered GitHub events or make GitHub comments/deployment statuses
+atomic with product commits. The publisher rechecks generation and head state
+before those writes and verifies the upload acknowledgement.

@@ -1,4 +1,4 @@
-name: ☁️ Playground infrastructure setup
+name: ☁️ Single host platform setup
 
 on:
   workflow_dispatch:
@@ -9,11 +9,11 @@ jobs:
   provision:
     name: ☁️ Provision playground infrastructure
     if: ${{ github.ref == 'refs/heads/master' }}
-    environment: playground
+    environment: platform
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     concurrency:
-      group: cli-playground-production
+      group: platform-production
       cancel-in-progress: false
     permissions:
       contents: read
@@ -28,7 +28,8 @@ jobs:
       HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
-      PLAYGROUND_URL: ${{ vars.PLAYGROUND_URL }}
+      PLATFORM_CONFIG: ${{ vars.PLATFORM_CONFIG }}
+      OPERATOR_TUNNEL_SECRET: ${{ secrets.OPERATOR_TUNNEL_SECRET }}
     steps:
       - name: 📥 Check out reviewed infrastructure source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -46,12 +47,21 @@ jobs:
         uses: pulumi/setup-pulumi@b374ceb6168550de27c6eba92e01c1a774040e11 # v2
         with:
           pulumi-version: '3.268.0'
-      - name: 🔎 Validate production infrastructure configuration
-        run: uv run --locked python -m playground_infra.ci configure
-      - name: ☁️ Provision Hetzner host and Cloudflare DNS
-        working-directory: tools/cli-playground/infra
+      - name: 🔧 Materialize the reviewed nonsecret environment settings
+        run: |
+          python3 - <<'PYCONFIG'
+          import json, os
+          from pathlib import Path
+          value = json.loads(os.environ['PLATFORM_CONFIG'])
+          Path('infra/environments/single-host/Pulumi.production.yaml').write_text(json.dumps({'config': {'single-host:environment': value}}))
+          PYCONFIG
+      - name: 🔧 Provision shared host, storage and selected DNS
+        working-directory: infra/environments/single-host
         run: |
           pulumi login "$PULUMI_BACKEND_URL" --non-interactive
           pulumi stack select production --create --secrets-provider passphrase --non-interactive
+          if [ -n "$OPERATOR_TUNNEL_SECRET" ]; then
+            printf '%s' "$OPERATOR_TUNNEL_SECRET" | pulumi config set --secret operatorTunnelSecret --non-interactive
+          fi
           pulumi preview --refresh --non-interactive --diff
           pulumi up --yes --refresh --non-interactive --suppress-outputs

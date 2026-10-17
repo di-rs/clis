@@ -17,6 +17,15 @@ on:
       - 'uv.lock'
       - '.python-version'
   workflow_dispatch:
+    inputs:
+      deployment:
+        description: Run the assembled production-manifest deployment gate
+        type: boolean
+        default: false
+      capacity:
+        description: Include the bounded eight-sandbox capacity observation
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -30,7 +39,7 @@ jobs:
     if: ${{ !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci') }}
     name: 🧪 Verify PostgreSQL and Temporal lifecycle
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && (inputs.deployment || inputs.capacity) && 60 || 35 }}
     env:
       PYTHONUNBUFFERED: '1'
     steps:
@@ -127,9 +136,48 @@ jobs:
         timeout-minutes: 3
         run: |
           uv run --locked pytest -m integration tools/boxie/tests/test_postgres.py -k failed_restart_journal -vv --durations=10
+      - name: 🔌 Verify real SSH disconnect cleanup
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.deployment || inputs.capacity) }}
+        timeout-minutes: 3
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-server
+          sudo mkdir -p /run/sshd
+          uv run --locked pytest -m integration tools/deploy/tests/deploy_checks/test_ssh_disconnect.py -vv
+      - name: 🧪 Verify assembled owner releases and optional capacity
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.deployment || inputs.capacity) }}
+        timeout-minutes: 20
+        env:
+          OBSERVE_CAPACITY: ${{ inputs.capacity }}
+        run: |
+          args=(--deployment)
+          if [[ $OBSERVE_CAPACITY == true ]]; then args+=(--capacity); fi
+          sudo --preserve-env=PATH "$PWD/.venv/bin/python" tools/boxie/tests/run_integration.py "${args[@]}" -- -vv --durations=10
+      - name: 📁 Collect only public assembled evidence
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && (inputs.deployment || inputs.capacity) }}
+        run: |
+          evidence="$RUNNER_TEMP/assembled-deployment-evidence"
+          mkdir -p "$evidence"
+          sudo "$PWD/.venv/bin/python" - "$evidence" <<'PYEVIDENCE'
+          import pathlib, shutil, sys
+          output = pathlib.Path(sys.argv[1])
+          for pattern in ('evidence.json', 'cleanup-errors.log'):
+              for source in pathlib.Path('/tmp/pytest-of-root').rglob(pattern):
+                  target = output / (source.parent.parent.name + '-' + source.parent.name + '-' + source.name)
+                  shutil.copyfile(source, target)
+                  target.chmod(0o644)
+          PYEVIDENCE
+      - name: 📤 Preserve assembled evidence and cleanup diagnostics
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && (inputs.deployment || inputs.capacity) }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: assembled-deployment-evidence
+          path: ${{ runner.temp }}/assembled-deployment-evidence/
+          if-no-files-found: ignore
+          retention-days: 14
       # Optional until the native suite's hang is resolved; never blocks a PR.
       - name: 🎭 Run optional native lifecycle and browser tests
-        if: github.event_name == 'workflow_dispatch'
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.deployment && !inputs.capacity }}
         timeout-minutes: 20
         run: |
           uv run --locked python tools/boxie/tests/run_integration.py --runtime runsc --browser -- -vv --durations=10 -o faulthandler_timeout=120

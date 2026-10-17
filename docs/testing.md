@@ -190,3 +190,57 @@ uv run --locked pytest -m integration tools/boxie/tests/test_observability_nativ
 The full native file requires a Linux Docker host with persistent journald and
 real PostgreSQL/Temporal fixtures. Missing prerequisites fail when explicitly
 selected. Storage-pressure and live Cloudflare Access remain activation checks.
+
+## Component release and host checks
+
+The root Python checks include host resource ownership, Pulumi component
+mock graphs, single-host composition, private release preparation and the
+standalone SSH activation adapter. Host-side scripts are checked against Python
+3.12 grammar; application code remains on Python 3.15. No cloud resources are
+created by these checks.
+
+The PR-only [component release smoke](../.github/workflows/component-release-check.yml)
+executes real Compose updates and failed-activation rollback while preserving a
+random persistent sentinel and the exact container of an unrelated component:
+
+```sh
+uv run --locked pytest tools/deploy/tests/test_native_release.py -m integration
+```
+
+It owns random labeled test networks, volumes and containers. Missing Docker or
+registry access fails when selected. This test does not establish cloud bootstrap,
+production dependency readiness, native gVisor isolation or live DNS/Access.
+Those acceptance gates remain in the
+[single-host runbook](../infra/environments/single-host/README.md).
+
+## Assembled deployment and capacity
+
+Select the manual lifecycle workflow's `deployment` input, or use an owned,
+disposable Linux amd64 host with configured runsc, root for UID ownership, built
+lifecycle images, native `echor`, Docker, and the host journal group:
+
+```sh
+sudo .venv/bin/python tools/boxie/tests/run_integration.py --deployment -- -vv
+sudo .venv/bin/python tools/boxie/tests/run_integration.py --capacity -- -vv
+```
+
+The existing lifecycle fixture has an assembled production-manifest adapter. It
+starts without Playground, uses explicit PostgreSQL/Temporal/Alembic operations,
+checks generic create/terminal/stop, then adds Playground. It verifies the profile
+digest/retained snapshot, real UID permissions, independent healthy/failed updates,
+Boxie terminal termination/cleanup, and Temporal outage recovery. Base and monitored
+variants share this scenario. The capacity mode reuses the monitored stack for a
+120-second eight-slot observation with terminal activity, host/cgroup pressure,
+OOM state, disk and best-effort producer-loss counters. It changes no limits.
+
+Fixtures use random owned resources, local-registry application digests and
+loopback endpoint overrides. Public proxy DNS/ACME is disabled. They use real
+bind-backed external volumes; they do not replace the provider disk/bootstrap
+activation gate. Missing selected prerequisites fail explicitly. The workflow
+collects only public evidence/cleanup diagnostics, with every fixture attempting
+all owned cleanup. Selected-VM sizing, live Access and browser/native hang evidence
+remain separate. No container, mock or one-sample benchmark proves those gates.
+
+The real non-PTY SSH-disconnect regression is also part of the selected manual
+Linux gate. It runs the shipped adapter through an actual isolated SSH server
+and verifies that an owned mutation cannot survive the remote deadline.

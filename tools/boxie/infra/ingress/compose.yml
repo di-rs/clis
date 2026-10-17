@@ -13,6 +13,8 @@ services:
     mem_limit: 134217728
     command:
     - tunnel
+    - --metrics
+    - 0.0.0.0:2000
     - --no-autoupdate
     - --config
     - /etc/cloudflared/config.yml

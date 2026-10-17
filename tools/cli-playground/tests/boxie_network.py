@@ -76,7 +76,16 @@ async def publish(product: Product, sha: str, pr: int = 123) -> httpx.Response:
 
     return await product.http.post(
         "/api/environments",
-        params={"sha": sha, "pr": pr},
+        params={
+            "sha": sha,
+            "pr": pr,
+            "expected_generation": (
+                await product.http.get(
+                    f"/api/pull-requests/{pr}/lifecycle",
+                    headers={"Authorization": "Bearer test-deployment-token"},
+                )
+            ).json()["generation"],
+        },
         headers={"Authorization": "Bearer test-deployment-token"},
         content=binary_bundle({"echor": elf_binary(sha.encode())}),
     )

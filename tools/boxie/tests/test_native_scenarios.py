@@ -305,3 +305,82 @@ def test_readiness_details_exclude_container_error_and_configuration_secrets() -
     state = json.loads(output)["containers"]["orchestrator"]
     assert state["oom_killed"] is True and state["exit_code"] == 137 and state["running"] is False
     assert json.loads(output)["containers"]["faults"] == {"error_type": "ValueError"}
+
+
+def test_assembled_fixture_prepares_committed_production_release(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+    import subprocess
+
+    from integration.deployment import DeploymentStack
+
+    stack = DeploymentStack(tmp_path, monitoring=False)
+    stack.images["boxie"] = "registry.example/boxie@sha256:" + "a" * 64
+    stack.env.update(json.loads((ROOT / "tools/boxie/infra/settings.example.json").read_text()))
+    stack.env["BOXIE_MONITORING"] = "false"
+    stack.env["BOXIE_TEST_API_PORT"] = "18090"
+    original = subprocess.run
+    captured: list[dict[str, Any]] = []
+
+    def execute(argv: list[str], *args: Any, **kwargs: Any) -> Any:
+        if len(argv) > 1 and str(argv[1]).endswith("deploy_tool/remote.py"):
+            payload = json.loads(kwargs["input"])
+            captured.append(payload)
+            return subprocess.CompletedProcess(argv, 0, b'{"outcome":"activated"}', b"")
+        return original(argv, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", execute)
+    assert stack.release("boxie")["outcome"] == "activated"
+    assert len(captured) == 1
+    payload = captured[0]
+    assert payload["descriptor"]["services"] == ["api", "orchestrator"]
+    assert payload["release"]["settings"]["BOXIE_MONITORING"] == "false"
+    assert not any(key.startswith("PLAYGROUND_") for key in payload["environment"])
+    assert len(payload["release"]["configuration_hashes"]) == 4
+
+
+def test_assembled_product_origin_settings_are_accepted_by_real_gateway(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import base64
+    import json
+    import subprocess
+
+    from integration.deployment import DeploymentStack
+    from playground.config import Settings
+
+    stack = DeploymentStack(tmp_path, monitoring=False)
+    stack.product_url = "http://127.0.0.1:18000"
+    stack.images["playground"] = "registry.example/playground@sha256:" + "a" * 64
+    stack.env.update(
+        json.loads((ROOT / "tools/cli-playground/infra/settings.example.json").read_text())
+    )
+    stack.env["BOXIE_TEST_PRODUCT_PORT"] = "18000"
+    original = subprocess.run
+    captured: list[dict[str, Any]] = []
+
+    def execute(argv: list[str], *args: Any, **kwargs: Any) -> Any:
+        if len(argv) > 1 and str(argv[1]).endswith("deploy_tool/remote.py"):
+            captured.append(json.loads(kwargs["input"]))
+            return subprocess.CompletedProcess(argv, 0, b'{"outcome":"activated"}', b"")
+        return original(argv, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", execute)
+    assert stack.release("playground")["outcome"] == "activated"
+    payload = captured[0]
+    config = yaml.safe_load(base64.b64decode(payload["files"]["compose.production.yml"]))
+    environment = config["services"]["gateway"]["environment"]
+    settings = Settings(
+        data_dir=tmp_path / "product",
+        public_url=Template(environment["PLAYGROUND_PUBLIC_URL"]).substitute(
+            payload["environment"]
+        ),
+        preview_domain=Template(environment["PLAYGROUND_PREVIEW_DOMAIN"]).substitute(
+            payload["environment"]
+        ),
+        deploy_token="fixture-token",
+        boxie_url=stack.env["PLAYGROUND_BOXIE_URL"],
+        boxie_credential_file=tmp_path / "consumer.secret",
+    )
+    assert settings.preview_url("a" * 32, 7).startswith(stack.product_url + "/p/")

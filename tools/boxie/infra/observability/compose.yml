@@ -216,6 +216,7 @@ services:
     command:
     - --collector.disable-defaults
     - --collector.filesystem
+    - --collector.filesystem.mount-points-include=^(/|/srv/boxie)$
     - --collector.meminfo
     - --path.rootfs=/host
     - --path.procfs=/host/proc

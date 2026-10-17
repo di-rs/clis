@@ -38,4 +38,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           RUN_ID: ${{ github.event.workflow_run.id }}
-        run: uv run --locked --no-dev python tools/cli-bench/report.py --repo "$REPOSITORY" --run-id "$RUN_ID" --post
+        run: uv run --locked --no-dev --package cli-bench --extra ci python tools/cli-bench/report.py --repo "$REPOSITORY" --run-id "$RUN_ID" --post

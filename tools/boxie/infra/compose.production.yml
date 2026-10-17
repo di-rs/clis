@@ -1,4 +1,4 @@
-name: ${BOXIE_PROJECT_NAME:-boxie}
+name: ${BOXIE_PROJECT_NAME:-clis-boxie}
 services:
   api:
     image: ${BOXIE_RUNTIME_IMAGE:?Set approved immutable Boxie image}
@@ -21,7 +21,7 @@ services:
       control: {}
     read_only: true
     tmpfs:
-    - /tmp
+    - /tmp:size=67108864,nosuid,nodev,noexec
     cap_drop:
     - ALL
     security_opt:
@@ -29,7 +29,7 @@ services:
     init: true
     restart: unless-stopped
     environment:
-      BOXIE_RELEASE: ${BOXIE_RELEASE:-unknown}
+      BOXIE_RELEASE: ${CLIS_RELEASE_REVISION:?Set release revision}
     logging:
       driver: journald
       options:
@@ -37,6 +37,24 @@ services:
         max-buffer-size: 4m
         tag: boxie-api
     pids_limit: 256
+    user: 10001:10001
+    mem_limit: 512m
+    healthcheck:
+      test:
+      - CMD
+      - /app/.venv/bin/python
+      - -m
+      - boxie.bootstrap.health
+      - api
+      - --config
+      - /etc/boxie/api.json
+      interval: 15s
+      timeout: 12s
+      retries: 8
+      start_period: 30s
+    stop_grace_period: 10s
+    labels:
+      clis.release-id: ${CLIS_RELEASE_ID:?Set immutable release identity}
   orchestrator:
     image: ${BOXIE_RUNTIME_IMAGE:?Set approved immutable Boxie image}
     command:
@@ -47,7 +65,7 @@ services:
     - /var/run/docker.sock:/var/run/docker.sock
     - ${BOXIE_DATA_DIR:?Set absolute daemon host data directory}:${BOXIE_DATA_DIR}
     - ${BOXIE_ORCHESTRATOR_CONFIG:?Set orchestrator config file}:/etc/boxie/orchestrator.json:ro
-    - ${BOXIE_PROFILES_FILE:?Set approved profiles file}:/etc/boxie/profiles.json:ro
+    - ${BOXIE_PROFILES_DIR:?Set stable approved profiles directory}:/etc/boxie/approved:ro
     - ${BOXIE_ORCHESTRATOR_CREDENTIAL_FILE}:/run/secrets/orchestrator:ro
     - ${BOXIE_POSTGRES_DSN_FILE:?Set Boxie database DSN file}:/run/secrets/postgres-dsn:ro
     - ${BOXIE_TEMPORAL_CA_FILE:?Set Temporal frontend CA}:/run/secrets/temporal-ca.pem:ro
@@ -57,7 +75,7 @@ services:
       control: {}
     read_only: true
     tmpfs:
-    - /tmp
+    - /tmp:size=67108864,nosuid,nodev,noexec
     cap_drop:
     - ALL
     security_opt:
@@ -65,7 +83,7 @@ services:
     init: true
     restart: unless-stopped
     environment:
-      BOXIE_RELEASE: ${BOXIE_RELEASE:-unknown}
+      BOXIE_RELEASE: ${CLIS_RELEASE_REVISION:?Set release revision}
     logging:
       driver: journald
       options:
@@ -73,6 +91,26 @@ services:
         max-buffer-size: 4m
         tag: boxie-orchestrator
     pids_limit: 256
+    user: 10001:10001
+    mem_limit: 768m
+    healthcheck:
+      test:
+      - CMD
+      - /app/.venv/bin/python
+      - -m
+      - boxie.bootstrap.health
+      - orchestrator
+      - --config
+      - /etc/boxie/orchestrator.json
+      interval: 15s
+      timeout: 12s
+      retries: 8
+      start_period: 30s
+    stop_grace_period: 60s
+    group_add:
+    - ${BOXIE_DOCKER_GID:?Set host Docker group}
+    labels:
+      clis.release-id: ${CLIS_RELEASE_ID:?Set immutable release identity}
 networks:
   consumer:
     external: true

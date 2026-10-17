@@ -1,0 +1,4 @@
+volumes:
+  postgres-data:
+    external: true
+    name: ${POSTGRES_VOLUME:?Set host-owned PostgreSQL volume}

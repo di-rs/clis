@@ -1,0 +1,148 @@
+name: 🚀 Component application release
+
+on:
+  workflow_call:
+    inputs:
+      component:
+        required: true
+        type: string
+      directory:
+        required: true
+        type: string
+      dockerfile:
+        required: true
+        type: string
+      image_variable:
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  release:
+    name: 🐳 Publish immutable component image
+    if: ${{ github.ref == 'refs/heads/master' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    env:
+      DOCKER_BUILD_RECORD_UPLOAD: 'false'
+    steps:
+      - name: 📥 Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: 🏷️ Select component image name
+        id: image
+        env:
+          REPOSITORY: ${{ github.repository }}
+          COMPONENT: ${{ inputs.component }}
+        run: echo "name=ghcr.io/${REPOSITORY,,}-${COMPONENT}" >> "$GITHUB_OUTPUT"
+      - name: 🐳 Set up image builder
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          cache-binary: false
+      - name: 🔑 Log in to component registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: 🐳 Build and publish component image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ inputs.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.image.outputs.name }}:run-${{ github.run_id }}-${{ github.run_attempt }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+      - name: 🔧 Record immutable component images
+        env:
+          COMPONENT_DIRECTORY: ${{ inputs.directory }}
+          IMAGE_VARIABLE: ${{ inputs.image_variable }}
+          IMAGE: ${{ steps.image.outputs.name }}@${{ steps.build.outputs.digest }}
+          REVISION: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          release = json.loads((Path(os.environ['COMPONENT_DIRECTORY']) / 'release.example.json').read_text())
+          release['revision'] = os.environ['REVISION']
+          release['images'][os.environ['IMAGE_VARIABLE']] = os.environ['IMAGE']
+          Path('images.json').write_text(json.dumps(release['images'], indent=2) + '\n')
+          PY
+      - name: 📤 Save immutable release manifest
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.component }}-images
+          path: images.json
+          if-no-files-found: error
+          retention-days: 30
+
+  deploy:
+    name: 🚀 Activate selected component
+    needs: release
+    if: ${{ github.ref == 'refs/heads/master' }}
+    environment: ${{ inputs.component }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    concurrency:
+      group: component-production-${{ inputs.component }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - name: 📥 Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: 🐍 Set up uv and Python
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: '0.13.0'
+          enable-cache: false
+      - name: 📦 Install locked workspace dependencies
+        run: uv sync --locked --all-packages
+      - name: 📥 Load immutable release manifest
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.component }}-images
+      - name: 🔧 Activate only this component
+        env:
+          COMPONENT_DIRECTORY: ${{ inputs.directory }}
+          CONNECTION_PROFILE: ${{ vars.DEPLOYMENT_PROFILE }}
+          SSH_IDENTITY: ${{ secrets.DEPLOYMENT_SSH_KEY }}
+          COMPONENT_SETTINGS: ${{ vars.COMPONENT_SETTINGS }}
+          COMPONENT_ENVIRONMENT: ${{ secrets.COMPONENT_ENVIRONMENT }}
+        run: |
+          set -euo pipefail
+          private=$(mktemp -d)
+          trap 'rm -rf "$private"' EXIT
+          export DEPLOY_PRIVATE="$private"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          root = Path(os.environ['DEPLOY_PRIVATE'])
+          for name, key in [('profile.json','CONNECTION_PROFILE'),('identity','SSH_IDENTITY'),('environment.json','COMPONENT_ENVIRONMENT'),('settings.json','COMPONENT_SETTINGS')]:
+              with os.fdopen(os.open(root / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as f:
+                  f.write(os.environ[key])
+          PY
+          uv run --locked python -m deploy_tool manifest --repository . --descriptor "$COMPONENT_DIRECTORY/release-component.json" --revision "$GITHUB_SHA" --images images.json --settings "$private/settings.json" --output release.json
+          uv run --locked python -m deploy_tool prepare --repository . --descriptor "$COMPONENT_DIRECTORY/release-component.json" --release release.json --environment "$private/environment.json" --output "$private/prepared"
+          uv run --locked python -m deploy_tool deploy --prepared "$private/prepared" --profile "$private/profile.json" --identity "$private/identity" --timeout 900
+      - name: 📤 Save public release identity
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.component }}-release
+          path: release.json
+          if-no-files-found: ignore
+          retention-days: 30

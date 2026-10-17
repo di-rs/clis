@@ -104,7 +104,7 @@ def test_run_identity_queries_are_all_or_none(api_client: TestClient) -> None:
     response = api_client.post(
         "/api/environments",
         headers=AUTH,
-        params={"pr": 123, "sha": "a" * 40, "run_id": 1000},
+        params={"expected_generation": 0, "pr": 123, "sha": "a" * 40, "run_id": 1000},
         content=binary_bundle({"echor": elf_binary()}),
     )
     assert response.status_code == 422
@@ -124,6 +124,7 @@ def test_supported_manifest_and_build_order_survive_restart(
         boxie_url="http://boxie.internal",
         boxie_credential_file=tmp_path / "boxie.secret",
     )
+    api_client.__exit__(None, None, None)
     with TestClient(
         create_app(settings, boxie=FakeBoxie()), base_url=settings.public_url
     ) as client:
@@ -153,6 +154,7 @@ def test_one_pr_url_publishes_all_clis_and_tracks_the_latest_revision(
         "expires_at": metadata["expires_at"],
         "revision": "a" * 40,
         "build": None,
+        "expected_generation": 0,
     }
     assert upload(api_client, clis=binaries) == deployed
     assert upload(api_client, cli="wcr", sha="b" * 40) == deployed
@@ -175,7 +177,7 @@ def test_a_published_revision_cannot_change_its_binary_or_cli_set(
     )
     response = api_client.post(
         "/api/environments",
-        params={"sha": "a" * 40, "pr": 123},
+        params={"sha": "a" * 40, "pr": 123, "expected_generation": 0},
         content=binary_bundle(binaries),
         headers={"Authorization": "Bearer test-deployment-token"},
     )
@@ -186,7 +188,7 @@ def test_a_published_revision_cannot_change_its_binary_or_cli_set(
 def test_upload_requires_the_correct_deployment_token(api_client: TestClient) -> None:
     headers = {"Authorization": "Bearer wrong"}
     response = api_client.post(
-        "/api/environments?sha=" + "a" * 40 + "&pr=123",
+        "/api/environments?sha=" + "a" * 40 + "&pr=123&expected_generation=0",
         content=binary_bundle({"echor": elf_binary()}),
         headers=headers,
     )
@@ -197,7 +199,7 @@ def test_streamed_upload_enforces_limit_and_removes_partial_files(
     api_client: TestClient, tmp_path: Path
 ) -> None:
     response = api_client.post(
-        "/api/environments?sha=" + "a" * 40 + "&pr=123",
+        "/api/environments?sha=" + "a" * 40 + "&pr=123&expected_generation=0",
         content=binary_bundle({"echor": elf_binary(b"x" * 128)}),
         headers={"Authorization": "Bearer test-deployment-token"},
     )
@@ -326,9 +328,10 @@ def test_pr_close_removes_all_revisions_and_survives_restart(
         ),
         boxie=FakeBoxie(),
     )
+    api_client.__exit__(None, None, None)
     with TestClient(restarted, base_url="https://play.example") as client:
         response = client.post(
-            "/api/environments?sha=" + "a" * 40 + "&pr=123",
+            "/api/environments?sha=" + "a" * 40 + "&pr=123&expected_generation=0",
             content=binary_bundle({"echor": elf_binary()}),
             headers={"Authorization": "Bearer test-deployment-token"},
         )
@@ -368,7 +371,10 @@ def test_pr_close_rejects_an_upload_that_started_before_closure(tmp_path: Path) 
             headers={"Authorization": "Bearer test-deployment-token"},
         ) as client:
             deploying = asyncio.create_task(
-                client.post("/api/environments?sha=" + "a" * 40 + "&pr=123", content=body())
+                client.post(
+                    "/api/environments?sha=" + "a" * 40 + "&pr=123&expected_generation=0",
+                    content=body(),
+                )
             )
             await started.wait()
             closing = asyncio.create_task(client.delete("/api/pull-requests/123"))
@@ -389,7 +395,7 @@ def test_invalid_batch_does_not_replace_the_live_revision(api_client: TestClient
     deployed = upload(api_client)
     response = api_client.post(
         "/api/environments",
-        params={"sha": "b" * 40, "pr": 123},
+        params={"sha": "b" * 40, "pr": 123, "expected_generation": 0},
         content=binary_bundle({"catr": elf_binary(), "echor": b"invalid"}),
         headers={"Authorization": "Bearer test-deployment-token"},
     )
@@ -414,6 +420,7 @@ def test_startup_removes_abandoned_uploads_but_keeps_published_batches(
         boxie_url="http://boxie.internal",
         boxie_credential_file=tmp_path / "boxie.secret",
     )
+    api_client.__exit__(None, None, None)
     with TestClient(
         create_app(settings, boxie=FakeBoxie()), base_url=settings.public_url
     ) as restarted:
@@ -431,7 +438,7 @@ def test_identical_binary_retry_ignores_original_zip_timestamps(api_client: Test
         bundle.writestr(zipfile.ZipInfo("echor", date_time=(2001, 2, 3, 4, 5, 6)), elf_binary())
     response = api_client.post(
         "/api/environments",
-        params={"sha": "a" * 40, "pr": 123},
+        params={"sha": "a" * 40, "pr": 123, "expected_generation": 0},
         headers=AUTH,
         content=archive.getvalue(),
     )

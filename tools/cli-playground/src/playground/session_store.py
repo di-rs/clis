@@ -64,6 +64,7 @@ class CreateIntent(BaseModel):
 
 
 class UploadIntent(BaseModel):
+    expected_generation: int = 0
     artifact: ArtifactMetadata
     build: BuildIdentity | None
     previous_revision: str | None

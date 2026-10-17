@@ -1,12 +1,129 @@
 """Independent service packaging and operator-owned topology contracts."""
 
 import json
+import tomllib
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
+
+
+@pytest.mark.parametrize(
+    "relative,module",
+    [
+        ("tools/boxie", "boxie"),
+        ("tools/cli-playground", "playground"),
+        ("tools/boxie/infra", "boxie_infra"),
+        ("tools/cli-playground/infra", "playground_infra"),
+    ],
+)
+def test_distributions_have_explicit_isolated_modules(relative: str, module: str) -> None:
+    config = tomllib.loads((ROOT / relative / "pyproject.toml").read_text())
+    if module == "boxie":
+        assert config["build-system"]["build-backend"] == "hatchling.build"
+        assert config["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == ["src/boxie"]
+    else:
+        assert config["build-system"] == {
+            "requires": ["uv_build==0.13.0"],
+            "build-backend": "uv_build",
+        }
+        assert config["tool"]["uv"]["build-backend"]["module-name"] == module
+
+
+@pytest.mark.parametrize(
+    "dockerfile,package",
+    [
+        ("tools/boxie/infra/Runtime.Dockerfile", "boxie"),
+        ("tools/cli-playground/infra/Playground.Dockerfile", "cli-playground"),
+    ],
+)
+def test_service_image_staged_workspace_resolves(
+    tmp_path: Path, dockerfile: str, package: str
+) -> None:
+    import os
+    import shlex
+    import shutil
+    import subprocess
+
+    # Reproduce only metadata actually staged before sync, including manifests
+    # inside directory COPYs. No full checkout can hide a missing workspace member.
+    for line in (ROOT / dockerfile).read_text().splitlines():
+        if line.startswith("RUN uv sync "):
+            break
+        if not line.startswith("COPY "):
+            continue
+        tokens = shlex.split(line)[1:]
+        if tokens[0].startswith("--"):
+            continue
+        for source in tokens[:-1]:
+            path = ROOT / source
+            if path.is_dir():
+                path = path / "pyproject.toml"
+            if path.name not in {"pyproject.toml", "uv.lock", ".python-version"}:
+                continue
+            if not path.is_file():
+                continue
+            target = tmp_path / path.relative_to(ROOT)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, target)
+    result = subprocess.run(
+        ["uv", "export", "--locked", "--offline", "--package", package, "--no-dev", "--no-hashes"],
+        cwd=tmp_path,
+        env={key: value for key, value in os.environ.items() if key != "VIRTUAL_ENV"},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "fastapi" in result.stdout
+
+
+def test_private_compose_units_do_not_share_privileges() -> None:
+    boxie = yaml.safe_load((ROOT / "tools/boxie/infra/compose.yml").read_text())
+    product = yaml.safe_load((ROOT / "tools/cli-playground/infra/compose.yml").read_text())
+    assert set(boxie["services"]) == {"api", "orchestrator"}
+    for name, service in boxie["services"].items():
+        assert not service.get("ports")
+        assert ("docker.sock" in json.dumps(service)) == (name == "orchestrator")
+    assert "docker.sock" not in json.dumps(product)
+    assert not product["services"]["gateway"].get("depends_on")
+    assert "PLAYGROUND_BOXIE_URL" in product["services"]["gateway"]["environment"]
+    assert boxie["networks"]["consumer"]["external"] is True
+    assert product["networks"]["consumer"]["external"] is True
+
+
+@pytest.mark.parametrize(
+    "component,directory,services",
+    [
+        ("boxie", "tools/boxie/infra", {"api", "orchestrator"}),
+        ("playground", "tools/cli-playground/infra", {"gateway", "proxy"}),
+    ],
+)
+def test_production_descriptors_validate_independent_release_ownership(
+    component: str, directory: str, services: set[str]
+) -> None:
+    from deploy_tool.manifests import validate
+
+    root = ROOT / directory
+    descriptor = json.loads((root / "release-component.json").read_text())
+    files = {
+        name: (root / name).read_bytes()
+        for name in {descriptor["compose_file"], *descriptor["files"]}
+    }
+    manifest = validate(descriptor, json.loads((root / "release.example.json").read_text()), files)
+    assert manifest.component == component
+    assert set(cast(list[str], manifest.descriptor["services"])) == services
+    config = yaml.safe_load(manifest.files["compose.production.yml"])
+    for name, service in config["services"].items():
+        assert ("docker.sock" in json.dumps(service)) == (name == "orchestrator")
+        if name != "proxy":
+            assert service["user"] == "10001:10001"
+            assert service["mem_limit"]
+            assert service["pids_limit"] == 256
 
 
 @pytest.mark.integration
@@ -80,7 +197,7 @@ def test_real_isolated_installation(
 import importlib, importlib.util, pathlib
 module = importlib.import_module({module!r})
 assert pathlib.Path(module.__file__).is_relative_to({str(python.parent.parent)!r})
-for name in ({forbidden!r}, 'boxie_infra', 'playground_infra', 'boxie_test_support', 'pulumi', 'pytest'):
+for name in ({forbidden!r}, 'boxie_infra', 'playground_infra', 'boxie_test_support', 'pulumi', 'pytest', 'ci'):
     assert importlib.util.find_spec(name) is None, name
 """
     if module == "boxie":
@@ -131,6 +248,39 @@ async def run():
 asyncio.run(run())
 """
     subprocess.run([str(python), "-I", "-c", probe], cwd=tmp_path, env=environment, check=True)
+    if module == "playground":
+        ci_wheels = tmp_path / "ci-wheels"
+        subprocess.run(
+            ["uv", "build", "--package", "clis-ci", "--out-dir", str(ci_wheels)],
+            cwd=ROOT,
+            env=environment,
+            check=True,
+        )
+        subprocess.run(
+            [
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                str(python),
+                "--constraint",
+                str(constraints),
+                "--find-links",
+                str(ci_wheels),
+                str(wheel) + "[ci]",
+            ],
+            env=environment,
+            check=True,
+        )
+        result = subprocess.run(
+            [str(python), "-I", "-m", "playground.preview.cli", "--help"],
+            cwd=tmp_path,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert "{build,publish,lifecycle}" in result.stdout
 
 
 @pytest.mark.integration
@@ -144,6 +294,11 @@ def test_resolved_compose_isolated_topology(
     import subprocess
 
     values = {
+        "BOXIE_DOCKER_GID": "999",
+        "OBS_METRICS_NETWORK": "test-metrics",
+        "CLIS_RELEASE_ID": "b" * 64,
+        "CLIS_RELEASE_REVISION": "a" * 40,
+        "PLAYGROUND_PROXY_IMAGE": "traefik:test",
         "BOXIE_RUNTIME_IMAGE": "boxie:test",
         "BOXIE_API_CONFIG": str(tmp_path / "api.json"),
         "BOXIE_POSTGRES_DSN_FILE": str(tmp_path / "postgres-dsn.secret"),
@@ -153,7 +308,7 @@ def test_resolved_compose_isolated_topology(
         "BOXIE_ORCHESTRATOR_TEMPORAL_CERT_FILE": str(tmp_path / "orchestrator.pem"),
         "BOXIE_ORCHESTRATOR_TEMPORAL_KEY_FILE": str(tmp_path / "orchestrator.key"),
         "BOXIE_ORCHESTRATOR_CONFIG": str(tmp_path / "orchestrator.json"),
-        "BOXIE_PROFILES_FILE": str(tmp_path / "profiles.json"),
+        "BOXIE_PROFILES_DIR": str(tmp_path / "profiles.json"),
         "BOXIE_ORCHESTRATOR_CREDENTIAL_FILE": str(tmp_path / "orchestrator.secret"),
         "BOXIE_CONSUMER_CREDENTIAL_FILE": str(tmp_path / "consumer.secret"),
         "BOXIE_DATA_DIR": str(tmp_path / "data"),
@@ -201,6 +356,8 @@ def test_resolved_compose_isolated_topology(
     expected_project = (
         {"boxie": "operator-boxie", "cli-playground": "operator-playground"}[service]
         if project_override
+        else ("clis-boxie" if service == "boxie" else "clis-playground")
+        if manifest == "compose.production.yml"
         else service
     )
     assert config["name"] == expected_project
@@ -213,6 +370,8 @@ def test_resolved_compose_isolated_topology(
             mount = next(v for v in entry["volumes"] if v["target"] == values["BOXIE_DATA_DIR"])
             assert mount["source"] == mount["target"]
             assert set(entry["networks"]) == {"control"}
+            approved = next(v for v in entry["volumes"] if v["target"] == "/etc/boxie/approved")
+            assert approved["source"] == values["BOXIE_PROFILES_DIR"] and approved["read_only"]
         if name == "api":
             assert not any(v["target"] == values["BOXIE_DATA_DIR"] for v in entry["volumes"])
         if name == "gateway":
@@ -223,7 +382,9 @@ def test_resolved_compose_isolated_topology(
     assert all(volume["external"] for volume in config.get("volumes", {}).values())
 
 
-def test_boxie_configuration_cli_is_product_independent(tmp_path: Path) -> None:
+def test_boxie_configuration_cli_is_product_independent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import subprocess
     import sys
 
@@ -261,7 +422,9 @@ def test_boxie_configuration_cli_is_product_independent(tmp_path: Path) -> None:
         check=True,
     )
     orchestrator = OrchestratorConfig.from_file(tmp_path / "orchestrator.json")
+    monkeypatch.setenv("BOXIE_RELEASE", "c" * 40)
     api = load_configuration(tmp_path / "api.json")
+    assert api.api.release == "c" * 40
     assert orchestrator.identity.host_id == "generic-host"
     generated = json.loads((tmp_path / "orchestrator.json").read_text())
     assert "max_sandboxes" not in generated
