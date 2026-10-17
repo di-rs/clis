@@ -10,6 +10,7 @@ members = [
     "cli-bench",
     "cli-playground",
     "cli-testing-policy",
+    "clis-ci",
     "clis-deploy",
     "clis-tools",
     "host-infra",
@@ -301,6 +302,15 @@ name = "cli-bench"
 version = "0.1.0"
 source = { virtual = "tools/cli-bench" }
 
+[package.optional-dependencies]
+ci = [
+    { name = "clis-ci" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "clis-ci", marker = "extra == 'ci'", editable = "tools/ci" }]
+provides-extras = ["ci"]
+
 [[package]]
 name = "cli-playground"
 version = "0.1.0"
@@ -315,16 +325,23 @@ dependencies = [
     { name = "websockets" },
 ]
 
+[package.optional-dependencies]
+ci = [
+    { name = "clis-ci" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.13,<4" },
     { name = "anyio", specifier = ">=4" },
+    { name = "clis-ci", marker = "extra == 'ci'", editable = "tools/ci" },
     { name = "fastapi", specifier = ">=0.128" },
     { name = "pydantic", specifier = ">=2.14,<3" },
     { name = "pydantic-settings", specifier = ">=2,<3" },
     { name = "uvicorn", specifier = ">=0.40" },
     { name = "websockets", specifier = ">=16" },
 ]
+provides-extras = ["ci"]
 
 [[package]]
 name = "cli-testing-policy"
@@ -339,6 +356,11 @@ sdist = { url = "https://files.pythonhosted.org/packages/c7/0e/7fa0ef50764b67090
 wheels = [
     { url = "https://files.pythonhosted.org/packages/58/50/6c0d534c5f134586a8e1ba4e330569e32f057e33372ae556463212fb4cd3/click-8.5.0-py3-none-any.whl", hash = "sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360", size = 125251, upload-time = "2026-08-26T13:33:12.928Z" },
 ]
+
+[[package]]
+name = "clis-ci"
+version = "0.1.0"
+source = { editable = "tools/ci" }
 
 [[package]]
 name = "clis-deploy"
@@ -359,6 +381,7 @@ source = { virtual = "." }
 [package.dev-dependencies]
 dev = [
     { name = "boxie-test-support" },
+    { name = "clis-ci" },
     { name = "clis-deploy" },
     { name = "host-infra" },
     { name = "httpx" },
@@ -378,6 +401,7 @@ dev = [
 [package.metadata.requires-dev]
 dev = [
     { name = "boxie-test-support", editable = "tools/boxie/tests/support" },
+    { name = "clis-ci", editable = "tools/ci" },
     { name = "clis-deploy", editable = "tools/deploy" },
     { name = "host-infra", editable = "infra/host" },
     { name = "httpx" },

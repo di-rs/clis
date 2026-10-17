@@ -6,6 +6,7 @@ dependencies = []
 
 [dependency-groups]
 dev = [
+    "clis-ci",
     "boxie-test-support",
     "host-infra",
     "clis-deploy",
@@ -26,7 +27,7 @@ package = false
 required-version = ">=0.13.0"
 
 [tool.uv.workspace]
-members = ["infra/host", "tools/deploy", "tools/boxie", "tools/boxie/tests/support", "tools/cli-playground", "tools/boxie/infra", "tools/cli-playground/infra", "tools/cli-bench", "tools/cli-testing"]
+members = ["tools/ci", "infra/host", "tools/deploy", "tools/boxie", "tools/boxie/tests/support", "tools/cli-playground", "tools/boxie/infra", "tools/cli-playground/infra", "tools/cli-bench", "tools/cli-testing"]
 
 [tool.ruff]
 target-version = "py315"
@@ -53,6 +54,7 @@ addopts = ["--strict-config", "--strict-markers", "-p", "boxie_test_support.depe
 markers = ["integration: real isolated builds/installations and external-tool checks; prerequisites required"]
 
 [tool.uv.sources]
+clis-ci = { workspace = true }
 host-infra = { workspace = true }
 clis-deploy = { workspace = true }
 boxie = { workspace = true }

@@ -85,3 +85,21 @@ different trust and credentials.
 See [Testing](../../docs/testing.md) for Python, frontend and browser checks,
 and the [🧪 Boxie lifecycle integration workflow](../../.github/workflows/boxie-lifecycle.yml)
 for real PostgreSQL/Temporal recovery and native Linux/gVisor browser checks.
+
+Trusted preview operations are installed under `playground.preview`; CI installs
+its `ci` extra to use the shared `clis-ci` transport. Source builds require an
+explicit checkout: `python -m playground.preview.cli build --repository . ...`.
+Publication and lifecycle commands use the same module without source discovery.
+
+Before an upload or build write, capture the authenticated
+`GET /api/pull-requests/PR/lifecycle` response. Send its `generation` as the
+`expected_generation` query parameter and require the same value in the response.
+A close or reopen advances the durable generation before waiting for uploads.
+Stale writes return 409 with `stale lifecycle`. Retries keep their original
+captured generation. Lifecycle state lives outside removable preview data, and
+one OS-held data-directory lock prevents competing writers.
+
+This fence rejects publication after a lifecycle event reaches Playground. It
+cannot detect undelivered GitHub events or make GitHub comments/deployment statuses
+atomic with product commits. The publisher rechecks generation and head state
+before those writes and verifies the upload acknowledgement.

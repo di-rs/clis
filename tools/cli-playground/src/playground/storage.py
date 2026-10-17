@@ -1,12 +1,14 @@
 """Atomic PR build state and immutable batches, retained while sessions reference them."""
 
+import fcntl
 import hashlib
 import os
 import re
 import shutil
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -20,6 +22,7 @@ from playground.models import (
     BuildUpdate,
     Environment,
     EnvironmentMetadata,
+    LifecycleState,
     PreviewRecord,
 )
 
@@ -41,6 +44,8 @@ class EnvironmentStore:
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.closed = self.root / ".closed-pull-requests"
         self.closed.mkdir(exist_ok=True, mode=0o700)
+        self.lifecycle_root = self.root / ".lifecycle"
+        self.lifecycle_root.mkdir(exist_ok=True, mode=0o700)
 
     @staticmethod
     def identifier(pr: int) -> str:
@@ -53,18 +58,57 @@ class EnvironmentStore:
         for directory in self.root.glob(".upload-*"):
             shutil.rmtree(directory)
 
-    def is_closed(self, pr: int) -> bool:
-        return (self.closed / str(pr)).exists()
+    @contextmanager
+    def writer(self) -> Iterator[None]:
+        fd = os.open(self.root / ".writer.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "w") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise RuntimeError("another Playground writer owns this data directory") from error
+            for path in self.lifecycle_root.iterdir():
+                if path.suffix != ".json" or not path.stem.isdecimal():
+                    raise ValueError("invalid lifecycle state")
+                self.lifecycle(int(path.stem))
+            yield
 
-    def close_pull_request(self, pr: int) -> None:
+    def lifecycle(self, pr: int) -> LifecycleState:
+        path = self.lifecycle_root / f"{pr}.json"
+        if not path.exists():
+            # Retain pre-generation closed tombstones across upgrades.
+            return LifecycleState(
+                generation=1 if (self.closed / str(pr)).exists() else 0,
+                closed=(self.closed / str(pr)).exists(),
+            )
+        if path.is_symlink() or path.stat().st_size > 1024:
+            raise ValueError("invalid lifecycle state")
+        return LifecycleState.model_validate_json(path.read_bytes())
+
+    def _lifecycle(self, pr: int, state: LifecycleState) -> None:
         from playground.session_store import atomic_write
 
-        atomic_write(self.closed / str(pr), b"")
+        atomic_write(self.lifecycle_root / f"{pr}.json", state.model_dump_json().encode())
 
-    def reopen_pull_request(self, pr: int) -> None:
-        from playground.session_store import unlink_and_sync
+    def check_generation(self, pr: int, expected: int) -> None:
+        state = self.lifecycle(pr)
+        if state.generation != expected or state.closed:
+            raise ArtifactConflictError("stale lifecycle")
 
-        unlink_and_sync(self.closed / str(pr))
+    def is_closed(self, pr: int) -> bool:
+        return self.lifecycle(pr).closed
+
+    def close_pull_request(self, pr: int) -> int:
+        generation = self.lifecycle(pr).generation + 1
+        self._lifecycle(pr, LifecycleState(generation=generation, closed=True))
+        return generation
+
+    def reopen_pull_request(self, pr: int) -> int:
+        # Invalidate synchronously, before any upload serialization wait.
+        return self.close_pull_request(pr)
+
+    def complete_reopen(self, pr: int, generation: int) -> None:
+        if self.lifecycle(pr).generation == generation:
+            self._lifecycle(pr, LifecycleState(generation=generation, closed=False))
 
     def record(self, identifier: str, *, include_inactive: bool = False) -> PreviewRecord | None:
         if re.fullmatch(ID_PATTERN, identifier) is None:
@@ -77,7 +121,9 @@ class EnvironmentStore:
             if record.artifact is not None and record.artifact.pr != record.pr:
                 return None
             if not include_inactive and (
-                record.expires_at <= self.clock() or self.is_closed(record.pr)
+                record.expires_at <= self.clock()
+                or self.is_closed(record.pr)
+                or record.expected_generation != self.lifecycle(record.pr).generation
             ):
                 return None
             return record
@@ -108,6 +154,7 @@ class EnvironmentStore:
                 environment.expires_at if environment else record.expires_at, UTC
             ).isoformat(),
             build=record.build,
+            expected_generation=record.expected_generation,
         )
 
     def inactive_identifiers(self) -> set[str]:
@@ -149,6 +196,7 @@ class EnvironmentStore:
         return record
 
     def _write_record(self, record: PreviewRecord) -> None:
+        self.check_generation(record.pr, record.expected_generation)
         directory = self.root / self.identifier(record.pr)
         directory.mkdir(exist_ok=True)
         manifest = directory / ".metadata-upload"
@@ -166,7 +214,13 @@ class EnvironmentStore:
         finally:
             manifest.unlink(missing_ok=True)
 
-    def update_build(self, pr: int, update: BuildUpdate) -> EnvironmentMetadata:
+    def update_build(
+        self, pr: int, update: BuildUpdate, expected_generation: int | None = None
+    ) -> EnvironmentMetadata:
+        expected_generation = (
+            self.lifecycle(pr).generation if expected_generation is None else expected_generation
+        )
+        self.check_generation(pr, expected_generation)
         record = self.check_build(pr, update)
         if record is not None and record.build is not None and update.order == record.build.order:
             # A delayed start/failure event must not undo a terminal result or publication.
@@ -178,6 +232,7 @@ class EnvironmentStore:
                     return result
         next_record = PreviewRecord(
             pr=pr,
+            expected_generation=expected_generation,
             expires_at=self.clock() + self.settings.preview_seconds,
             build=BuildStatus(**update.model_dump()),
             artifact=record.artifact if record is not None and update.state != "empty" else None,
@@ -197,7 +252,18 @@ class EnvironmentStore:
         path = self.root / self.identifier(pr) / "revisions" / f"{revision}.json"
         return ArtifactMetadata.model_validate_json(path.read_bytes()) if path.exists() else None
 
-    def publish(self, artifact: ArtifactMetadata, build: BuildIdentity | None) -> Environment:
+    def publish(
+        self,
+        artifact: ArtifactMetadata,
+        build: BuildIdentity | None,
+        expected_generation: int | None = None,
+    ) -> Environment:
+        expected_generation = (
+            self.lifecycle(artifact.pr).generation
+            if expected_generation is None
+            else expected_generation
+        )
+        self.check_generation(artifact.pr, expected_generation)
         from playground.session_store import atomic_write
 
         self.check_build(artifact.pr, build)
@@ -217,6 +283,7 @@ class EnvironmentStore:
         self._write_record(
             PreviewRecord(
                 pr=artifact.pr,
+                expected_generation=expected_generation,
                 expires_at=artifact.expires_at,
                 artifact=artifact,
                 build=BuildStatus(**build.model_dump(), state="ready") if build else None,

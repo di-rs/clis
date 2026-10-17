@@ -8,7 +8,7 @@ on:
       - 'tools/deploy/**'
       - 'tools/boxie/infra/**'
       - 'tools/cli-playground/infra/**'
-      - 'infra/platform/**'
+      - 'infra/host/**'
       - 'infra/environments/**'
       - '.github/workflows/*release*.yml'
       - 'pyproject.toml'

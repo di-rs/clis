@@ -48,9 +48,9 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          uv run --locked --no-dev python tools/cli-bench/select_suites.py \
+          uv run --locked --no-dev --package cli-bench --extra ci python tools/cli-bench/select_suites.py \
             --base "$BASE_SHA" --head "$HEAD_SHA" --event "$GITHUB_EVENT_PATH" > selection.json
-          uv run --locked --no-dev python - <<'PY'
+          uv run --locked --no-dev --package cli-bench --extra ci python - <<'PY'
           import json
           import os
           from pathlib import Path
@@ -101,7 +101,7 @@ jobs:
         env:
           PACKAGES: ${{ needs.select.outputs.packages }}
         run: |
-          uv run --locked --no-dev python - <<'PY'
+          uv run --locked --no-dev --package cli-bench --extra ci python - <<'PY'
           import json
           import os
           import subprocess
@@ -121,7 +121,7 @@ jobs:
           RUNS: ${{ needs.select.outputs.runs }}
           WARMUP: ${{ needs.select.outputs.warmup }}
         run: |
-          uv run --locked --no-dev python - <<'PY'
+          uv run --locked --no-dev --package cli-bench --extra ci python - <<'PY'
           import json
           import os
           import subprocess

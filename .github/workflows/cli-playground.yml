@@ -45,7 +45,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          uv run --locked --no-dev python tools/cli-playground/preview_ci.py build \
+          uv run --locked --no-dev --package cli-playground --extra ci python -m playground.preview.cli build --repository . \
             --base "$BASE_SHA" --head "$HEAD_SHA" --output target/playground-artifact
       - name: 📤 Upload playground CLI binaries
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -1,112 +1,25 @@
-#!/usr/bin/env python3.15
-"""Build PR binaries without secrets; publish bounded artifacts from trusted code."""
+"""Bound artifact transport and publication against captured lifecycle generations."""
 
-import argparse
 import json
-import os
 import re
-import shutil
 import subprocess
-import sys
-import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
 from collections.abc import Callable
-from pathlib import Path
 from time import sleep
 from typing import Protocol
 
-# Keep direct script invocation usable from any working directory.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
-from ci.github import GitHub, PaginationLimit, array, table  # noqa: E402
-from playground.artifacts import CLI_PATTERN, MAX_ARCHIVE, MAX_CLIS, binary_archive  # noqa: E402
+from ci.github import GitHub, array, table
 
-ROOT = Path(__file__).resolve().parents[2]
-WORKFLOW = ".github/workflows/cli-playground.yml"
+from playground.artifacts import MAX_ARCHIVE, binary_archive
+
+from .github import WORKFLOW, current_pull, positive
+
 TIMEOUT = 60
 ARTIFACT_NAME = "cli-playground-binaries"
 MARKER = re.compile(r"<!-- cli-playground run=(\d+) attempt=(\d+) -->")
-
-
-def positive(value: object, maximum: int = 10**18) -> int:
-    if type(value) is not int or not 1 <= value <= maximum:
-        raise ValueError("invalid integer")
-    return value
-
-
-def discover(root: Path = ROOT) -> dict[str, str]:
-    manifest = tomllib.loads((root / "Cargo.toml").read_text())
-    workspace = manifest["workspace"]
-    excluded = {path for pattern in workspace.get("exclude", []) for path in root.glob(pattern)}
-    members = {path for pattern in workspace["members"] for path in root.glob(pattern)}
-    packages: dict[str, str] = {}
-    for directory in sorted(members - excluded):
-        data = tomllib.loads((directory / "Cargo.toml").read_text())
-        if not (directory / "src/main.rs").is_file():
-            continue
-        name = data["package"]["name"]
-        binaries = data.get("bin", [])
-        if (
-            not isinstance(name, str)
-            or not re.fullmatch(CLI_PATTERN, name)
-            or name != directory.name
-            or name in packages
-            or any((directory / "src/bin").glob("**/*.rs"))
-            or len(binaries) > 1
-            or binaries
-            and (
-                binaries[0].get("name") != name
-                or binaries[0].get("path", "src/main.rs") != "src/main.rs"
-            )
-        ):
-            raise ValueError("CLI package must define exactly its matching binary")
-        packages[name] = directory.relative_to(root).as_posix()
-    if not packages or len(packages) > MAX_CLIS:
-        raise ValueError("unexpected CLI package count")
-    return packages
-
-
-def production(path: str, directory: str) -> bool:
-    prefix = directory + "/"
-    if not path.startswith(prefix):
-        return False
-    relative = path.removeprefix(prefix)
-    return relative in {"Cargo.toml", "build.rs"} or relative.startswith("src/")
-
-
-def select(packages: dict[str, str], paths: list[str]) -> list[str]:
-    paths = [
-        path
-        for path in paths
-        if not path.endswith(".md") and not {"tests", "docs"}.intersection(Path(path).parts)
-    ]
-    global_paths = {
-        "Cargo.toml",
-        "Cargo.lock",
-        "rust-toolchain.toml",
-        "tools/cli-playground/Build.Dockerfile",
-        "tools/cli-playground/Build.Dockerfile.dockerignore",
-        "tools/cli-playground/preview_ci.py",
-        WORKFLOW,
-    }
-    if any(
-        path in global_paths
-        or path.startswith(".cargo/")
-        or path.startswith("utils/")
-        and "/src/" in path
-        or path.startswith("utils/")
-        and path.endswith(("/Cargo.toml", "/build.rs"))
-        for path in paths
-    ):
-        return sorted(packages)
-    return sorted(
-        name
-        for name, directory in packages.items()
-        if any(production(path, directory) for path in paths)
-    )
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -164,6 +77,20 @@ class GatewayRequest(Protocol):
     ) -> dict[str, object]: ...
 
 
+def lifecycle_state(base: str, token: str, pr: int, gateway: GatewayRequest) -> tuple[int, bool]:
+    state = gateway(base, token, f"/api/pull-requests/{pr}/lifecycle", method="GET")
+    generation, closed = state.get("generation"), state.get("closed")
+    if type(generation) is not int or not 0 <= generation <= 10**18 or type(closed) is not bool:
+        raise ValueError("invalid lifecycle response")
+    return generation, closed
+
+
+def lifecycle_matches(
+    base: str, token: str, pr: int, expected: int, gateway: GatewayRequest
+) -> bool:
+    return lifecycle_state(base, token, pr, gateway) == (expected, False)
+
+
 def upload(
     api: GitHub,
     repo: str,
@@ -176,6 +103,7 @@ def upload(
     run_id: int,
     run_number: int,
     run_attempt: int,
+    expected_generation: int,
     gateway: GatewayRequest = gateway_request,
     sleep: Callable[[float], None] = sleep,
 ) -> dict[str, object] | None:
@@ -186,15 +114,25 @@ def upload(
             "run_id": run_id,
             "run_number": run_number,
             "run_attempt": run_attempt,
+            "expected_generation": expected_generation,
         }
     )
     # Two minutes of backoff allow for the gateway's 60-second upload plus cleanup.
     delays = iter((2, 4, 8, 16, 30, 30, 30))
     while True:
-        if not current_pull(api, repo, pr, sha):
+        if not current_pull(api, repo, pr, sha) or not lifecycle_matches(
+            base, token, pr, expected_generation, gateway
+        ):
             return None
         try:
-            return gateway(base, token, "/api/environments?" + query, method="POST", data=data)
+            response = gateway(base, token, "/api/environments?" + query, method="POST", data=data)
+            if (
+                type(response.get("expected_generation")) is not int
+                or response["expected_generation"] != expected_generation
+                or not lifecycle_matches(base, token, pr, expected_generation, gateway)
+            ):
+                return None
+            return response
         except urllib.error.HTTPError as error:
             if error.code == 409 and (stale_build(error) or not current_pull(api, repo, pr, sha)):
                 return None
@@ -208,7 +146,10 @@ def upload(
 def stale_build(error: urllib.error.HTTPError) -> bool:
     try:
         payload = error.read(16385)
-        return len(payload) <= 16384 and table(json.loads(payload)).get("detail") == "stale build"
+        return len(payload) <= 16384 and table(json.loads(payload)).get("detail") in {
+            "stale build",
+            "stale lifecycle",
+        }
     except ValueError:
         return False
     finally:
@@ -226,15 +167,18 @@ def update_build(
     revision: tuple[int, int],
     state: str,
     *,
+    expected_generation: int,
     gateway: GatewayRequest = gateway_request,
 ) -> dict[str, object] | None:
-    if not current_pull(api, repo, pr, sha):
+    if not current_pull(api, repo, pr, sha) or not lifecycle_matches(
+        base, token, pr, expected_generation, gateway
+    ):
         return None
     try:
-        return gateway(
+        response = gateway(
             base,
             token,
-            f"/api/pull-requests/{pr}/build",
+            f"/api/pull-requests/{pr}/build?expected_generation={expected_generation}",
             method="PUT",
             content_type="application/json",
             data=json.dumps(
@@ -247,6 +191,13 @@ def update_build(
                 }
             ).encode(),
         )
+        if (
+            type(response.get("expected_generation")) is not int
+            or response["expected_generation"] != expected_generation
+            or not lifecycle_matches(base, token, pr, expected_generation, gateway)
+        ):
+            return None
+        return response
     except urllib.error.HTTPError as error:
         if error.code == 409 and (stale_build(error) or not current_pull(api, repo, pr, sha)):
             return None
@@ -269,105 +220,6 @@ def preview_url(base: str, response: dict[str, object], pr: int) -> str:
         if response.get("url") == expected:
             return expected
     raise ValueError("invalid preview URL")
-
-
-def current_pull(
-    api: GitHub, repo: str, number: int, sha: str | None = None, *, state: str = "open"
-) -> bool:
-    pull = table(api.json(f"repos/{repo}/pulls/{number}"))
-    base = table(pull.get("base"))
-    return (
-        pull.get("number") == number
-        and pull.get("state") == state
-        and (sha is None or table(pull.get("head")).get("sha") == sha)
-        and base.get("ref") == "master"
-        and table(base.get("repo")).get("full_name") == repo
-    )
-
-
-def lifecycle(
-    api: GitHub,
-    repo: str,
-    number: int,
-    action: str,
-    base_url: str,
-    token: str,
-    *,
-    gateway: GatewayRequest = gateway_request,
-) -> str | None:
-    """Reconcile trusted close/reopen events with the PR's current GitHub state."""
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
-        raise ValueError("invalid repository")
-    positive(number)
-    if action not in {"closed", "reopened"}:
-        raise ValueError("invalid lifecycle action")
-    state = "closed" if action == "closed" else "open"
-    if not current_pull(api, repo, number, state=state):
-        return None
-    if not base_url or not token:
-        return (
-            "Configuration needed: PLAYGROUND_URL and PLAYGROUND_DEPLOY_TOKEN. "
-            "No hosted environments were cleaned or reopened."
-        )
-    base_url = public_origin(base_url)
-    path = f"/api/pull-requests/{number}"
-    if action == "reopened":
-        response = gateway(base_url, token, path + "/reopen", method="POST")
-        if positive(response.get("reopened")) != number:
-            raise ValueError("invalid reopen acknowledgement")
-        # A build can finish before the lifecycle job clears the closed tombstone.
-        # Replay its current state through the same trusted publisher after reopening.
-        pull = table(api.json(f"repos/{repo}/pulls/{number}"))
-        sha = table(pull.get("head")).get("sha")
-        if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
-            raise ValueError("invalid commit SHA")
-        query = urllib.parse.urlencode({"event": "pull_request", "head_sha": sha})
-        runs = api.pages(
-            f"repos/{repo}/actions/workflows/cli-playground.yml/runs?{query}", "workflow_runs"
-        )
-        latest = max(
-            (
-                run
-                for run in runs
-                if run.get("head_sha") == sha
-                and run.get("path") == WORKFLOW
-                and run.get("event") == "pull_request"
-            ),
-            key=lambda run: (positive(run.get("run_number")), positive(run.get("run_attempt"))),
-            default=None,
-        )
-        if latest is not None:
-            publish(api, repo, positive(latest.get("id")), base_url, token, gateway=gateway)
-        return f"PR #{number} reopened; reconciled the latest available build for its current head."
-    response = gateway(base_url, token, path, method="DELETE")
-    deleted = response.get("deleted")
-    if type(deleted) is not int or deleted < 0:
-        raise ValueError("invalid cleanup acknowledgement")
-    message = f"Deleted {deleted} hosted playground environment(s) for closed PR #{number}."
-    try:
-        query = urllib.parse.urlencode({"environment": f"cli-playground/pr-{number}"})
-        deployments = api.pages(f"repos/{repo}/deployments?{query}")
-    except PaginationLimit:
-        return (
-            message + " GitHub deployment status listing reached its pagination limit; "
-            "some GitHub statuses may remain active."
-        )
-    for deployment in deployments:
-        if deployment.get("environment") != f"cli-playground/pr-{number}":
-            continue
-        # Reopening can race with cleanup; its serialized event clears the tombstone.
-        if not current_pull(api, repo, number, state="closed"):
-            break
-        api.request(
-            f"repos/{repo}/deployments/{positive(deployment.get('id'))}/statuses",
-            method="POST",
-            body={
-                "state": "inactive",
-                "description": "Pull request closed",
-                "auto_inactive": False,
-            },
-        )
-    return message
 
 
 def publish(
@@ -425,8 +277,12 @@ def publish(
         if (int(marker[1]), int(marker[2])) > revision:
             return None
     configured = bool(base_url and token)
+    generation = 0
     if configured:
         base_url = public_origin(base_url)
+        generation, closed = lifecycle_state(base_url, token, number, gateway)
+        if closed:
+            return None
     run_url = f"https://github.com/{repo}/actions/runs/{run_id}"
     paragraphs = [
         f"<!-- cli-playground run={revision[0]} attempt={revision[1]} -->\n### CLI playground",
@@ -508,6 +364,7 @@ def publish(
                     run_id=run_id,
                     run_number=revision[0],
                     run_attempt=revision[1],
+                    expected_generation=generation,
                     gateway=gateway,
                     sleep=sleep,
                 )
@@ -522,7 +379,17 @@ def publish(
                 )
     if configured and not url:
         status_response = update_build(
-            api, repo, base_url, token, sha, number, run_id, revision, state, gateway=gateway
+            api,
+            repo,
+            base_url,
+            token,
+            sha,
+            number,
+            run_id,
+            revision,
+            state,
+            expected_generation=generation,
+            gateway=gateway,
         )
         if status_response is None:
             return None
@@ -534,7 +401,9 @@ def publish(
             return None
         status_url = preview_url(base_url, status_response, number)
         paragraphs.append(f"[View preview status]({status_url})")
-    if not current_pull(api, repo, number, sha):
+    if not current_pull(api, repo, number, sha) or (
+        configured and not lifecycle_matches(base_url, token, number, generation, gateway)
+    ):
         return None
     if url:
         deployment = table(
@@ -552,6 +421,10 @@ def publish(
                 },
             )
         )
+        if not current_pull(api, repo, number, sha) or not lifecycle_matches(
+            base_url, token, number, generation, gateway
+        ):
+            return None
         api.request(
             f"{base}/deployments/{positive(deployment.get('id'))}/statuses",
             method="POST",
@@ -567,7 +440,9 @@ def publish(
         "Live previews expire seven days after upload. Each terminal starts with a fresh filesystem."
     )
     markdown = "\n\n".join(paragraphs) + "\n"
-    if not current_pull(api, repo, number, sha):
+    if not current_pull(api, repo, number, sha) or (
+        configured and not lifecycle_matches(base_url, token, number, generation, gateway)
+    ):
         return None
     comment_path = (
         f"issues/comments/{positive(owned[0].get('id'))}" if owned else f"issues/{number}/comments"
@@ -578,75 +453,3 @@ def publish(
     if publish_failed:
         raise ValueError("Failed to publish the CLI preview")
     return markdown
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    commands = parser.add_subparsers(dest="command", required=True)
-    build = commands.add_parser("build")
-    build.add_argument("--base", required=True)
-    build.add_argument("--head", required=True)
-    build.add_argument("--output", required=True, type=Path)
-    publication = commands.add_parser("publish")
-    publication.add_argument("--repo", required=True)
-    publication.add_argument("--run-id", required=True, type=int)
-    lifecycle_command = commands.add_parser("lifecycle")
-    lifecycle_command.add_argument("--repo", required=True)
-    lifecycle_command.add_argument("--pr", required=True, type=int)
-    lifecycle_command.add_argument("--action", required=True, choices=("closed", "reopened"))
-    args = parser.parse_args()
-    try:
-        if args.command == "build":
-            diff = subprocess.run(
-                [
-                    "git",
-                    "diff",
-                    "--name-only",
-                    "--no-renames",
-                    "-z",
-                    f"{args.base}...{args.head}",
-                    "--",
-                ],
-                cwd=ROOT,
-                check=True,
-                capture_output=True,
-            )
-            paths = [os.fsdecode(item) for item in diff.stdout.split(b"\0") if item]
-            names = select(discover(), paths)
-            selection = "CLI playground builds: " + (", ".join(names) or "none")
-            print(selection)
-            if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
-                with Path(summary).open("a") as stream:
-                    print(selection, file=stream)
-            if names:
-                subprocess.run(
-                    [
-                        "cargo",
-                        "build",
-                        "--locked",
-                        "--release",
-                        "--bins",
-                        *(arg for name in names for arg in ("--package", name)),
-                    ],
-                    cwd=ROOT,
-                    check=True,
-                )
-                args.output.mkdir(parents=True, exist_ok=False)
-                for name in names:
-                    shutil.copy2(ROOT / "target/release" / name, args.output / name)
-        else:
-            api = GitHub()
-            base_url = os.environ.get("PLAYGROUND_URL", "")
-            token = os.environ.get("PLAYGROUND_DEPLOY_TOKEN", "")
-            if args.command == "lifecycle":
-                message = lifecycle(api, args.repo, args.pr, args.action, base_url, token)
-            else:
-                message = publish(api, args.repo, args.run_id, base_url, token)
-            if message:
-                print(message)
-    except OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError:
-        sys.exit("Playground CI failed; check configuration, build logs, and artifact validity.")
-
-
-if __name__ == "__main__":
-    main()

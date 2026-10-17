@@ -82,7 +82,14 @@ class Environment(ArtifactMetadata):
         )
 
 
+class LifecycleState(BaseModel):
+    model_config = ConfigDict(strict=True, frozen=True, extra="forbid")
+    generation: Annotated[int, Field(ge=0)]
+    closed: bool
+
+
 class PreviewRecord(BaseModel):
+    expected_generation: Annotated[int, Field(ge=0)] = 0
     pr: Annotated[int, Field(gt=0)]
     expires_at: FiniteFloat
     build: BuildStatus | None = None
@@ -90,6 +97,7 @@ class PreviewRecord(BaseModel):
 
 
 class EnvironmentMetadata(BaseModel):
+    expected_generation: int = 0
     id: str
     clis: list[str]
     sha: str | None
@@ -100,6 +108,7 @@ class EnvironmentMetadata(BaseModel):
 
 
 class DeploymentResult(BaseModel):
+    expected_generation: int
     id: str
     url: str
 

@@ -159,6 +159,7 @@ def test_stop_failure_survives_preview_removal_and_restart_without_touching_othe
     saved = service.sessions.get(UUID(first["id"]))
     assert saved is not None and saved.pending_stop
     monkeypatch.setattr(client, "terminate", original)
+    api_client.__exit__(None, None, None)
     with TestClient(create_app(service.settings, boxie=client), base_url="https://play.example"):
         saved_first = service.sessions.get(UUID(first["id"]))
         saved_second = service.sessions.get(UUID(second["id"]))

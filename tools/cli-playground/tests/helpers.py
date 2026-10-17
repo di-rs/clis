@@ -40,7 +40,13 @@ def upload(
 ) -> dict[str, str]:
     response = client.post(
         "/api/environments",
-        params={"sha": sha, "pr": pr},
+        params={
+            "sha": sha,
+            "pr": pr,
+            "expected_generation": client.get(
+                f"/api/pull-requests/{pr}/lifecycle", headers=AUTH
+            ).json()["generation"],
+        },
         content=binary_bundle(clis or {cli: elf_binary() if content is None else content}),
         headers={"Authorization": "Bearer test-deployment-token"},
     )
@@ -123,6 +129,11 @@ def build_event(
     response: httpx.Response = client.put(
         "/api/pull-requests/123/build",
         headers=AUTH,
+        params={
+            "expected_generation": client.get(
+                "/api/pull-requests/123/lifecycle", headers=AUTH
+            ).json()["generation"]
+        },
         json={
             "sha": sha,
             "run_id": run_id or run * 100,
@@ -147,6 +158,9 @@ def build_upload(
         headers=AUTH,
         params={
             "pr": 123,
+            "expected_generation": client.get(
+                "/api/pull-requests/123/lifecycle", headers=AUTH
+            ).json()["generation"],
             "sha": sha,
             "run_id": run * 100,
             "run_number": run,

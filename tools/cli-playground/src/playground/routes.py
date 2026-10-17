@@ -37,6 +37,7 @@ from playground.models import (
     BuildUpdateResult,
     DeploymentResult,
     EnvironmentMetadata,
+    LifecycleState,
 )
 from playground.service import PlaygroundService, UploadBusyError, UploadTooLargeError
 from playground.storage import ArtifactConflictError
@@ -66,11 +67,14 @@ def create_router(service: PlaygroundService, static_dir: Path) -> APIRouter:
         request: Request,
         sha: Annotated[str, Query(pattern=f"^{SHA_PATTERN}$")],
         pr: Annotated[int, Query(gt=0)],
+        expected_generation: Annotated[int | None, Query(ge=0)] = None,
         run_id: Annotated[int | None, Query(gt=0)] = None,
         run_number: Annotated[int | None, Query(gt=0)] = None,
         run_attempt: Annotated[int | None, Query(gt=0)] = None,
     ) -> DeploymentResult:
         authenticate(request)
+        if expected_generation is None:
+            raise HTTPException(422, "expected_generation is required")
         if any(value is not None for value in (run_id, run_number, run_attempt)) and any(
             value is None for value in (run_id, run_number, run_attempt)
         ):
@@ -81,7 +85,9 @@ def create_router(service: PlaygroundService, static_dir: Path) -> APIRouter:
             else None
         )
         try:
-            environment = await service.deploy(request.stream(), sha, pr, build)
+            environment = await service.deploy(
+                request.stream(), sha, pr, build, expected_generation=expected_generation
+            )
         except UploadBusyError as error:
             raise HTTPException(429, "another upload is in progress") from error
         except UploadTooLargeError as error:
@@ -94,23 +100,37 @@ def create_router(service: PlaygroundService, static_dir: Path) -> APIRouter:
             raise HTTPException(408, "upload timed out") from error
         except BoxieUnavailable as error:
             raise HTTPException(503, "sandbox service unavailable") from error
-        return DeploymentResult(id=environment.id, url=settings.preview_url(environment.id, pr=pr))
+        return DeploymentResult(
+            id=environment.id,
+            url=settings.preview_url(environment.id, pr=pr),
+            expected_generation=expected_generation,
+        )
 
     @router.put("/api/pull-requests/{pr}/build")
     async def update_build(
         request: Request,
         pr: Annotated[int, PathParameter(gt=0)],
         update: BuildUpdate,
+        expected_generation: Annotated[int | None, Query(ge=0)] = None,
     ) -> BuildUpdateResult:
         authenticate(request)
+        if expected_generation is None:
+            raise HTTPException(422, "expected_generation is required")
         try:
-            metadata = service.update_build(pr, update)
+            metadata = service.update_build(pr, update, expected_generation)
         except ArtifactConflictError as error:
             raise HTTPException(409, str(error)) from error
         return BuildUpdateResult(
             **metadata.model_dump(),
             url=settings.preview_url(metadata.id, pr=pr),
         )
+
+    @router.get("/api/pull-requests/{pr}/lifecycle")
+    async def lifecycle(
+        request: Request, pr: Annotated[int, PathParameter(gt=0)]
+    ) -> LifecycleState:
+        authenticate(request)
+        return service.store.lifecycle(pr)
 
     @router.delete("/api/pull-requests/{pr}")
     async def close_pull_request(

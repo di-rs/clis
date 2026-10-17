@@ -41,15 +41,16 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        service.store.remove_abandoned_uploads()
-        await service.recover()
-        cleanup = asyncio.create_task(service.cleanup_periodically())
-        try:
-            yield
-        finally:
-            cleanup.cancel()
-            await asyncio.gather(cleanup, return_exceptions=True)
-            await service.boxie.close()
+        with service.store.writer():
+            service.store.remove_abandoned_uploads()
+            await service.recover()
+            cleanup = asyncio.create_task(service.cleanup_periodically())
+            try:
+                yield
+            finally:
+                cleanup.cancel()
+                await asyncio.gather(cleanup, return_exceptions=True)
+                await service.boxie.close()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.add_middleware(RequestHostBoundary, settings=service.settings)
