@@ -7,6 +7,7 @@ import shutil
 import struct
 import zipfile
 from pathlib import Path
+from typing import BinaryIO
 
 MAX_BINARY = 64 * 1024 * 1024
 MAX_ARCHIVE = 512 * 1024 * 1024
@@ -23,6 +24,103 @@ def validate_elf_header(header: bytes) -> None:
         raise ValueError("expected a Linux x86_64 ELF executable")
     if header[7] not in {0, 3}:
         raise ValueError("expected a Linux or System V ELF ABI")
+
+
+def validate_zip_directory(source: BinaryIO) -> None:
+    """Scan directory records with fixed buffers before ZipFile allocates ZipInfo objects."""
+    position = source.tell()
+    try:
+        source.seek(0, io.SEEK_END)
+        size = source.tell()
+        if size > MAX_ARCHIVE:
+            raise ValueError("artifact exceeds size limit")
+        source.seek(max(0, size - 65557))
+        tail = source.read(65557)
+        # EOCD's variable comment may itself contain a signature. Only a record
+        # ending exactly at EOF is a candidate; never trust its count or size yet.
+        index = len(tail)
+        while True:
+            index = tail.rfind(b"PK\x05\x06", 0, index)
+            if index < 0:
+                raise ValueError("invalid ZIP directory")
+            if len(tail) - index >= 22 and index + 22 + struct.unpack_from("<H", tail, index + 20)[
+                0
+            ] == len(tail):
+                break
+        footer = struct.unpack_from("<4s4H2LH", tail, index)
+        _, disk, directory_disk, disk_count, count, directory_size, offset, _ = footer
+        end = size - len(tail) + index
+        if disk or directory_disk or disk_count != count:
+            raise ValueError("multi-disk ZIP is not supported")
+        if end >= 20:
+            source.seek(end - 20)
+            locator = source.read(20)
+        else:
+            locator = b""
+        zip64 = locator.startswith(b"PK\x06\x07")
+        if zip64:
+            _, disk64, zip64_offset, disks = struct.unpack("<4sLQL", locator)
+            if disk64 != 0 or disks != 1 or zip64_offset + 56 > end - 20:
+                raise ValueError("invalid ZIP64 locator")
+            source.seek(zip64_offset)
+            record = source.read(56)
+            if len(record) != 56:
+                raise ValueError("truncated ZIP64 directory")
+            sig, length, _, _, disk64, directory_disk64, disk_count64, count64, size64, offset64 = (
+                struct.unpack("<4sQ2H2L4Q", record)
+            )
+            if (
+                sig != b"PK\x06\x06"
+                or length < 44
+                or length > 8 * 1024 * 1024
+                or zip64_offset + length + 12 != end - 20
+                or disk64
+                or directory_disk64
+                or disk_count64 != count64
+                or count not in (65535, count64)
+                or directory_size not in (0xFFFFFFFF, size64)
+                or offset not in (0xFFFFFFFF, offset64)
+            ):
+                raise ValueError("inconsistent ZIP64 directory")
+            count, directory_size, offset = count64, size64, offset64
+            end = zip64_offset
+        elif count == 65535 or directory_size == 0xFFFFFFFF or offset == 0xFFFFFFFF:
+            raise ValueError("missing ZIP64 metadata")
+        if (
+            not 1 <= count <= MAX_CLIS
+            or not 0 < directory_size <= 8 * 1024 * 1024
+            or offset < 0
+            or offset + directory_size != end
+        ):
+            raise ValueError("ZIP directory exceeds limits or has inconsistent offsets")
+        source.seek(offset)
+        actual = 0
+        while source.tell() < end:
+            header = source.read(46)
+            if len(header) != 46 or header[:4] != b"PK\x01\x02":
+                raise ValueError("invalid ZIP directory record")
+            name_size, extra_size, comment_size, disk_start = struct.unpack_from("<4H", header, 28)
+            actual += 1
+            if (
+                actual > MAX_CLIS
+                or not 1 <= name_size <= 64
+                or extra_size > 4096
+                or comment_size > 4096
+                or disk_start != 0
+                or source.tell() + name_size + extra_size + comment_size > end
+            ):
+                raise ValueError("ZIP directory member exceeds limits")
+            name = source.read(name_size)
+            try:
+                if re.fullmatch(CLI_PATTERN, name.decode("ascii")) is None:
+                    raise ValueError("unsafe binary artifact name")
+            except UnicodeError as error:
+                raise ValueError("unsafe binary artifact name") from error
+            source.seek(extra_size + comment_size, io.SEEK_CUR)
+        if source.tell() != end or actual != count:
+            raise ValueError("inconsistent ZIP directory count")
+    finally:
+        source.seek(position)
 
 
 def archive_members(archive: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
@@ -49,7 +147,9 @@ def binary_archive(data: bytes) -> dict[str, bytes]:
     if len(data) > MAX_ARCHIVE:
         raise ValueError("artifact exceeds size limit")
     binaries = {}
-    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+    source = io.BytesIO(data)
+    validate_zip_directory(source)
+    with zipfile.ZipFile(source) as archive:
         for member in archive_members(archive):
             binary = archive.read(member)
             validate_elf_header(binary[:64])
@@ -59,6 +159,8 @@ def binary_archive(data: bytes) -> dict[str, bytes]:
 
 def stage_archive(source: Path, destination: Path, max_binary_bytes: int) -> list[str]:
     """Validate and stage one member at a time so large batches stay off the heap."""
+    with source.open("rb") as stream:
+        validate_zip_directory(stream)
     with zipfile.ZipFile(source) as archive:
         members = archive_members(archive)
         if any(member.file_size > max_binary_bytes for member in members):
