@@ -33,6 +33,7 @@ references, and evaluation cases are included.
 - `editorial-pass` has a shorter discovery description within the 1,024-character
   limit. Its research link points to the pinned upstream file, since that file
   lives outside the imported skill directory.
+  Its noise-category introduction is corrected to match the four categories.
 - `technical-documentation` no longer points to an uninstalled `documents` skill.
   Its missing `information-architecture.md` reference is replaced with inline
   routing guidance; upstream does not ship that file. A redundant compatibility
@@ -43,6 +44,9 @@ references, and evaluation cases are included.
 - The OAuth response uses an explicit refresh-token placeholder instead of a
   credential-like example value. The original import's false-positive finding is
   fingerprinted in `.gitleaksignore` so historical scans remain enabled.
+- API/CLI reference corrections put OpenAPI serialization fields on the
+  parameter, use named component maps, import FastAPI's `Header`, and use the
+  correct data-format exit code in the example.
 
 The wrapper keeps the selected order, adapts completeness to the page's purpose,
 and applies editorial changes within an authorized writing/editing task. The

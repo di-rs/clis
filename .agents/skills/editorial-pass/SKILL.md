@@ -41,7 +41,7 @@ Structure before flow, flow before paragraphs, paragraphs before lines. An edito
 
 ### 3. Hunt the four noise categories
 
-These are deletion passes. Agents (and tired humans) leave all three behind, and each one is the residue of the writing process showing through the shipped document. The reader is buying the building, not the scaffolding.
+These are deletion passes. Agents (and tired humans) leave all four behind, and each one is the residue of the writing process showing through the shipped document. The reader is buying the building, not the scaffolding.
 
 **Provenance narration.** How the author learned a fact is research trail, not content. "As verified in `ia-logic.js`", "X confirmed with Y in the thread", "a design doc pointed here", "checked across code, Confluence, and Slack: no such job exists". State the fact and let it stand on its own authority; the verification happened, it just doesn't need to be narrated. Words to watch: *verified, confirmed, as discussed with, per the thread, according to the doc, after checking, I looked at*.
 

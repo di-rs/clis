@@ -192,13 +192,13 @@ parameters:
   - name: status
     in: query
     description: "Filter by status (comma-separated for multiple values)"
+    style: form
+    explode: false
     schema:
       type: array
       items:
         type: string
         enum: [active, inactive, archived]
-      style: form
-      explode: false
     required: false
 ```
 
@@ -684,19 +684,26 @@ paths:
     $ref: "./paths/customers_id.yaml"
 components:
   schemas:
-    $ref: "./schemas/_index.yaml"
+    Customer:
+      $ref: "./schemas/Customer.yaml"
   securitySchemes:
-    $ref: "./security.yaml"
+    ApiKeyAuth:
+      $ref: "./security.yaml#/ApiKeyAuth"
   parameters:
-    $ref: "./parameters/_index.yaml"
+    Limit:
+      $ref: "./parameters/pagination.yaml#/Limit"
 ```
+
+Each component map contains named entries. In this layout, `security.yaml`
+defines a top-level `ApiKeyAuth` object, and `parameters/pagination.yaml` defines
+a top-level `Limit` object; the reference fragments select those objects.
 
 #### Annotation Patterns (Code-First)
 
 **Python (FastAPI):**
 
 ```python
-from fastapi import FastAPI, Query, Path, Body, HTTPException
+from fastapi import FastAPI, Query, Path, Body, HTTPException, Header
 from pydantic import BaseModel, Field
 
 app = FastAPI(
@@ -1197,7 +1204,7 @@ EXIT CODES
     0         Successful completion
     1         General error (see stderr for details)
     2         Invalid usage or command-line parsing error
-    64        Invalid input data
+    65        Invalid input data
     70        Internal software error
     77        Permission denied
 
