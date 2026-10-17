@@ -101,7 +101,8 @@ Start with `cargo nextest run --locked -p PACKAGE --profile ci`; run
 Include affected consumers for shared changes. The [verification map](../../../docs/testing.md)
 links formatting, lint, platform and tooling checks and their configuration.
 
-Run `uv run --locked python tools/cli-testing/cli_test_policy.py` after structural
-test changes. Its [documented checks](../../../tools/cli-testing/README.md) verify
-registration and layout, not assertion quality or reference correctness.
+Run `uv run --locked cli-check` after structural test changes. Its
+[documented checks](../../../tools/cli-check/README.md) verify package boundaries,
+test registration, documentation and benchmark layout, not assertion quality or
+reference correctness. Select `cli-check tests` to inspect only test conventions.
 Report checks and limitations; preserve passing results until relevant inputs change.

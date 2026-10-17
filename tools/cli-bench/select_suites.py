@@ -6,10 +6,11 @@ import json
 import os
 import subprocess
 import sys
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict, cast
+
+from cli_check.workspace import discover, load_toml
 
 ROOT = Path(__file__).resolve().parents[2]
 GLOBAL_PATHS = {
@@ -40,21 +41,10 @@ class Selection(TypedDict):
     reason: str
 
 
-def load_toml(path: Path) -> dict[str, object]:
-    with path.open("rb") as source:
-        return cast(dict[str, object], tomllib.load(source))
-
-
 def discover_suites() -> list[Suite]:
-    manifest = load_toml(ROOT / "Cargo.toml")
-    workspace = cast(dict[str, list[str]], manifest["workspace"])
-    excluded = {path for pattern in workspace.get("exclude", []) for path in ROOT.glob(pattern)}
-    members = {path for pattern in workspace["members"] for path in ROOT.glob(pattern)}
-    if "package" in manifest:
-        members.add(ROOT)
     suites: list[Suite] = []
-    for directory in sorted(members - excluded):
-        package = cast(dict[str, str], load_toml(directory / "Cargo.toml")["package"])["name"]
+    for member in discover(ROOT):
+        directory, package = member.directory, member.name
         for path in sorted(directory.glob("benches/*.toml")):
             suite = load_toml(path)
             relative = path.relative_to(ROOT).as_posix()
@@ -111,7 +101,7 @@ def affected_suites(suites: list[Suite], base: str, head: str) -> list[Suite]:
     )
     paths = [os.fsdecode(path) for path in diff.stdout.split(b"\0") if path]
     for path in paths:
-        if path in GLOBAL_PATHS or path.startswith(".cargo/"):
+        if path in GLOBAL_PATHS or path.startswith((".cargo/", "tools/cli-check/src/")):
             return suites
         parts = path.split("/")
         if len(parts) > 2 and parts[0] == "utils" and production_change(path, f"utils/{parts[1]}"):

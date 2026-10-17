@@ -93,8 +93,8 @@ jobs:
         run: prek run mypy --all-files --show-diff-on-failure
       - name: 🧪 Run Python regression tests
         run: prek run python-tests --all-files --show-diff-on-failure
-      - name: 📜 Verify CLI test layout policy
-        run: prek run cli-test-policy --all-files --show-diff-on-failure
+      - name: 📜 Verify CLI repository standards
+        run: prek run cli-check --all-files --show-diff-on-failure
       - name: 🧹 Verify checks leave the checkout unchanged
         run: git diff --exit-code
 
