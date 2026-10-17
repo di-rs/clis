@@ -11,6 +11,11 @@ profile updates, durable preview generations and bounded ZIP metadata parsing.
 Application, supporting-service, profile and infrastructure operations have
 separate trusted workflows. Monitoring and Playground remain optional.
 
+Task 8 acceptance is **pending**. The assembled Linux/runsc scenario must pass
+through the actual supporting-release operation before the correction plan can
+be called successfully executed. The earlier local prerequisite failures and
+skipped draft CI do not satisfy that gate.
+
 Focused tests, native configuration validation, real Compose release/rollback,
 actual profile SIGHUP acknowledgement and directory-bind visibility have been
 run locally. The final verification table is recorded after the assembled gate
@@ -61,3 +66,29 @@ settings parser. The focused review suite passed 84 tests; the full locked Pytho
 suite passed 699 tests in 93.97 seconds. Lint, formatting and strict typing passed,
 and the corrected Playground runtime image was rebuilt and imported in isolation.
 No minor findings were deferred.
+
+## PR42 review follow-up
+
+Supporting releases now use the project name declared by each native manifest,
+matching fresh installation: `boxie-postgres`, `boxie-temporal`,
+`boxie-observability` and `boxie-operator-ingress`. Native Compose regressions
+reproduced all four mismatches before the fix. A real PostgreSQL installation
+followed by `activate_supporting` preserves the container ID and a persistent
+data sentinel; its committed fixture source contains no administrator password.
+
+The assembled fixture installs from committed adaptations of the owner assets,
+then calls `activate_supporting` for PostgreSQL, Temporal and selected monitoring.
+It verifies that unchanged releases retain every selected container ID and saves
+the owner-operation results in public evidence. Schema setup and namespace
+bootstrap still run explicitly before Temporal release readiness. The lifecycle
+workflow also runs the native project and PostgreSQL transition regressions.
+
+Native fixture regressions also preserve dynamic certificate and monitoring bind
+mounts when merging Compose assets without committing private environment values.
+All 699 ordinary Python tests passed on macOS arm64 (128 integration cases
+excluded from that run). All seven native regressions passed against Docker
+Desktop after the fixture correction.
+Root Ruff, formatting, strict mypy, workflow lint/security and documentation hooks
+passed. Assembled Linux/runsc verification is pending the updated manual workflow with
+`deployment=true`; production activation and selected-host capacity remain
+separate checks.

@@ -154,8 +154,6 @@ def activate_supporting(
         "/dev/null",
         "--project-directory",
         str(owner),
-        "-p",
-        "clis-boxie-" + unit,
         "-f",
         str(owner / "compose.yml"),
     ]

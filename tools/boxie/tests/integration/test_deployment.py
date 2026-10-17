@@ -77,6 +77,12 @@ def test_fresh_install_independent_release_failure_and_profile_ack(
 ) -> None:
     async def scenario() -> None:
         stack = assembled_stack
+        assert set(stack.supporting_releases) == (
+            {"postgres", "temporal", "observability"}
+            if stack.monitoring
+            else {"postgres", "temporal"}
+        )
+        assert all(record["containers_preserved"] for record in stack.supporting_releases.values())
         assert "playground" not in stack.bundles
         assert not any(
             key.startswith("PLAYGROUND_") for key in stack.bundles["boxie"]["release"]["settings"]

@@ -90,6 +90,10 @@ jobs:
       - name: 📦 Install locked Python workspace dependencies
         run: |
           uv sync --locked --all-packages
+      - name: 🔄 Verify supporting installation and release projects
+        timeout-minutes: 3
+        run: |
+          uv run --locked pytest -m integration tools/boxie/tests/test_supporting_release.py -vv
       - name: 🌐 Install frontend and Chromium dependencies
         if: github.event_name == 'workflow_dispatch'
         run: |

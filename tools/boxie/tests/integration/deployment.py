@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -20,6 +21,7 @@ from typing import Any
 
 import yaml
 from boxie_infra.component import storage_requests
+from boxie_infra.operations import UNITS, activate_supporting
 from boxie_infra.profiles import main as profile_operation
 from deploy_tool.manifests import source_manifest
 from deploy_tool.prepare import canonical, load_prepared, prepare
@@ -51,6 +53,9 @@ class DeploymentStack(LifecycleStack):
         self.monitoring_started = False
         self.release_ids: set[str] = set()
         self.counter = 0
+        self.supporting_sources: dict[str, Path] = {}
+        self.supporting_releases: dict[str, dict[str, object]] = {}
+        self.observability = self.name + "-monitoring"
         self.env["BOXIE_API_ALIAS"] = "boxie-api"
         self.env["BOXIE_DATA_DIR"] = str(root / "boxie")
         self.env["BOXIE_MONITORING"] = str(monitoring).lower()
@@ -166,11 +171,16 @@ class DeploymentStack(LifecycleStack):
         ):
             self.images[unit] = self.pin_local(unit, local)
         super().start()
+        # Install and bootstrap first, then exercise the production release path
+        # against those same projects. Native readiness requires the namespace.
+        for unit in ("postgres", "temporal", *(["observability"] if self.monitoring else [])):
+            self.supporting_release(unit)
         self.evidence.update(
             source_revision=self.git(ROOT, "rev-parse", "HEAD"),
             production_manifests=True,
             monitoring=self.monitoring,
             registry_image=registry_image,
+            supporting_releases=self.supporting_releases,
             adaptations=[
                 "random owned projects/resources",
                 "disposable bind-backed storage without provider disk bootstrap",
@@ -202,11 +212,17 @@ class DeploymentStack(LifecycleStack):
             ["git", "-C", str(repository), *args], env=env, text=True, stderr=subprocess.DEVNULL
         ).strip()
 
-    def compose(self, package: str, *args: str) -> str:
+    def supporting_checkout(self, package: str) -> Path:
+        if package in self.supporting_sources:
+            return self.supporting_sources[package]
         owner = ROOT / "tools/boxie/infra" / package
         command = [
             "docker",
             "compose",
+            "--env-file",
+            "/dev/null",
+            "--profile",
+            "*",
             "-p",
             getattr(self, package),
             "-f",
@@ -216,7 +232,95 @@ class DeploymentStack(LifecycleStack):
             command += ["-f", str(owner / "compose.production.yml")]
         if package == "temporal" and self.monitoring:
             command += ["-f", str(owner / "compose.observability.yml")]
-        return self.command(command + ["-f", str(self.root / f"{package}-override.yml"), *args])
+        override = self.root / f"{package}-override.yml"
+        if override.exists():
+            command += ["-f", str(override)]
+        # Let native Compose merge !override and production overlays. Keep
+        # variables private and relative owner assets alongside the committed file.
+        config = json.loads(
+            self.command(
+                command + ["config", "--no-interpolate", "--no-path-resolution", "--format", "json"]
+            )
+        )
+        # Without interpolation Compose classifies variable path sources as
+        # named volumes. Retain native mount types without committing resolved
+        # environment values, which include the fixture's private credentials.
+        resolved = json.loads(self.command(command + ["config", "--format", "json"]))
+        for name, service in config["services"].items():
+            mounts = {
+                mount["target"]: mount for mount in resolved["services"][name].get("volumes", [])
+            }
+            for mount in service.get("volumes", []):
+                actual = mounts[mount["target"]]
+                if mount["type"] == "volume" and actual["type"] == "bind":
+                    mount.pop("volume", None)
+                    mount["type"] = "bind"
+                    mount["bind"] = actual.get("bind", {})
+        source = self.root / ("supporting-" + package)
+        target = source / "tools/boxie/infra" / package
+        shutil.copytree(owner, target)
+        for name in ("compose.production.yml", "compose.observability.yml"):
+            (target / name).unlink(missing_ok=True)
+        (target / "compose.yml").write_text(json.dumps(config))
+        self.git(source, "init", "-q")
+        self.git(source, "add", ".")
+        self.git(
+            source,
+            "-c",
+            "user.name=Assembled fixture",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "commit",
+            "-qm",
+            "fixture",
+        )
+        self.supporting_sources[package] = source
+        return source
+
+    def supporting_values(self, package: str) -> dict[str, str]:
+        source = self.supporting_checkout(package)
+        config = source / "tools/boxie/infra" / package / "compose.yml"
+        keys = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*)", config.read_text()))
+        values = {key: self.env[key] for key in keys if key in self.env}
+        if package == "temporal":
+            values["TEMPORAL_PROBE_ADDRESS"] = self.address
+            values["TEMPORAL_OPERATOR_CERTS_DIR"] = self.env["TEMPORAL_OPERATOR_CERTS_DIR"]
+        return values
+
+    def compose(self, package: str, *args: str) -> str:
+        source = self.supporting_checkout(package)
+        owner = source / "tools/boxie/infra" / package
+        return self.command(
+            [
+                "docker",
+                "compose",
+                "--env-file",
+                "/dev/null",
+                "--project-directory",
+                str(owner),
+                "-f",
+                str(owner / "compose.yml"),
+                *args,
+            ],
+            env={
+                **{k: self.env[k] for k in ("PATH", "HOME") if k in self.env},
+                **self.supporting_values(package),
+            },
+        )
+
+    def supporting_release(self, unit: str) -> dict[str, object]:
+        source = self.supporting_checkout(unit)
+        before = {service: self.compose(unit, "ps", "-q", service) for service in UNITS[unit]}
+        assert all(before.values()), "supporting release requires an installed project"
+        result = activate_supporting(
+            source, self.git(source, "rev-parse", "HEAD"), unit, dict(self.supporting_values(unit))
+        )
+        after = {service: self.compose(unit, "ps", "-q", service) for service in UNITS[unit]}
+        assert after == before, "unchanged supporting release replaced installed containers"
+        self.supporting_releases[unit] = {**result, "containers_preserved": True}
+        return result
 
     def private_readers(self) -> None:
         for path in (
@@ -503,20 +607,7 @@ class DeploymentStack(LifecycleStack):
         )
 
     def monitoring_command(self, *args: str) -> str:
-        owner = ROOT / "tools/boxie/infra/observability"
-        return self.command(
-            [
-                "docker",
-                "compose",
-                "-p",
-                self.name + "-monitoring",
-                "-f",
-                str(owner / "compose.yml"),
-                "-f",
-                str(owner / "compose.production.yml"),
-                *args,
-            ]
-        )
+        return self.compose("observability", *args)
 
     def clean_applications(self) -> None:
         for project, services in (
