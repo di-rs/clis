@@ -24,7 +24,7 @@ def compose(*files: Path) -> dict[str, Any]:
             for key in (
                 "BOXIE_API_CONFIG",
                 "BOXIE_ORCHESTRATOR_CONFIG",
-                "BOXIE_PROFILES_FILE",
+                "BOXIE_PROFILES_DIR",
                 "BOXIE_DATA_DIR",
                 "BOXIE_ORCHESTRATOR_CREDENTIAL_FILE",
                 "BOXIE_CONSUMER_CREDENTIAL_FILE",

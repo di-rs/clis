@@ -65,7 +65,7 @@ services:
     - /var/run/docker.sock:/var/run/docker.sock
     - ${BOXIE_DATA_DIR:?Set absolute daemon host data directory}:${BOXIE_DATA_DIR}
     - ${BOXIE_ORCHESTRATOR_CONFIG:?Set orchestrator config file}:/etc/boxie/orchestrator.json:ro
-    - ${BOXIE_PROFILES_FILE:?Set approved profiles file}:/etc/boxie/profiles.json:ro
+    - ${BOXIE_PROFILES_DIR:?Set stable approved profiles directory}:/etc/boxie/approved:ro
     - ${BOXIE_ORCHESTRATOR_CREDENTIAL_FILE}:/run/secrets/orchestrator:ro
     - ${BOXIE_POSTGRES_DSN_FILE:?Set Boxie database DSN file}:/run/secrets/postgres-dsn:ro
     - ${BOXIE_TEMPORAL_CA_FILE:?Set Temporal frontend CA}:/run/secrets/temporal-ca.pem:ro

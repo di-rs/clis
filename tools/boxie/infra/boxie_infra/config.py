@@ -17,7 +17,7 @@ def main() -> None:
     parser.add_argument("--bind-host", default="0.0.0.0")
     parser.add_argument("--orchestrator-credential", default="/run/secrets/orchestrator")
     parser.add_argument("--consumer-credential", default="/run/secrets/consumer")
-    parser.add_argument("--profiles", default="/etc/boxie/profiles.json")
+    parser.add_argument("--profiles", default="/etc/boxie/approved/profiles.json")
     parser.add_argument("--postgres-dsn", default="/run/secrets/postgres-dsn")
     parser.add_argument("--temporal-address", default="temporal:7233")
     parser.add_argument("--temporal-server-name", default="temporal")

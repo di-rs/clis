@@ -41,9 +41,12 @@ class Directory:
     directory: str
     uid: int
     gid: int
+    mode: int = 0o700
 
     def __post_init__(self) -> None:
         _relative(self.directory)
+        if type(self.mode) is not int or self.mode not in (0o700, 0o750, 0o755):
+            raise ValueError("unsafe directory reader mode")
         if any(type(v) is not int or not 0 <= v < 2**31 for v in (self.uid, self.gid)):
             raise ValueError("explicit numeric directory owner required")
 
@@ -113,8 +116,10 @@ def _directory(root: Path, value: Volume | Directory, *, create: bool) -> None:
         owner = path.stat()
         if not path.is_dir() or (owner.st_uid, owner.st_gid) != (value.uid, value.gid):
             raise ValueError("existing storage directory has a different owner")
+        if isinstance(value, Directory) and owner.st_mode & 0o777 != value.mode:
+            raise ValueError("existing storage directory has different reader permissions")
     elif create:
-        path.mkdir(mode=0o700, parents=True)
+        path.mkdir(mode=value.mode if isinstance(value, Directory) else 0o700, parents=True)
         owner = path.stat()
         if (owner.st_uid, owner.st_gid) != (value.uid, value.gid):
             os.chown(path, value.uid, value.gid)

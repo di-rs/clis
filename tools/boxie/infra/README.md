@@ -187,3 +187,31 @@ cross-boot collection; there are no infrastructure Python renderers.
 
 Runtime images install only their application package. The root lockfile lists
 workspace member manifests, whose metadata is copied for dependency resolution.
+
+## Update approved profiles
+
+Keep `/srv/boxie/approved-profiles` root-owned with group 10001 and mode 0750;
+its `profiles.json` child is root-owned and mode 0644. The orchestrator mounts the
+stable directory read-only at `/etc/boxie/approved`, and its configuration points
+to `/etc/boxie/approved/profiles.json`. Retained immutable runtime versions remain
+under Boxie's data directory, separate from this mutable approval source.
+
+Run the operator tooling from the reviewed checkout with an approved immutable
+Boxie image and the exact orchestrator container ID:
+
+```sh
+uv run --locked python -m boxie_infra.profiles \
+  --directory /srv/boxie/approved-profiles --content /private/reviewed-profiles.json \
+  --installation-id "$INSTALLATION" --host-id "$HOST" \
+  --container "$ORCHESTRATOR_CONTAINER_ID" --image "$BOXIE_RUNTIME_IMAGE" \
+  --profile playground --command '["/bin/sh"]'
+```
+
+The command verifies image, owner labels, installation/host identity and the
+read-only directory mount. It validates inside the running approved image,
+fsyncs and atomically replaces only `profiles.json`, signals only that
+orchestrator, then observes `config_digest` through its authenticated loopback
+resolver. It does not restart API or orchestrator. Existing admissions retain
+their old snapshot. Missing acknowledgement restores the prior source and
+verifies it; uncertain restoration requires operator recovery. An ordinary
+application release cannot perform this operation.

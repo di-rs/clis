@@ -275,7 +275,7 @@ def test_resolved_compose_isolated_topology(
         "BOXIE_ORCHESTRATOR_TEMPORAL_CERT_FILE": str(tmp_path / "orchestrator.pem"),
         "BOXIE_ORCHESTRATOR_TEMPORAL_KEY_FILE": str(tmp_path / "orchestrator.key"),
         "BOXIE_ORCHESTRATOR_CONFIG": str(tmp_path / "orchestrator.json"),
-        "BOXIE_PROFILES_FILE": str(tmp_path / "profiles.json"),
+        "BOXIE_PROFILES_DIR": str(tmp_path / "profiles.json"),
         "BOXIE_ORCHESTRATOR_CREDENTIAL_FILE": str(tmp_path / "orchestrator.secret"),
         "BOXIE_CONSUMER_CREDENTIAL_FILE": str(tmp_path / "consumer.secret"),
         "BOXIE_DATA_DIR": str(tmp_path / "data"),

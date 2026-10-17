@@ -57,5 +57,8 @@ class Boxie(pulumi.ComponentResource):
         self.volumes = tuple(
             Volume(f"{prefix}-{name}", f"volumes/{name}", uid, gid) for name, uid, gid in specs
         )
-        self.directories = (Directory("boxie", 10001, 10001),)
+        self.directories = (
+            Directory("boxie", 10001, 10001),
+            Directory("approved-profiles", 0, 10001, 0o750),
+        )
         self.register_outputs(self.settings)

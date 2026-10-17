@@ -134,6 +134,7 @@ def compose(
         "OPERATOR_TEMPORAL_NETWORK": networks.temporal_ui_origin,
         "POSTGRES_VOLUME": prefix + "-postgres",
         "BOXIE_DATA_DIR": host_handle.data_root + "/boxie",
+        "BOXIE_PROFILES_DIR": host_handle.data_root + "/approved-profiles",
         "OBS_VECTOR_VOLUME": prefix + "-vector",
         "OBS_LOGS_VOLUME": prefix + "-logs",
         "OBS_PROMETHEUS_VOLUME": prefix + "-prometheus",

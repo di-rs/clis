@@ -138,14 +138,32 @@ def test_service_sighup_reload_is_atomic(
                     data = json.loads(config.profiles_file.read_text())
                     replacement = "sha256:" + "4" * 64
                     data["shell"]["image_digest"] = replacement
-                    config.profiles_file.write_text(json.dumps(data))
-                    process.send_signal(signal.SIGHUP)
-                    for _ in range(200):
-                        result = await client.post("/v1/profiles/resolve", json=payload)
-                        if result.json()["image_digest"] == replacement:
-                            break
-                        await asyncio.sleep(0.01)
-                    assert result.json()["image_digest"] == replacement
+                    from boxie_infra.profiles import update_profiles
+
+                    pid = process.pid
+
+                    def acknowledged_digest() -> str:
+                        response = httpx.post(
+                            f"http://127.0.0.1:{port}/v1/profiles/resolve",
+                            headers=AUTH,
+                            json=payload,
+                            timeout=2,
+                        )
+                        response.raise_for_status()
+                        return str(response.json()["config_digest"])
+
+                    digest = await asyncio.to_thread(
+                        update_profiles,
+                        config.profiles_file.parent,
+                        json.dumps(data).encode(),
+                        lambda: process.send_signal(signal.SIGHUP),
+                        acknowledged_digest,
+                    )
+                    assert digest != first.json()["config_digest"]
+                    assert process.pid == pid and process.returncode is None
+                    assert (await client.post("/v1/profiles/resolve", json=payload)).json()[
+                        "image_digest"
+                    ] == replacement
                     config.profiles_file.write_text('{"shell":{"image_digest":"untrusted:tag"}}')
                     process.send_signal(signal.SIGHUP)
                     await asyncio.sleep(0.05)

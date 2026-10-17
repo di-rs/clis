@@ -13,7 +13,7 @@
   "BOXIE_ORCHESTRATOR_TEMPORAL_CERT_FILE": "/srv/boxie/config/boxie_orchestrator_temporal_cert_file",
   "BOXIE_ORCHESTRATOR_TEMPORAL_KEY_FILE": "/srv/boxie/config/boxie_orchestrator_temporal_key_file",
   "BOXIE_POSTGRES_DSN_FILE": "/srv/boxie/config/boxie_postgres_dsn_file",
-  "BOXIE_PROFILES_FILE": "/srv/boxie/config/boxie_profiles_file",
+  "BOXIE_PROFILES_DIR": "/srv/boxie/approved-profiles",
   "BOXIE_TEMPORAL_CA_FILE": "/srv/boxie/config/boxie_temporal_ca_file",
   "OBS_METRICS_NETWORK": "clis-example-metrics"
 }
