@@ -215,7 +215,30 @@ class DeploymentStack(LifecycleStack):
     def supporting_checkout(self, package: str) -> Path:
         if package in self.supporting_sources:
             return self.supporting_sources[package]
-        owner = ROOT / "tools/boxie/infra" / package
+        source = self.root / ("supporting-" + package)
+        owner = source / "tools/boxie/infra" / package
+        shutil.copytree(ROOT / "tools/boxie/infra" / package, owner)
+        # Compose v2 cannot parse unexpanded shorthand path sources containing
+        # :? or :-; newer versions infer them as named volumes. Declare the
+        # existing path binds explicitly before merging, keeping values private.
+        for path in owner.glob("compose*.yml"):
+            document = yaml.safe_load(path.read_text())
+            for service in document.get("services", {}).values():
+                volumes = service.get("volumes", [])
+                for index, volume in enumerate(volumes):
+                    match = (
+                        re.fullmatch(r"(\$\{[^}]+\}):([^:]+)(?::(ro|rw))?", volume)
+                        if isinstance(volume, str)
+                        else None
+                    )
+                    if match:
+                        volumes[index] = {
+                            "type": "bind",
+                            "source": match[1],
+                            "target": match[2],
+                            "read_only": match[3] == "ro",
+                        }
+            path.write_text(yaml.safe_dump(document))
         command = [
             "docker",
             "compose",
@@ -242,26 +265,9 @@ class DeploymentStack(LifecycleStack):
                 command + ["config", "--no-interpolate", "--no-path-resolution", "--format", "json"]
             )
         )
-        # Without interpolation Compose classifies variable path sources as
-        # named volumes. Retain native mount types without committing resolved
-        # environment values, which include the fixture's private credentials.
-        resolved = json.loads(self.command(command + ["config", "--format", "json"]))
-        for name, service in config["services"].items():
-            mounts = {
-                mount["target"]: mount for mount in resolved["services"][name].get("volumes", [])
-            }
-            for mount in service.get("volumes", []):
-                actual = mounts[mount["target"]]
-                if mount["type"] == "volume" and actual["type"] == "bind":
-                    mount.pop("volume", None)
-                    mount["type"] = "bind"
-                    mount["bind"] = actual.get("bind", {})
-        source = self.root / ("supporting-" + package)
-        target = source / "tools/boxie/infra" / package
-        shutil.copytree(owner, target)
         for name in ("compose.production.yml", "compose.observability.yml"):
-            (target / name).unlink(missing_ok=True)
-        (target / "compose.yml").write_text(json.dumps(config))
+            (owner / name).unlink(missing_ok=True)
+        (owner / "compose.yml").write_text(json.dumps(config))
         self.git(source, "init", "-q")
         self.git(source, "add", ".")
         self.git(

@@ -87,8 +87,15 @@ Native fixture regressions also preserve dynamic certificate and monitoring bind
 mounts when merging Compose assets without committing private environment values.
 All 699 ordinary Python tests passed on macOS arm64 (128 integration cases
 excluded from that run). All seven native regressions passed against Docker
-Desktop after the fixture correction.
+Desktop after the fixture correction, with both Compose v2.36.2 and v5.6.0.
 Root Ruff, formatting, strict mypy, workflow lint/security and documentation hooks
 passed. Assembled Linux/runsc verification is pending the updated manual workflow with
 `deployment=true`; production activation and selected-host capacity remain
 separate checks.
+
+The [first Linux run](https://github.com/di-rs/clis/actions/runs/39058293451),
+at `9522e8f`, passed the four project checks and PostgreSQL transition, then
+stopped at two fixture bind-parsing failures in the runner's Compose version.
+That compatibility failure was reproduced locally with Compose v2.36.2 and
+corrected by declaring variable path binds before native merging. No assembled
+pass is inferred from that failed attempt.
