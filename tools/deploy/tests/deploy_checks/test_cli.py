@@ -17,7 +17,7 @@ def invoke(*args: str, env: dict[str, str] | None = None) -> subprocess.Complete
     # Existing engine cases use a committed fixture; explicit --repository cases
     # below exercise provenance independently without this fixture preparation.
     if args[0] in {"prepare", "validate"} and "--repository" not in args:
-        from .conftest import commit_source
+        from .support import commit_source
 
         arguments = list(args)
         descriptor_path = Path(arguments[arguments.index("--descriptor") + 1])
@@ -142,7 +142,10 @@ def test_prepare_missing_component_secret_is_private_error(source: Path) -> None
     assert not (source / "prepared").exists()
 
 
-def test_deploy_pins_host_and_keeps_private_payload_off_arguments(source: Path) -> None:
+@pytest.mark.parametrize("budget", [60, 900])
+def test_deploy_pins_host_and_keeps_private_payload_off_arguments(
+    source: Path, budget: int
+) -> None:
     out = source / "prepared"
     prepared = invoke(
         "prepare",
@@ -196,6 +199,8 @@ print(json.dumps({'component':'sample','release_id':release_id,'outcome':'activa
         str(profile),
         "--identity",
         str(identity),
+        "--timeout",
+        str(budget),
         env={"PATH": str(bin_dir) + os.pathsep + os.environ["PATH"]},
     )
     assert result.returncode == 0, result.stderr
@@ -367,7 +372,7 @@ def test_remote_metadata_filename_cannot_be_component_payload(source: Path) -> N
 
 @pytest.mark.parametrize("fault", ["revision", "symlink", "duplicate", "oversize"])
 def test_committed_release_rejects_invalid_source_before_output(source: Path, fault: str) -> None:
-    from .conftest import commit_source
+    from .support import commit_source
 
     if fault == "symlink":
         (source / "real.yml").write_bytes((source / "compose.yml").read_bytes())
@@ -407,7 +412,7 @@ def test_committed_release_rejects_invalid_source_before_output(source: Path, fa
 
 
 def test_release_uses_committed_bytes_and_public_identity(source: Path) -> None:
-    from .conftest import commit_source
+    from .support import commit_source
 
     revision = commit_source(source)
     committed = (source / "compose.yml").read_bytes()
@@ -484,3 +489,33 @@ def test_public_identity_tracks_images_and_references_without_secret_values(sour
     )
     assert second.returncode == 0, second.stderr
     assert json.loads(first.stdout)["release_id"] != json.loads(second.stdout)["release_id"]
+
+
+@pytest.mark.parametrize("budget", [59, 901])
+def test_invalid_budget_is_rejected_before_ssh(source: Path, budget: int) -> None:
+    from deploy_tool.manifests import ReleaseError
+    from deploy_tool.transport import deploy_ssh
+
+    with pytest.raises(ReleaseError, match="between 60 and 900"):
+        deploy_ssh({}, {}, source / "missing", budget)
+
+
+@pytest.mark.parametrize("stream", [1, 2])
+def test_ssh_output_is_bounded_while_process_runs(source: Path, stream: int) -> None:
+    import time
+
+    from deploy_tool.manifests import ReleaseError
+    from deploy_tool.transport import run_ssh
+
+    start = time.monotonic()
+    with pytest.raises(ReleaseError, match="output exceeds limit"):
+        run_ssh(
+            [
+                sys.executable,
+                "-c",
+                f"import os,time; os.write({stream}, b'x'*65536); time.sleep(8)",
+            ],
+            b"{}",
+            10,
+        )
+    assert time.monotonic() - start < 3

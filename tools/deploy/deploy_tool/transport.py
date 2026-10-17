@@ -2,9 +2,13 @@
 
 import base64
 import json
+import os
+import selectors
 import shlex
+import signal
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import cast
 
@@ -15,8 +19,8 @@ from .prepare import canonical, identity, private_write
 def deploy_ssh(
     bundle: dict[str, object], profile: dict[str, object], key: Path, timeout: int
 ) -> dict[str, str]:
-    if not 30 <= timeout <= 900:
-        raise ReleaseError("SSH timeout must be between 30 and 900 seconds")
+    if not 60 <= timeout <= 900:
+        raise ReleaseError("SSH timeout must be between 60 and 900 seconds")
     host = string(profile.get("host"), "deployment host", r"[a-zA-Z0-9][a-zA-Z0-9.:-]*")
     user = string(profile.get("user", "root"), "SSH user", r"[a-z_][a-z0-9_-]*")
     port = profile.get("port", 22)
@@ -82,14 +86,7 @@ def deploy_ssh(
             f"{user}@{host}",
             remote_command,
         ]
-        try:
-            result = subprocess.run(
-                command, input=canonical(bundle), capture_output=True, timeout=timeout, check=False
-            )
-        except subprocess.TimeoutExpired as error:
-            raise ReleaseError(
-                "SSH deadline exceeded; inspect remote component status before retrying"
-            ) from error
+        result = run_ssh(command, canonical(bundle), timeout)
         if len(result.stdout) > 4096:
             raise ReleaseError("invalid SSH activation response")
         try:
@@ -107,6 +104,7 @@ def deploy_ssh(
             "failed-rolled-back",
             "failed-rollback-failed",
             "activation-error",
+            "recovery-required",
         }
         outcome = response.get("outcome")
         if outcome not in allowed:
@@ -125,3 +123,63 @@ def deploy_ssh(
             "release_id": identity(bundle),
             "outcome": "activated",
         }
+
+
+def run_ssh(command: list[str], payload: bytes, timeout: int) -> subprocess.CompletedProcess[bytes]:
+    """Bound both streams during execution, including on early stdin close."""
+    with tempfile.TemporaryFile() as incoming:
+        incoming.write(payload)
+        incoming.seek(0)
+        process = subprocess.Popen(
+            command,
+            stdin=incoming,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        assert process.stdout is not None and process.stderr is not None
+        output: dict[int, bytearray] = {
+            process.stdout.fileno(): bytearray(),
+            process.stderr.fileno(): bytearray(),
+        }
+        end = time.monotonic() + timeout
+        try:
+            with selectors.DefaultSelector() as selector:
+                for stream in (process.stdout, process.stderr):
+                    selector.register(stream, selectors.EVENT_READ)
+                while selector.get_map():
+                    remaining = end - time.monotonic()
+                    if remaining <= 0:
+                        raise ReleaseError(
+                            "SSH deadline exceeded; inspect remote component status before retrying"
+                        )
+                    for key, _ in selector.select(min(0.2, remaining)):
+                        chunk = os.read(key.fd, 4096)
+                        if not chunk:
+                            selector.unregister(key.fd)
+                            continue
+                        stream_output = output[key.fd]
+                        if len(stream_output) + len(chunk) > 4096:
+                            raise ReleaseError(
+                                "SSH output exceeds limit; inspect remote component status"
+                            )
+                        stream_output.extend(chunk)
+            process.wait(timeout=max(0, end - time.monotonic()))
+            return subprocess.CompletedProcess(
+                command,
+                process.returncode,
+                bytes(output[process.stdout.fileno()]),
+                bytes(output[process.stderr.fileno()]),
+            )
+        except subprocess.TimeoutExpired as error:
+            raise ReleaseError(
+                "SSH deadline exceeded; inspect remote component status before retrying"
+            ) from error
+        finally:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait()
+            process.stdout.close()
+            process.stderr.close()

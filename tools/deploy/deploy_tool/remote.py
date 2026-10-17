@@ -17,12 +17,18 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 
 class ActivationError(Exception):
     """Safe operational failure without child output or input values."""
+
+
+class ActivationCancelled(BaseException):
+    """Unwind owned process cleanup without entering ordinary rollback."""
 
 
 def canonical(value: object) -> bytes:
@@ -63,11 +69,33 @@ def read_bundle(path: Path) -> dict[str, Any]:
 
 class Activator:
     def __init__(self, root: Path, timeout: float, health_timeout: float) -> None:
+        self.cancelled = False
         self.root = root
         self.deadline = time.monotonic() + timeout
         self.health_timeout = health_timeout
 
+    @contextmanager
+    def cancellation_signals(self) -> Iterator[None]:
+        previous = {}
+
+        def cancel(signum: int, frame: Any) -> None:
+            # No I/O or exception from callbacks; normal control flow unwinds cleanup.
+            self.cancelled = True
+
+        try:
+            for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+                previous[signum] = signal.signal(signum, cancel)
+            yield
+        finally:
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
+
+    def check_cancelled(self) -> None:
+        if self.cancelled:
+            raise ActivationCancelled()
+
     def run(self, command: list[str], env: dict[str, str], cwd: Path, seconds: float = 120) -> str:
+        self.check_cancelled()
         remaining = self.deadline - time.monotonic()
         if remaining <= 0:
             raise ActivationError("activation deadline exceeded")
@@ -88,10 +116,11 @@ class Activator:
             with selectors.DefaultSelector() as selector:
                 selector.register(process.stdout, selectors.EVENT_READ)
                 while selector.get_map():
+                    self.check_cancelled()
                     wait = end - time.monotonic()
                     if wait <= 0:
                         raise ActivationError("activation command deadline exceeded")
-                    for key, _ in selector.select(min(1, wait)):
+                    for key, _ in selector.select(min(0.05, wait)):
                         chunk = os.read(key.fd, 65536)
                         if not chunk:
                             selector.unregister(key.fd)
@@ -100,6 +129,7 @@ class Activator:
                             raise ActivationError("activation command output exceeds limit")
                         output.extend(chunk)
             process.wait(timeout=max(0, end - time.monotonic()))
+            self.check_cancelled()
             if process.returncode != 0:
                 raise ActivationError("activation command failed")
             return output.decode()
@@ -189,7 +219,11 @@ class Activator:
                         if service in members
                     )
                     labels = data["Config"].get("Labels", {})
-                    if data["Image"] != intended[variable] or not data["State"]["Running"]:
+                    if (
+                        data["Image"] != intended[variable]
+                        or not data["State"]["Running"]
+                        or labels.get("clis.release-id") != directory.name
+                    ):
                         raise ActivationError("service running unintended image")
                     if (
                         labels.get("com.docker.compose.project")
@@ -238,6 +272,10 @@ class Activator:
         os.replace(staging, component / name)
 
     def activate(self, bundle: dict[str, Any]) -> dict[str, str]:
+        with self.cancellation_signals():
+            return self.activate_owned(bundle)
+
+    def activate_owned(self, bundle: dict[str, Any]) -> dict[str, str]:
         component_name = bundle["descriptor"]["component"]
         if re.fullmatch(r"[a-z][a-z0-9-]{0,47}", component_name) is None:
             raise ActivationError("invalid component")
@@ -256,11 +294,29 @@ class Activator:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as error:
                 raise ActivationError("component activation already in progress") from error
-            return self.activate_locked(bundle, component, releases)
+            try:
+                self.check_cancelled()
+                return self.activate_locked(bundle, component, releases)
+            except ActivationCancelled:
+                return self.record(
+                    component,
+                    {
+                        "component": component_name,
+                        "release_id": bundle_id(bundle),
+                        "outcome": "recovery-required",
+                    },
+                )
 
     def activate_locked(
         self, bundle: dict[str, Any], component: Path, releases: Path
     ) -> dict[str, str]:
+        status = component / "status.json"
+        if status.exists() and json.loads(status.read_bytes()).get("outcome") in (
+            "activating",
+            "recovery-required",
+            "failed-rollback-failed",
+        ):
+            raise ActivationError("recovery required; inspect component before retrying")
         old = self.pointer(component, "current")
         prior = read_bundle(old) if old else None
         release_id = bundle_id(bundle)
@@ -321,6 +377,7 @@ class Activator:
                 result["outcome"] = "hook-failed" if hook_failed else "failed-no-previous"
             return self.record(component, result)
         self.deadline = overall_deadline
+        self.check_cancelled()
         if old and old != directory:
             self.link(component, "previous", old)
         self.link(component, "current", directory)

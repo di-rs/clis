@@ -41,6 +41,7 @@ def compose(*files: Path) -> dict[str, Any]:
         }
     )
     env.update(
+        CLIS_RELEASE_ID="b" * 64,
         CLIS_RELEASE_REVISION="a" * 40,
         BOXIE_DOCKER_GID="999",
         OBS_METRICS_NETWORK="test-metrics",

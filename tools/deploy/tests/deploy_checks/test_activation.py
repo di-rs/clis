@@ -2,6 +2,7 @@
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -39,6 +40,7 @@ if args[0] == 'compose':
     if action == 'up':
         state['active'] = os.environ['APP_IMAGE']
         state['project'] = project
+        state['release_id'] = os.environ['CLIS_RELEASE_ID']
     if action == 'ps':
         print('container-' + args[-1])
     if action == 'exec':
@@ -53,6 +55,7 @@ elif args[0] == 'inspect':
     if state.get('wrong_image'):
         image_id = 'sha256:' + 'f' * 64
     print(json.dumps({'Config': {'Image': active, 'Labels': {
+      'clis.release-id': 'old' if state.get('old_release_label') else state['release_id'],
       'com.docker.compose.project': state['project'],
       'com.docker.compose.service': args[-1].replace('container-', ''),
     }}, 'Image': image_id, 'State': {'Running': True, 'Health': {
@@ -358,3 +361,67 @@ sys.exit(result.returncode)
     assert (root / "sample/current").is_symlink()
     assert json.loads(state.read_text())["active"] == DIGEST
     assert "never-log-me" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("signum", [signal.SIGTERM, signal.SIGHUP])
+def test_cancellation_reaps_hook_before_releasing_component_lock(
+    source: Path, docker: tuple[Path, Path], signum: int
+) -> None:
+    from deploy_tool.prepare import load_prepared
+
+    bin_dir, state = docker
+    descriptor = json.loads((source / "descriptor.json").read_text())
+    descriptor["pre_activate"] = "cancel.sh"
+    (source / "descriptor.json").write_text(json.dumps(descriptor))
+    marker = source / "child-started"
+    mutated = source / "late-mutation"
+    (source / "cancel.sh").write_text(
+        f"(sleep 1; echo survived > '{mutated}') &\necho ready > '{marker}'\nwait\n"
+    )
+    prepared = prepare_release(source, "cancelled")
+    root = source / "host"
+    process = subprocess.Popen(
+        [sys.executable, str(PACKAGE / "deploy_tool/remote.py"), "--root", str(root)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env={**os.environ, "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"]},
+    )
+    try:
+        assert process.stdin is not None
+        process.stdin.write(json.dumps(load_prepared(prepared)))
+        process.stdin.close()
+        end = time.monotonic() + 5
+        while not marker.exists() and time.monotonic() < end:
+            time.sleep(0.01)
+        assert marker.exists()
+        process.send_signal(signum)
+        process.wait(timeout=3)
+        assert process.returncode != 0
+        status = json.loads((root / "sample/status.json").read_text())
+        assert status["outcome"] == "recovery-required"
+        import fcntl
+
+        with (root / "sample/activation.lock").open() as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        time.sleep(1.1)
+        assert not mutated.exists(), "owned descendant survived lock release"
+        assert not (root / "sample/current").exists()
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait()
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()
+
+
+def test_same_image_with_old_release_label_is_not_promoted(
+    source: Path, docker: tuple[Path, Path]
+) -> None:
+    bin_dir, state = docker
+    state.write_text('{"old_release_label":true}')
+    result = remote(prepare_release(source, "old-label"), source / "host", bin_dir)
+    assert result.returncode == 1
+    assert json.loads(result.stdout)["outcome"] == "failed-no-previous"

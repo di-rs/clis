@@ -74,6 +74,7 @@ def component(
       HEALTHY: ${{HEALTHY}}
     labels:
       {OWNER}: {owner}
+      clis.release-id: ${{CLIS_RELEASE_ID}}
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/', timeout=1)"]
       interval: 1s

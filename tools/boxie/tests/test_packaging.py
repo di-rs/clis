@@ -263,6 +263,7 @@ def test_resolved_compose_isolated_topology(
     values = {
         "BOXIE_DOCKER_GID": "999",
         "OBS_METRICS_NETWORK": "test-metrics",
+        "CLIS_RELEASE_ID": "b" * 64,
         "CLIS_RELEASE_REVISION": "a" * 40,
         "PLAYGROUND_PROXY_IMAGE": "traefik:test",
         "BOXIE_RUNTIME_IMAGE": "boxie:test",

@@ -53,6 +53,8 @@ services:
       retries: 8
       start_period: 30s
     stop_grace_period: 10s
+    labels:
+      clis.release-id: ${CLIS_RELEASE_ID:?Set immutable release identity}
   orchestrator:
     image: ${BOXIE_RUNTIME_IMAGE:?Set approved immutable Boxie image}
     command:
@@ -107,6 +109,8 @@ services:
     stop_grace_period: 60s
     group_add:
     - ${BOXIE_DOCKER_GID:?Set host Docker group}
+    labels:
+      clis.release-id: ${CLIS_RELEASE_ID:?Set immutable release identity}
 networks:
   consumer:
     external: true

@@ -216,3 +216,19 @@ values do not affect that identity. Credential rotations require a new versioned
 reference in settings and a new read-only path for each mounted credential.
 Keep retained versions available for rollback. The activator rejects changed
 private values at an existing immutable identity rather than overwriting them.
+
+## Cancellation and recovery
+
+SSH budgets are 60-900 seconds, with a 30-second remote margin. Both SSH streams
+and each owned command are bounded while running. Handled SIGTERM/SIGHUP/SIGINT
+stops further commands and kills/reaps the command group before unlocking. The
+status becomes `recovery-required`; cancellation never starts automatic rollback.
+Readiness requires the expected `clis.release-id` label and immutable image.
+
+After SIGKILL, lost hosts, dropped connections or Docker daemon side effects,
+inspect `status.json`, both retained releases and actual container labels/images.
+An `activating`, `recovery-required` or `failed-rollback-failed` status blocks the
+next activation. Reconcile state using the retained inputs and verify dependency
+readiness before an operator archives that status. Signal delivery alone cannot
+prove daemon-side mutations stopped. Ordinary rollback preserves volumes and
+schemas and ends terminals; it cannot restore their sessions.
