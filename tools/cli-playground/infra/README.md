@@ -300,7 +300,41 @@ SSH client's allowed IPv4 networks. Narrowing it without a runner with a stable,
 allowed egress address blocks GitHub-hosted deployment. Host-key and cloud-init
 changes are not a routine way to update an already running host.
 
-## 7. Provision only
+## 7. Review infrastructure changes
+
+After the infrastructure-check workflow has landed on `master`, use **Actions →
+☁️ Playground infrastructure review → master** before applying a host change.
+Leave `revision` blank to preview the workflow's exact default-branch commit, or
+enter the full 40-character lowercase SHA of a reviewed commit reachable from a
+branch or tag in this repository. Branch names and unknown commits are rejected
+before the protected job requests credentials.
+
+The protected job's name includes the resolved SHA. Review the **entire revision**,
+including package build hooks, dependencies and Pulumi code, before dispatching
+or approving it: installation and preview execute that code with state access and
+provisioning credentials. Configure required reviewers on the `playground`
+environment when a second approval is required. The workflow itself must run from
+`master`; PR events never trigger it and forks receive no credentials.
+
+The Pulumi action previews against the existing production stack and writes its
+diff to the workflow summary with stack outputs suppressed. It does not create a
+stack or apply changes. Review that result, then use the separate setup workflow
+to apply the reviewed change after it lands on `master`. A preview is advisory;
+setup refreshes and previews again against the current cloud state before applying.
+
+For weekly detection of changes made outside Pulumi, set the repository variable
+`PLAYGROUND_INFRA_DRIFT_CHECK` to exactly `true`. Monday's check uses default-branch
+code and `pulumi refresh --preview-only --expect-no-changes`; it does not persist
+the refresh or remediate drift. Drift and provider/authentication errors fail the
+job. Inspect its summary and logs, then resolve the change through a reviewed PR
+or an explicit operator decision. Scheduled checks honor the same environment
+approval requirements and production concurrency group as setup and deployment.
+Leave the variable unset or `false` until state and credentials are configured.
+
+The existing R2 backend and passphrase are used by both workflows. No Pulumi Cloud
+account or additional repository secret is required.
+
+## 8. Provision only
 
 Run **Actions → ☁️ Playground infrastructure setup → master** for explicitly authorized host
 provisioning. Its protected `provision` job configures the existing R2-backed stack,
