@@ -2,7 +2,7 @@
 
 The three pipeline dependencies are checked into `.agents/skills/` so a checkout
 contains the instructions and supporting references. No global installation or
-Node.js runtime is required to use them. The `documentation-pipeline` skill is
+Node.js runtime is required to use them. The `clis-documentation-pipeline` skill is
 repository-owned.
 
 ## Sources
@@ -40,6 +40,9 @@ references, and evaluation cases are included.
 - Nested Markdown examples in `readme-patterns.md` use four-backtick outer fences
   so their inner shell blocks render correctly.
 - Trailing whitespace was removed from blank lines in the API/CLI reference.
+- The OAuth response uses an explicit refresh-token placeholder instead of a
+  credential-like example value. The original import's false-positive finding is
+  fingerprinted in `.gitleaksignore` so historical scans remain enabled.
 
 The wrapper keeps the selected order, adapts completeness to the page's purpose,
 and applies editorial changes within an authorized writing/editing task. The

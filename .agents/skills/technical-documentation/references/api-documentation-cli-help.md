@@ -607,7 +607,7 @@ Response:
     "access_token": "eyJhbGciOi...",
     "token_type": "Bearer",
     "expires_in": 3600,
-    "refresh_token": "rt_abc123def456",
+    "refresh_token": "<REFRESH_TOKEN>",
     "scope": "read write"
   }
 

@@ -44,7 +44,7 @@ performance changes from those samples.
 
 ## Human-facing documentation
 
-Use `.agents/skills/documentation-pipeline/SKILL.md` when creating or editing
+Use `.agents/skills/clis-documentation-pipeline/SKILL.md` when creating or editing
 persistent documentation for human readers about CLIs, tools, products, or
 architecture. It runs `write-docs`, `technical-documentation`, and
 `editorial-pass` in that order. This includes READMEs, guides, references, and

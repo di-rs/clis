@@ -1,9 +1,9 @@
 ---
-name: documentation-pipeline
+name: clis-documentation-pipeline
 description: Use when creating or editing persistent, human-facing technical documentation about CLIs, tools, products, or architecture, including READMEs, tutorials, how-to guides, references, troubleshooting, and architecture overviews. Also use when reviewing these documents. Excludes ordinary chat answers, agent instructions, skill authoring, and temporary working notes.
 ---
 
-# Documentation pipeline
+# CLIs documentation pipeline
 
 Produce a saved document that helps its intended reader use or understand the
 system. Run the three repository skills in order on the same document, keeping
@@ -105,7 +105,7 @@ Deliver the saved document paths, a brief description of the result, verificatio
 performed, and any unresolved questions. For review-only work, deliver the memo.
 The final artifact should stand on its own for someone who never saw the chat.
 
-Example invocation: "Use $documentation-pipeline to update
+Example invocation: "Use $clis-documentation-pipeline to update
 coreutils/echor/README.md for new users, with verified examples and exit behavior."
 
 For upstream versions, licenses, local adaptations, and updates, read
