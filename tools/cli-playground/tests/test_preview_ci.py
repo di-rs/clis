@@ -130,7 +130,7 @@ class FakeGitHub(GitHub):
             "status": "completed",
             "conclusion": "success",
             "path": ".github/workflows/cli-playground.yml",
-            "name": "CLI playground build",
+            "name": "🏗️ Playground PR binary builds",
             "workflow_id": 21,
             "repository": {"full_name": REPO},
             "head_sha": SHA,

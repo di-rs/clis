@@ -253,14 +253,16 @@ def render(
         "| --- | ---: | ---: | ---: | --- |",
     ]
     for system in SYSTEMS:
-        job = next((item for item in jobs if item.get("name") == f"suites ({system})"), None)
+        job = next(
+            (item for item in jobs if item.get("name") == f"⏱️ Run CLI benchmarks ({system})"), None
+        )
         if job is None:
             lines.append(f"| {PLATFORMS[system]} | — | — | — | Not run |")
             continue
         steps = [table(value) for value in array(job.get("steps", []))]
         times = [
             next((clock(duration(step)) for step in steps if step.get("name") == name), "—")
-            for name in ("Build selected CLIs", "Run suites")
+            for name in ("🏗️ Build selected CLI executables", "⏱️ Execute selected benchmark suites")
         ]
         lines.append(
             f"| {PLATFORMS[system]} | {clock(duration(job))} | {times[0]} | {times[1]} | "
@@ -311,7 +313,7 @@ def generate(api: GitHub, repo: str, run_id: int, *, author: str | None = None) 
         or run.get("status") != "completed"
         or run.get("conclusion") in ("cancelled", "skipped")
         or run.get("path") != WORKFLOW
-        or run.get("name") != "CLI benchmark suites"
+        or run.get("name") != "⏱️ CLI benchmark execution"
         or table(run.get("repository")).get("full_name") != repo
     ):
         return None
@@ -335,7 +337,7 @@ def generate(api: GitHub, repo: str, run_id: int, *, author: str | None = None) 
     attempt = integer(run.get("run_attempt"))
     jobs = api.pages(f"{base}/actions/runs/{run_id}/attempts/{attempt}/jobs", "jobs")
     if not any(
-        job.get("name") in {f"suites ({system})" for system in SYSTEMS}
+        job.get("name") in {f"⏱️ Run CLI benchmarks ({system})" for system in SYSTEMS}
         and job.get("conclusion") != "skipped"
         for job in jobs
     ):
@@ -354,7 +356,10 @@ def generate(api: GitHub, repo: str, run_id: int, *, author: str | None = None) 
             continue
         try:
             if name != "cli-bench-selection":
-                job = next((job for job in jobs if job.get("name") == f"suites ({system})"), {})
+                job = next(
+                    (job for job in jobs if job.get("name") == f"⏱️ Run CLI benchmarks ({system})"),
+                    {},
+                )
                 started, created = (
                     seconds(job.get("started_at")),
                     seconds(artifact.get("created_at")),

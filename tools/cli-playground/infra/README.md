@@ -302,7 +302,7 @@ changes are not a routine way to update an already running host.
 
 ## 7. Provision only
 
-Run **Actions → CLI playground setup → master** for explicitly authorized host
+Run **Actions → ☁️ Playground infrastructure setup → master** for explicitly authorized host
 provisioning. Its protected `provision` job configures the existing R2-backed stack,
 previews and applies infrastructure, then finishes. Keep `PLAYGROUND_AUTO_DEPLOY`
 unset or false. Running the release workflow deliberately fails at its first step;

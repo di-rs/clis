@@ -1,8 +1,9 @@
-name: CodeQL
+name: 🛡️ CodeQL security analysis
 
 on:
   pull_request:
     branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
   push:
     branches: [master]
   schedule:
@@ -18,7 +19,11 @@ concurrency:
 
 jobs:
   analyze:
-    name: analyze (${{ matrix.language }})
+    if: >-
+      ${{
+        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
+      }}
+    name: 🛡️ Analyze ${{ matrix.language }} security
     strategy:
       fail-fast: false
       matrix:
@@ -29,14 +34,17 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: 📥 Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4
+      - name: 🛡️ Initialize CodeQL security queries
+        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4
         with:
           languages: ${{ matrix.language }}
           build-mode: none
           queries: security-extended
-      - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4
+      - name: 🔎 Analyze code and upload security results
+        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4
         with:
           category: /language:${{ matrix.language }}

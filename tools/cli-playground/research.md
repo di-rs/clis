@@ -77,7 +77,7 @@ when connecting.
 Setup is browser-only: create a private Standard R2 bucket manually once
 (EU jurisdiction recommended), store its bucket-scoped S3 credentials and the
 state encryption passphrase in the `master`-restricted GitHub environment, then
-run **CLI playground setup**. R2 state remains outside the VPS lifecycle. The
+run **☁️ Playground infrastructure setup**. R2 state remains outside the VPS lifecycle. The
 setup workflow applies infrastructure and calls the same release/deployment
 workflows used for later updates. After successful setup, the repository variable
 `PLAYGROUND_AUTO_DEPLOY=true` enables releases on relevant pushes to `master`.

@@ -24,7 +24,7 @@ TOOLS = Path(__file__).resolve().parents[1]
 @pytest.fixture
 def suite_workflow(tmp_path: Path) -> Path:
     workflow = (TOOLS.parents[1] / ".github/workflows/cli-bench.yml").read_text()
-    step = workflow.split("      - name: Run suites\n", 1)[1]
+    step = workflow.split("      - name: ⏱️ Execute selected benchmark suites\n", 1)[1]
     code = step.split("<<'PY'\n", 1)[1].split("          PY\n", 1)[0]
     script = tmp_path / "run-suites.py"
     script.write_text(textwrap.dedent(code))
@@ -333,12 +333,12 @@ def job(name: str, start: str, end: str) -> dict[str, object]:
         "completed_at": f"2026-10-13T00:{end}Z",
         "steps": [
             {
-                "name": "Build selected CLIs",
+                "name": "🏗️ Build selected CLI executables",
                 "started_at": "2026-10-13T00:01:00Z",
                 "completed_at": "2026-10-13T00:02:00Z",
             },
             {
-                "name": "Run suites",
+                "name": "⏱️ Execute selected benchmark suites",
                 "started_at": "2026-10-13T00:02:00Z",
                 "completed_at": "2026-10-13T00:02:30Z",
             },
@@ -353,7 +353,7 @@ class FakeGitHub(GitHub):
             "run_number": 10,
             "run_attempt": 1,
             "workflow_id": 42,
-            "name": "CLI benchmark suites",
+            "name": "⏱️ CLI benchmark execution",
             "path": ".github/workflows/cli-bench.yml",
             "event": "pull_request",
             "status": "completed",
@@ -370,8 +370,8 @@ class FakeGitHub(GitHub):
         }
         self.jobs = [
             job("select", "00:00", "00:10"),
-            job("suites (ubuntu-24.04)", "00:10", "03:10"),
-            job("suites (macos-15)", "00:20", "04:20"),
+            job("⏱️ Run CLI benchmarks (ubuntu-24.04)", "00:10", "03:10"),
+            job("⏱️ Run CLI benchmarks (macos-15)", "00:20", "04:20"),
         ]
         self.comments: list[dict[str, object]] = []
         self.responses: dict[str, object] = {

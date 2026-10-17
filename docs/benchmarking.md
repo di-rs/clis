@@ -129,8 +129,11 @@ uv run --locked pytest
 ```
 
 The [workflow](../.github/workflows/cli-bench.yml) runs for pull requests targeting
-`master`. There are no benchmark runs on pushes, merges, or a schedule. A small
-selection job examines the whole PR's diff from its merge base, then Linux and
+`master`. Drafts skip benchmarks unless the `run-ci` label is applied; see
+[draft pull requests](testing.md#draft-pull-requests). Marking a PR ready for review
+or adding the override label starts selection. There are no benchmark runs on
+pushes, merges, or a schedule. A small selection job examines the whole PR's diff
+from its merge base, then Linux and
 macOS jobs build only the selected CLI packages (plus Biggie when needed).
 An empty selection skips both benchmark jobs.
 
