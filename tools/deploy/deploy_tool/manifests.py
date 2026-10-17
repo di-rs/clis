@@ -1,8 +1,9 @@
 """Validate source-owned contracts before an activation can reach a host."""
 
+import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import cast
 
@@ -19,11 +20,43 @@ def object_map(value: object, label: str) -> dict[str, object]:
     return cast(dict[str, object], value)
 
 
+def json_bytes(content: bytes) -> dict[str, object]:
+    if len(content) > 65536:
+        raise ReleaseError("JSON metadata exceeds 64 KiB")
+
+    def unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ReleaseError("duplicate JSON key")
+            result[key] = value
+        return result
+
+    try:
+        return object_map(json.loads(content, object_pairs_hook=unique), "JSON")
+    except (ValueError, UnicodeError) as error:
+        raise ReleaseError("cannot read JSON input") from error
+
+
 def read_json(path: Path) -> dict[str, object]:
     try:
-        return object_map(json.loads(path.read_bytes()), "JSON")
-    except (OSError, ValueError, UnicodeError) as error:
+        with path.open("rb") as stream:
+            return json_bytes(stream.read(65537))
+    except OSError as error:
         raise ReleaseError("cannot read JSON input") from error
+
+
+@dataclass(frozen=True)
+class ReleaseIdentity:
+    component: str
+    revision: str
+    images: dict[str, str]
+    configuration_hashes: dict[str, str]
+    compatibility: dict[str, str]
+    settings: dict[str, str]
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
 
 
 def string(value: object, label: str, pattern: str | None = None) -> str:
@@ -112,7 +145,11 @@ def validate(
     owned: dict[str, str] = {}
     for key, members in variables.items():
         string(key, "image variable", r"[A-Z][A-Z0-9_]*")
-        string(images[key], "immutable image", r"[a-zA-Z0-9][a-zA-Z0-9./_:-]*@sha256:[a-f0-9]{64}")
+        string(
+            images[key],
+            "immutable image",
+            r"[a-z0-9][a-z0-9.:-]*/[a-z0-9][a-z0-9./_-]*@sha256:[a-f0-9]{64}",
+        )
         for service in names(members, "image services"):
             if service not in services or service in owned:
                 raise ReleaseError("invalid image service ownership")
@@ -124,6 +161,12 @@ def validate(
     )
     if set(required) & variables.keys():
         raise ReleaseError("image variables cannot be environment requirements")
+    private = names(descriptor.get("secret_environment", []), "secret names", r"[A-Z][A-Z0-9_]*")
+    if set(private) & (set(required) | variables.keys()):
+        raise ReleaseError("secret names must be disjoint from settings and images")
+    settings = object_map(release.get("settings", {}), "settings")
+    if set(private) & settings.keys():
+        raise ReleaseError("private values cannot enter public settings")
     health = object_map(descriptor.get("healthchecks", {}), "healthchecks")
     if set(health) - set(services):
         raise ReleaseError("healthcheck outside component")
@@ -156,24 +199,70 @@ def validate(
     return Manifest(descriptor, release, files)
 
 
-def load(descriptor_path: Path, release_path: Path) -> Manifest:
-    descriptor, release = read_json(descriptor_path), read_json(release_path)
+def source_manifest(
+    repository: Path,
+    descriptor_name: str,
+    revision: str,
+    images: dict[str, object],
+    settings: dict[str, object],
+) -> Manifest:
+    from .source import committed_files
+
+    relative_file(descriptor_name)
+    selected = committed_files(repository, revision, (descriptor_name,))
+    descriptor = json_bytes(selected[descriptor_name])
+    root = str(PurePosixPath(descriptor_name).parent)
     wanted = {relative_file(descriptor.get("compose_file"))}
     wanted.update(
         relative_file(item) for item in names(descriptor.get("files", []), "files", r".+")
     )
-    if descriptor.get("pre_activate") is not None:
+    if descriptor.get("pre_activate"):
         wanted.add(relative_file(descriptor["pre_activate"]))
-    try:
-        files = {name: file_bytes(descriptor_path.parent, name) for name in wanted}
-    except OSError as error:
-        raise ReleaseError("cannot read component files") from error
-    return validate(descriptor, release, files)
+    paths = tuple(str(PurePosixPath(root) / name) for name in sorted(wanted))
+    content = committed_files(repository, revision, paths)
+    files = {name: content[str(PurePosixPath(root) / name)] for name in wanted}
+    hashes = {name: hashlib.sha256(data).hexdigest() for name, data in (selected | content).items()}
+    identity = ReleaseIdentity(
+        string(descriptor.get("component"), "component"),
+        revision,
+        {k: string(v, "image") for k, v in images.items()},
+        hashes,
+        {
+            k: string(v, "compatibility")
+            for k, v in object_map(descriptor.get("compatibility"), "compatibility").items()
+        },
+        {k: string(v, "setting") for k, v in settings.items()},
+    )
+    manifest = validate(descriptor, identity.to_dict(), files)
+    environment({}, manifest, require_private=False)
+    return manifest
 
 
-def environment(value: dict[str, object], manifest: Manifest) -> dict[str, str]:
+def load(descriptor_path: Path, release_path: Path, repository: Path) -> Manifest:
+    release = read_json(release_path)
+    manifest = source_manifest(
+        repository,
+        descriptor_path.as_posix(),
+        string(release.get("revision"), "revision"),
+        object_map(release.get("images"), "images"),
+        object_map(release.get("settings"), "settings"),
+    )
+    if manifest.release != release:
+        raise ReleaseError("release manifest does not match committed configuration")
+    return manifest
+
+
+def environment(
+    value: dict[str, object], manifest: Manifest, *, require_private: bool = True
+) -> dict[str, str]:
+    private = set(names(manifest.descriptor.get("secret_environment", []), "secret names"))
+    if set(value) - private:
+        raise ReleaseError("unknown private environment name")
+    if require_private and any(not value.get(key) for key in private):
+        raise ReleaseError("missing required component secret")
     resolved: dict[str, str] = {}
-    for key, item in value.items():
+    combined = object_map(manifest.release.get("settings", {}), "settings") | value
+    for key, item in combined.items():
         string(key, "environment key", r"[A-Z][A-Z0-9_]*")
         if key.startswith(("CLIS_", "COMPOSE_", "DOCKER_", "LD_", "PYTHON")) or key in (
             "PATH",

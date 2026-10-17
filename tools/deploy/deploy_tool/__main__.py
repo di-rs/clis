@@ -5,8 +5,8 @@ import json
 import sys
 from pathlib import Path
 
-from .manifests import ReleaseError, load, read_json
-from .prepare import load_prepared, prepare
+from .manifests import ReleaseError, load, read_json, source_manifest
+from .prepare import canonical, load_prepared, prepare, private_write
 
 
 def main() -> int:
@@ -16,11 +16,16 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("validate", "prepare"):
         command = sub.add_parser(name)
+        command.add_argument("--repository", type=Path, required=True)
         command.add_argument("--descriptor", type=Path, required=True)
         command.add_argument("--release", type=Path, required=True)
         if name == "prepare":
             command.add_argument("--environment", type=Path, required=True)
             command.add_argument("--output", type=Path, required=True)
+    public = sub.add_parser("manifest")
+    for flag in ("repository", "descriptor", "images", "settings", "output"):
+        public.add_argument("--" + flag, type=Path, required=True)
+    public.add_argument("--revision", required=True)
     deploy = sub.add_parser("deploy")
     deploy.add_argument("--prepared", type=Path, required=True)
     deploy.add_argument("--profile", type=Path, required=True)
@@ -40,8 +45,18 @@ def main() -> int:
                     args.timeout,
                 )
             )
+        elif args.command == "manifest":
+            manifest = source_manifest(
+                args.repository,
+                args.descriptor.as_posix(),
+                args.revision,
+                read_json(args.images),
+                read_json(args.settings),
+            )
+            private_write(args.output, canonical(manifest.release))
+            result = {"component": manifest.component, "valid": True}
         else:
-            manifest = load(args.descriptor, args.release)
+            manifest = load(args.descriptor, args.release, args.repository)
             if args.command == "validate":
                 result = {
                     "component": manifest.component,

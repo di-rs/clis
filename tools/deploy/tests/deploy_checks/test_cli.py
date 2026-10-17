@@ -1,5 +1,6 @@
 """CLI expectations are hand-derived from the release contract, not snapshots."""
 
+import hashlib
 import json
 import os
 import subprocess
@@ -13,6 +14,37 @@ DIGEST = "registry.example/test@sha256:" + "a" * 64
 
 
 def invoke(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    # Existing engine cases use a committed fixture; explicit --repository cases
+    # below exercise provenance independently without this fixture preparation.
+    if args[0] in {"prepare", "validate"} and "--repository" not in args:
+        from .conftest import commit_source
+
+        arguments = list(args)
+        descriptor_path = Path(arguments[arguments.index("--descriptor") + 1])
+        source = descriptor_path.parent
+        descriptor = json.loads(descriptor_path.read_text())
+        revision = commit_source(source)
+        release_path = Path(arguments[arguments.index("--release") + 1])
+        release = json.loads(release_path.read_text())
+        wanted = {
+            "descriptor.json",
+            descriptor.get("compose_file", "compose.yml"),
+            *descriptor.get("files", []),
+        }
+        if descriptor.get("pre_activate"):
+            wanted.add(descriptor["pre_activate"])
+        release.update(
+            revision=revision,
+            settings=release.get("settings", {"TOKEN_REF": "test/v1"}),
+            configuration_hashes={
+                f: hashlib.sha256((source / f).read_bytes()).hexdigest()
+                for f in wanted
+                if (source / f).is_file()
+            },
+        )
+        release_path.write_text(json.dumps(release))
+        arguments[arguments.index("--descriptor") + 1] = descriptor_path.name
+        args = (*arguments, "--repository", str(source))
     return subprocess.run(
         [sys.executable, "-m", "deploy_tool", *args],
         env={**os.environ, "PYTHONPATH": str(PACKAGE), **(env or {})},
@@ -33,7 +65,11 @@ def test_prepare_private_content_addressed_release(source: Path) -> None:
     )
     result = invoke("validate", *args)
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {"component": "sample", "revision": "1" * 40, "valid": True}
+    assert json.loads(result.stdout) == {
+        "component": "sample",
+        "revision": json.loads((source / "release.json").read_text())["revision"],
+        "valid": True,
+    }
     out = source / "prepared"
     result = invoke(
         "prepare", *args, "--environment", str(source / "env.json"), "--output", str(out)
@@ -55,7 +91,7 @@ def test_prepare_private_content_addressed_release(source: Path) -> None:
         str(source / "second"),
     )
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout)["release_id"] != first
+    assert json.loads(result.stdout)["release_id"] == first
 
 
 @pytest.mark.parametrize("fault", ["mutable", "component", "path", "service", "schema"])
@@ -148,7 +184,7 @@ known = next(arg.split('=', 1)[1] for arg in args if arg.startswith('UserKnownHo
 assert pathlib.Path(known).read_text().startswith('[192.0.2.7]:2222 ssh-ed25519 ')
 assert 'root@192.0.2.7' in args
 assert pathlib.Path(known).stat().st_mode & 0o777 == 0o600
-release_id = hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()).hexdigest()
+release_id = hashlib.sha256(json.dumps(payload["release"],sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()).hexdigest()
 print(json.dumps({'component':'sample','release_id':release_id,'outcome':'activated'}))
 """)
     ssh.chmod(0o700)
@@ -327,3 +363,124 @@ def test_remote_metadata_filename_cannot_be_component_payload(source: Path) -> N
         str(source / "release.json"),
     )
     assert result.returncode == 2
+
+
+@pytest.mark.parametrize("fault", ["revision", "symlink", "duplicate", "oversize"])
+def test_committed_release_rejects_invalid_source_before_output(source: Path, fault: str) -> None:
+    from .conftest import commit_source
+
+    if fault == "symlink":
+        (source / "real.yml").write_bytes((source / "compose.yml").read_bytes())
+        (source / "compose.yml").unlink()
+        (source / "compose.yml").symlink_to("real.yml")
+    elif fault == "duplicate":
+        p = source / "descriptor.json"
+        p.write_text(
+            p.read_text().replace(
+                '"component": "sample"', '"component": "sample", "component": "sample"'
+            )
+        )
+    elif fault == "oversize":
+        p = source / "descriptor.json"
+        p.write_text(p.read_text() + " " * 65536)
+    revision = commit_source(source)
+    release = json.loads((source / "release.json").read_text())
+    release["revision"] = "0" * 40 if fault == "revision" else revision
+    (source / "release.json").write_text(json.dumps(release))
+    out = source / "invalid-prepared"
+    result = invoke(
+        "prepare",
+        "--repository",
+        str(source),
+        "--descriptor",
+        "descriptor.json",
+        "--release",
+        str(source / "release.json"),
+        "--environment",
+        str(source / "env.json"),
+        "--output",
+        str(out),
+    )
+    assert result.returncode == 2
+    assert not out.exists()
+    assert "never-log-me" not in result.stdout + result.stderr
+
+
+def test_release_uses_committed_bytes_and_public_identity(source: Path) -> None:
+    from .conftest import commit_source
+
+    revision = commit_source(source)
+    committed = (source / "compose.yml").read_bytes()
+    release = json.loads((source / "release.json").read_text())
+    release["revision"] = revision
+    (source / "images.json").write_text(json.dumps(release["images"]))
+    (source / "settings.json").write_text('{"TOKEN_REF":"test/v1"}')
+    result = invoke(
+        "manifest",
+        "--repository",
+        str(source),
+        "--descriptor",
+        "descriptor.json",
+        "--revision",
+        revision,
+        "--images",
+        str(source / "images.json"),
+        "--settings",
+        str(source / "settings.json"),
+        "--output",
+        str(source / "public.json"),
+    )
+    assert result.returncode == 0, result.stderr
+    public = json.loads((source / "public.json").read_text())
+    assert "configuration_hashes" in public
+    assert "never-log-me" not in (source / "public.json").read_text()
+    (source / "compose.yml").write_text("uncommitted malicious configuration")
+    result = invoke(
+        "prepare",
+        "--repository",
+        str(source),
+        "--descriptor",
+        "descriptor.json",
+        "--release",
+        str(source / "public.json"),
+        "--environment",
+        str(source / "env.json"),
+        "--output",
+        str(source / "committed-prepared"),
+    )
+    assert result.returncode == 0, result.stderr
+    assert (source / "committed-prepared/files/compose.yml").read_bytes() == committed
+
+
+def test_public_identity_tracks_images_and_references_without_secret_values(source: Path) -> None:
+    first = invoke(
+        "prepare",
+        "--descriptor",
+        str(source / "descriptor.json"),
+        "--release",
+        str(source / "release.json"),
+        "--environment",
+        str(source / "env.json"),
+        "--output",
+        str(source / "first-public"),
+    )
+    assert first.returncode == 0, first.stderr
+    public = json.loads((source / "first-public/release.json").read_text())
+    assert "never-log-me" not in json.dumps(public)
+    release = json.loads((source / "release.json").read_text())
+    release["images"]["APP_IMAGE"] = "registry.example/test@sha256:" + "b" * 64
+    release["settings"]["TOKEN_REF"] = "test/v2"
+    (source / "release.json").write_text(json.dumps(release))
+    second = invoke(
+        "prepare",
+        "--descriptor",
+        str(source / "descriptor.json"),
+        "--release",
+        str(source / "release.json"),
+        "--environment",
+        str(source / "env.json"),
+        "--output",
+        str(source / "second-public"),
+    )
+    assert second.returncode == 0, second.stderr
+    assert json.loads(first.stdout)["release_id"] != json.loads(second.stdout)["release_id"]

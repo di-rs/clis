@@ -191,3 +191,28 @@ Compose in randomly named, labeled fixture resources. Selecting it without
 prerequisites fails. This supplies local workload activation evidence separately
 from fresh cloud bootstrap, gVisor, real product dependencies, SSH host-key
 rotation, and production activation gates.
+
+## Prepare committed configuration
+
+The descriptor is relative to `--repository` and all selected files come from the
+exact full commit SHA. Dirty or untracked checkout bytes never enter a release.
+Descriptors declare compatibility, public `required_environment` settings and
+separate `secret_environment` names. Images must be registry-qualified digests.
+JSON metadata is bounded to 64 KiB and duplicate keys are rejected.
+
+```sh
+uv run --locked python -m deploy_tool manifest --repository . \
+  --descriptor tools/boxie/infra/release-component.json --revision "$REVISION" \
+  --images images.json --settings settings.json --output release.json
+uv run --locked python -m deploy_tool prepare --repository . \
+  --descriptor tools/boxie/infra/release-component.json --release release.json \
+  --environment private.json --output prepared
+```
+
+Publish only `release.json`. The prepared directory contains private inputs with
+mode 0600 and must never be uploaded as an artifact. Its public identity includes
+committed file hashes, images, compatibility and nonsecret settings; private
+values do not affect that identity. Credential rotations require a new versioned
+reference in settings and a new read-only path for each mounted credential.
+Keep retained versions available for rollback. The activator rejects changed
+private values at an existing immutable identity rather than overwriting them.

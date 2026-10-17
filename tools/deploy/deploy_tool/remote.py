@@ -30,7 +30,7 @@ def canonical(value: object) -> bytes:
 
 
 def bundle_id(bundle: dict[str, Any]) -> str:
-    return hashlib.sha256(canonical(bundle)).hexdigest()
+    return hashlib.sha256(canonical(bundle["release"])).hexdigest()
 
 
 def safe_path(root: Path, name: str) -> Path:

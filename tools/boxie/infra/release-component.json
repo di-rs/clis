@@ -30,8 +30,7 @@
     "BOXIE_ORCHESTRATOR_TEMPORAL_KEY_FILE",
     "BOXIE_POSTGRES_DSN_FILE",
     "BOXIE_PROFILES_FILE",
-    "BOXIE_TEMPORAL_CA_FILE",
-    "OBS_METRICS_NETWORK"
+    "BOXIE_TEMPORAL_CA_FILE"
   ],
   "healthchecks": {
     "api": {
@@ -41,5 +40,11 @@
       "kind": "docker"
     }
   },
-  "pre_activate": "pre-activate.sh"
+  "pre_activate": "pre-activate.sh",
+  "compatibility": {
+    "schema": "boxie-alembic-0004",
+    "boxie_api": "v1",
+    "temporal_server": "1.32.0"
+  },
+  "secret_environment": []
 }

@@ -18,15 +18,12 @@
   },
   "required_environment": [
     "ACME_EMAIL",
-    "CLOUDFLARE_DNS_API_TOKEN",
-    "OBS_METRICS_NETWORK",
     "PLAYGROUND_BOXIE_CREDENTIAL_FILE",
     "PLAYGROUND_BOXIE_PROFILE",
     "PLAYGROUND_BOXIE_URL",
     "PLAYGROUND_CERTIFICATES_VOLUME",
     "PLAYGROUND_CONSUMER_NETWORK",
     "PLAYGROUND_DATA_VOLUME",
-    "PLAYGROUND_DEPLOY_TOKEN",
     "PLAYGROUND_DOMAIN",
     "PLAYGROUND_PROXY_NETWORK"
   ],
@@ -37,5 +34,14 @@
     "proxy": {
       "kind": "docker"
     }
-  }
+  },
+  "compatibility": {
+    "schema": "playground-files-v1",
+    "boxie_api": "v1",
+    "temporal_server": "1.32.0"
+  },
+  "secret_environment": [
+    "CLOUDFLARE_DNS_API_TOKEN",
+    "PLAYGROUND_DEPLOY_TOKEN"
+  ]
 }

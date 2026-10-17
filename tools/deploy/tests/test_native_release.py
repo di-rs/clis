@@ -99,6 +99,8 @@ networks:
         "services": ["web"],
         "image_variables": {"APP_IMAGE": ["web"]},
         "required_environment": ["HEALTHY"],
+        "secret_environment": [],
+        "compatibility": {"schema": "fixture-v1"},
         "healthchecks": {"web": {"kind": "docker"}},
     }
     (directory / "descriptor.json").write_text(json.dumps(descriptor))
@@ -109,10 +111,11 @@ networks:
                 "revision": ("a" if healthy else "b") * 40,
                 "images": {"APP_IMAGE": image},
                 "compatibility": {"schema": "fixture-v1"},
+                "settings": {"HEALTHY": "yes" if healthy else "no"},
             }
         )
     )
-    (directory / "environment.json").write_text(json.dumps({"HEALTHY": "yes" if healthy else "no"}))
+    (directory / "environment.json").write_text(json.dumps({}))
     prepared = directory / "prepared"
     result = invoke(
         "prepare",
@@ -162,6 +165,8 @@ def test_real_compose_independent_update_and_failed_release_rollback(tmp_path: P
     )
     assert digests and "@sha256:" in digests[0]
     image = str(digests[0])
+    if "/" not in image.split("@")[0]:
+        image = "docker.io/library/" + image
     owner = uuid.uuid4().hex[:12]
     network = "clis-release-" + owner
     volumes = [network + "-a", network + "-b"]

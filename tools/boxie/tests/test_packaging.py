@@ -106,10 +106,15 @@ def test_private_compose_units_do_not_share_privileges() -> None:
 def test_production_descriptors_validate_independent_release_ownership(
     component: str, directory: str, services: set[str]
 ) -> None:
-    from deploy_tool.manifests import load
+    from deploy_tool.manifests import validate
 
     root = ROOT / directory
-    manifest = load(root / "release-component.json", root / "release.example.json")
+    descriptor = json.loads((root / "release-component.json").read_text())
+    files = {
+        name: (root / name).read_bytes()
+        for name in {descriptor["compose_file"], *descriptor["files"]}
+    }
+    manifest = validate(descriptor, json.loads((root / "release.example.json").read_text()), files)
     assert manifest.component == component
     assert set(cast(list[str], manifest.descriptor["services"])) == services
     config = yaml.safe_load(manifest.files["compose.production.yml"])

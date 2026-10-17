@@ -70,6 +70,9 @@ def prepare_release(source: Path, name: str, digit: str = "a", schema: str = "sa
     release["revision"] = digit * 40
     release["images"]["APP_IMAGE"] = "registry.example/test@sha256:" + digit * 64
     release["compatibility"]["schema"] = schema
+    descriptor = json.loads((source / "descriptor.json").read_text())
+    descriptor["compatibility"]["schema"] = schema
+    (source / "descriptor.json").write_text(json.dumps(descriptor))
     (source / "release.json").write_text(json.dumps(release))
     out = source / name
     result = invoke(
@@ -121,9 +124,9 @@ def docker(source: Path) -> tuple[Path, Path]:
     (bin_dir / "docker").chmod(0o700)
     state = source / "docker.json"
     state.write_text("{}")
-    (source / "env.json").write_text(
-        json.dumps({"TOKEN": "never-log-me", "TEST_DOCKER_STATE": str(state)})
-    )
+    release = json.loads((source / "release.json").read_text())
+    release["settings"] = {"TOKEN_REF": "test/v1", "TEST_DOCKER_STATE": str(state)}
+    (source / "release.json").write_text(json.dumps(release))
     return bin_dir, state
 
 

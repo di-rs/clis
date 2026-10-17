@@ -12,6 +12,7 @@ from .manifests import (
     ReleaseError,
     environment,
     file_bytes,
+    object_map,
     read_json,
     validate,
 )
@@ -31,7 +32,7 @@ def payload(manifest: Manifest, values: dict[str, str]) -> dict[str, object]:
 
 
 def identity(bundle: dict[str, object]) -> str:
-    return hashlib.sha256(canonical(bundle)).hexdigest()
+    return hashlib.sha256(canonical(bundle["release"])).hexdigest()
 
 
 def private_write(path: Path, content: bytes) -> None:
@@ -52,6 +53,10 @@ def prepare(manifest: Manifest, values: dict[str, object], output: Path) -> str:
     for name, content in manifest.files.items():
         private_write(output / "files" / name, content)
     private_write(output / "release-id", release_id.encode())
+    private_write(
+        output / "payload-hash",
+        hashlib.sha256(canonical(payload(manifest, resolved))).hexdigest().encode(),
+    )
     return release_id
 
 
@@ -72,9 +77,18 @@ def load_prepared(root: Path) -> dict[str, object]:
         wanted.add(cast(str, descriptor["pre_activate"]))
     files = {name: file_bytes(root / "files", name) for name in wanted}
     manifest = validate(descriptor, release, files)
-    result = payload(manifest, environment(read_json(root / "environment.json"), manifest))
+    values = read_json(root / "environment.json")
+    private_names = set(cast(list[str], descriptor.get("secret_environment", [])))
+    public = object_map(release.get("settings", {}), "settings")
+    if {k: v for k, v in values.items() if k not in private_names} != public:
+        raise ReleaseError("prepared release content changed")
+    result = payload(
+        manifest, environment({k: v for k, v in values.items() if k in private_names}, manifest)
+    )
     try:
-        if (root / "release-id").read_text() != identity(result):
+        if (root / "release-id").read_text() != identity(result) or (
+            root / "payload-hash"
+        ).read_text() != hashlib.sha256(canonical(result)).hexdigest():
             raise ReleaseError("prepared release content changed")
     except OSError as error:
         raise ReleaseError("missing prepared release identity") from error
