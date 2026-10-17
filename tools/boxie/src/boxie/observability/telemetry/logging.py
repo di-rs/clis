@@ -2,6 +2,7 @@
 
 import asyncio
 import atexit
+import json
 import logging
 import math
 import os
@@ -10,15 +11,13 @@ import re
 import sys
 import threading
 import time
-from collections.abc import Callable, Mapping, MutableMapping
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from logging.handlers import QueueHandler
+from logging.handlers import QueueHandler, QueueListener
 from types import TracebackType
 from typing import Any, cast
 from uuid import uuid4
-
-import structlog
 
 from boxie.observability.telemetry.context import current_context, validated
 
@@ -49,7 +48,6 @@ _BASE_EVENTS = {
     "request.completed": "Request completed",
 }
 _LEVELS = {10: "DEBUG", 20: "INFO", 30: "WARNING", 40: "ERROR", 50: "CRITICAL"}
-_DROP_REASONS = ("queue_full", "disabled", "broken_sink", "oversize", "shutdown", "invalid_event")
 
 
 @dataclass(frozen=True)
@@ -61,16 +59,13 @@ class LogSettings:
     level: int = logging.INFO
 
 
-@dataclass(frozen=True)
+@dataclass
 class LogStats:
-    queued_records: int
-    dropped_count: int
-    drops: tuple[tuple[str, int], ...]
-    delivered_count: int
-    configuration_errors: int
-    sink_state: str
-    max_event_bytes: int
-    closed: bool
+    queued_records: int = 0
+    dropped_count: int = 0
+    configuration_errors: int = 0
+    sink_state: str = "unavailable"
+    closed: bool = False
 
 
 def _logger_category(name: object) -> str:
@@ -108,7 +103,7 @@ def _exception(error: BaseException) -> dict[str, object]:
     }
 
 
-class LogRuntime:
+class LogRuntime(QueueListener):
     def __init__(
         self,
         settings: LogSettings,
@@ -134,15 +129,12 @@ class LogRuntime:
         self._routes = dict(routes)
         self._sink = sink
         self._limit = limit
-        self._state = state
         self._queue: queue.Queue[logging.LogRecord] = queue.Queue(maxsize=2047)
+        super().__init__(self._queue)
         self._queue_handler = QueueHandler(self._queue)
         self._lock = threading.Lock()
         self._deadline: float | None = None
-        self._pending = 0
-        self._drops = dict.fromkeys(_DROP_REASONS, 0)
-        self._delivered = 0
-        self._configuration_errors = 0
+        self._stats = LogStats(sink_state=state)
         self._identity = {
             "service": settings.service if settings.service == "boxie" else "unknown",
             "role": settings.role if settings.role in {"api", "orchestrator"} else "unknown",
@@ -155,31 +147,17 @@ class LogRuntime:
             and re.fullmatch(r"[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}", settings.instance_id)
             else str(uuid4()),
         }
-        self._renderer = structlog.processors.JSONRenderer(
-            ensure_ascii=False, separators=(",", ":")
-        )
-        self._thread: threading.Thread | None = None
         if sink is not None:
-            self._thread = threading.Thread(target=self._write, name="json-log-writer", daemon=True)
-            self._thread.start()
+            self.start()
 
     @property
     def stats(self) -> LogStats:
         with self._lock:
-            return LogStats(
-                self._queue.qsize() + self._pending,
-                sum(self._drops.values()),
-                tuple(self._drops.items()),
-                self._delivered,
-                self._configuration_errors,
-                self._state,
-                self._limit,
-                self._deadline is not None,
-            )
+            return replace(self._stats, closed=self._deadline is not None)
 
     def configuration_error(self) -> None:
         with self._lock:
-            self._configuration_errors += 1
+            self._stats.configuration_errors += 1
 
     def emit(
         self,
@@ -195,7 +173,7 @@ class LogRuntime:
         # Reject foreign objects before looking them up or comparing their values.
         if type(event) is not str or len(event) > 64 or event not in self._events:
             with self._lock:
-                self._drops["invalid_event"] += 1
+                self._stats.dropped_count += 1
             return
         record: dict[str, Any] = {
             "schema_version": 1,
@@ -212,93 +190,59 @@ class LogRuntime:
         }
         if error is not None:
             record.update(_exception(error))
-        line = (cast(str, self._renderer(None, "", record)) + "\n").encode("utf-8")
-        if len(line) > self._limit:
-            record["truncated"] = True
-            # IDs are omitted intact; never truncate their identity.
-            for key in (
-                "error_stack",
-                "workflow_id",
-                "request_id",
-                "sandbox_id",
-                "operation_id",
-                "run_id",
-                "generation",
-                "activity_attempt",
-                "duration_ms",
-                "reason",
-                "outcome",
-                "error_message",
-                "error_type",
-            ):
-                record.pop(key, None)
-                line = (cast(str, self._renderer(None, "", record)) + "\n").encode("utf-8")
-                if len(line) <= self._limit:
-                    break
-            while len(line) > self._limit and len(record["message"]) > 1:
-                record["message"] = record["message"][: max(1, len(record["message"]) // 2)]
-                line = (cast(str, self._renderer(None, "", record)) + "\n").encode("utf-8")
+        line = (json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n").encode()
         with self._lock:
-            if len(line) > self._limit:
-                self._drops["oversize"] += 1
-            elif self._deadline is not None:
-                self._drops["shutdown"] += 1
-            elif self._state != "enabled":
-                self._drops["disabled"] += 1
+            if (
+                len(line) > self._limit
+                or self._deadline is not None
+                or self._stats.sink_state != "enabled"
+            ):
+                self._stats.dropped_count += 1
             else:
                 try:
                     self._queue_handler.enqueue(
                         logging.LogRecord("boxie", level, "", 0, line, (), None)
                     )
+                    self._stats.queued_records += 1
                 except queue.Full:
-                    self._drops["queue_full"] += 1
+                    self._stats.dropped_count += 1
 
-    def _write(self) -> None:
-        sink = self._sink
-        assert sink is not None
+    def dequeue(self, block: bool) -> logging.LogRecord:
+        """Let QueueListener own the daemon; Queue.shutdown wakes idle readers."""
+        if self._deadline is not None and time.monotonic() >= self._deadline:
+            self._finish()
         try:
-            while True:
-                with self._lock:
-                    if self._deadline is not None and (
-                        self._queue.empty() or time.monotonic() >= self._deadline
-                    ):
-                        break
-                try:
-                    record = self._queue.get(timeout=0.05)
-                except queue.Empty:
-                    continue
-                with self._lock:
-                    self._pending = 1
-                # Only this daemon may block. No buffered Python stream lock is
-                # held, and stdout/stderr descriptors and flags remain untouched.
-                line = cast(bytes, record.msg)
-                while line:
-                    written = os.write(sink, line)
-                    if written <= 0:
-                        raise OSError("closed log sink")
-                    line = line[written:]
-                with self._lock:
-                    self._delivered += self._pending
-                    self._pending = 0
-        except OSError:
-            with self._lock:
-                self._state = "broken"
-        finally:
-            os.close(sink)
-            with self._lock:
-                self._discard("broken_sink" if self._state == "broken" else "shutdown")
-                if self._state == "enabled":
-                    self._state = "closed"
+            return self._queue.get(block)
+        except queue.ShutDown:
+            self._finish()
+            assert self._sink is not None
+            os.close(self._sink)
+            # QueueListener handles Empty without treating it as a queued sentinel.
+            raise queue.Empty from None
 
-    def _discard(self, reason: str) -> None:
-        self._drops[reason] += self._pending
-        self._pending = 0
-        while True:
-            try:
-                self._queue.get_nowait()
-                self._drops[reason] += 1
-            except queue.Empty:
-                break
+    def handle(self, record: logging.LogRecord) -> None:
+        # Only the listener daemon writes. Never hold a Python stream/handler lock.
+        assert self._sink is not None
+        line = cast(bytes, record.msg)
+        try:
+            while line:
+                written = os.write(self._sink, line)
+                if written <= 0:
+                    raise OSError("closed log sink")
+                line = line[written:]
+        except OSError:
+            self._finish("broken")
+        else:
+            with self._lock:
+                self._stats.queued_records = max(0, self._stats.queued_records - 1)
+
+    def _finish(self, state: str = "closed") -> None:
+        with self._lock:
+            if self._stats.sink_state == "enabled":
+                self._stats.sink_state = state
+            self._stats.dropped_count += self._stats.queued_records
+            self._stats.queued_records = 0
+            self._queue.shutdown(immediate=True)
 
     def begin_close(self, timeout_seconds: float = 2) -> float:
         """Signal terminal drain without joining; return the one shutdown deadline."""
@@ -306,6 +250,7 @@ class LogRuntime:
         with self._lock:
             if self._deadline is None:
                 self._deadline = time.monotonic() + timeout
+                self._queue.shutdown()
             deadline = self._deadline
         return deadline
 
@@ -317,10 +262,10 @@ class LogRuntime:
         except RuntimeError:
             if self._thread is not None and threading.current_thread() is not self._thread:
                 self._thread.join(max(0.0, deadline - time.monotonic()))
-            with self._lock:
-                self._discard("shutdown")
-                if self._state == "enabled":
-                    self._state = "closed"
+            self._finish()
+
+    def stop(self) -> None:
+        self.close()
 
 
 class _Handler(logging.Handler):
@@ -335,9 +280,6 @@ class _Handler(logging.Handler):
         error = record.exc_info[1] if record.exc_info else None
         self.runtime.emit(event, level=record.levelno, logger=record.name, error=error)
         # Deliberately never getMessage(), format(), formatException() or handleError().
-
-    def flush(self) -> None:
-        pass
 
 
 _runtime: LogRuntime | None = None
@@ -379,33 +321,6 @@ def configure_logging(
                 value.handlers.clear()
                 value.propagate = True
 
-        def processor(_logger: object, method: str, event_dict: MutableMapping[str, Any]) -> Any:
-            event = event_dict.pop("event", "")
-            error = event_dict.pop("exc_info", None)
-            runtime.emit(
-                event,
-                level={
-                    "debug": 10,
-                    "info": 20,
-                    "warning": 30,
-                    "error": 40,
-                    "critical": 50,
-                    "exception": 40,
-                }.get(method, 20),
-                error=sys.exception()
-                if error is True
-                else error
-                if isinstance(error, BaseException)
-                else None,
-                **cast(dict[str, Any], validated(event_dict)),
-            )
-            raise structlog.DropEvent
-
-        structlog.configure(
-            processors=[processor],
-            logger_factory=structlog.ReturnLoggerFactory(),
-            cache_logger_on_first_use=False,
-        )
         if _bootstrap:
             _install_hooks(runtime)
             atexit.register(runtime.close)

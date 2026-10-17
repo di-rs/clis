@@ -96,8 +96,9 @@ configured allocation. Prometheus has seven-day/2 GiB retention; reserve at leas
 3 GiB for its WAL and compaction. Monitor every backing filesystem, adding its
 mount to node-exporter filters and disk alert selectors when storage is not on `/`.
 
-Logging producers enqueue without waiting, count drops, capture context before
-enqueueing and drain for at most two seconds at shutdown. One daemon writes an
+Logging producers sanitize before a stdlib QueueHandler/QueueListener queue,
+count drops and drain for at most two seconds at shutdown. Events over the byte
+limit are dropped whole, preserving valid JSON and intact IDs. One daemon writes an
 unbuffered duplicate of stdout; a blocked sink cannot hold a Python buffered-stream
 lock during interpreter shutdown. Standard streams and their flags stay usable.
 Raw `print`/fd writes are not telemetry APIs; application and dependency logging

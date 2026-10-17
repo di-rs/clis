@@ -168,7 +168,7 @@ def test_cli_help_and_argument_errors_are_visible(
     assert "usage:" in getattr(result, stream)
 
 
-def test_atomic_truncation_preserves_json_and_omits_ids_intact() -> None:
+def test_unicode_messages_and_context_ids_stay_intact() -> None:
     code = """
 from boxie.observability.telemetry.logging import bootstrap_logging, LogSettings
 from boxie.observability.telemetry.context import bind_context
@@ -181,12 +181,39 @@ runtime.close()
     events = records(result)
     assert isinstance(events[0]["message"], str)
     assert "\n" in events[0]["message"]
-    assert events[0].get("request_id") in (None, "11111111-1111-1111-1111-111111111111")
+    assert events[0]["request_id"] == "11111111-1111-1111-1111-111111111111"
 
 
-def test_thread_asyncio_unraisable_hooks_and_structlog() -> None:
+def test_oversize_record_is_dropped_whole(tmp_path: Path) -> None:
+    import os
+
+    from boxie.observability.telemetry.logging import LogRuntime, LogSettings
+
+    output = tmp_path / "events.jsonl"
+    with output.open("wb") as sink:
+        runtime = LogRuntime(
+            LogSettings(service="boxie", role="api"), {}, {}, os.dup(sink.fileno()), 512, "enabled"
+        )
+        try:
+            identifier = "11111111-1111-1111-1111-111111111111"
+            runtime.emit(
+                "request.completed",
+                request_id=identifier,
+                sandbox_id=identifier,
+                operation_id=identifier,
+                run_id=identifier,
+                workflow_id="boxie/sandbox/" + identifier,
+            )
+        finally:
+            runtime.close()
+    assert output.read_bytes() == b""
+    assert runtime.stats.dropped_count == 1
+    assert runtime.stats.queued_records == 0
+
+
+def test_thread_asyncio_and_unraisable_hooks() -> None:
     result = child(f"""
-import structlog, gc
+import gc
 from boxie.observability.telemetry.logging import install_asyncio_handler
 secret = {SECRET!r}
 def fail(): raise ValueError(secret)
@@ -198,7 +225,6 @@ async def run():
     install_asyncio_handler(runtime)
     asyncio.get_running_loop().call_exception_handler({{"message":secret,"exception":RuntimeError(secret)}})
 asyncio.run(run())
-structlog.get_logger().info("request.completed", request_id=secret, message=secret, level=secret)
 runtime.close()
 """)
     events = records(result)
@@ -206,7 +232,6 @@ runtime.close()
         "thread_failed",
         "unraisable_failed",
         "async_failed",
-        "request.completed",
     }
     assert SECRET not in result.stdout + result.stderr
 
@@ -283,6 +308,11 @@ async def run():
     Path({str(evidence)!r}).write_text(json.dumps({{"terminal_roundtrip_completed":True,"drops":runtime.stats.dropped_count}}))
 asyncio.run(run())
 runtime.close(.1)
+assert runtime.stats.closed and runtime.stats.queued_records == 0
+dropped = runtime.stats.dropped_count
+runtime.emit("request.completed")
+runtime.close(.1)
+assert runtime.stats.dropped_count == dropped + 1
 '''
     )
     process = subprocess.Popen(
