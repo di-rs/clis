@@ -7,10 +7,14 @@ to VictoriaLogs. Grafana queries VictoriaLogs and Prometheus. Request, sandbox,
 workflow and run IDs are searchable fields; they never become stream labels or
 metric labels. Sandbox PTY output is never collected. Vector has no Docker socket.
 
-The deployment uses the pinned official Vector 0.59.0 Debian image. It includes
-`journalctl` 257.13 and runs both binaries as UID/GID 65532; a supplementary host
-journal group provides read access. No derived image or configuration compiler is
-needed. `versions.json` records upstream image and Grafana plugin pins.
+The 12-line [collector Dockerfile](collector/Dockerfile) copies the pinned upstream
+Vector 0.59.0 binary onto pinned Ubuntu 26.04 with systemd/journalctl and its runtime
+libraries. The official Vector Debian image bundles journalctl 257; Vector rejects
+`current_boot_only: false` with versions 250–257, so that image cannot preserve
+cross-boot collection. Ubuntu supplies journalctl 259. Native validation checks the
+actual source under UID/GID 65532; a supplementary host journal group grants read
+access. No package snapshot/checksum framework or configuration compiler is needed.
+`versions.json` records the upstream image and Grafana plugin pins.
 
 ## Setup
 
@@ -52,8 +56,14 @@ set +a
 envsubst '${BOXIE_INSTALLATION_ID} ${BOXIE_HOST_ID} ${BOXIE_TEMPORAL_NAMESPACE}' \
   < tools/boxie/infra/observability/prometheus.yml > "$OBS_PROMETHEUS_CONFIG_FILE"
 docker compose --env-file /private/boxie/monitoring.env \
+  -f tools/boxie/infra/observability/compose.yml build vector
+docker compose --env-file /private/boxie/monitoring.env \
   -f tools/boxie/infra/observability/compose.yml up -d
 ```
+
+The local collector defaults to `boxie-collector:local`. For a production release,
+publish the built collector separately, set `OBS_COLLECTOR_IMAGE` to its immutable
+registry digest, and start Compose with `--no-build` using that approved artifact.
 
 Compose initializes the Vector and VictoriaLogs volume roots once with a
 networkless, CHOWN-only service, then starts those nonroot services. Grafana and

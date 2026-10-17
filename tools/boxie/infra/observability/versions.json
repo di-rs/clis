@@ -23,8 +23,9 @@
   },
   "collector": {
     "version": "0.59.0",
-    "image": "docker.io/timberio/vector@sha256:98e7b4dfe50750e61470697bbd2fbeca643d12bea97f351005038ef506eab630",
-    "journalctl": "257.13-1~deb13u1 (bundled in official image)"
+    "journalctl": ">=258 required; Ubuntu 26.04 provides 259",
+    "source_image": "docker.io/timberio/vector@sha256:98e7b4dfe50750e61470697bbd2fbeca643d12bea97f351005038ef506eab630",
+    "base": "docker.io/library/ubuntu@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
   },
   "plugins": {
     "victoriametrics-logs-datasource": {

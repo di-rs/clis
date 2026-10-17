@@ -145,8 +145,8 @@ cover the optional network overlays, three shared private bridges, bounded stora
 and the small environment substitution step for installation-specific Prometheus
 and Access values. Base Boxie and Temporal deployment needs no monitoring inputs.
 Only API/orchestrator and Temporal join metrics; Playground stays on the consumer
-network. The official collector includes journalctl; there are no infrastructure
-Python renderers or derived collector images.
+network. The minimal collector image supplies the journalctl version required for
+cross-boot collection; there are no infrastructure Python renderers.
 
 Runtime images install only their application package. The root lockfile lists
 workspace member manifests, whose metadata is copied for dependency resolution.

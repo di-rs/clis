@@ -401,7 +401,7 @@ API remains internal. See [Cloudflare self-hosted Access applications](https://d
 and [VictoriaLogs Grafana integration](https://docs.victoriametrics.com/victorialogs/integrations/grafana/).
 
 Implementation uses committed native configs and optional monitoring network
-overlays, pinned upstream images (including Vector's bundled journalctl), and
+overlays, pinned upstream images with one minimal collector layer for a compatible journalctl, and
 cloudflared's native required Access validation. There are no infrastructure
 Python distributions, configuration compilers, custom metrics HTTP servers or
 observability-only fault workflows. The existing lifecycle CI owns compact native

@@ -8,6 +8,7 @@ import sys
 import time
 import urllib.request
 import zipfile
+from collections.abc import Iterator
 from pathlib import Path
 from string import Template
 from typing import Any
@@ -18,12 +19,16 @@ import pytest
 
 OBS = Path(__file__).parents[1] / "infra/observability"
 PINS = json.loads((OBS / "versions.json").read_text())
-VECTOR = PINS["collector"]["image"]
+VECTOR = PINS["collector"]["source_image"]
 
 
 def docker(*args: str, input: str | None = None) -> str:
     result = subprocess.run(
-        ["docker", *args], input=input, text=True, capture_output=True, timeout=90
+        ["docker", *args],
+        input=input,
+        text=True,
+        capture_output=True,
+        timeout=180 if args[0] == "build" else 90,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     return (result.stdout + result.stderr).strip() if args[0] == "logs" else result.stdout.strip()
@@ -45,22 +50,36 @@ def substituted(source: Path, destination: Path) -> None:
     )
 
 
+@pytest.fixture(scope="session")
+def collector_image() -> Iterator[str]:
+    image = "boxie-collector-test:" + uuid4().hex[:12]
+    docker("build", "--tag", image, str(OBS / "collector"))
+    try:
+        yield image
+    finally:
+        docker("image", "rm", image)
+
+
 @pytest.mark.integration
-def test_native_configs(tmp_path: Path) -> None:
+def test_native_configs(tmp_path: Path, collector_image: str) -> None:
     mount = f"{OBS}:/config:ro"
-    for command in (["validate", "--no-environment", "--skip-healthchecks"], ["test"]):
+    for command in (["validate", "--skip-healthchecks"], ["test"]):
         docker(
             "run",
             "--rm",
             "--user",
             "65532:65532",
+            "--tmpfs",
+            "/var/lib/vector:uid=65532,gid=65532",
+            "--tmpfs",
+            "/var/log/journal:mode=755",
             "-e",
             "BOXIE_ENVIRONMENT=test",
             "-e",
             "BOXIE_HOST_ID=test-host",
             "-v",
             mount,
-            VECTOR,
+            collector_image,
             *command,
             "/config/vector.yaml",
         )
@@ -162,6 +181,7 @@ def test_failed_lifecycle_is_searchable_after_collector_outage(
     postgres_dsn: str,
     temporal_stack: Any,
     tmp_path: Path,
+    collector_image: str,
 ) -> None:
     if sys.platform != "linux" or not Path("/var/log/journal").is_dir():
         pytest.fail("journal smoke requires a Linux Docker host with persistent journald")
@@ -206,7 +226,7 @@ def test_failed_lifecycle_is_searchable_after_collector_outage(
         )
         vector = start(
             "vector",
-            VECTOR,
+            collector_image,
             "--user",
             "65532:65532",
             "--group-add",
