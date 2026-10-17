@@ -4,7 +4,7 @@ import re
 
 import pulumi
 import pulumi_cloudflare as cloudflare
-from platform_infra.contracts import IMAGE, REFERENCE, HostHandle, NetworkHandles, name
+from host_infra.contracts import IMAGE, REFERENCE, HostHandle, NetworkHandles, name
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 

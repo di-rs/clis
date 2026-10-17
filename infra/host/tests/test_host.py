@@ -18,8 +18,8 @@ POLICY = "[Journal]\nStorage=persistent\nSystemMaxUse=1G\nRuntimeMaxUse=128M\nSy
 
 
 def api() -> Any:
-    assert importlib.util.find_spec("platform_infra"), "shared platform package is missing"
-    return importlib.import_module("platform_infra.host")
+    assert importlib.util.find_spec("host_infra"), "shared platform package is missing"
+    return importlib.import_module("host_infra.host")
 
 
 def test_generic_host_needs_no_product_or_cloudflare_configuration() -> None:

@@ -4,19 +4,19 @@ from pathlib import Path
 from typing import NamedTuple
 
 import pulumi
-from boxie_infra.component import Boxie, BoxieConfig
-from ingress_infra.access import (
+from boxie_infra.access import (
     OperatorIngressConfig,
     OperatorIngressOutputs,
     OperatorOrigin,
     OperatorOrigins,
     provision_operator_access,
 )
-from platform_infra.contracts import IMAGE, REFERENCE, HostHandle, NetworkHandles
-from platform_infra.host import Host, HostConfig
-from platform_infra.resources import Directory, Network, ResourcePlan, Volume
+from boxie_infra.component import Boxie, BoxieConfig
+from host_infra.contracts import IMAGE, REFERENCE, HostHandle, NetworkHandles
+from host_infra.host import Host, HostConfig
+from host_infra.resources import Network, ResourcePlan, Volume
 from playground_infra.component import Playground, PlaygroundConfig
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ProductConfig(BaseModel):
@@ -51,6 +51,13 @@ class EnvironmentConfig(BaseModel):
     consumer_credential_ref: str = Field(pattern="^" + REFERENCE + "$")
     playground: ProductConfig | None = None
     operators: OperatorsConfig | None = None
+    monitoring: bool = False
+
+    @model_validator(mode="after")
+    def selected_operators_need_monitoring(self) -> EnvironmentConfig:
+        if self.operators and not self.monitoring:
+            raise ValueError("operator ingress requires monitoring selection")
+        return self
 
 
 class Environment(NamedTuple):
@@ -101,21 +108,22 @@ def compose(
         config.host.model_copy(update={"public_http": product_config is not None}),
         journal_policy=journal_policy,
     )
-    boxie = Boxie("boxie", boxie_config, host=host_handle, networks=networks)
+    boxie = Boxie(
+        "boxie", boxie_config, host=host_handle, networks=networks, monitoring=config.monitoring
+    )
     declarations = [
         Network(networks.control),
         Network(networks.consumer),
-        Network(networks.metrics),
-        Network(networks.grafana_origin),
-        Network(networks.temporal_ui_origin),
     ]
-    volume_specs = [
-        ("postgres", 999, 999),
-        ("vector", 65532, 65532),
-        ("logs", 65534, 65534),
-        ("prometheus", 65534, 65534),
-        ("grafana", 472, 0),
-    ]
+    if config.monitoring:
+        declarations.extend(
+            (
+                Network(networks.metrics),
+                Network(networks.grafana_origin),
+                Network(networks.temporal_ui_origin),
+            )
+        )
+    volumes = list(boxie.volumes)
     handles = {
         "BOXIE_CONTROL_NETWORK": networks.control,
         "BOXIE_CONSUMER_NETWORK": networks.consumer,
@@ -134,7 +142,10 @@ def compose(
     product = None
     if product_config:
         declarations.append(Network(networks.public_proxy, False))
-        volume_specs.extend((("playground-data", 10001, 10001), ("certificates", 0, 0)))
+        volumes.extend(
+            Volume(f"{prefix}-{suffix}", f"volumes/{suffix}", uid, gid)
+            for suffix, uid, gid in (("playground-data", 10001, 10001), ("certificates", 0, 0))
+        )
         handles.update(
             {
                 "PLAYGROUND_CONSUMER_NETWORK": networks.consumer,
@@ -172,25 +183,17 @@ def compose(
             device,
             host_handle.data_root,
             tuple(declarations),
-            tuple(
-                Volume(f"{prefix}-{suffix}", f"volumes/{suffix}", uid, gid)
-                for suffix, uid, gid in volume_specs
-            ),
-            (Directory("boxie", 10001, 10001),),
+            tuple(volumes),
+            boxie.directories,
         ).to_dict()
     )
-    observability_settings: dict[str, object] = {
-        "environment": pulumi.get_stack(),
-        "host": host_handle.host_id,
-        "metrics_network": networks.metrics,
-        "grafana_origin_network": networks.grafana_origin,
-        "vector_volume": handles["OBS_VECTOR_VOLUME"],
-        "logs_volume": handles["OBS_LOGS_VOLUME"],
-        "prometheus_volume": handles["OBS_PROMETHEUS_VOLUME"],
-        "grafana_volume": handles["OBS_GRAFANA_VOLUME"],
-        "backing_mounts": ["/", host_handle.data_root],
-        "consumer_scrapes": [],
-        "installation_id": installation,
-        "temporal_namespace": "boxie",
-    }
+    observability_settings: dict[str, object] = (
+        {
+            "BOXIE_INSTALLATION_ID": installation,
+            "BOXIE_HOST_ID": host_handle.host_id,
+            "BOXIE_TEMPORAL_NAMESPACE": "boxie",
+        }
+        if config.monitoring
+        else {}
+    )
     return Environment(host, boxie, product, operators, resources, handles, observability_settings)

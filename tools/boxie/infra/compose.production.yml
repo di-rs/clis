@@ -19,9 +19,6 @@ services:
         aliases:
         - ${BOXIE_API_ALIAS:-boxie-api}
       control: {}
-      metrics:
-        aliases:
-        - boxie-api
     read_only: true
     tmpfs:
     - /tmp:size=67108864,nosuid,nodev,noexec
@@ -33,7 +30,6 @@ services:
     restart: unless-stopped
     environment:
       BOXIE_RELEASE: ${CLIS_RELEASE_REVISION:?Set release revision}
-      BOXIE_METRICS_HOST: 0.0.0.0
     logging:
       driver: journald
       options:
@@ -75,9 +71,6 @@ services:
     - ${BOXIE_ORCHESTRATOR_TEMPORAL_KEY_FILE:?Set dedicated Temporal client key}:/run/secrets/temporal-client.key:ro
     networks:
       control: {}
-      metrics:
-        aliases:
-        - boxie-orchestrator
     read_only: true
     tmpfs:
     - /tmp:size=67108864,nosuid,nodev,noexec
@@ -89,7 +82,6 @@ services:
     restart: unless-stopped
     environment:
       BOXIE_RELEASE: ${CLIS_RELEASE_REVISION:?Set release revision}
-      BOXIE_METRICS_HOST: 0.0.0.0
     logging:
       driver: journald
       options:
@@ -122,6 +114,3 @@ networks:
   control:
     external: true
     name: ${BOXIE_CONTROL_NETWORK:?Set private control network}
-  metrics:
-    external: true
-    name: ${OBS_METRICS_NETWORK:?Set private metrics network}

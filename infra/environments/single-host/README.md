@@ -51,7 +51,7 @@ require neither Pulumi state decryption nor cloud credentials.
 
 Export `sharedResources`, `deploymentHandles`, and `observabilitySettings` separately with
 `pulumi stack output NAME --json`. Transfer the resource plan and the matching
-`infra/platform/platform_infra/resources.py` to a root-owned setup directory on
+`infra/host/host_infra/resources.py` to a root-owned setup directory on
 the host using the profile’s pinned SSH host key. On the host, run:
 
 ```sh
@@ -82,11 +82,11 @@ references; resolve credentials only at the consuming process.
 1. Provision the host, firewall, volume and selected DNS; wait for cloud-init and
    the Docker/gVisor smoke to finish. Transfer the connection profile and secret
    SSH credential separately. Verify `/srv/boxie` against the exported device.
-2. Prepare shared resources. Start [platform PostgreSQL](../../platform/README.md)
+2. Prepare shared resources. Start [platform PostgreSQL](../../host/README.md)
    and apply Boxie SQL explicitly. Set up [Temporal](../../../tools/boxie/infra/temporal/README.md)
    credentials/certificates, run its schema jobs and idempotent namespace bootstrap.
-3. Release Temporal, [observability](../../observability/README.md), and selected
-   [operator ingress](../../ingress/README.md). Check private dependency readiness,
+3. Release Temporal, [observability](../../../tools/boxie/infra/observability/README.md), and selected
+   [operator ingress](../../../tools/boxie/infra/ingress/README.md). Check private dependency readiness,
    telemetry and live Access protection before starting Boxie.
 4. Release [Boxie](../../../tools/boxie/infra/README.md) with API and orchestrator
    on one approved image identity. Verify readiness and a generic

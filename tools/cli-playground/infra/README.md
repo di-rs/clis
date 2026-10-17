@@ -5,7 +5,7 @@ routes. It has no Docker socket, workflow worker or Temporal schema ownership.
 Provision the optional product through the thin
 [single-host environment](../../../infra/environments/single-host/README.md).
 The shared host, disk, networks and persistent volumes belong to
-[platform](../../../infra/platform/README.md).
+[platform](../../../infra/host/README.md).
 
 ## First installation
 

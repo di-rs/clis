@@ -12,7 +12,6 @@ from uuid import UUID
 
 import pulumi
 import pulumi_cloudflare as cloudflare
-import yaml
 
 _NAME = re.compile(r"[a-z][a-z0-9-]{0,62}\Z")
 _HOST = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\Z")
@@ -80,7 +79,6 @@ class OperatorIngressOutputs:
     tunnel_id: pulumi.Output[str]
     grafana_audience: pulumi.Output[str]
     temporal_audience: pulumi.Output[str]
-    cloudflared_config: pulumi.Output[str]
     tunnel_credentials_json: pulumi.Output[str]
 
 
@@ -111,45 +109,6 @@ def _secret(value: str) -> str:
     except (ValueError, TypeError, binascii.Error) as exc:
         raise ValueError("tunnel secret must encode at least 32 bytes") from exc
     return value
-
-
-def render_cloudflared(
-    config: OperatorIngressConfig,
-    origins: OperatorOrigins,
-    tunnel_id: str,
-    grafana_audience: str,
-    temporal_audience: str,
-    credentials_file: str,
-) -> str:
-    """Pure configuration transform, never secret materialization or activation."""
-    _credential_path(credentials_file)
-    audiences = (_audience(grafana_audience), _audience(temporal_audience))
-    if audiences[0] == audiences[1]:
-        raise ValueError("Access application audiences must be distinct")
-    routes = [
-        {
-            "hostname": hostname,
-            "service": origin.url,
-            "originRequest": {
-                "access": {
-                    "required": True,
-                    "teamName": config.team_name,
-                    "audTag": [audience],
-                }
-            },
-        }
-        for hostname, origin, audience in zip(
-            (config.grafana_hostname, config.temporal_hostname),
-            (origins.grafana, origins.temporal),
-            audiences,
-            strict=True,
-        )
-    ]
-    routes.append({"service": "http_status:404"})
-    return yaml.safe_dump(
-        {"tunnel": _tunnel_id(tunnel_id), "credentials-file": credentials_file, "ingress": routes},
-        sort_keys=False,
-    )
 
 
 def provision_operator_access(
@@ -231,11 +190,6 @@ def provision_operator_access(
             opts=opts,
         )
     grafana_aud, temporal_aud = (app.aud.apply(_audience) for app in apps)
-    rendered = pulumi.Output.all(tunnel_id, grafana_aud, temporal_aud).apply(
-        lambda values: render_cloudflared(
-            config, origins, values[0], values[1], values[2], credentials_file
-        )
-    )
     credentials: pulumi.Output[str] = pulumi.Output.secret(
         pulumi.Output.all(tunnel_id, secret).apply(
             lambda values: json.dumps(
@@ -243,4 +197,4 @@ def provision_operator_access(
             )
         )
     )
-    return OperatorIngressOutputs(tunnel_id, grafana_aud, temporal_aud, rendered, credentials)
+    return OperatorIngressOutputs(tunnel_id, grafana_aud, temporal_aud, credentials)

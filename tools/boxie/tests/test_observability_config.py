@@ -44,6 +44,10 @@ def compose(*files: Path) -> dict[str, Any]:
         CLIS_RELEASE_REVISION="a" * 40,
         BOXIE_DOCKER_GID="999",
         OBS_METRICS_NETWORK="test-metrics",
+        OBS_VECTOR_VOLUME="host-vector",
+        OBS_LOGS_VOLUME="host-logs",
+        OBS_PROMETHEUS_VOLUME="host-prometheus",
+        OBS_GRAFANA_VOLUME="host-grafana",
         BOXIE_CONTROL_NETWORK="control",
         BOXIE_CONSUMER_NETWORK="consumer",
         BOXIE_RUNTIME_IMAGE="boxie:test",
@@ -70,17 +74,12 @@ def compose(*files: Path) -> dict[str, Any]:
 
 
 @pytest.mark.parametrize("manifest", ["compose.yml", "compose.production.yml"])
-def test_local_monitoring_is_optional_and_production_releases_retain_it(manifest: str) -> None:
+def test_base_monitoring_is_optional_and_selected_by_overlay(manifest: str) -> None:
     base = compose(INFRA / manifest)
-    assert set(base["networks"]) == (
-        {"consumer", "control", "metrics"}
-        if manifest == "compose.production.yml"
-        else {"consumer", "control"}
-    )
-    if manifest == "compose.production.yml":
-        for role in ("api", "orchestrator"):
-            assert "metrics" in base["services"][role]["networks"]
-            assert base["services"][role]["environment"]["BOXIE_METRICS_HOST"] == "0.0.0.0"
+    assert set(base["services"]) == {"api", "orchestrator"}
+    assert set(base["networks"]) == {"consumer", "control"}
+    for role in ("api", "orchestrator"):
+        assert "BOXIE_METRICS_HOST" not in base["services"][role]["environment"]
     monitored = compose(INFRA / manifest, INFRA / "compose.observability.yml")
     for role in ("api", "orchestrator"):
         assert "metrics" in monitored["services"][role]["networks"]
@@ -167,3 +166,23 @@ def test_operator_routes_require_distinct_access_audiences() -> None:
                 "access": {"required": True, "teamName": "operators", "audTag": [audience]}
             },
         }
+
+
+def test_production_storage_is_host_owned() -> None:
+    from unittest.mock import patch
+
+    handles = {
+        "POSTGRES_PASSWORD": "test",
+        "BOXIE_DB_PASSWORD": "test",
+        "POSTGRES_VOLUME": "host-postgres",
+        "OBS_VECTOR_VOLUME": "host-vector",
+        "OBS_LOGS_VOLUME": "host-logs",
+        "OBS_PROMETHEUS_VOLUME": "host-prometheus",
+        "OBS_GRAFANA_VOLUME": "host-grafana",
+    }
+    with patch.dict(os.environ, handles):
+        for unit in ("postgres", "observability"):
+            resolved = compose(
+                INFRA / unit / "compose.yml", INFRA / unit / "compose.production.yml"
+            )
+            assert all(v["external"] for v in resolved["volumes"].values())

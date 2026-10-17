@@ -2,7 +2,7 @@
 name = "playground-infra"
 version = "0.1.0"
 requires-python = ">=3.15"
-dependencies = ["cli-playground", "pydantic>=2.14,<3", "pyyaml>=6.0.3", "pulumi==3.268.0", "pulumi-cloudflare==6.22.1", "platform-infra"]
+dependencies = ["cli-playground", "pydantic>=2.14,<3", "pyyaml>=6.0.3", "pulumi==3.268.0", "pulumi-cloudflare==6.22.1", "host-infra"]
 
 [build-system]
 requires = ["uv_build==0.13.0"]

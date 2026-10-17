@@ -1,7 +1,8 @@
 """Boxie-owned declarations receive explicit dependencies and never activate containers."""
 
 import pulumi
-from platform_infra.contracts import IMAGE, REFERENCE, HostHandle, NetworkHandles
+from host_infra.contracts import IMAGE, REFERENCE, HostHandle, NetworkHandles
+from host_infra.resources import Directory, Volume
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -27,6 +28,7 @@ class Boxie(pulumi.ComponentResource):
         *,
         host: HostHandle,
         networks: NetworkHandles,
+        monitoring: bool = False,
         opts: pulumi.ResourceOptions | None = None,
     ) -> None:
         super().__init__("clis:boxie:Service", name, None, opts)
@@ -41,4 +43,19 @@ class Boxie(pulumi.ComponentResource):
             "metrics_network": networks.metrics,
             "endpoint": self.endpoint,
         }
+        if not monitoring:
+            self.settings.pop("metrics_network")
+        prefix = "clis-" + host.installation_id.replace("-", "")
+        specs = [("postgres", 999, 999)]
+        if monitoring:
+            specs += [
+                ("vector", 65532, 65532),
+                ("logs", 65534, 65534),
+                ("prometheus", 65534, 65534),
+                ("grafana", 472, 0),
+            ]
+        self.volumes = tuple(
+            Volume(f"{prefix}-{name}", f"volumes/{name}", uid, gid) for name, uid, gid in specs
+        )
+        self.directories = (Directory("boxie", 10001, 10001),)
         self.register_outputs(self.settings)

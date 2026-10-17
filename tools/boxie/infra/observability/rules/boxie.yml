@@ -90,8 +90,8 @@ groups:
       severity: warning
       job: prometheus
   - alert: HostDiskSpaceLow
-    expr: (node_filesystem_avail_bytes{job="node-exporter",mountpoint="/",device_error=""}
-      / node_filesystem_size_bytes{job="node-exporter",mountpoint="/",device_error=""})
+    expr: (node_filesystem_avail_bytes{job="node-exporter",mountpoint=~"/|/srv/boxie",device_error=""}
+      / node_filesystem_size_bytes{job="node-exporter",mountpoint=~"/|/srv/boxie",device_error=""})
       < 0.2 and on(job,instance,device,mountpoint,fstype) (node_filesystem_device_error{job="node-exporter"}
       == 0) and on(job,instance,device,mountpoint,fstype) (node_filesystem_size_bytes{job="node-exporter"}
       > 0) and on(job,instance) (node_scrape_collector_success{job="node-exporter",collector="filesystem"}
@@ -100,8 +100,8 @@ groups:
     labels:
       severity: warning
   - alert: HostDiskSpaceCritical
-    expr: (node_filesystem_avail_bytes{job="node-exporter",mountpoint="/",device_error=""}
-      / node_filesystem_size_bytes{job="node-exporter",mountpoint="/",device_error=""})
+    expr: (node_filesystem_avail_bytes{job="node-exporter",mountpoint=~"/|/srv/boxie",device_error=""}
+      / node_filesystem_size_bytes{job="node-exporter",mountpoint=~"/|/srv/boxie",device_error=""})
       < 0.1 and on(job,instance,device,mountpoint,fstype) (node_filesystem_device_error{job="node-exporter"}
       == 0) and on(job,instance,device,mountpoint,fstype) (node_filesystem_size_bytes{job="node-exporter"}
       > 0) and on(job,instance) (node_scrape_collector_success{job="node-exporter",collector="filesystem"}
@@ -111,7 +111,7 @@ groups:
       severity: critical
   - alert: HostDiskMetricsUnavailable
     expr: node_filesystem_device_error{job="node-exporter"} != 0 or node_scrape_collector_success{job="node-exporter",collector="filesystem"}
-      != 1 or node_filesystem_size_bytes{job="node-exporter"} <= 0 or absent(node_filesystem_size_bytes{job="node-exporter",mountpoint="/"})
+      != 1 or node_filesystem_size_bytes{job="node-exporter"} <= 0 or absent(node_filesystem_size_bytes{job="node-exporter",mountpoint="/"}) or absent(node_filesystem_size_bytes{job="node-exporter",mountpoint="/srv/boxie"})
     for: 2m
     labels:
       severity: warning

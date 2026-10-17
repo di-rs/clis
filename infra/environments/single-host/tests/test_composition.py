@@ -6,10 +6,10 @@ from typing import Any
 
 import pulumi
 import pytest
-from platform_infra.host import HostConfig
+from host_infra.host import HostConfig
 
 support_spec = importlib.util.spec_from_file_location(
-    "infra_test_support", Path(__file__).parents[3] / "platform/tests/test_host.py"
+    "infra_test_support", Path(__file__).parents[3] / "host/tests/test_host.py"
 )
 assert support_spec is not None and support_spec.loader is not None
 support = importlib.util.module_from_spec(support_spec)
@@ -72,7 +72,6 @@ async def test_generic_environment_has_no_product_dns_and_only_nonsecret_referen
     assert {n["name"].rsplit("-", 1)[-1] for n in plan["networks"]} >= {
         "control",
         "consumer",
-        "metrics",
     }
     assert all(n["internal"] for n in plan["networks"])
     assert all(v["directory"].startswith("volumes/") for v in plan["volumes"])
@@ -83,7 +82,7 @@ async def test_generic_environment_has_no_product_dns_and_only_nonsecret_referen
 @pulumi.runtime.test  # type: ignore[untyped-decorator]
 async def test_product_receives_supplied_private_endpoint_without_owning_boxie() -> None:
     mocks = HostMocks()
-    from platform_infra.contracts import HostHandle, NetworkHandles
+    from host_infra.contracts import HostHandle, NetworkHandles
     from playground_infra.component import Playground, PlaygroundConfig
 
     playground = Playground(
@@ -197,57 +196,33 @@ async def test_environment_supplies_the_observability_owned_journal_policy() -> 
     assert files.get("/etc/systemd/journald.conf.d/60-clis.conf") == policy
 
 
-@pulumi.runtime.test  # type: ignore[untyped-decorator]
-async def test_observability_settings_cover_actual_persistent_disk_and_selected_consumer(
-    tmp_path: Path,
-) -> None:
+def test_native_monitoring_covers_both_backing_mounts() -> None:
     import yaml
-    from observability_infra.config import ObservabilityConfig, ScrapeEndpoint, render_config
 
+    assets = Path("tools/boxie/infra/observability")
+    compose = yaml.safe_load((assets / "compose.yml").read_text())
+    assert (
+        "--collector.filesystem.mount-points-include=^(/|/srv/boxie)$"
+        in compose["services"]["node-exporter"]["command"]
+    )
+    rules = yaml.safe_load((assets / "rules/boxie.yml").read_text())["groups"][0]["rules"]
+    disk = next(rule for rule in rules if rule["alert"] == "HostDiskSpaceLow")
+    assert "/srv/boxie" in disk["expr"]
+
+
+def test_owners_are_native_and_postgres_has_one_definition() -> None:
+    root = ROOT.parents[2]
+    assert not (root / "infra/platform").exists()
+    assert not (root / "infra/observability").exists()
+    assert not (root / "infra/ingress").exists()
+    assert (root / "tools/boxie/infra/postgres/compose.production.yml").is_file()
+
+
+def test_monitoring_requires_explicit_selection() -> None:
     a = api()
-    for selected in (False, True):
-        HostMocks()
-        product = (
-            a.ProductConfig(domain="play.example.com", cloudflare_zone_id="b" * 32, image=IMAGE)
-            if selected
-            else None
-        )
-        result = a.compose(
-            a.EnvironmentConfig(
-                host=HostConfig(installation_id=INSTALLATION, identity_ref="DEPLOYMENT_KEY"),
-                boxie_image=IMAGE,
-                consumer_credential_ref="BOXIE_CONSUMER_CREDENTIAL",
-                playground=product,
-            )
-        )
-        assert hasattr(result, "observability_settings"), "observability wiring settings missing"
-        settings = dict(result.observability_settings)
-        assert settings["backing_mounts"] == ["/", "/srv/boxie"]
-        assert settings["consumer_scrapes"] == []
-        settings["consumer_scrapes"] = tuple(
-            ScrapeEndpoint(**item) for item in settings["consumer_scrapes"]
-        )
-        settings["backing_mounts"] = tuple(settings["backing_mounts"])
-        directory = tmp_path / str(selected)
-        config = ObservabilityConfig(
-            **settings,
-            assets_dir=Path("tools/boxie/infra/observability"),
-            journal_group_gid=190,
-            collector_image="ghcr.io/example/collector@sha256:" + "a" * 64,
-            grafana_public_url="https://grafana.example.com",
-        )
-        render_config(config, directory)
-        compose = yaml.safe_load((directory / "compose.yml").read_text())
-        assert (
-            "--collector.filesystem.mount-points-include=^(/|/srv/boxie)$"
-            in compose["services"]["node-exporter"]["command"]
-        )
-        rules = yaml.safe_load((directory / "rules/boxie.yml").read_text())["groups"][0]["rules"]
-        disk = next(rule for rule in rules if rule["alert"] == "HostDiskSpaceLow")
-        assert "/srv/boxie" in disk["expr"]
-        jobs = {
-            job["job_name"]
-            for job in yaml.safe_load((directory / "prometheus.yml").read_text())["scrape_configs"]
-        }
-        assert "playground" not in jobs
-        await result.host.connection_profile.future()
+    config = a.EnvironmentConfig(
+        host=HostConfig(installation_id=INSTALLATION, identity_ref="DEPLOYMENT_KEY"),
+        boxie_image=IMAGE,
+        consumer_credential_ref="BOXIE_CONSUMER_CREDENTIAL",
+    )
+    assert config.monitoring is False

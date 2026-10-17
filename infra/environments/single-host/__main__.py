@@ -19,5 +19,7 @@ pulumi.export("boxie", environment.boxie.settings)
 if environment.playground:
     pulumi.export("playground", environment.playground.settings)
 if environment.operators:
-    pulumi.export("operatorConfig", environment.operators.cloudflared_config)
+    pulumi.export("operatorTunnelId", environment.operators.tunnel_id)
+    pulumi.export("operatorGrafanaAudience", environment.operators.grafana_audience)
+    pulumi.export("operatorTemporalAudience", environment.operators.temporal_audience)
     pulumi.export("operatorCredentials", environment.operators.tunnel_credentials_json)

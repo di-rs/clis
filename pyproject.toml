@@ -7,10 +7,8 @@ dependencies = []
 [dependency-groups]
 dev = [
     "boxie-test-support",
-    "platform-infra",
+    "host-infra",
     "clis-deploy",
-    "observability-infra",
-    "ingress-infra",
     "httpx",
     "mypy",
     "pulumi==3.268.0",
@@ -28,7 +26,7 @@ package = false
 required-version = ">=0.13.0"
 
 [tool.uv.workspace]
-members = ["infra/platform", "tools/deploy", "infra/ingress", "infra/observability", "tools/boxie", "tools/boxie/tests/support", "tools/cli-playground", "tools/boxie/infra", "tools/cli-playground/infra", "tools/cli-bench", "tools/cli-testing"]
+members = ["infra/host", "tools/deploy", "tools/boxie", "tools/boxie/tests/support", "tools/cli-playground", "tools/boxie/infra", "tools/cli-playground/infra", "tools/cli-bench", "tools/cli-testing"]
 
 [tool.ruff]
 target-version = "py315"
@@ -39,26 +37,24 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
 
 [tool.ruff.per-file-target-version]
 "tools/deploy/deploy_tool/remote.py" = "py312"
-"infra/platform/platform_infra/resources.py" = "py312"
+"infra/host/host_infra/resources.py" = "py312"
 
 [tool.mypy]
 python_version = "3.15"
 plugins = ["pydantic.mypy"]
-files = ["tools", "infra/observability", "infra/ingress", "infra/platform", "infra/environments"]
+files = ["tools", "infra/host", "infra/environments"]
 mypy_path = ["tools"]
 strict = true
 
 [tool.pytest]
-testpaths = ["infra/environments/single-host/tests", "infra/platform/tests", "tools/deploy/tests", "infra/ingress/tests", "infra/observability/tests", "tools/boxie/tests", "tools/ci/tests", "tools/cli-bench/tests", "tools/cli-playground/tests", "tools/cli-testing/tests"]
+testpaths = ["infra/environments/single-host/tests", "infra/host/tests", "tools/deploy/tests", "tools/boxie/tests", "tools/ci/tests", "tools/cli-bench/tests", "tools/cli-playground/tests", "tools/cli-testing/tests"]
 pythonpath = ["tools", "tools/cli-bench"]
 addopts = ["--strict-config", "--strict-markers", "-p", "boxie_test_support.dependencies", "-m", "not integration"]
 markers = ["integration: real isolated builds/installations and external-tool checks; prerequisites required"]
 
 [tool.uv.sources]
-platform-infra = { workspace = true }
+host-infra = { workspace = true }
 clis-deploy = { workspace = true }
-ingress-infra = { workspace = true }
-observability-infra = { workspace = true }
 boxie = { workspace = true }
 boxie-test-support = { workspace = true }
 cli-playground = { workspace = true }

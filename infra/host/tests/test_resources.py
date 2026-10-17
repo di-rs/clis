@@ -15,10 +15,10 @@ INSTALLATION = "12345678-1234-4234-8234-123456789abc"
 
 
 def api() -> Any:
-    module = importlib.import_module("platform_infra")
+    module = importlib.import_module("host_infra")
     assert hasattr(module, "__path__")
-    assert importlib.util.find_spec("platform_infra.resources"), "resource preparation missing"
-    return importlib.import_module("platform_infra.resources")
+    assert importlib.util.find_spec("host_infra.resources"), "resource preparation missing"
+    return importlib.import_module("host_infra.resources")
 
 
 class Docker:
@@ -136,7 +136,7 @@ def test_plan_rejects_noncanonical_or_escaping_paths(directory: str) -> None:
 
 
 def test_host_preparation_runs_standalone_with_python312_compatible_syntax() -> None:
-    script = Path(__file__).parents[1] / "platform_infra/resources.py"
+    script = Path(__file__).parents[1] / "host_infra/resources.py"
     ast.parse(script.read_text(), filename=str(script), feature_version=(3, 12))
     result = subprocess.run(
         [sys.executable, "-I", str(script), "--help"],
