@@ -1,4 +1,4 @@
-name: CLI playground setup
+name: ☁️ Playground infrastructure setup
 
 on:
   workflow_dispatch:
@@ -7,6 +7,7 @@ permissions: {}
 
 jobs:
   provision:
+    name: ☁️ Provision playground infrastructure
     if: ${{ github.ref == 'refs/heads/master' }}
     environment: playground
     runs-on: ubuntu-24.04
@@ -29,21 +30,25 @@ jobs:
       CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
       PLAYGROUND_URL: ${{ vars.PLAYGROUND_URL }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: 📥 Check out reviewed infrastructure source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: 🐍 Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: '0.13.0'
           enable-cache: false
-      - run: uv sync --locked --all-packages
-      - uses: pulumi/setup-pulumi@b374ceb6168550de27c6eba92e01c1a774040e11 # v2
+      - name: 📦 Install locked Python workspace dependencies
+        run: uv sync --locked --all-packages
+      - name: ☁️ Set up Pulumi infrastructure tooling
+        uses: pulumi/setup-pulumi@b374ceb6168550de27c6eba92e01c1a774040e11 # v2
         with:
           pulumi-version: '3.268.0'
-      - name: Validate and configure the production stack
+      - name: 🔎 Validate production infrastructure configuration
         run: uv run --locked python -m playground_infra.ci configure
-      - name: Provision Hetzner and Cloudflare DNS
+      - name: ☁️ Provision Hetzner host and Cloudflare DNS
         working-directory: tools/cli-playground/infra
         run: |
           pulumi login "$PULUMI_BACKEND_URL" --non-interactive

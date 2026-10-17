@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from boxie.domain.errors import BoxieError
@@ -60,7 +61,9 @@ def test_local_content_addressed_image_is_approved(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
-def test_service_sighup_reload_is_atomic(tmp_path: Path, postgres_dsn: str) -> None:
+def test_service_sighup_reload_is_atomic(
+    tmp_path: Path, postgres_dsn: str, temporal_stack: Any
+) -> None:
     import asyncio
     import signal
     import socket
@@ -93,7 +96,18 @@ def test_service_sighup_reload_is_atomic(tmp_path: Path, postgres_dsn: str) -> N
                         "host_id": "host-1",
                     },
                     "bind_port": port,
-                    "postgres_dsn_file": str(dsn_file),
+                    "lifecycle": {
+                        "postgres_dsn_file": str(dsn_file),
+                        "temporal_address": temporal_stack.address,
+                        "temporal_server_name": "temporal",
+                        "temporal_ca_file": str(temporal_stack.root / "clients/frontend-ca.pem"),
+                        "temporal_cert_file": str(
+                            temporal_stack.root / "clients/boxie-orchestrator.pem"
+                        ),
+                        "temporal_key_file": str(
+                            temporal_stack.root / "clients/boxie-orchestrator.key"
+                        ),
+                    },
                 }
             )
         )
@@ -139,7 +153,8 @@ def test_service_sighup_reload_is_atomic(tmp_path: Path, postgres_dsn: str) -> N
                         "image_digest"
                     ] == replacement
             finally:
-                process.terminate()
+                if process.returncode is None:
+                    process.terminate()
                 await asyncio.wait_for(process.wait(), 5)
         assert "orchestrator-test-secret" not in (tmp_path / "orchestrator.log").read_text()
 

@@ -346,6 +346,11 @@ it.each([
   [501, 301, 500, 300],
   [0, 24, 1, 24],
   [80, 0, 80, 1],
+  [NaN, NaN, 80, 24],
+  [Infinity, -Infinity, 80, 24],
+  [-Infinity, Infinity, 80, 24],
+  [NaN, 40, 80, 40],
+  [120, NaN, 120, 24],
 ])(
   "settles measured geometry %i x %i at bounded %i x %i",
   async (cols, rows, boundedCols, boundedRows) => {

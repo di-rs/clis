@@ -1,16 +1,29 @@
-name: CLI benchmark suites
+name: ⏱️ CLI benchmark execution
+
+# Keep this condition aligned with the first job: downstream workflows skip without a runner.
+run-name: >-
+  ${{
+    (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci')) &&
+    (github.event.action != 'edited' || github.event.changes.body != null) &&
+    format('⏱️ CLI benchmarks for PR #{0}', github.event.pull_request.number) || '⏭️ CI skipped'
+  }}
 
 on:
   pull_request:
     branches: [master]
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened, edited, ready_for_review, labeled]
 
 permissions:
   contents: read
 
 jobs:
   select:
-    if: github.event.action != 'edited' || github.event.changes.body != null
+    name: 🔎 Select affected CLI benchmarks
+    if: >-
+      ${{
+        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci')) &&
+        (github.event.action != 'edited' || github.event.changes.body != null)
+      }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
@@ -19,15 +32,17 @@ jobs:
       runs: ${{ steps.selection.outputs.runs }}
       warmup: ${{ steps.selection.outputs.warmup }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: 📥 Check out full Git history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: 🐍 Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: '0.13.0'
           enable-cache: false
-      - name: Select affected or requested CLIs
+      - name: 🔎 Select affected or requested CLI benchmarks
         id: selection
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -45,7 +60,7 @@ jobs:
               for key in ("suites", "packages", "runs", "warmup"):
                   print(f"{key}={json.dumps(selection[key])}", file=output)
           PY
-      - name: Selection details
+      - name: 📤 Upload benchmark selection details
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cli-bench-selection
@@ -54,6 +69,7 @@ jobs:
           if-no-files-found: error
 
   suites:
+    name: ⏱️ Run CLI benchmarks (${{ matrix.os }})
     needs: select
     if: needs.select.outputs.suites != '[]'
     concurrency:
@@ -66,18 +82,21 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: 📥 Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: 🐍 Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: '0.13.0'
           enable-cache: false
-      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+      - name: ⏱️ Install Hyperfine benchmark runner
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: hyperfine@2.0.0
           fallback: none
-      - name: Build selected CLIs
+      - name: 🏗️ Build selected CLI executables
         shell: bash
         env:
           PACKAGES: ${{ needs.select.outputs.packages }}
@@ -95,7 +114,7 @@ jobs:
               *[argument for package in packages for argument in ("-p", package)],
           ], check=True)
           PY
-      - name: Run suites
+      - name: ⏱️ Execute selected benchmark suites
         shell: bash
         env:
           SUITES: ${{ needs.select.outputs.suites }}
@@ -123,7 +142,7 @@ jobs:
           if failed:
               raise SystemExit("Failed suites: " + ", ".join(failed))
           PY
-      - name: Benchmark reports
+      - name: 📤 Upload benchmark results
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

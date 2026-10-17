@@ -22,7 +22,7 @@ only the dedicated client CA plus the internode CA for its required internal
 clients. Internode mTLS uses only the internode CA. Server config disables the
 unused frontend HTTP API and never disables hostname verification.
 
-Issue distinct client identities only to Boxie API, Boxie workers, the UI
+Issue distinct client identities only to Boxie API, Boxie orchestrator, the UI
 backend, and trusted operator tools. Playground and sandbox containers receive
 neither certificates nor control-network membership. Mount only each process's
 own keys and public trust roots; the server's internal worker reuses its
@@ -108,7 +108,7 @@ readable by the disposable container UIDs; this test permission choice is not a
 production key policy. No CA private key is mounted into a runtime container.
 Only the harness's projects/volumes are removed, including after failure.
 
-The gate runs both schema operations, bootstrap twice, valid API/worker/operator
+The gate runs both schema operations, bootstrap twice, valid API/orchestrator/operator
 and UI identities, no-certificate/foreign-CA/wrong-hostname rejection, a real
 workflow/activity, the actual UI namespace API, and six cross-database credential
 denials. It writes nonsecret runtime evidence into pytest's temporary directory.

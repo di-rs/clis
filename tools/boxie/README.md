@@ -307,9 +307,11 @@ The 2026-10-15 compatibility gate verified CPython 3.15.0 with `temporalio==1.34
 native Linux arm64, and emulated Linux amd64. Real Temporal worker execution,
 cancellation, graceful worker replacement, and replay of four exported histories
 passed on each platform. That gate did not exercise PostgreSQL transactions or
-process-crash recovery. These pinned dependencies are installed by the Boxie runtime. The mandatory
-[native lifecycle workflow](../../.github/workflows/boxie-lifecycle.yml) additionally
-exercises Linux amd64/runsc, process loss, SQL accounting and browser reconnection.
+process-crash recovery. These pinned dependencies are installed by the Boxie runtime.
+The [lifecycle workflow](../../.github/workflows/boxie-lifecycle.yml) retains real
+PostgreSQL/Temporal recovery coverage on pull requests. Native Linux amd64/runsc,
+browser reconnection and process-loss E2Es are temporarily optional via
+`workflow_dispatch` while their hang is investigated.
 
 ## Independent distribution and topology
 

@@ -171,7 +171,10 @@ def test_production_mtls_workflow_ui_and_database_isolation(temporal_stack: Any)
         with pytest.raises(RuntimeError):
             await asyncio.to_thread(stack.bootstrap)
         await set_retention(604800)
+        # Repeating bootstrap against the existing namespace verifies idempotence
+        # here, without repeating its propagation grace in every native fixture.
         await asyncio.to_thread(stack.bootstrap)
+        stack.evidence["namespace"] = "repeated bootstrap verified existing seven-day retention"
         stack.evidence["security"] = (
             "valid API/worker/operator/UI; rejected no cert, foreign CA, wrong hostname; 6 cross-database denials"
         )
