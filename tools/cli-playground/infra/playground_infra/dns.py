@@ -27,12 +27,13 @@ class DnsConfig(BaseModel):
         return value
 
 
-def provision_dns(config: DnsConfig, ipv4: pulumi.Input[str]) -> None:
+def provision_dns(config: DnsConfig, ipv4: pulumi.Input[str]) -> list[pulumi.Resource]:
+    resources: list[pulumi.Resource] = []
     for name, domain in (
         ("playground", config.domain),
         ("playground-previews", f"*.{config.domain}"),
     ):
-        cloudflare.DnsRecord(
+        record = cloudflare.DnsRecord(
             name,
             zone_id=config.cloudflare_zone_id,
             name=domain,
@@ -41,4 +42,6 @@ def provision_dns(config: DnsConfig, ipv4: pulumi.Input[str]) -> None:
             ttl=300,
             proxied=False,
         )
+        resources.append(record)
     pulumi.export("publicUrl", f"https://{config.domain}")
+    return resources

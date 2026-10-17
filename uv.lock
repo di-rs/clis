@@ -593,6 +593,7 @@ version = "0.1.0"
 source = { editable = "infra/host" }
 dependencies = [
     { name = "pulumi" },
+    { name = "pulumi-command" },
     { name = "pulumi-hcloud" },
     { name = "pulumi-tls" },
     { name = "pydantic" },
@@ -601,6 +602,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "pulumi", specifier = "==3.268.0" },
+    { name = "pulumi-command", specifier = "==1.2.1" },
     { name = "pulumi-hcloud", specifier = "==1.43.1" },
     { name = "pulumi-tls", specifier = "==5.6.2" },
     { name = "pydantic", specifier = ">=2.14,<3" },
@@ -1034,6 +1036,15 @@ wheels = [
 ]
 
 [[package]]
+name = "parver"
+version = "1.0.1.post0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9a/63/fe1b2d9f19ce47e4a0da6d33ea19a20d7bd1632da432d8e32b20724c741a/parver-1.0.1.post0.tar.gz", hash = "sha256:1bfb9c3f13d5daccaa10eb605679b5dbd4bf2e15b4f5fa1bdf178c5c3f065a2c", size = 105980, upload-time = "2026-07-30T12:32:19.754Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8b/ad/92776e7199caee67944945fb2c3988443060d318782d8c25d9bb9f8d235d/parver-1.0.1.post0-py3-none-any.whl", hash = "sha256:81f5cbe349da9939749ece40b70ef97b94a346f750750ed49f3ebbf1a40f1195", size = 20853, upload-time = "2026-07-30T12:32:18.289Z" },
+]
+
+[[package]]
 name = "pathspec"
 version = "1.1.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1216,6 +1227,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/01/fe/69ff5b24badcd27dd9b4ad874d4da7428e82e85fc378e19d3346a228bcf5/pulumi_cloudflare-6.22.1.tar.gz", hash = "sha256:1706cdd01214ca0e7065fd34649b02ccbaf56904df16c36df026b0ac512b185c", size = 2078213, upload-time = "2026-10-13T20:33:19.84Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/2b/6e/bf1ba64a12c742c9bf957d6e0d3a2f2fa7038d6dc5bf0362cb43bc9efcac/pulumi_cloudflare-6.22.1-py3-none-any.whl", hash = "sha256:a45f6bfefc072191fcdfdcbdb147b4852c9b728e1ca0887eda5e47720ab0cb31", size = 3102062, upload-time = "2026-10-13T20:33:17.696Z" },
+]
+
+[[package]]
+name = "pulumi-command"
+version = "1.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "parver" },
+    { name = "pulumi" },
+    { name = "semver" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/cf/56/b7f66c9d2e4536b24a5bbe4e743093c7cdd689343d86f020419f4897a88d/pulumi_command-1.2.1.tar.gz", hash = "sha256:cbc9281a6571701ac5db598dac0246a058875b62f28c40c7cc0fcdc36898918d", size = 33022, upload-time = "2026-03-04T00:23:25.84Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fa/ce/1e5f30f868ba0827ca3311b0b171b12606e30c05e864714764d8d943fef1/pulumi_command-1.2.1-py3-none-any.whl", hash = "sha256:c7e465338e4363f114ddff99ee249260c7770ef4451b970ab51f7e8a37c9b030", size = 36861, upload-time = "2026-03-04T00:23:24.571Z" },
 ]
 
 [[package]]

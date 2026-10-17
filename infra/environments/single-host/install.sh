@@ -4,6 +4,12 @@ set -euo pipefail
 [[ $# == 1 && $1 == /opt/clis/releases/setup/* ]] || { echo 'Use a prepared setup checkout.' >&2; exit 2; }
 release=$1
 /usr/local/sbin/clis-storage-guard
+install -d -m 0700 /etc/clis
+install -m 0600 "$release/settings.env" /etc/clis/settings.env
+install -m 0600 "$release/tunnel.json" /etc/clis/tunnel.json
+install -m 0700 "$release/infra/host/operation.sh" /usr/local/sbin/clis-operation
+install -m 0644 "$release"/infra/host/systemd/*.service /etc/systemd/system/
+systemctl daemon-reload
 set -a
 # shellcheck disable=SC1091
 source /etc/clis/settings.env
@@ -33,3 +39,21 @@ python3 "$release/tools/cli-playground/infra/playground_infra/installation.py" "
 bash "/opt/clis/releases/boxie/$run/tools/boxie/infra/install.sh" "/opt/clis/releases/boxie/$run"
 bash "/opt/clis/releases/playground/$run/tools/cli-playground/infra/install.sh" "/opt/clis/releases/playground/$run"
 bash "/opt/clis/releases/playground/$run/tools/cli-playground/infra/deploy.sh" "/opt/clis/releases/playground/$run"
+
+# Only publish application records after the complete installation is healthy.
+python3 - "$run" <<'PYCODE'
+import os
+import sys
+from pathlib import Path
+for app in ('boxie', 'playground'):
+    directory = Path('/srv/clis/deployment') / app
+    directory.mkdir(parents=True, exist_ok=True)
+    temporary = directory / ('current-' + sys.argv[1])
+    temporary.symlink_to('/opt/clis/releases/' + app + '/' + sys.argv[1])
+    temporary.replace(directory / 'current')
+    descriptor = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+PYCODE

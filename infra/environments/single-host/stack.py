@@ -1,12 +1,15 @@
 """Compose the shared host with its service-owned public routes."""
 
+import runpy
+from pathlib import Path
+
 import pulumi
 from boxie_infra.access import OperatorConfig, provision_access
-from host_infra.host import HostConfig, provision
+from host_infra.host import HostConfig, provision_resources
 from playground_infra.dns import DnsConfig, provision_dns
 
 config = pulumi.Config()
-host = provision(
+host = provision_resources(
     HostConfig(
         ssh_public_key=config.get("sshPublicKey"),
         ssh_cidrs=config.require_object("sshCidrs"),
@@ -16,13 +19,13 @@ host = provision(
         protect=config.get_bool("protect") is not False,
     )
 )
-provision_dns(
+dns = provision_dns(
     DnsConfig(
         domain=config.require("domain"), cloudflare_zone_id=config.require("cloudflareZoneId")
     ),
-    host.ipv4_address,
+    host.server.ipv4_address,
 )
-provision_access(
+operators = provision_access(
     OperatorConfig(
         account_id=config.require("cloudflareAccountId"),
         zone_id=config.require("cloudflareZoneId"),
@@ -32,3 +35,23 @@ provision_access(
         emails=config.require_object("operatorEmails"),
     )
 )
+
+# Provision-only previews remain possible; installation is an explicit platform operation.
+if config.get_bool("install"):
+    installer = runpy.run_path(str(Path(__file__).with_name("installation.py")))
+    settings = pulumi.Output.all(
+        **operators.settings,
+        PLAYGROUND_DOMAIN=config.require("domain"),
+        ACME_EMAIL=config.require("acmeEmail"),
+        CLOUDFLARE_DNS_API_TOKEN=config.require_secret("cloudflareDnsApiToken"),
+    ).apply(installer["serialize_settings"])
+    installer["provision_installation"](
+        host.connection,
+        Path(config.require("sourceDirectory")).resolve(),
+        config.require("revision"),
+        config.require("runId"),
+        host_id=host.server.id,
+        settings=settings,
+        tunnel_credentials=operators.credentials,
+        dependencies=[host.server, host.volume_attachment, *dns, *operators.resources],
+    )

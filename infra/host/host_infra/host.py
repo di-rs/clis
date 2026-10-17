@@ -4,12 +4,14 @@ import base64
 import binascii
 import ipaddress
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 import pulumi
 import pulumi_hcloud as hcloud
 import pulumi_tls as tls
+from pulumi_command import remote
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -119,7 +121,18 @@ def cloud_init(host_private_key: str, host_public_key: str, volume_id: str) -> s
     )
 
 
+@dataclass(frozen=True)
+class HostResources:
+    server: hcloud.Server
+    volume_attachment: hcloud.VolumeAttachment
+    connection: remote.ConnectionArgs
+
+
 def provision(config: HostConfig) -> hcloud.Server:
+    return provision_resources(config).server
+
+
+def provision_resources(config: HostConfig) -> HostResources:
     labels = {"service": "clis", "managed-by": "pulumi"}
     private_outputs = ["privateKeyOpenssh", "privateKeyPem", "privateKeyPemPkcs8"]
     deployment_key = tls.PrivateKey(
@@ -208,10 +221,21 @@ def provision(config: HostConfig) -> hcloud.Server:
         labels=labels,
         opts=pulumi.ResourceOptions(protect=config.protect, additional_secret_outputs=["userData"]),
     )
-    hcloud.VolumeAttachment(
+    attachment = hcloud.VolumeAttachment(
         "clis-data", volume_id=volume.id.apply(int), server_id=server.id.apply(int), automount=False
     )
     pulumi.export("ipv4", ipv4.ip_address)
     pulumi.export("sshPrivateKey", pulumi.Output.secret(deployment_key.private_key_openssh))
     pulumi.export("sshHostPublicKey", host_public_key)
-    return server
+    return HostResources(
+        server,
+        attachment,
+        remote.ConnectionArgs(
+            host=ipv4.ip_address,
+            user="root",
+            private_key=pulumi.Output.secret(deployment_key.private_key_openssh),
+            host_key=host_public_key,
+            per_dial_timeout=15,
+            dial_error_limit=20,
+        ),
+    )

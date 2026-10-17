@@ -11,13 +11,22 @@ from test_host import HostMocks
 ROOT = Path(__file__).resolve().parents[4]
 
 
+@pytest.mark.parametrize("install", [False, True])
 @pulumi.runtime.test  # type: ignore[untyped-decorator]
-async def test_environment_composes_service_owned_routes(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_environment_composes_service_owned_routes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, install: bool
+) -> None:
     mocks = HostMocks()
     monkeypatch.setenv(
         "PULUMI_CONFIG",
         json.dumps(
             {
+                "clis:install": str(install).lower(),
+                "clis:sourceDirectory": str(tmp_path),
+                "clis:revision": "a" * 40,
+                "clis:runId": "1-1",
+                "clis:acmeEmail": "ops@example.com",
+                "clis:cloudflareDnsApiToken": "test-token",
                 "clis:domain": "play.example.com",
                 "clis:cloudflareZoneId": "a" * 32,
                 "clis:cloudflareAccountId": "b" * 32,
@@ -49,3 +58,5 @@ async def test_environment_composes_service_owned_routes(monkeypatch: pytest.Mon
     for app in apps:
         assert app["policies"][0]["decision"] == "allow"
         assert app["policies"][0]["includes"] == [{"email": {"email": "ops@example.com"}}]
+
+    assert (("command:remote:Command", "installation") in mocks.inputs) == install

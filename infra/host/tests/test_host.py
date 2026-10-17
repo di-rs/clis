@@ -26,6 +26,9 @@ class HostMocks(pulumi.runtime.Mocks):
         return "123", {
             **args.inputs,
             "ipAddress": "203.0.113.12",
+            "aud": "test-audience",
+            "stdout": "",
+            "stderr": "",
             "privateKeyOpenssh": "private",
             "publicKeyOpenssh": "ssh-ed25519 YWJj",
         }
@@ -103,3 +106,15 @@ def test_cloud_init_installs_bounded_operation_units() -> None:
         assert "KillMode=control-group" in unit
         assert "RemainAfterExit=yes" in unit
         assert "/usr/bin/flock -n /run/lock/clis-deployment.lock" in unit
+
+
+@pulumi.runtime.test  # type: ignore[untyped-decorator]
+async def test_host_exposes_pinned_setup_connection_and_attachment() -> None:
+    from host_infra.host import HostConfig, provision_resources
+
+    mocks = HostMocks()
+    host = provision_resources(HostConfig())
+    await mocks.finish()
+    assert await pulumi.Output.from_input(host.connection.host_key).future() == "ssh-ed25519 YWJj"
+    assert await pulumi.Output.from_input(host.connection.private_key).is_secret()
+    assert await host.volume_attachment.urn.future()

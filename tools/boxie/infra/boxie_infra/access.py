@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import re
+from dataclasses import dataclass
 
 import pulumi
 import pulumi_cloudflare as cloudflare
@@ -42,7 +43,14 @@ class OperatorConfig(BaseModel):
         return self
 
 
-def provision_access(config: OperatorConfig) -> None:
+@dataclass(frozen=True)
+class OperatorResources:
+    settings: dict[str, pulumi.Input[str]]
+    credentials: pulumi.Output[str]
+    resources: list[pulumi.Resource]
+
+
+def provision_access(config: OperatorConfig) -> OperatorResources:
     key = tls.PrivateKey("operator-tunnel-secret", algorithm="ED25519")
     secret: pulumi.Output[str] = pulumi.Output.secret(
         key.private_key_openssh.apply(
@@ -56,6 +64,8 @@ def provision_access(config: OperatorConfig) -> None:
         config_src="local",
         tunnel_secret=secret,
     )
+    resources: list[pulumi.Resource] = [tunnel]
+    audiences: dict[str, pulumi.Input[str]] = {}
     for name, hostname in (
         ("grafana", config.grafana_hostname),
         ("temporal", config.temporal_hostname),
@@ -83,7 +93,7 @@ def provision_access(config: OperatorConfig) -> None:
                 )
             ],
         )
-        cloudflare.DnsRecord(
+        record = cloudflare.DnsRecord(
             f"boxie-{name}",
             zone_id=config.zone_id,
             name=hostname,
@@ -92,19 +102,26 @@ def provision_access(config: OperatorConfig) -> None:
             ttl=1,
             proxied=True,
         )
+        resources.extend([app, record])
+        audiences[f"OPERATOR_{name.upper()}_AUDIENCE"] = app.aud
         pulumi.export(f"{name}Audience", app.aud)
     pulumi.export("operatorTunnelId", tunnel.id)
-    pulumi.export(
-        "operatorTunnelCredentials",
-        pulumi.Output.secret(
-            pulumi.Output.all(tunnel.id, secret).apply(
-                lambda values: json.dumps(
-                    {
-                        "AccountTag": config.account_id,
-                        "TunnelID": values[0],
-                        "TunnelSecret": values[1],
-                    }
-                )
+    credentials: pulumi.Output[str] = pulumi.Output.secret(
+        pulumi.Output.all(tunnel.id, secret).apply(
+            lambda values: json.dumps(
+                {"AccountTag": config.account_id, "TunnelID": values[0], "TunnelSecret": values[1]}
             )
-        ),
+        )
+    )
+    pulumi.export("operatorTunnelCredentials", credentials)
+    return OperatorResources(
+        {
+            **audiences,
+            "OPERATOR_TUNNEL_ID": tunnel.id,
+            "OPERATOR_TEAM_NAME": config.team_name,
+            "OPERATOR_GRAFANA_HOSTNAME": config.grafana_hostname,
+            "OPERATOR_TEMPORAL_HOSTNAME": config.temporal_hostname,
+        },
+        credentials,
+        resources,
     )
