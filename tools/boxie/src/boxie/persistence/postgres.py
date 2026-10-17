@@ -32,6 +32,7 @@ from boxie.domain.models import (
     SandboxView,
     TerminationReason,
 )
+from boxie.observability.events import DiagnosticSink, Transition, deliver, emit
 from boxie.persistence.database import SessionFactory
 from boxie.persistence.models import (
     Artifact,
@@ -89,8 +90,11 @@ class PostgresLifecycle:
         identity: OrchestratorIdentity,
         dependencies: DependencyCheck,
         readiness: AdmissionReadiness | None = None,
+        *,
+        diagnostics: DiagnosticSink = emit,
     ) -> None:
         self.sessions, self.resolver, self.identity = sessions, resolver, identity
+        self.diagnostics = diagnostics
         self.dependencies, self.readiness = dependencies, readiness or AdmissionReadiness()
 
     async def _ready(self, session: AsyncSession) -> bool:
@@ -186,7 +190,8 @@ class PostgresLifecycle:
                 slot.sandbox_id = identifier
                 session.add(SandboxArtifactRef(sandbox_id=identifier, artifact_id=spec.artifact_id))
                 await self._enqueue(session, identifier, "start")
-                return view(row)
+            deliver(self.diagnostics, Transition("sandbox.accepted", identifier))
+            return view(row)
         except TimeoutError:
             raise BoxieError(503, "admission dependency timeout") from None
 
@@ -232,11 +237,19 @@ class PostgresLifecycle:
                 raise BoxieError(404, "sandbox not found")
             if row.cleaned_at is not None or row.desired_stop:
                 return view(row)
+            was_pending = row.cleanup_pending
             row.desired_stop = True
             row.reason = row.reason or reason.value
             row.state, row.cleanup_pending = "terminating", True
+            if not was_pending:
+                row.cleanup_pending_since = cast(
+                    datetime, await session.scalar(select(func.clock_timestamp()))
+                )
             await self._enqueue(session, sandbox_id, "stop")
-            return view(row)
+        deliver(
+            self.diagnostics, Transition("termination.requested", sandbox_id, reason=row.reason)
+        )
+        return view(row)
 
     async def load_request(self, sandbox_id: UUID) -> SandboxRequest:
         """Activity-side lookup only: spec/snapshot may contain secrets."""
@@ -318,6 +331,7 @@ class PostgresLifecycle:
             old = await session.get(OrchestratorObservationRecord, item.sandbox_id)
             if old is not None and old.event_version >= item.event_version:
                 return False
+            prior_ready = old is not None and old.ready_at is not None
             record = OrchestratorObservationRecord(
                 sandbox_id=item.sandbox_id,
                 generation=item.generation,
@@ -342,6 +356,7 @@ class PostgresLifecycle:
                 else item.state.value
             )
             row.reason = row.reason or (item.reason.value if item.reason else None)
+            was_pending = row.cleanup_pending
             row.cleanup_pending = not item.removal_confirmed and (
                 item.cleanup_pending
                 or row.desired_stop
@@ -352,6 +367,35 @@ class PostgresLifecycle:
                 if item.removal_confirmed
                 else None
             )
+            now = cast(datetime, await session.scalar(select(func.clock_timestamp())))
+            if row.cleanup_pending and not was_pending:
+                row.cleanup_pending_since = now
+            events: list[Transition] = []
+            if row.provisioning_outcome is None:
+                outcome = (
+                    "ready"
+                    if item.ready_at is not None or prior_ready
+                    else "failed"
+                    if item.removal_confirmed and row.reason == "provisioning_failed"
+                    else "stopped"
+                    if item.removal_confirmed
+                    else None
+                )
+                if outcome is not None:
+                    row.provisioning_outcome = outcome
+                    duration = None
+                    if outcome == "ready":
+                        duration = max(0, (now - row.accepted_at).total_seconds())
+                    events.append(
+                        Transition(
+                            "provisioning.completed",
+                            item.sandbox_id,
+                            outcome=outcome,
+                            duration_seconds=duration,
+                        )
+                    )
+                    if outcome == "ready":
+                        events.append(Transition("sandbox.ready", item.sandbox_id))
             if item.removal_confirmed:
                 slot = (
                     await session.exec(
@@ -363,7 +407,9 @@ class PostgresLifecycle:
                 reference = await session.get(SandboxArtifactRef, item.sandbox_id)
                 if reference is not None:
                     await session.delete(reference)
-            return True
+                events.append(Transition("cleanup.completed", item.sandbox_id))
+        deliver(self.diagnostics, *events)
+        return True
 
     async def confirm_removed(self, observation: OrchestratorObservation) -> bool:
         if not observation.removal_confirmed:

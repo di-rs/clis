@@ -35,3 +35,38 @@ def test_initial_revision_matches_mapped_metadata(postgres_dsn: str) -> None:
 
     migrate(postgres_dsn)
     command.check(migration_config(postgres_dsn))
+
+
+def test_observability_revision_preserves_unknown_cleanup_age() -> None:
+    output = StringIO()
+    config = migration_config("postgresql://localhost/boxie")
+    config.output_buffer = output
+    command.upgrade(config, "0002_command_outbox:head", sql=True)
+    schema = output.getvalue()
+    assert "ADD COLUMN provisioning_outcome" in schema
+    assert "ADD COLUMN provisioning_ready_observed_at" in schema
+    assert "ADD COLUMN cleanup_pending_since" in schema
+    assert "sandbox_provisioning_outcome" in schema
+    assert "DROP CONSTRAINT provisioning_ready_evidence" in schema
+    assert "DROP COLUMN provisioning_ready_observed_at" in schema
+    assert "CREATE INDEX sandbox_cleanup_pending" in schema
+    assert "UPDATE sandboxes" not in schema
+
+
+@pytest.mark.integration
+def test_forward_observability_revision_removes_unread_timestamp(postgres_dsn: str) -> None:
+    from boxie.persistence.database import database_url
+    from sqlalchemy import create_engine, inspect
+
+    config = migration_config(postgres_dsn)
+    command.upgrade(config, "0002_command_outbox")
+    command.upgrade(config, "0003_observability")
+    command.upgrade(config, "head")
+    engine = create_engine(database_url(postgres_dsn))
+    try:
+        columns = {column["name"] for column in inspect(engine).get_columns("sandboxes")}
+        assert "provisioning_ready_observed_at" not in columns
+        assert {"provisioning_outcome", "cleanup_pending_since"} <= columns
+        command.check(config)
+    finally:
+        engine.dispose()

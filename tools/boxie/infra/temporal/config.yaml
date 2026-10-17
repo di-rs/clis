@@ -30,6 +30,10 @@ persistence:
         maxIdleConns: 2
         maxConnLifetime: 1h
 global:
+  metrics:
+    prometheus:
+      timerType: histogram
+      listenAddress: "0.0.0.0:9090"
   membership:
     maxJoinDuration: 30s
     broadcastAddress: '{{ env "TEMPORAL_BROADCAST_ADDRESS" }}'

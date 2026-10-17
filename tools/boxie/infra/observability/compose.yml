@@ -1,0 +1,254 @@
+name: boxie-observability
+services:
+  storage-init:
+    image: docker.io/timberio/vector@sha256:98e7b4dfe50750e61470697bbd2fbeca643d12bea97f351005038ef506eab630
+    user: 0:0
+    read_only: true
+    cap_drop:
+    - ALL
+    cap_add:
+    - CHOWN
+    security_opt:
+    - no-new-privileges:true
+    network_mode: none
+    pids_limit: 16
+    mem_limit: 33554432
+    entrypoint:
+    - /bin/sh
+    - -ec
+    command:
+    - chown 65532:65532 /vector-data; chown 65534:65534 /logs-data
+    volumes:
+    - vector-data:/vector-data
+    - logs-data:/logs-data
+  vector:
+    image: ${OBS_COLLECTOR_IMAGE:-boxie-collector:local}
+    user: 65532:65532
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    restart: unless-stopped
+    pids_limit: 128
+    mem_limit: ${OBS_VECTOR_MEMORY_BYTES:-268435456}
+    logging:
+      driver: journald
+      options:
+        mode: non-blocking
+        max-buffer-size: 4m
+        tag: observability-vector
+    networks:
+      metrics:
+        aliases:
+        - vector
+      ingest:
+        aliases:
+        - vector
+    group_add:
+    - ${OBS_JOURNAL_GROUP_GID:?Set numeric host journal group}
+    environment:
+      VECTOR_LOG: info
+      BOXIE_ENVIRONMENT: ${BOXIE_ENVIRONMENT:-production}
+      BOXIE_HOST_ID: ${BOXIE_HOST_ID:-boxie-host}
+    command:
+    - --config
+    - /etc/vector/vector.yaml
+    volumes:
+    - ./vector.yaml:/etc/vector/vector.yaml:ro
+    - ${OBS_JOURNAL_DIRECTORY:-/var/log/journal}:/var/log/journal:ro
+    - ${OBS_MACHINE_ID_PATH:-/etc/machine-id}:/etc/machine-id:ro
+    - vector-data:/var/lib/vector
+    tmpfs:
+    - /tmp:size=16777216
+    depends_on:
+      storage-init:
+        condition: service_completed_successfully
+    build:
+      context: ./collector
+  victorialogs:
+    image: docker.io/victoriametrics/victoria-logs@sha256:251121fa882af99b95ba0c230a4a2f412ea602d2698c64a96c58dc9842bb755d
+    user: 65534:65534
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    restart: unless-stopped
+    pids_limit: 128
+    mem_limit: ${OBS_LOGS_MEMORY_BYTES:-1073741824}
+    logging:
+      driver: journald
+      options:
+        mode: non-blocking
+        max-buffer-size: 4m
+        tag: observability-victorialogs
+    networks:
+      ingest:
+        aliases:
+        - victorialogs
+      query:
+        aliases:
+        - victorialogs
+      metrics:
+        aliases:
+        - victorialogs
+    command:
+    - -httpListenAddr=:9428
+    - -storageDataPath=/victoria-logs-data
+    - -retentionPeriod=${OBS_LOGS_RETENTION_DAYS:-7}d
+    - -retention.maxDiskSpaceUsageBytes=${OBS_LOGS_DISK_BYTES:-268435456}
+    - -metrics.exposeMetadata
+    - -loggerLevel=INFO
+    volumes:
+    - logs-data:/victoria-logs-data
+    depends_on:
+      storage-init:
+        condition: service_completed_successfully
+  prometheus:
+    image: docker.io/prom/prometheus@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
+    user: 65534:65534
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    restart: unless-stopped
+    pids_limit: 128
+    mem_limit: ${OBS_PROMETHEUS_MEMORY_BYTES:-536870912}
+    logging:
+      driver: journald
+      options:
+        mode: non-blocking
+        max-buffer-size: 4m
+        tag: observability-prometheus
+    networks:
+      metrics:
+        aliases:
+        - prometheus
+      query:
+        aliases:
+        - prometheus
+    command:
+    - --config.file=/etc/prometheus/prometheus.yml
+    - --storage.tsdb.path=/prometheus
+    - --storage.tsdb.retention.time=${OBS_PROMETHEUS_RETENTION_DAYS:-7}d
+    - --storage.tsdb.retention.size=${OBS_PROMETHEUS_RETENTION_BYTES:-2147483648}B
+    - --web.listen-address=0.0.0.0:9090
+    - --log.level=info
+    volumes:
+    - ${OBS_PROMETHEUS_CONFIG_FILE:?Set envsubst-rendered Prometheus config}:/etc/prometheus/prometheus.yml:ro
+    - ./rules:/etc/prometheus/rules:ro
+    - prometheus-data:/prometheus
+  grafana:
+    image: docker.io/grafana/grafana@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f
+    user: '472:0'
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    restart: unless-stopped
+    pids_limit: 256
+    mem_limit: 268435456
+    logging:
+      driver: journald
+      options:
+        mode: non-blocking
+        max-buffer-size: 4m
+        tag: observability-grafana
+    networks:
+      query:
+        aliases:
+        - grafana
+      grafana-origin:
+        aliases:
+        - grafana
+    environment:
+      GOGC: '25'
+      GF_LOG_LEVEL: info
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana-admin
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+      GF_AUTH_DISABLE_LOGIN_FORM: 'false'
+      GF_SECURITY_COOKIE_SECURE: 'true'
+      GF_PLUGINS_PREINSTALL: ''
+      GF_PLUGINS_PREINSTALL_SYNC: ''
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: ''
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_PLUGINS_DISABLE_PLUGINS: elasticsearch,grafana-postgresql-datasource,grafana-pyroscope-datasource,influxdb,jaeger,loki,mssql,mysql,opentsdb,stackdriver,tempo,zipkin
+      GF_PLUGINS_PREINSTALL_DISABLED: 'true'
+      GF_PLUGINS_PREINSTALL_AUTO_UPDATE: 'false'
+      GF_PLUGINS_PLUGIN_ADMIN_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: 'false'
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_SERVER_ROOT_URL: https://${OBS_GRAFANA_HOSTNAME:?Set exact Grafana hostname}
+    volumes:
+    - grafana-data:/var/lib/grafana
+    - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    - ./grafana/dashboards:/etc/grafana/dashboards:ro
+    - ${OBS_GRAFANA_PLUGIN_DIR:?Set verified pinned plugins}:/var/lib/grafana/plugins:ro
+    tmpfs:
+    - /tmp:size=16777216
+    secrets:
+    - grafana-admin
+  node-exporter:
+    image: ghcr.io/prometheus/node-exporter@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
+    user: 65534:65534
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    restart: unless-stopped
+    pids_limit: 128
+    mem_limit: ${OBS_EXPORTER_MEMORY_BYTES:-67108864}
+    logging:
+      driver: journald
+      options:
+        mode: non-blocking
+        max-buffer-size: 4m
+        tag: observability-node-exporter
+    networks:
+      metrics:
+        aliases:
+        - node-exporter
+    command:
+    - --collector.disable-defaults
+    - --collector.filesystem
+    - --collector.meminfo
+    - --path.rootfs=/host
+    - --path.procfs=/host/proc
+    - --web.listen-address=0.0.0.0:9100
+    - --web.telemetry-path=/metrics
+    - --log.level=info
+    volumes:
+    - type: bind
+      source: /
+      target: /host
+      read_only: true
+      bind:
+        propagation: rslave
+        create_host_path: false
+    tmpfs:
+    - /host/run:ro,nosuid,nodev,noexec,mode=000,size=4096
+    - /host/var/run:ro,nosuid,nodev,noexec,mode=000,size=4096
+volumes:
+  vector-data: {}
+  logs-data: {}
+  prometheus-data: {}
+  grafana-data: {}
+networks:
+  metrics:
+    external: true
+    name: ${OBS_METRICS_NETWORK:-boxie-metrics}
+  grafana-origin:
+    external: true
+    name: ${OBS_GRAFANA_ORIGIN_NETWORK:-boxie-grafana-origin}
+  ingest:
+    internal: true
+  query:
+    internal: true
+secrets:
+  grafana-admin:
+    file: ${OBS_GRAFANA_ADMIN_PASSWORD_FILE:?Set private Grafana admin file}

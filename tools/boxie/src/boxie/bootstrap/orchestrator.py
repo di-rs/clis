@@ -1,5 +1,7 @@
 """The privileged service entry point; only this process receives a Docker socket."""
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import logging
@@ -9,21 +11,17 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
-
-import uvicorn
-from fastapi import FastAPI
-from sqlmodel import select
+from typing import TYPE_CHECKING
 
 from boxie.bootstrap.config import OrchestratorConfig, read_credential
 from boxie.bootstrap.dependencies import database_for, temporal_client
-from boxie.bootstrap.runtime import embedded_workers
-from boxie.persistence.postgres import PostgresLifecycle
 from boxie.persistence.postgres_artifacts import PostgresArtifactStore
-from boxie.persistence.start_guard import PostgresStartGuard
-from boxie.sandbox.docker import DockerBackend
-from boxie.sandbox.execution.orchestrator import Orchestrator
-from boxie.sandbox.execution.ownership import acquire_owner_lock
-from boxie.sandbox.transport.server import create_orchestrator_app as create_transport_app
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
+
+    from boxie.observability.metrics import Metrics
+    from boxie.sandbox.execution.orchestrator import Orchestrator
 
 
 def create_orchestrator_app(
@@ -32,8 +30,14 @@ def create_orchestrator_app(
     *,
     credential: bytes,
     runtime: Callable[[], AbstractAsyncContextManager[None]] | None = None,
+    request_completed: Callable[[str, str, str, float], None] | None = None,
 ) -> FastAPI:
     """Compose process services; the HTTP adapter receives only its required ports."""
+
+    from sqlmodel import select
+
+    from boxie.observability.logging import RequestLogging
+    from boxie.sandbox.transport.server import create_orchestrator_app as create_transport_app
 
     async def readiness() -> dict[str, bool]:
         try:
@@ -59,16 +63,30 @@ def create_orchestrator_app(
         finally:
             await orchestrator.close()
 
-    return create_transport_app(
+    app = create_transport_app(
         orchestrator, artifacts, credential=credential, readiness=readiness, lifespan=lifespan
     )
+    app.add_middleware(RequestLogging, completed=request_completed)
+    return app
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Boxie private sandbox orchestrator")
-    parser.add_argument("--config", type=Path, required=True)
-    args = parser.parse_args()
-    config = OrchestratorConfig.from_file(args.config)
+def _main(metrics: Metrics, config_path: Path) -> None:
+    import uvicorn
+
+    from boxie.bootstrap.runtime import embedded_workers
+    from boxie.observability.runtime import (
+        background,
+        orchestrator_cache,
+        orchestrator_dependencies,
+    )
+    from boxie.observability.telemetry.logging import install_asyncio_handler, log_runtime
+    from boxie.persistence.postgres import PostgresLifecycle
+    from boxie.persistence.start_guard import PostgresStartGuard
+    from boxie.sandbox.docker import DockerBackend
+    from boxie.sandbox.execution.orchestrator import Orchestrator
+    from boxie.sandbox.execution.ownership import acquire_owner_lock
+
+    config = OrchestratorConfig.from_file(config_path)
 
     if config.lifecycle is None:
         raise ValueError("orchestrator requires PostgreSQL and Temporal lifecycle configuration")
@@ -76,6 +94,7 @@ def main() -> None:
     dsn_file = lifecycle.postgres_dsn_file
 
     async def run() -> None:
+        install_asyncio_handler(log_runtime())
         with acquire_owner_lock(config.data_dir):
             await run_owned()
 
@@ -89,18 +108,22 @@ def main() -> None:
                 PostgresStartGuard(sessions),
                 lambda: datetime.now(UTC),
                 time.monotonic,
+                diagnostics=metrics.transition,
             )
 
             async def local_ready() -> bool:
                 return orchestrator.execution_ready
 
-            repository = PostgresLifecycle(sessions, orchestrator, config.identity, local_ready)
+            repository = PostgresLifecycle(
+                sessions, orchestrator, config.identity, local_ready, diagnostics=metrics.transition
+            )
             client = await temporal_client(lifecycle)
             credential = read_credential(config.credential_file)
             app = create_orchestrator_app(
                 orchestrator,
                 artifacts,
                 credential=credential,
+                request_completed=metrics.http_completed,
                 runtime=lambda: embedded_workers(client, repository, orchestrator, artifacts),
             )
 
@@ -125,13 +148,30 @@ def main() -> None:
                         ws_max_queue=4,
                         ws_per_message_deflate=False,
                         access_log=False,
+                        log_config=None,
                     )
                 )
-                await server.serve()
+                async with background(
+                    orchestrator_cache(metrics, orchestrator),
+                    orchestrator_dependencies(metrics, orchestrator, sessions),
+                ):
+                    await server.serve()
             finally:
                 loop.remove_signal_handler(signal.SIGHUP)
 
     asyncio.run(run())
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Boxie private sandbox orchestrator")
+    parser.add_argument("--config", type=Path, required=True)
+    args = parser.parse_args()
+    from boxie.observability.logging import process_logging
+
+    logs = process_logging("orchestrator")
+    from boxie.observability.runtime import run_metrics_process
+
+    run_metrics_process(logs, "orchestrator", lambda metrics: _main(metrics, args.config))
 
 
 if __name__ == "__main__":

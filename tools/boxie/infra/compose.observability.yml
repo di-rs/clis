@@ -1,0 +1,17 @@
+services:
+  api:
+    environment:
+      BOXIE_METRICS_HOST: 0.0.0.0
+    networks:
+      metrics:
+        aliases: [boxie-api]
+  orchestrator:
+    environment:
+      BOXIE_METRICS_HOST: 0.0.0.0
+    networks:
+      metrics:
+        aliases: [boxie-orchestrator]
+networks:
+  metrics:
+    external: true
+    name: ${OBS_METRICS_NETWORK:-boxie-metrics}

@@ -1,40 +1,64 @@
 name: boxie-temporal
-x-admin: &admin
+x-admin:
   image: temporalio/admin-tools:1.32.0@sha256:a9f84fb9a374b2374fe2e67c8efc0468ff3f1c66c8a0b14597ec86e349e62bca
-  profiles: [operations]
-  networks: [control]
+  profiles: &id001
+  - operations
+  networks: &id002
+  - control
 services:
   temporal:
     image: temporalio/server:1.32.0@sha256:c3e752127759616bb1615e0f9ba0e21635aeb5fdeb922de4f371c350955f46ae
     restart: unless-stopped
-    entrypoint: [/bin/sh, -ec]
+    entrypoint:
+    - /bin/sh
+    - -ec
     command:
-      - 'export TEMPORAL_BROADCAST_ADDRESS=$$(hostname -i); exec /usr/local/bin/temporal-server --config-file /etc/temporal/config.yaml --allow-no-auth start --service=frontend --service=history --service=matching --service=worker'
+    - set -- $$(getent ahostsv4 temporal-internode); test "$$#" -gt 0; export TEMPORAL_BROADCAST_ADDRESS=$$1;
+      exec /usr/local/bin/temporal-server --config-file /etc/temporal/config.yaml --allow-no-auth start
+      --service=frontend --service=history --service=matching --service=worker
     environment:
       TEMPORAL_DB_PASSWORD: ${TEMPORAL_DB_PASSWORD:?provide persistence database password}
       VISIBILITY_DB_PASSWORD: ${VISIBILITY_DB_PASSWORD:?provide visibility database password}
     volumes:
-      - ./config.yaml:/etc/temporal/config.yaml:ro
-      - ${TEMPORAL_CERTS_DIR:?provide server certificate directory}:/certs:ro
-    networks: [control]
+    - ./config.yaml:/etc/temporal/config.yaml:ro
+    - ${TEMPORAL_CERTS_DIR:?provide server certificate directory}:/certs:ro
+    networks:
+      control:
+        aliases:
+        - temporal-internode
+    logging:
+      driver: journald
+      options:
+        mode: non-blocking
+        max-buffer-size: 4m
+        tag: boxie-temporal-temporal
   schema:
-    <<: *admin
-    entrypoint: [/bin/sh, /scripts/schema.sh]
+    image: temporalio/admin-tools:1.32.0@sha256:a9f84fb9a374b2374fe2e67c8efc0468ff3f1c66c8a0b14597ec86e349e62bca
+    profiles: *id001
+    networks: *id002
+    entrypoint:
+    - /bin/sh
+    - /scripts/schema.sh
     environment:
       SQL_HOST: postgres
-      SQL_PORT: "5432"
+      SQL_PORT: '5432'
       TEMPORAL_DB_PASSWORD: ${TEMPORAL_DB_PASSWORD:?provide persistence database password}
       VISIBILITY_DB_PASSWORD: ${VISIBILITY_DB_PASSWORD:?provide visibility database password}
     volumes:
-      - ./schema.sh:/scripts/schema.sh:ro
+    - ./schema.sh:/scripts/schema.sh:ro
   bootstrap:
-    profiles: [operations]
-    networks: [control]
+    profiles:
+    - operations
+    networks:
+    - control
     image: ${BOXIE_RUNTIME_IMAGE:?provide approved immutable Boxie runtime image}
-    user: "1000:1000"
-    entrypoint: [python, -m, boxie.bootstrap.temporal]
+    user: 1000:1000
+    entrypoint:
+    - python
+    - -m
+    - boxie.bootstrap.temporal
     volumes:
-      - ${TEMPORAL_OPERATOR_CERTS_DIR:?provide operator certificate directory}:/certs:ro
+    - ${TEMPORAL_OPERATOR_CERTS_DIR:?provide operator certificate directory}:/certs:ro
   ui:
     image: temporalio/ui:2.56.0@sha256:66d55d383bfb334ee0781f21a3b36c865b3f0f2262491a070bb2143394e9fe88
     restart: unless-stopped
@@ -44,10 +68,17 @@ services:
       TEMPORAL_TLS_CERT: /certs/ui-client.pem
       TEMPORAL_TLS_KEY: /certs/ui-client.key
       TEMPORAL_TLS_SERVER_NAME: temporal
-      TEMPORAL_TLS_ENABLE_HOST_VERIFICATION: "true"
+      TEMPORAL_TLS_ENABLE_HOST_VERIFICATION: 'true'
     volumes:
-      - ${TEMPORAL_UI_CERTS_DIR:?provide UI certificate directory}:/certs:ro
-    networks: [control]
+    - ${TEMPORAL_UI_CERTS_DIR:?provide UI certificate directory}:/certs:ro
+    networks:
+      control: {}
+    logging:
+      driver: journald
+      options:
+        mode: non-blocking
+        max-buffer-size: 4m
+        tag: boxie-temporal-ui
 networks:
   control:
     external: true

@@ -136,3 +136,17 @@ A consumer-network operator can run `python -m boxie_infra.smoke --boxie-url
 http://boxie-api:8090 --credential-file /private/consumer.secret` with the `smoke`
 profile approved. The inspection portion also requires operator Docker access;
 that access belongs to the test runner, never the Playground service.
+
+## Observability and operator access
+
+[Observability](observability/README.md) and [operator ingress](ingress/README.md)
+are Boxie-owned native configuration beside PostgreSQL and Temporal. Their guides
+cover the optional network overlays, three shared private bridges, bounded storage
+and the small environment substitution step for installation-specific Prometheus
+and Access values. Base Boxie and Temporal deployment needs no monitoring inputs.
+Only API/orchestrator and Temporal join metrics; Playground stays on the consumer
+network. The minimal collector image supplies the journalctl version required for
+cross-boot collection; there are no infrastructure Python renderers.
+
+Runtime images install only their application package. The root lockfile lists
+workspace member manifests, whose metadata is copied for dependency resolution.

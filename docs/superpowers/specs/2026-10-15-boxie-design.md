@@ -355,11 +355,20 @@ command/environment workflow parameters. Test persisted workflow history and
 logs with sentinel secrets. See [Temporal data handling](https://docs.temporal.io/dataconversion).
 
 Use journald for long-lived service logs, Vector for collection, VictoriaLogs for
-storage, and Grafana for provisioned dashboards. Retain searchable VictoriaLogs
-data for seven days. Journal copies use shorter retention; journal storage and
-Vector buffers have separate bounded disk budgets defined in deployment
-configuration. The seven-day window describes searchable storage, not guaranteed
-delivery of buffered logs. Do not mount Docker's socket into the collector or
+storage, and Grafana for provisioned dashboards. Searchable VictoriaLogs data has
+a seven-day maximum age and a user-selected 256 MiB (268435456 bytes) native
+cleanup target. The selected VictoriaLogs version checks approximately every ten
+seconds and deletes the oldest eligible daily partitions while retaining the
+newest two daily partitions. The user explicitly accepts that these protected
+partitions and periodic cleanup can exceed 256 MiB; this is not a filesystem
+quota or a guaranteed seven-day history window. See
+[VictoriaLogs disk retention](https://docs.victoriametrics.com/victorialogs/#retention-by-disk-space-usage)
+and the [selected cleanup implementation](https://github.com/VictoriaMetrics/VictoriaLogs/blob/v1.53.0/lib/logstorage/storage.go#L769-L842).
+Grafana RAM has a hard 256 MiB maximum, independently of searchable-log storage.
+Journal copies use shorter retention; journal storage and Vector buffers have
+separate bounded disk budgets defined in deployment configuration. These changes
+do not alter SQL lifecycle/idempotency retention or any other service budget.
+Buffered log delivery remains best effort. Do not mount Docker's socket into the collector or
 tail the private binary files of Docker's local
 logging driver. Sandboxes keep their logging driver disabled; the orchestrator owns their
 PTY output. See [Docker journald](https://docs.docker.com/engine/logging/drivers/journald/),
@@ -390,6 +399,23 @@ Access and Tunnel. Validate Access at the tunnel/origin boundary and prevent
 direct-origin bypass. Only approved dashboard routes use that ingress; Boxie's
 API remains internal. See [Cloudflare self-hosted Access applications](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/)
 and [VictoriaLogs Grafana integration](https://docs.victoriametrics.com/victorialogs/integrations/grafana/).
+
+Implementation uses committed native configs and optional monitoring network
+overlays, pinned upstream images with one minimal collector layer for a compatible journalctl, and
+cloudflared's native required Access validation. There are no infrastructure
+Python distributions, configuration compilers, custom metrics HTTP servers or
+observability-only fault workflows. The existing lifecycle CI owns compact native
+validators and a collector-outage/log-search smoke. Storage pressure and real
+Access policy enforcement remain deployment activation checks.
+
+Standard logging/structlog sanitizes and captures context before a bounded
+QueueHandler queue. One daemon writes an unbuffered duplicate of stdout without
+changing fd1/fd2 or their flags; shutdown shares a two-second budget with the
+upstream prometheus-client exporter. CLI parsing precedes logging setup. SQL
+telemetry reads only cached bounded snapshots; scrapes never query the database.
+Alembic is the sole schema authority. Retain provisioning_outcome for deduplicated
+post-commit outcomes and cleanup_pending_since for restart-safe cleanup age; drop
+the unread readiness timestamp with a forward revision for upgrade safety.
 
 ## Pulumi, releases, and CI
 
@@ -566,3 +592,7 @@ No additional product decisions are required before implementation planning.
 Exact wire schemas, dependency versions, replay-buffer bounds, and deployment
 settings must be made concrete and tested in the implementation plan within the
 constraints above; Python/Temporal support remains an explicit feasibility gate.
+
+## PR 41 integration update (2026-10-17)
+
+This update supersedes shared-observability and standalone-worker assumptions above. Boxie now owns observability runtime code under `tools/boxie/src/boxie/observability`, and deployment assets under `tools/boxie/infra/observability` and `tools/boxie/infra/ingress`. API and orchestrator are the only Boxie processes. The orchestrator embeds the lifecycle and maintenance workers on installation/host-specific queues. SQLModel and Alembic own the telemetry facts and schema changes. Playground has no telemetry dependency or private scrape target. Its existing lightweight logging is sufficient for disposable feature environments; extraction is deferred until a second long-lived service needs the same behavior. Grafana remains capped at 256 MiB RAM; VictoriaLogs retains its accepted 256 MiB cleanup target with the newest two daily partitions protected.

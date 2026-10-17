@@ -49,6 +49,15 @@ class Sandbox(SQLModel, table=True):
         UniqueConstraint("consumer_id", "idempotency_key"),
         CheckConstraint(column("generation") > 0, name="sandbox_generation"),
         CheckConstraint(
+            column("provisioning_outcome").in_(["ready", "failed", "stopped"]),
+            name="sandbox_provisioning_outcome",
+        ),
+        Index(
+            "sandbox_cleanup_pending",
+            "cleanup_pending_since",
+            postgresql_where=column("cleanup_pending"),
+        ),
+        CheckConstraint(
             column("state").in_(
                 ["accepted", "provisioning", "ready", "terminating", "terminated", "failed"]
             ),
@@ -89,6 +98,8 @@ class Sandbox(SQLModel, table=True):
     state: str = Field(default="accepted", sa_column_kwargs={"server_default": literal("accepted")})
     cleanup_pending: bool = Field(default=False, sa_column_kwargs={"server_default": false()})
     cleaned_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
+    provisioning_outcome: str | None = None
+    cleanup_pending_since: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
 
 
 class CapacitySlot(SQLModel, table=True):

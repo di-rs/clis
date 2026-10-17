@@ -145,7 +145,7 @@ default-branch boundaries.
 
 Boxie has only the PostgreSQL/Temporal lifecycle. Default pytest excludes live
 services; explicit integration selection fails when dependencies are missing.
-Run the isolated infrastructure tier with:
+Run the isolated infrastructure tier (including SQL/Temporal observability, migration and history/privacy checks) with:
 
 ```sh
 uv run --locked python tools/boxie/tests/run_integration.py
@@ -176,3 +176,17 @@ The native browser config uses the fixture's real Playground origin and Linux
 artifact, including same-page reconnection. Local Docker Desktop arm64/runc cannot
 satisfy this platform requirement. Local real SQL/Temporal tests and mocked Docker tests remain
 separate evidence; neither establishes production activation readiness.
+
+## Observability validation
+
+The existing lifecycle job also validates pinned native Vector/Prometheus/Cloudflare
+configuration and runs a compact Linux persistent-journal to Grafana datasource
+smoke after a collector outage. To run the validators locally on Docker Desktop:
+
+```sh
+uv run --locked pytest -m integration tools/boxie/tests/test_observability_native.py -k native_configs
+```
+
+The full native file requires a Linux Docker host with persistent journald and
+real PostgreSQL/Temporal fixtures. Missing prerequisites fail when explicitly
+selected. Storage-pressure and live Cloudflare Access remain activation checks.

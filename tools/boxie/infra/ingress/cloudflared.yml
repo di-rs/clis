@@ -1,0 +1,19 @@
+# Substitute only the six OPERATOR_* variables listed in README.md before deployment.
+tunnel: ${OPERATOR_TUNNEL_ID}
+credentials-file: /run/secrets/tunnel.json
+ingress:
+  - hostname: ${OPERATOR_GRAFANA_HOSTNAME}
+    service: http://grafana:3000
+    originRequest:
+      access:
+        required: true
+        teamName: ${OPERATOR_TEAM_NAME}
+        audTag: [${OPERATOR_GRAFANA_AUDIENCE}]
+  - hostname: ${OPERATOR_TEMPORAL_HOSTNAME}
+    service: http://temporal-ui:8080
+    originRequest:
+      access:
+        required: true
+        teamName: ${OPERATOR_TEAM_NAME}
+        audTag: [${OPERATOR_TEMPORAL_AUDIENCE}]
+  - service: http_status:404

@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import json
 import os
 import subprocess
 import time
@@ -30,6 +31,18 @@ from temporalio.worker import Replayer
 from integration.stack import LifecycleStack
 
 pytestmark = pytest.mark.integration
+
+
+def assert_journal_failure(logs: str) -> None:
+    events = [json.loads(line) for line in logs.splitlines() if line]
+    assert any(
+        event.get("schema_version") == 1
+        and event.get("service") == "boxie"
+        and event.get("role") == "orchestrator"
+        and event.get("level") == "ERROR"
+        and event.get("event") == "journal_failed"
+        for event in events
+    ), "structured orchestrator journal failure event missing"
 
 
 @pytest.fixture
@@ -327,9 +340,9 @@ def test_sustained_journal_failure_across_orchestrator_restart(
             # Profiles alone remain writable for bootstrap; execution.json and its
             # parent stay read-only. Physical deletion proves startup reached cleanup.
             logs = await asyncio.to_thread(
-                stack.runtime_command, "logs", "--no-color", "orchestrator"
+                stack.runtime_command, "logs", "--no-color", "--no-log-prefix", "orchestrator"
             )
-            assert "execution journal persistence failed" in logs
+            assert_journal_failure(logs)
             await asyncio.to_thread(stack.process, "orchestrator", "kill")
             await asyncio.to_thread(stack.process, "orchestrator", "start")
             await pending_after_restart(stack, client, identifier)

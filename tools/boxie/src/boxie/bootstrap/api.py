@@ -1,32 +1,20 @@
 """Unprivileged API composition root: secrets and orchestrator origin are operator-owned."""
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import hmac
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import uvicorn
-from pydantic import TypeAdapter, ValidationError
-
-from boxie.api.app import ApiConfig, create_app
-from boxie.bootstrap.config import LifecycleConfig, read_credential
-from boxie.bootstrap.dependencies import (
-    Dependencies,
-    database_for,
-    lifecycle_config,
-    orchestrator_identity,
-    temporal_client,
-)
-from boxie.bootstrap.schedules import check_schedules
-from boxie.contracts.common import ConsumerId
-from boxie.domain.models import OrchestratorIdentity
-from boxie.persistence.outbox import PostgresOutbox
-from boxie.persistence.postgres import PostgresLifecycle
-from boxie.sandbox.transport.client import OrchestratorClient
-from boxie.temporal.contracts import lifecycle_queue
-from boxie.temporal.dispatcher import CommandDelivery
+if TYPE_CHECKING:
+    from boxie.api.app import ApiConfig
+    from boxie.bootstrap.config import LifecycleConfig
+    from boxie.domain.models import OrchestratorIdentity
+    from boxie.observability.metrics import Metrics
 
 
 @dataclass(frozen=True)
@@ -42,6 +30,13 @@ class RuntimeConfig:
 
 
 def load_configuration(path: Path) -> RuntimeConfig:
+    from pydantic import TypeAdapter, ValidationError
+
+    from boxie.api.app import ApiConfig
+    from boxie.bootstrap.config import read_credential
+    from boxie.bootstrap.dependencies import lifecycle_config, orchestrator_identity
+    from boxie.contracts.common import ConsumerId
+
     data = json.loads(path.read_text())
     orchestrator = read_credential(Path(data.pop("orchestrator_credential_file")))
     consumers = {
@@ -67,13 +62,25 @@ def load_configuration(path: Path) -> RuntimeConfig:
     return RuntimeConfig(api=api, orchestrator_credential=orchestrator, **data)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Boxie private sandbox API")
-    parser.add_argument("--config", type=Path, required=True)
-    args = parser.parse_args()
-    config = load_configuration(args.config)
+def _main(metrics: Metrics, config_path: Path) -> None:
+    import uvicorn
+
+    from boxie.api.app import create_app
+    from boxie.bootstrap.dependencies import Dependencies, database_for, temporal_client
+    from boxie.bootstrap.schedules import check_schedules
+    from boxie.observability.runtime import api_dependencies, background
+    from boxie.observability.snapshot import refresh_snapshots
+    from boxie.observability.telemetry.logging import install_asyncio_handler, log_runtime
+    from boxie.persistence.outbox import PostgresOutbox
+    from boxie.persistence.postgres import PostgresLifecycle
+    from boxie.sandbox.transport.client import OrchestratorClient
+    from boxie.temporal.contracts import lifecycle_queue
+    from boxie.temporal.dispatcher import CommandDelivery
+
+    config = load_configuration(config_path)
 
     async def run() -> None:
+        install_asyncio_handler(log_runtime())
         # SQL-backed retry/status/stop and observations must remain reachable
         # during Temporal outages. Readiness connects with a bounded timeout;
         # only new admission depends on that probe. Worker startup stays eager.
@@ -96,12 +103,14 @@ def main() -> None:
                     config.identity,
                     lambda: check_schedules(temporal, config.identity),
                 ),
+                diagnostics=metrics.transition,
             )
             app = create_app(
                 config.api,
                 lifecycle,
                 orchestrator,
                 orchestrator,
+                request_completed=metrics.http_completed,
                 deliver=CommandDelivery(
                     PostgresOutbox(sessions, config.identity),
                     temporal,
@@ -118,11 +127,28 @@ def main() -> None:
                     ws_max_queue=4,
                     ws_per_message_deflate=False,
                     access_log=False,
+                    log_config=None,
                 )
             )
-            await server.serve()
+            async with background(
+                refresh_snapshots(metrics, config.lifecycle.postgres_dsn_file),
+                api_dependencies(metrics, orchestrator, temporal, config.identity),
+            ):
+                await server.serve()
 
     asyncio.run(run())
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Boxie private sandbox api")
+    parser.add_argument("--config", type=Path, required=True)
+    args = parser.parse_args()
+    from boxie.observability.logging import process_logging
+
+    logs = process_logging("api")
+    from boxie.observability.runtime import run_metrics_process
+
+    run_metrics_process(logs, "api", lambda metrics: _main(metrics, args.config))
 
 
 if __name__ == "__main__":

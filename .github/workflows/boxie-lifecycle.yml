@@ -110,10 +110,15 @@ jobs:
           PYTHON
           export BOXIE_TEST_SERVER="$RUNNER_TEMP/boxie-test-server"
           uv run --locked pytest -m integration tools/boxie/tests/test_temporal_lifecycle.py -vv --durations=10
-      - name: 🧪 Test PostgreSQL and Temporal cancellation, replay and recovery
-        timeout-minutes: 7
+      - name: 🗂️ Enable persistent journal for the collector smoke
         run: |
-          uv run --locked pytest -m integration tools/boxie/tests/test_temporal_deployment.py tools/boxie/tests/test_outbox.py tools/boxie/tests/integration/test_artifact_commit.py -vv --durations=10
+          sudo mkdir -p /var/log/journal
+          sudo systemd-tmpfiles --create --prefix /var/log/journal
+          sudo journalctl --flush
+      - name: 🧪 Test PostgreSQL and Temporal cancellation, replay and diagnostics
+        timeout-minutes: 9
+        run: |
+          uv run --locked pytest -m integration tools/boxie/tests/test_temporal_deployment.py tools/boxie/tests/test_outbox.py tools/boxie/tests/integration/test_artifact_commit.py tools/boxie/tests/test_migrations.py tools/boxie/tests/test_observability_lifecycle.py tools/boxie/tests/test_observability_logging.py tools/boxie/tests/test_observability_native.py -vv --durations=10
       - name: 🔐 Test native credential permissions and endpoint restarts
         timeout-minutes: 3
         run: |

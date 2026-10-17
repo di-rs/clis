@@ -15,7 +15,7 @@ import sys
 import time
 from importlib.metadata import version
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
 import yaml
@@ -32,8 +32,13 @@ def command(args: list[str], *, env: dict[str, str] | None = None) -> str:
     return result.stdout.strip()
 
 
+class CommandRunner(Protocol):
+    def __call__(self, args: list[str], *, env: dict[str, str] | None = None) -> str: ...
+
+
 class ProductionStack:
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, command_runner: CommandRunner | None = None) -> None:
+        self._command_runner = command_runner or command
         self.root = root
         self.name = "boxie-integration-" + uuid4().hex[:12]
         self.postgres = self.name + "-postgres"
@@ -66,13 +71,16 @@ class ProductionStack:
         self.pg_port = ""
         self.evidence: dict[str, Any] = {}
 
+    def command(self, args: list[str], *, env: dict[str, str] | None = None) -> str:
+        return self._command_runner(args, env=self.env if env is None else env)
+
     def compose(self, package: str, *args: str) -> str:
         directory = (
             ROOT / "tools/boxie/infra/temporal"
             if package == "temporal"
             else ROOT / "tools/boxie/infra/postgres"
         )
-        return command(
+        return self.command(
             [
                 "docker",
                 "compose",
@@ -93,7 +101,7 @@ class ProductionStack:
         for directory in ("server", "operator", "ui", "clients"):
             (self.root / directory).mkdir()
         for name in ("frontend", "internode", "client", "untrusted"):
-            command(
+            self.command(
                 [
                     "openssl",
                     "req",
@@ -123,7 +131,7 @@ class ProductionStack:
             target = self.root / directory
             key, cert = target / f"{name}.key", target / f"{name}.pem"
             csr, ext = ca / f"{name}.csr", ca / f"{name}.ext"
-            command(
+            self.command(
                 [
                     "openssl",
                     "req",
@@ -141,7 +149,7 @@ class ProductionStack:
             ext.write_text(
                 f"subjectAltName=DNS:{san}\nextendedKeyUsage={usage}\nbasicConstraints=CA:FALSE\n"
             )
-            command(
+            self.command(
                 [
                     "openssl",
                     "x509",
@@ -192,12 +200,31 @@ class ProductionStack:
             )
         )
 
+        # Dependency diagnostics remain local and bounded during journal faults.
+        for name, roles in (
+            ("postgres", ("postgres",)),
+            ("temporal", ("temporal", "ui", "schema", "bootstrap")),
+        ):
+            path = self.root / f"{name}-override.yml"
+            data = yaml.safe_load(path.read_text())
+            for role in roles:
+                data["services"].setdefault(role, {})["logging"] = {
+                    "driver": "local",
+                    "options": {
+                        "mode": "non-blocking",
+                        "max-buffer-size": "4m",
+                        "max-size": "10m",
+                        "max-file": "3",
+                    },
+                }
+            path.write_text(yaml.safe_dump(data).replace("logging:", "logging: !override"))
+
     def start(self) -> None:
         self.certificates()
         self.write_overrides()
         # The harness owns this external bridge separately from both projects.
         # Host-side SQL/Temporal clients require a non-internal disposable bridge.
-        self.network_id = command(
+        self.network_id = self.command(
             ["docker", "network", "create", "--label", f"boxie.integration={self.name}", self.name]
         )
         self.compose("postgres", "up", "--detach", "--wait", "--wait-timeout", "90")
@@ -225,7 +252,7 @@ class ProductionStack:
                 + self.compose("temporal", "logs", "--tail", "100")
             )
         self.evidence = {
-            "server": command(
+            "server": self.command(
                 ["docker", "version", "--format", "{{.Server.Version}} {{.Server.Arch}}"]
             ),
             "bootstrap_sdk": version("temporalio"),
@@ -236,7 +263,7 @@ class ProductionStack:
         (self.root / "evidence.json").write_text(json.dumps(self.evidence, indent=2))
 
     def bootstrap(self) -> str:
-        return command(
+        return self.command(
             [
                 sys.executable,
                 "-m",
@@ -262,7 +289,16 @@ class ProductionStack:
                     failures.append(str(error))
         if self.network_id is not None:
             try:
-                command(["docker", "network", "rm", self.network_id])
+                item = json.loads(self.command(["docker", "network", "inspect", self.network_id]))[
+                    0
+                ]
+                if (
+                    item["Id"] != self.network_id
+                    or item["Name"] != self.name
+                    or item.get("Labels", {}).get("boxie.integration") != self.name
+                ):
+                    raise RuntimeError("refusing cleanup of foreign control network")
+                self.command(["docker", "network", "rm", self.network_id])
                 self.network_id = None
             except Exception as error:
                 failures.append(str(error))
@@ -283,7 +319,13 @@ def main() -> None:
     selected = (
         ["tools/boxie/tests/integration/test_lifecycle.py"]
         if args.runtime
-        else ["tools/boxie/tests/test_postgres.py", "tools/boxie/tests/test_temporal_deployment.py"]
+        else [
+            "tools/boxie/tests/test_postgres.py",
+            "tools/boxie/tests/test_temporal_deployment.py",
+            "tools/boxie/tests/test_migrations.py",
+            "tools/boxie/tests/test_observability_lifecycle.py",
+            "tools/boxie/tests/test_observability_logging.py",
+        ]
     )
     raise SystemExit(
         subprocess.call(

@@ -1,0 +1,152 @@
+groups:
+- name: boxie-health
+  rules:
+  - alert: BoxieCleanupDelayed
+    expr: boxie_cleanup_oldest_age_seconds{job="boxie-api"} > 120 and on(job,instance)
+      (boxie_snapshot_fresh{job="boxie-api"} == 1)
+    for: 2m
+    labels:
+      severity: warning
+  - alert: BoxieCapacityFull
+    expr: (boxie_capacity_reserved{job="boxie-api"} >= boxie_capacity_limit{job="boxie-api"}
+      and boxie_capacity_limit{job="boxie-api"} > 0) and on(job,instance) (boxie_snapshot_fresh{job="boxie-api"}
+      == 1)
+    for: 5m
+    labels:
+      severity: warning
+  - alert: BoxieSnapshotUnavailable
+    expr: boxie_snapshot_fresh{job="boxie-api"} == 0 or absent(boxie_snapshot_fresh{job="boxie-api"})
+    for: 2m
+    labels:
+      severity: warning
+  - alert: BoxieCleanupAgeUnknown
+    expr: boxie_cleanup_age_unknown{job="boxie-api"} > 0 and on(job,instance) (boxie_snapshot_fresh{job="boxie-api"}
+      == 1)
+    for: 2m
+    labels:
+      severity: warning
+  - alert: BoxieWorkerUnavailable
+    expr: (boxie_dependency_ready{job="boxie-api",dependency=~"workflow_poller|activity_poller|maintenance_workflow_poller|maintenance_activity_poller"}
+      == 0) or (boxie_dependency_known{job="boxie-api",dependency=~"workflow_poller|activity_poller|maintenance_workflow_poller|maintenance_activity_poller"}
+      == 0) or absent(boxie_dependency_known{job="boxie-api",dependency="workflow_poller"})
+      or absent(boxie_dependency_known{job="boxie-api",dependency="activity_poller"})
+      or absent(boxie_dependency_known{job="boxie-api",dependency="maintenance_workflow_poller"})
+      or absent(boxie_dependency_known{job="boxie-api",dependency="maintenance_activity_poller"})
+    for: 2m
+    labels:
+      severity: warning
+  - alert: RequiredScrapeUnavailable
+    expr: up{job="boxie-api"} == 0 or absent(up{job="boxie-api"})
+    for: 2m
+    labels:
+      severity: warning
+      job: boxie-api
+  - alert: RequiredScrapeUnavailable
+    expr: up{job="boxie-orchestrator"} == 0 or absent(up{job="boxie-orchestrator"})
+    for: 2m
+    labels:
+      severity: warning
+      job: boxie-orchestrator
+  - alert: RequiredScrapeUnavailable
+    expr: up{job="boxie-api-sdk"} == 0 or absent(up{job="boxie-api-sdk"})
+    for: 2m
+    labels:
+      severity: warning
+      job: boxie-api-sdk
+  - alert: RequiredScrapeUnavailable
+    expr: up{job="boxie-orchestrator-sdk"} == 0 or absent(up{job="boxie-orchestrator-sdk"})
+    for: 2m
+    labels:
+      severity: warning
+      job: boxie-orchestrator-sdk
+  - alert: RequiredScrapeUnavailable
+    expr: up{job="temporal"} == 0 or absent(up{job="temporal"})
+    for: 2m
+    labels:
+      severity: warning
+      job: temporal
+  - alert: RequiredScrapeUnavailable
+    expr: up{job="vector"} == 0 or absent(up{job="vector"})
+    for: 2m
+    labels:
+      severity: warning
+      job: vector
+  - alert: RequiredScrapeUnavailable
+    expr: up{job="victorialogs"} == 0 or absent(up{job="victorialogs"})
+    for: 2m
+    labels:
+      severity: warning
+      job: victorialogs
+  - alert: RequiredScrapeUnavailable
+    expr: up{job="node-exporter"} == 0 or absent(up{job="node-exporter"})
+    for: 2m
+    labels:
+      severity: warning
+      job: node-exporter
+  - alert: RequiredScrapeUnavailable
+    expr: up{job="prometheus"} == 0 or absent(up{job="prometheus"})
+    for: 2m
+    labels:
+      severity: warning
+      job: prometheus
+  - alert: HostDiskSpaceLow
+    expr: (node_filesystem_avail_bytes{job="node-exporter",mountpoint="/",device_error=""}
+      / node_filesystem_size_bytes{job="node-exporter",mountpoint="/",device_error=""})
+      < 0.2 and on(job,instance,device,mountpoint,fstype) (node_filesystem_device_error{job="node-exporter"}
+      == 0) and on(job,instance,device,mountpoint,fstype) (node_filesystem_size_bytes{job="node-exporter"}
+      > 0) and on(job,instance) (node_scrape_collector_success{job="node-exporter",collector="filesystem"}
+      == 1)
+    for: 5m
+    labels:
+      severity: warning
+  - alert: HostDiskSpaceCritical
+    expr: (node_filesystem_avail_bytes{job="node-exporter",mountpoint="/",device_error=""}
+      / node_filesystem_size_bytes{job="node-exporter",mountpoint="/",device_error=""})
+      < 0.1 and on(job,instance,device,mountpoint,fstype) (node_filesystem_device_error{job="node-exporter"}
+      == 0) and on(job,instance,device,mountpoint,fstype) (node_filesystem_size_bytes{job="node-exporter"}
+      > 0) and on(job,instance) (node_scrape_collector_success{job="node-exporter",collector="filesystem"}
+      == 1)
+    for: 2m
+    labels:
+      severity: critical
+  - alert: HostDiskMetricsUnavailable
+    expr: node_filesystem_device_error{job="node-exporter"} != 0 or node_scrape_collector_success{job="node-exporter",collector="filesystem"}
+      != 1 or node_filesystem_size_bytes{job="node-exporter"} <= 0 or absent(node_filesystem_size_bytes{job="node-exporter",mountpoint="/"})
+    for: 2m
+    labels:
+      severity: warning
+  - alert: CollectorBufferHigh
+    expr: vector_buffer_size_bytes{job="vector",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0"}
+      / ((vector_buffer_max_size_bytes{job="vector",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0"}
+      >= 268435488) - 134217728) > 0.8
+    for: 5m
+    labels:
+      severity: warning
+  - alert: CollectorBufferCapacityUnavailable
+    expr: (up{job="vector"} == 1) unless on(job,instance) (vector_buffer_max_size_bytes{job="vector",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0"}
+      >= 268435488)
+    for: 2m
+    labels:
+      severity: warning
+  - alert: CollectorDropsIncreasing
+    expr: sum by(job,instance,component_id,buffer_type,stage,intentional) (increase(vector_buffer_discarded_events_total{job="vector",component_id="storage",buffer_id="storage",buffer_type="disk",stage="1",intentional="true"}[5m])
+      or increase(vector_buffer_discarded_events_total{job="vector",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0",intentional="false"}[5m]))
+      > 0
+    for: 2m
+    labels:
+      severity: warning
+  - alert: ServiceLogDropsIncreasing
+    expr: increase(boxie_log_dropped_total[5m]) > 0
+    for: 2m
+    labels:
+      severity: warning
+  - alert: ServiceLogSinkUnavailable
+    expr: boxie_log_sink_available == 0
+    for: 2m
+    labels:
+      severity: warning
+  - alert: LogStorageDropsIncreasing
+    expr: increase(vl_rows_dropped_total{job="victorialogs"}[5m]) > 0
+    for: 2m
+    labels:
+      severity: warning

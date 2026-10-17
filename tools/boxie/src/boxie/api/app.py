@@ -15,6 +15,7 @@ from boxie.api.routes import routes
 from boxie.api.terminal import terminal_routes
 from boxie.application.ports import ArtifactAccess, ReadyLifecycle, TerminalAccess
 from boxie.domain.errors import BoxieError
+from boxie.observability.logging import RequestLogging
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,7 @@ def create_app(
     terminal: TerminalAccess,
     *,
     deliver: Callable[[UUID], Awaitable[None]] | None = None,
+    request_completed: Callable[[str, str, str, float], None] | None = None,
 ) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     auth = ConsumerAuth(config.consumers)
@@ -82,4 +84,5 @@ def create_app(
 
     app.include_router(routes(lifecycle, artifacts, deliver))
     app.include_router(terminal_routes(lifecycle, terminal, auth))
+    app.add_middleware(RequestLogging, completed=request_completed)
     return app

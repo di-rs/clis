@@ -25,6 +25,7 @@ from boxie.domain.models import (
     TerminationReason,
 )
 from boxie.domain.policy import validate_policy
+from boxie.observability.events import DiagnosticSink, Transition, deliver, emit
 from boxie.sandbox.docker import ExecutionDocker
 from boxie.sandbox.execution.journal import ExecutionJournal, ExecutionRecord
 from boxie.sandbox.execution.reconcile import reconcile_removal
@@ -65,6 +66,8 @@ class Orchestrator:
         guard: StartGuard,
         clock: Callable[[], datetime],
         monotonic: Callable[[], float],
+        *,
+        diagnostics: DiagnosticSink = emit,
     ) -> None:
         self.config, self.docker, self.artifact_path, self.guard = (
             config,
@@ -73,6 +76,7 @@ class Orchestrator:
             guard,
         )
         self.clock, self.monotonic, self.boot_id = clock, monotonic, uuid4()
+        self.diagnostics = diagnostics
         self.profiles = ProfileRegistry(config.profiles_file, config.data_dir / "profiles")
         self.journal = ExecutionJournal(config.data_dir / "execution.json", config.identity)
         self.records = self.journal.records
@@ -347,6 +351,7 @@ class Orchestrator:
                 except Exception:
                     pass
             create = runtime.create
+            started = self.monotonic()
             try:
                 await reconcile_removal(
                     self.docker,
@@ -360,6 +365,18 @@ class Orchestrator:
                     raise
                 # Physical deletion may have succeeded, but the failed final save
                 # leaves a pending, unconfirmed record for autonomous retry.
+            finally:
+                if not record.removal_confirmed:
+                    deliver(
+                        self.diagnostics,
+                        Transition(
+                            "cleanup.failed",
+                            record.id,
+                            outcome="pending",
+                            reason="delete_unconfirmed",
+                            duration_seconds=max(0, self.monotonic() - started),
+                        ),
+                    )
 
     async def renew_control_lease(self, ref: SandboxRef, boot_id: UUID) -> OrchestratorObservation:
         async with self._lock(ref):
@@ -396,6 +413,7 @@ class Orchestrator:
             self.runtimes[ref.id].timers.disconnect = None
             self._changed(record)
             epoch = record.attachment_epoch
+        deliver(self.diagnostics, Transition("terminal.attached", record.id))
         await self.publish(ref)
         return epoch
 
@@ -410,6 +428,7 @@ class Orchestrator:
                 self._attachment(record, epoch)
 
     async def detach(self, ref: SandboxRef, epoch: int) -> None:
+        detached = False
         async with self._lock(ref):
             record = self._record(ref)
             if (
@@ -423,6 +442,9 @@ class Orchestrator:
                     self.monotonic() + record.spec.policy.disconnect_seconds
                 )
                 self._changed(record)
+                detached = True
+        if detached:
+            deliver(self.diagnostics, Transition("terminal.detached", record.id))
         await self.publish(ref)
 
     async def write(
@@ -468,6 +490,9 @@ class Orchestrator:
             await self._cleanup(record)
 
     async def _supervised_reconcile(self, record: ExecutionRecord) -> None:
+        attempted = record.state not in FINAL and (
+            record.cleanup_pending or self._expiry(record) is not None
+        )
         try:
             await self._reconcile_one(record)
         except Exception:
@@ -476,6 +501,15 @@ class Orchestrator:
             self.runtimes[record.id].reconciliation_failed = True
         else:
             self.runtimes[record.id].reconciliation_failed = False
+        if attempted:
+            deliver(
+                self.diagnostics,
+                Transition(
+                    "reconciliation.completed",
+                    record.id,
+                    outcome="confirmed" if record.removal_confirmed else "pending",
+                ),
+            )
 
     async def reconcile(self) -> None:
         await asyncio.gather(

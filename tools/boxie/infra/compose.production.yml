@@ -1,4 +1,3 @@
-# API and orchestrator with embedded Temporal workers; only orchestrator receives Docker and artifact storage.
 name: ${BOXIE_PROJECT_NAME:-boxie}
 services:
   api:
@@ -29,6 +28,15 @@ services:
     - no-new-privileges:true
     init: true
     restart: unless-stopped
+    environment:
+      BOXIE_RELEASE: ${BOXIE_RELEASE:-unknown}
+    logging:
+      driver: journald
+      options:
+        mode: non-blocking
+        max-buffer-size: 4m
+        tag: boxie-api
+    pids_limit: 256
   orchestrator:
     image: ${BOXIE_RUNTIME_IMAGE:?Set approved immutable Boxie image}
     command:
@@ -46,7 +54,7 @@ services:
     - ${BOXIE_ORCHESTRATOR_TEMPORAL_CERT_FILE:?Set dedicated Temporal client certificate}:/run/secrets/temporal-client.pem:ro
     - ${BOXIE_ORCHESTRATOR_TEMPORAL_KEY_FILE:?Set dedicated Temporal client key}:/run/secrets/temporal-client.key:ro
     networks:
-    - control
+      control: {}
     read_only: true
     tmpfs:
     - /tmp
@@ -56,7 +64,15 @@ services:
     - no-new-privileges:true
     init: true
     restart: unless-stopped
-
+    environment:
+      BOXIE_RELEASE: ${BOXIE_RELEASE:-unknown}
+    logging:
+      driver: journald
+      options:
+        mode: non-blocking
+        max-buffer-size: 4m
+        tag: boxie-orchestrator
+    pids_limit: 256
 networks:
   consumer:
     external: true

@@ -364,3 +364,9 @@ facts repaired by the next 30-second workflow inspection. No input or PTY output
 is stored in workflow history. The start/stop outbox protects the commit-to-Temporal
 handoff; native scheduled recovery handles pending commands without custom leases
 or application retry clocks.
+
+## Boxie observability
+
+Boxie owns bounded JSON logging, private metrics and the [operator stack](infra/observability/README.md). Its runtime code, PostgreSQL migration, Temporal instrumentation and infrastructure all live under this directory. The API and orchestrator have separate registries; the orchestrator embeds lifecycle and maintenance workers. Domain and consumer contracts remain independent of telemetry.
+
+CLI Playground keeps its existing lightweight logging. It does not install Boxie, share its telemetry implementation, join its metrics network or add dashboards. A shared library would add a cross-service release boundary without a current second long-lived consumer.
