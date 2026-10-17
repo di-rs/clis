@@ -49,6 +49,7 @@ def compose(*files: Path) -> dict[str, Any]:
         OBS_GRAFANA_HOSTNAME="grafana.example.com",
         OBS_GRAFANA_ADMIN_PASSWORD_FILE="/tmp/grafana-secret",
         OBS_GRAFANA_PLUGIN_DIR="/tmp/plugins",
+        OBS_PROMETHEUS_CONFIG_FILE="/tmp/prometheus.yml",
         OBS_JOURNAL_GROUP_GID="190",
     )
     args = ["docker", "compose"]

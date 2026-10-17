@@ -137,7 +137,7 @@ services:
     - --web.listen-address=0.0.0.0:9090
     - --log.level=info
     volumes:
-    - ${OBS_PROMETHEUS_CONFIG_FILE:-./prometheus.yml}:/etc/prometheus/prometheus.yml:ro
+    - ${OBS_PROMETHEUS_CONFIG_FILE:?Set envsubst-rendered Prometheus config}:/etc/prometheus/prometheus.yml:ro
     - ./rules:/etc/prometheus/rules:ro
     - prometheus-data:/prometheus
   grafana:
