@@ -27,6 +27,43 @@ def workflow(name: str) -> dict[str, Any]:
     return result
 
 
+def test_setup_builds_all_images_from_one_revision_before_provisioning() -> None:
+    setup = workflow("setup")
+    assert setup["on"]["workflow_dispatch"] == {}
+    jobs = setup["jobs"]
+    components = {
+        "boxie": "boxie",
+        "gateway": "playground-gateway",
+        "sandbox": "playground-sandbox",
+        "collector": "collector",
+    }
+    for name, component in components.items():
+        job = jobs[name]
+        assert job["uses"] == "./.github/workflows/build-runtime-image.yml"
+        assert job["with"] == {"component": component, "revision": "${{ github.sha }}"}
+        assert "DEPLOYMENT_ACCEPTANCE_PASSED" not in str(job)
+        assert "BOXIE_BACKUP_RESTORE_VERIFIED" not in str(job)
+    provision = jobs["provision"]
+    assert set(provision["needs"]) == set(components)
+    assert all(f"needs.{name}.outputs.source_sha" in str(provision) for name in components)
+    assert all(f"needs.{name}.outputs.image" in str(provision) for name in components)
+
+
+def test_reusable_builder_maps_fixed_components_and_has_no_deployment_secrets() -> None:
+    builder = yaml.load((WORKFLOWS / "build-runtime-image.yml").read_text(), Loader=yaml.BaseLoader)
+    assert set(builder["on"]) == {"workflow_call"}
+    assert set(builder["on"]["workflow_call"]["outputs"]) == {"image", "source_sha"}
+    job = builder["jobs"]["build"]
+    assert job["permissions"] == {"contents": "read", "packages": "write"}
+    assert "refs/heads/master" in job["if"]
+    assert "linux/amd64" in str(job)
+    assert "observability/collector" in str(job)
+    assert "Runtime.Dockerfile" in str(job)
+    assert "Playground.Dockerfile" in str(job)
+    assert "Sandbox.Dockerfile" in str(job)
+    assert not any(secret in str(job) for secret in DEPLOYMENT_SECRETS)
+
+
 @pytest.mark.parametrize("app", ["boxie", "playground"])
 def test_application_release_uses_native_ssh_without_cloud_state(app: str) -> None:
     path = WORKFLOWS / ("boxie-release.yml" if app == "boxie" else "cli-playground-release.yml")
@@ -58,7 +95,7 @@ def test_application_release_uses_native_ssh_without_cloud_state(app: str) -> No
         "expected-revision",
     ):
         assert required in commands
-    gate = release["jobs"]["release"]["if"]
+    gate = deployment["if"]
     assert "DEPLOYMENT_ACCEPTANCE_PASSED" in gate
     assert "BOXIE_BACKUP_RESTORE_VERIFIED" in gate
     assert "AUTO_DEPLOY" in gate
@@ -235,6 +272,8 @@ def test_delayed_release_refuses_to_copy_over_newer_success(tmp_path: Path) -> N
             "CALLS": str(log),
             "CURRENT": newer,
             "GITHUB_SHA": older,
+            "GATEWAY_SOURCE_SHA": older,
+            "SANDBOX_SOURCE_SHA": older,
             "GITHUB_RUN_ID": "1",
             "GITHUB_RUN_ATTEMPT": "1",
             "DEPLOY_HOST": "example.com",

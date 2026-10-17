@@ -1,27 +1,43 @@
 name: ☁️ Single-host platform setup
 'on':
-  workflow_dispatch:
-    inputs:
-      boxie_image:
-        description: Boxie runtime image@sha256 digest
-        required: true
-        type: string
-      playground_image:
-        description: Gateway image@sha256 digest
-        required: true
-        type: string
-      sandbox_image:
-        description: Sandbox image@sha256 digest
-        required: true
-        type: string
-      collector_image:
-        description: Collector image@sha256 digest
-        required: true
-        type: string
+  workflow_dispatch: {}
 permissions: {}
 jobs:
+  boxie:
+    uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
+    with:
+      component: boxie
+      revision: ${{ github.sha }}
+    permissions:
+      contents: read
+      packages: write
+  gateway:
+    uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
+    with:
+      component: playground-gateway
+      revision: ${{ github.sha }}
+    permissions:
+      contents: read
+      packages: write
+  sandbox:
+    uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
+    with:
+      component: playground-sandbox
+      revision: ${{ github.sha }}
+    permissions:
+      contents: read
+      packages: write
+  collector:
+    uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
+    with:
+      component: collector
+      revision: ${{ github.sha }}
+    permissions:
+      contents: read
+      packages: write
   provision:
     name: Provision and install the shared host
+    needs: [boxie, gateway, sandbox, collector]
     if: ${{ github.ref == 'refs/heads/master' }}
     environment: platform
     runs-on: ubuntu-24.04
@@ -62,13 +78,20 @@ jobs:
         pulumi-version: 3.268.0
     - name: Prepare committed installation files
       env:
-        BOXIE_RUNTIME_IMAGE: ${{ inputs.boxie_image }}
-        PLAYGROUND_IMAGE: ${{ inputs.playground_image }}
-        PLAYGROUND_SANDBOX_IMAGE: ${{ inputs.sandbox_image }}
-        OBS_COLLECTOR_IMAGE: ${{ inputs.collector_image }}
+        BOXIE_SOURCE_SHA: ${{ needs.boxie.outputs.source_sha }}
+        GATEWAY_SOURCE_SHA: ${{ needs.gateway.outputs.source_sha }}
+        SANDBOX_SOURCE_SHA: ${{ needs.sandbox.outputs.source_sha }}
+        COLLECTOR_SOURCE_SHA: ${{ needs.collector.outputs.source_sha }}
+        BOXIE_RUNTIME_IMAGE: ${{ needs.boxie.outputs.image }}
+        PLAYGROUND_IMAGE: ${{ needs.gateway.outputs.image }}
+        PLAYGROUND_SANDBOX_IMAGE: ${{ needs.sandbox.outputs.image }}
+        OBS_COLLECTOR_IMAGE: ${{ needs.collector.outputs.image }}
       run: |
         set -euo pipefail
         umask 077
+        for source in "$BOXIE_SOURCE_SHA" "$GATEWAY_SOURCE_SHA" "$SANDBOX_SOURCE_SHA" "$COLLECTOR_SOURCE_SHA"; do
+            [[ $source == "$GITHUB_SHA" ]]
+        done
         mkdir -p .installation/infra/environments .installation/tools/boxie .installation/tools/cli-playground
         cp -a infra/host .installation/infra/
         cp -a infra/environments/single-host .installation/infra/environments/

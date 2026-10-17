@@ -20,74 +20,19 @@ name: 🚀 Boxie runtime release
     - .dockerignore
   workflow_dispatch: {}
 permissions: {}
-concurrency:
-  group: boxie-release
-  cancel-in-progress: false
 jobs:
-  release:
-    name: Build and publish Boxie runtime
-    if: ${{ github.ref == 'refs/heads/master' && vars.DEPLOYMENT_ACCEPTANCE_PASSED == 'true' && vars.BOXIE_BACKUP_RESTORE_VERIFIED
-      == 'true' && (github.event_name != 'push' || vars.BOXIE_AUTO_DEPLOY == 'true') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
+  build:
+    uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
+    with:
+      component: boxie
+      revision: ${{ github.sha }}
     permissions:
       contents: read
       packages: write
-    outputs:
-      revision: ${{ github.sha }}
-      changed: ${{ steps.select.outputs.runtime }}
-      sandbox_changed: ${{ steps.select.outputs.sandbox }}
-      runtime_image: ${{ steps.runtime.outputs.digest && format('{0}@{1}', steps.images.outputs.runtime, steps.runtime.outputs.digest)
-        || '' }}
-    env:
-      DOCKER_BUILD_RECORD_UPLOAD: 'false'
-    steps:
-    - name: 📥 Check out reviewed release source
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      with:
-        ref: ${{ github.sha }}
-        persist-credentials: 'false'
-        fetch-depth: 0
-    - name: Select affected runtime images
-      id: select
-      env:
-        APP: boxie
-      run: python3 tools/boxie/infra/boxie_infra/release_selection.py "$APP" "" >> "$GITHUB_OUTPUT"
-    - name: 🏷️ Choose image names and unique release tag
-      id: images
-      env:
-        REPOSITORY: ${{ github.repository }}
-        RUN_ID: ${{ github.run_id }}
-        RUN_ATTEMPT: ${{ github.run_attempt }}
-      run: printf 'runtime=ghcr.io/%s-boxie\ntag=run-%s-%s\n' "${REPOSITORY,,}" "$RUN_ID" "$RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
-    - name: 🐳 Set up Docker Buildx
-      uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
-      with:
-        cache-binary: 'false'
-    - name: 🔐 Sign in to GitHub Container Registry
-      uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ github.token }}
-    - name: Build and publish Boxie runtime
-      id: runtime
-      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
-      with:
-        context: .
-        file: tools/boxie/infra/Runtime.Dockerfile
-        platforms: linux/amd64
-        push: 'true'
-        tags: ${{ steps.images.outputs.runtime }}:${{ steps.images.outputs.tag }}
-        labels: |
-          org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          org.opencontainers.image.revision=${{ github.sha }}
-      if: ${{ steps.select.outputs.runtime == 'true' }}
   deploy:
     name: Deploy boxie
-    needs: release
-    if: ${{ github.ref == 'refs/heads/master' && (needs.release.outputs.changed == 'true' || needs.release.outputs.sandbox_changed
-      == 'true') }}
+    needs: build
+    if: ${{ github.ref == 'refs/heads/master' && vars.DEPLOYMENT_ACCEPTANCE_PASSED == 'true' && vars.BOXIE_BACKUP_RESTORE_VERIFIED == 'true' && (github.event_name != 'push' || vars.BOXIE_AUTO_DEPLOY == 'true') }}
     environment: boxie
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -106,7 +51,8 @@ jobs:
         fetch-depth: 0
     - name: Copy release and run bounded host operation
       env:
-        RUNTIME_IMAGE: ${{ needs.release.outputs.runtime_image }}
+        RUNTIME_IMAGE: ${{ needs.build.outputs.image }}
+        SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
         DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
         DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
@@ -116,6 +62,7 @@ jobs:
         umask 077
         run="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
         [[ $run =~ ^[0-9]+-[0-9]+$ && $GITHUB_SHA =~ ^[a-f0-9]{40}$ ]]
+        [[ $SOURCE_SHA == "$GITHUB_SHA" ]]
         [[ $DEPLOY_HOST =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+$ ]]
         private=$(mktemp -d)
         trap 'rm -rf "$private"' EXIT

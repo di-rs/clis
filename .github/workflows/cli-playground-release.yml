@@ -21,94 +21,27 @@ name: 🚀 Playground runtime release
     - .dockerignore
   workflow_dispatch: {}
 permissions: {}
-concurrency:
-  group: playground-release
-  cancel-in-progress: false
 jobs:
-  release:
-    name: 📦 Build and publish playground runtime images
-    if: ${{ github.ref == 'refs/heads/master' && vars.DEPLOYMENT_ACCEPTANCE_PASSED == 'true' && vars.BOXIE_BACKUP_RESTORE_VERIFIED
-      == 'true' && (github.event_name != 'push' || vars.PLAYGROUND_AUTO_DEPLOY == 'true') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
+  gateway:
+    uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
+    with:
+      component: playground-gateway
+      revision: ${{ github.sha }}
     permissions:
       contents: read
       packages: write
-    outputs:
+  sandbox:
+    uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
+    with:
+      component: playground-sandbox
       revision: ${{ github.sha }}
-      changed: ${{ steps.select.outputs.runtime }}
-      sandbox_changed: ${{ steps.select.outputs.sandbox }}
-      gateway_image: ${{ steps.gateway.outputs.digest && format('{0}@{1}', steps.images.outputs.gateway, steps.gateway.outputs.digest)
-        || '' }}
-      sandbox_image: ${{ steps.sandbox.outputs.digest && format('{0}@{1}', steps.images.outputs.sandbox, steps.sandbox.outputs.digest)
-        || '' }}
-    env:
-      DOCKER_BUILD_RECORD_UPLOAD: 'false'
-    steps:
-    - name: 📥 Check out reviewed release source
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      with:
-        ref: ${{ github.sha }}
-        persist-credentials: 'false'
-        fetch-depth: 0
-    - name: Select affected runtime images
-      id: select
-      env:
-        APP: playground
-      run: python3 tools/boxie/infra/boxie_infra/release_selection.py "$APP" "" >> "$GITHUB_OUTPUT"
-    - name: 🏷️ Choose image names and unique release tag
-      id: images
-      env:
-        REPOSITORY: ${{ github.repository }}
-        RUN_ID: ${{ github.run_id }}
-        RUN_ATTEMPT: ${{ github.run_attempt }}
-      run: |
-        {
-          printf 'gateway=ghcr.io/%s-playground-gateway\n' "${REPOSITORY,,}"
-          printf 'sandbox=ghcr.io/%s-playground-sandbox\n' "${REPOSITORY,,}"
-          printf 'tag=run-%s-%s\n' "$RUN_ID" "$RUN_ATTEMPT"
-        } >> "$GITHUB_OUTPUT"
-    - name: 🐳 Set up Docker Buildx
-      uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
-      with:
-        cache-binary: 'false'
-    - name: 🔐 Sign in to GitHub Container Registry
-      uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ github.token }}
-    - name: 🏗️ Build and publish gateway and frontend image
-      id: gateway
-      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
-      with:
-        context: .
-        file: tools/cli-playground/infra/Playground.Dockerfile
-        platforms: linux/amd64
-        push: 'true'
-        tags: ${{ steps.images.outputs.gateway }}:${{ steps.images.outputs.tag }}
-        labels: |
-          org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          org.opencontainers.image.revision=${{ github.sha }}
-      if: ${{ steps.select.outputs.runtime == 'true' }}
-    - name: 🏗️ Build and publish shared sandbox image
-      id: sandbox
-      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
-      with:
-        context: .
-        file: tools/cli-playground/Sandbox.Dockerfile
-        platforms: linux/amd64
-        push: 'true'
-        tags: ${{ steps.images.outputs.sandbox }}:${{ steps.images.outputs.tag }}
-        labels: |
-          org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          org.opencontainers.image.revision=${{ github.sha }}
-      if: ${{ steps.select.outputs.sandbox == 'true' }}
+    permissions:
+      contents: read
+      packages: write
   deploy:
     name: Deploy playground
-    needs: release
-    if: ${{ github.ref == 'refs/heads/master' && (needs.release.outputs.changed == 'true' || needs.release.outputs.sandbox_changed
-      == 'true') }}
+    needs: [gateway, sandbox]
+    if: ${{ github.ref == 'refs/heads/master' && vars.DEPLOYMENT_ACCEPTANCE_PASSED == 'true' && vars.BOXIE_BACKUP_RESTORE_VERIFIED == 'true' && (github.event_name != 'push' || vars.PLAYGROUND_AUTO_DEPLOY == 'true') }}
     environment: playground
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -127,8 +60,10 @@ jobs:
         fetch-depth: 0
     - name: Copy release and run bounded host operation
       env:
-        GATEWAY_IMAGE: ${{ needs.release.outputs.gateway_image }}
-        SANDBOX_IMAGE: ${{ needs.release.outputs.sandbox_image }}
+        GATEWAY_IMAGE: ${{ needs.gateway.outputs.image }}
+        SANDBOX_IMAGE: ${{ needs.sandbox.outputs.image }}
+        GATEWAY_SOURCE_SHA: ${{ needs.gateway.outputs.source_sha }}
+        SANDBOX_SOURCE_SHA: ${{ needs.sandbox.outputs.source_sha }}
         DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
         DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
@@ -138,6 +73,7 @@ jobs:
         umask 077
         run="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
         [[ $run =~ ^[0-9]+-[0-9]+$ && $GITHUB_SHA =~ ^[a-f0-9]{40}$ ]]
+        [[ $GATEWAY_SOURCE_SHA == "$GITHUB_SHA" && $SANDBOX_SOURCE_SHA == "$GITHUB_SHA" ]]
         [[ $DEPLOY_HOST =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+$ ]]
         private=$(mktemp -d)
         trap 'rm -rf "$private"' EXIT
