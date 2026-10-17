@@ -3,6 +3,10 @@
 Each finite CLI owns TOML suites under its `benches/` directory.
 Each CLI has its own Cargo package, with matching package and binary names;
 see the [repository rules](../AGENTS.md).
+Run `uv run --locked cli-check benches` to check suite presence, ownership and
+case structure without executing benchmarks. A CLI without a finite benchmark
+records a reason in its manifest's `package.metadata.cli-check.benchmark-exemption`;
+see [cli-check](../tools/cli-check/README.md#record-a-benchmark-exemption).
 [Biggie](../biggie/README.md) generates inputs once; [hyperfine 2](https://github.com/sharkdp/hyperfine/releases/tag/v2.0.0)
 measures the executables directly, including warmups, timing and peak RSS.
 The [runner](../tools/cli-bench/bench.py) requires Python 3.15+ and uses only the

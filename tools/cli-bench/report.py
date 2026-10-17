@@ -10,14 +10,146 @@ import subprocess
 import sys
 import tomllib
 import zipfile
-from dataclasses import dataclass
+from collections.abc import AsyncIterator
+from dataclasses import dataclass, replace
 from datetime import datetime
 from itertools import groupby
 from pathlib import Path, PurePosixPath
+from typing import cast
+
+import anyio
+import httpx
+from githubkit import BaseAuthStrategy, GitHub, TokenAuthStrategy
+from githubkit.exception import GitHubException
 
 # Keep direct script invocation usable from any working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from ci.github import GitHub, array, table  # noqa: E402
+
+MAX_JSON = 2 * 1024 * 1024
+MAX_PAGES = 20
+
+
+class PaginationLimit(ValueError):
+    """A complete listing cannot be established within the repository's limit."""
+
+
+def table(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise ValueError("expected JSON object")
+    return cast(dict[str, object], value)
+
+
+def array(value: object) -> list[object]:
+    if not isinstance(value, list):
+        raise ValueError("expected JSON array")
+    return cast(list[object], value)
+
+
+def github_client() -> GitHub[TokenAuthStrategy]:
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if not token:
+        raise ValueError("Set GH_TOKEN or GITHUB_TOKEN for GitHub publication")
+    return GitHub(token, auto_retry=False, http_cache=False, timeout=60)
+
+
+def github_request[A: BaseAuthStrategy](
+    api: GitHub[A],
+    path: str,
+    *,
+    method: str = "GET",
+    body: object = None,
+    limit: int = MAX_JSON,
+    timeout: float = 60,
+) -> bytes:
+    # SDK error and redirect handling also reads bodies. Bound the underlying
+    # stream before that handling, as well as the decoded successful response.
+    async def bound_response(response: httpx.Response) -> None:
+        # GitHubKit buffers error bodies before returning them. Request identity
+        # encoding and reject compressed responses before its decoder can inflate
+        # an otherwise small wire body beyond the repository's byte budget.
+        if response.headers.get("content-encoding", "identity").strip().lower() not in {
+            "",
+            "identity",
+        }:
+            raise ValueError("GitHub response uses unexpected HTTP compression")
+        upstream = response.stream
+        if not isinstance(upstream, httpx.AsyncByteStream):
+            raise ValueError("expected an asynchronous GitHub response")
+        stream: httpx.AsyncByteStream = upstream
+
+        class LimitedBody(httpx.AsyncByteStream):
+            async def __aiter__(self) -> AsyncIterator[bytes]:
+                size = 0
+                try:
+                    async for chunk in stream:
+                        size += len(chunk)
+                        if size > limit:
+                            raise ValueError("GitHub response exceeds size limit")
+                        yield chunk
+                finally:
+                    with anyio.CancelScope(shield=True):
+                        await stream.aclose()
+
+            async def aclose(self) -> None:
+                with anyio.CancelScope(shield=True):
+                    await stream.aclose()
+
+        response.stream = LimitedBody()
+
+    async def fetch() -> bytes:
+        config = replace(
+            api.config,
+            http_cache=False,
+            auto_retry=None,
+            timeout=httpx.Timeout(timeout),
+            async_event_hooks={"response": [bound_response]},
+        )
+        async with GitHub(api.auth, config=config) as client:
+            with anyio.fail_after(timeout):
+                response = await client.arequest(
+                    method, path, json=body, stream=True, headers={"Accept-Encoding": "identity"}
+                )
+                data = bytearray()
+                async for chunk in response.aiter_bytes():
+                    if len(data) + len(chunk) > limit:
+                        raise ValueError("GitHub response exceeds size limit")
+                    data.extend(chunk)
+                return bytes(data)
+
+    try:
+        return anyio.run(fetch)
+    except (GitHubException, TimeoutError) as error:
+        # SDK error strings can contain response bodies or signed artifact URLs.
+        raise ValueError(
+            "GitHub request failed or exceeded its response limit or deadline"
+        ) from error
+
+
+def github_json[A: BaseAuthStrategy](
+    api: GitHub[A],
+    path: str,
+    *,
+    method: str = "GET",
+    body: object = None,
+) -> object:
+    return cast(object, json.loads(github_request(api, path, method=method, body=body)))
+
+
+def github_pages[A: BaseAuthStrategy](
+    api: GitHub[A],
+    path: str,
+    key: str | None = None,
+) -> list[dict[str, object]]:
+    result: list[dict[str, object]] = []
+    separator = "&" if "?" in path else "?"
+    for page in range(1, MAX_PAGES + 1):
+        response = github_json(api, f"{path}{separator}per_page=100&page={page}")
+        values = array(table(response)[key] if key else response)
+        result.extend(table(value) for value in values)
+        if len(values) < 100:
+            return result
+    raise PaginationLimit("GitHub pagination limit exceeded")
+
 
 MAX_ZIP = 8 * 1024 * 1024
 MAX_MEMBER = 1024 * 1024
@@ -291,8 +423,8 @@ def render(
     return "\n".join(lines).rstrip() + "\n"
 
 
-def current_pull(api: GitHub, repo: str, number: int, sha: str) -> bool:
-    pull = table(api.json(f"repos/{repo}/pulls/{number}"))
+def current_pull(api: GitHub[TokenAuthStrategy], repo: str, number: int, sha: str) -> bool:
+    pull = table(github_json(api, f"repos/{repo}/pulls/{number}"))
     base = table(pull.get("base"))
     return (
         pull.get("state") == "open"
@@ -302,11 +434,13 @@ def current_pull(api: GitHub, repo: str, number: int, sha: str) -> bool:
     )
 
 
-def generate(api: GitHub, repo: str, run_id: int, *, author: str | None = None) -> str | None:
+def generate(
+    api: GitHub[TokenAuthStrategy], repo: str, run_id: int, *, author: str | None = None
+) -> str | None:
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
         raise ValueError("invalid repository")
     base = f"repos/{repo}"
-    run = table(api.json(f"{base}/actions/runs/{integer(run_id)}"))
+    run = table(github_json(api, f"{base}/actions/runs/{integer(run_id)}"))
     if (
         run.get("id") != run_id
         or run.get("event") != "pull_request"
@@ -317,7 +451,7 @@ def generate(api: GitHub, repo: str, run_id: int, *, author: str | None = None) 
         or table(run.get("repository")).get("full_name") != repo
     ):
         return None
-    workflow = table(api.json(f"{base}/actions/workflows/cli-bench.yml"))
+    workflow = table(github_json(api, f"{base}/actions/workflows/cli-bench.yml"))
     if workflow.get("id") != run.get("workflow_id") or workflow.get("path") != WORKFLOW:
         return None
     sha = str(run.get("head_sha"))
@@ -325,7 +459,7 @@ def generate(api: GitHub, repo: str, run_id: int, *, author: str | None = None) 
         raise ValueError("invalid head SHA")
     pulls = [table(pull) for pull in array(run.get("pull_requests", []))]
     if not pulls:
-        pulls = api.pages(f"{base}/commits/{sha}/pulls")
+        pulls = github_pages(api, f"{base}/commits/{sha}/pulls")
     matches = [
         integer(pull.get("number"))
         for pull in pulls
@@ -335,7 +469,7 @@ def generate(api: GitHub, repo: str, run_id: int, *, author: str | None = None) 
         return None
     pull_number = matches[0]
     attempt = integer(run.get("run_attempt"))
-    jobs = api.pages(f"{base}/actions/runs/{run_id}/attempts/{attempt}/jobs", "jobs")
+    jobs = github_pages(api, f"{base}/actions/runs/{run_id}/attempts/{attempt}/jobs", "jobs")
     if not any(
         job.get("name") in {f"⏱️ Run CLI benchmarks ({system})" for system in SYSTEMS}
         and job.get("conclusion") != "skipped"
@@ -345,7 +479,7 @@ def generate(api: GitHub, repo: str, run_id: int, *, author: str | None = None) 
     suites: list[Suite] = []
     selection: dict[str, object] = {}
     warnings: list[str] = []
-    artifacts = api.pages(f"{base}/actions/runs/{run_id}/artifacts", "artifacts")
+    artifacts = github_pages(api, f"{base}/actions/runs/{run_id}/artifacts", "artifacts")
     for name in ["cli-bench-selection", *(f"cli-bench-{system}" for system in SYSTEMS)]:
         system = name.removeprefix("cli-bench-")
         matched = [artifact for artifact in artifacts if artifact.get("name") == name]
@@ -373,8 +507,8 @@ def generate(api: GitHub, repo: str, run_id: int, *, author: str | None = None) 
                     warnings.append(f"{system}: artifact unavailable for this attempt.")
                     continue
             integer(artifact.get("size_in_bytes"), MAX_ZIP)
-            data = api.request(
-                f"{base}/actions/artifacts/{integer(artifact.get('id'))}/zip", limit=MAX_ZIP
+            data = github_request(
+                api, f"{base}/actions/artifacts/{integer(artifact.get('id'))}/zip", limit=MAX_ZIP
             )
             if name == "cli-bench-selection":
                 selected = table(json.loads(read_zip(data)["selection.json"]))
@@ -391,7 +525,7 @@ def generate(api: GitHub, repo: str, run_id: int, *, author: str | None = None) 
             warnings.append(f"{name}: invalid artifact data omitted.")
     markdown = render(repo, run, jobs, suites, selection, warnings)
     if author is not None:
-        comments = api.pages(f"{base}/issues/{pull_number}/comments")
+        comments = github_pages(api, f"{base}/issues/{pull_number}/comments")
         owned = [
             comment
             for comment in comments
@@ -408,14 +542,15 @@ def generate(api: GitHub, repo: str, run_id: int, *, author: str | None = None) 
             return None
         if owned:
             if owned[0].get("body") != markdown:
-                api.request(
+                github_request(
+                    api,
                     f"{base}/issues/comments/{integer(owned[0]['id'])}",
                     method="PATCH",
                     body={"body": markdown},
                 )
         else:
-            api.request(
-                f"{base}/issues/{pull_number}/comments", method="POST", body={"body": markdown}
+            github_request(
+                api, f"{base}/issues/{pull_number}/comments", method="POST", body={"body": markdown}
             )
     return markdown
 
@@ -427,15 +562,15 @@ def main() -> None:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--post", action="store_true", help="Update the caller's PR comment")
     args = parser.parse_args()
-    api = GitHub()
-    author = None
-    if args.post:
-        author = (
-            "github-actions[bot]"
-            if os.environ.get("GITHUB_ACTIONS") == "true"
-            else str(table(api.json("user"))["login"])
-        )
     try:
+        api = github_client()
+        author = None
+        if args.post:
+            author = (
+                "github-actions[bot]"
+                if os.environ.get("GITHUB_ACTIONS") == "true"
+                else str(table(github_json(api, "user"))["login"])
+            )
         markdown = generate(api, args.repo, args.run_id, author=author)
         if markdown is None:
             print("Skipped: no current eligible PR benchmark run.")

@@ -14,8 +14,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NotRequired, TypedDict, cast
 
+import httpx
 import pytest
-from ci.github import GitHub
+from githubkit import GitHub, TokenAuthStrategy
 from select_suites import Selection
 
 TOOLS = Path(__file__).resolve().parents[1]
@@ -346,8 +347,9 @@ def job(name: str, start: str, end: str) -> dict[str, object]:
     }
 
 
-class FakeGitHub(GitHub):
+class FakeGitHub(GitHub[TokenAuthStrategy]):
     def __init__(self) -> None:
+        super().__init__("test-token", async_transport=httpx.MockTransport(self.handle))
         self.run: dict[str, object] = {
             "id": 500,
             "run_number": 10,
@@ -401,7 +403,12 @@ class FakeGitHub(GitHub):
             ),
         }
 
-    def request(
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.raw_path.decode().removeprefix("/")
+        body = json.loads(request.content) if request.content else None
+        return httpx.Response(200, content=self.respond(path, method=request.method, body=body))
+
+    def respond(
         self, path: str, *, method: str = "GET", body: object = None, limit: int = 0
     ) -> bytes:
         if method == "POST":

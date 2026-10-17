@@ -8,6 +8,16 @@ import report
 from conftest import BASE, REPO, FakeGitHub, archive, benchmark, suite_files
 
 
+def test_missing_token_has_actionable_error_without_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setattr("sys.argv", ["report.py", "--repo", REPO, "--run-id", "500"])
+    with pytest.raises(SystemExit, match="Cannot report benchmarks: Set GH_TOKEN"):
+        report.main()
+
+
 def test_renders_real_means_ratio_smoke_and_parallel_runner_timing(github: FakeGitHub) -> None:
     result = report.generate(github, REPO, 500)
     assert result is not None

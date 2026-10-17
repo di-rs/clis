@@ -14,9 +14,10 @@ from pathlib import Path
 from threading import Thread
 from unittest.mock import Mock
 
+import httpx
 import preview_ci
 import pytest
-from ci.github import GitHub
+from githubkit import GitHub, TokenAuthStrategy
 from playground import artifacts
 
 from .helpers import elf_binary
@@ -27,12 +28,11 @@ RUN = f"repos/{REPO}/actions/runs/500"
 PR = f"repos/{REPO}/pulls/7"
 
 
-def test_build_script_runs_without_installed_workspace_packages(tmp_path: Path) -> None:
+def test_build_script_runs_from_another_directory(tmp_path: Path) -> None:
     result = subprocess.run(
         [
             sys.executable,
             "-I",
-            "-S",
             str(Path(preview_ci.__file__).resolve()),
             "build",
             "--base",
@@ -78,6 +78,8 @@ def workspace(root: Path) -> dict[str, str]:
     library = root / "utils/shared"
     library.mkdir(parents=True)
     (library / "Cargo.toml").write_text('[package]\nname = "shared"\n')
+    (library / "src").mkdir()
+    (library / "src/lib.rs").write_text("pub fn shared() {}\n")
     return {"catr": "coreutils/catr", "echor": "coreutils/echor"}
 
 
@@ -108,6 +110,26 @@ def test_discovery_rejects_an_additional_binary(tmp_path: Path) -> None:
         preview_ci.discover(tmp_path)
 
 
+def test_discovery_includes_root_package(tmp_path: Path) -> None:
+    root = tmp_path / "rootcli"
+    (root / "src").mkdir(parents=True)
+    (root / "Cargo.toml").write_text('[workspace]\nmembers = []\n[package]\nname = "rootcli"\n')
+    (root / "src/main.rs").write_text("fn main() {}\n")
+    assert preview_ci.discover(root) == {"rootcli": "."}
+
+
+def test_discovery_rejects_explicit_binary_outside_main(tmp_path: Path) -> None:
+    workspace(tmp_path)
+    package = tmp_path / "coreutils/echor"
+    (package / "src/main.rs").unlink()
+    (package / "Cargo.toml").write_text(
+        '[package]\nname = "echor"\n[[bin]]\nname = "echor"\npath = "app.rs"\n'
+    )
+    (package / "app.rs").write_text("fn main() {}\n")
+    with pytest.raises(ValueError, match="src/main.rs"):
+        preview_ci.discover(tmp_path)
+
+
 def test_compressed_bundle_expansion_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
     data = archive(["echor", "catr"], payload=elf_binary(bytes(1024)))
     assert len(data) < 512
@@ -116,8 +138,9 @@ def test_compressed_bundle_expansion_is_bounded(monkeypatch: pytest.MonkeyPatch)
         artifacts.binary_archive(data)
 
 
-class FakeGitHub(GitHub):
+class FakeGitHub(GitHub[TokenAuthStrategy]):
     def __init__(self) -> None:
+        super().__init__("test-token", async_transport=httpx.MockTransport(self.handle))
         self.pull: dict[str, object] = {
             "number": 7,
             "state": "open",
@@ -154,7 +177,12 @@ class FakeGitHub(GitHub):
         self.deployments: list[dict[str, object]] = []
         self.workflow_runs: list[dict[str, object]] = []
 
-    def request(
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.raw_path.decode().removeprefix("/")
+        body = json.loads(request.content) if request.content else None
+        return httpx.Response(200, content=self.respond(path, method=request.method, body=body))
+
+    def respond(
         self, path: str, *, method: str = "GET", body: object = None, limit: int = 2 * 1024 * 1024
     ) -> bytes:
         self.requests.append(path)

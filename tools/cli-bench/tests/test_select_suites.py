@@ -104,6 +104,7 @@ def test_docs_tests_and_python_tool_configuration_skip_native_suites(
         ".cargo/config.toml",
         "tools/cli-bench/bench.py",
         "tools/cli-bench/select_suites.py",
+        "tools/cli-check/src/cli_check/workspace.py",
         ".github/workflows/cli-bench.yml",
         ".python-version",
     ],

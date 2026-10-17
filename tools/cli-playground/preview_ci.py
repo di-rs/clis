@@ -8,21 +8,153 @@ import re
 import shutil
 import subprocess
 import sys
-import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from dataclasses import replace
 from pathlib import Path
 from time import sleep
-from typing import Protocol
+from typing import Protocol, cast
+
+import anyio
+import httpx
+from cli_check.checks.layout import check as check_layout
+from cli_check.workspace import discover as discover_workspace
+from githubkit import BaseAuthStrategy, GitHub, TokenAuthStrategy
+from githubkit.exception import GitHubException
 
 # Keep direct script invocation usable from any working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
-from ci.github import GitHub, PaginationLimit, array, table  # noqa: E402
 from playground.artifacts import CLI_PATTERN, MAX_ARCHIVE, MAX_CLIS, binary_archive  # noqa: E402
+
+MAX_JSON = 2 * 1024 * 1024
+MAX_PAGES = 20
+
+
+class PaginationLimit(ValueError):
+    """A complete listing cannot be established within the repository's limit."""
+
+
+def table(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise ValueError("expected JSON object")
+    return cast(dict[str, object], value)
+
+
+def array(value: object) -> list[object]:
+    if not isinstance(value, list):
+        raise ValueError("expected JSON array")
+    return cast(list[object], value)
+
+
+def github_client() -> GitHub[TokenAuthStrategy]:
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if not token:
+        raise ValueError("Set GH_TOKEN or GITHUB_TOKEN for GitHub publication")
+    return GitHub(token, auto_retry=False, http_cache=False, timeout=60)
+
+
+def github_request[A: BaseAuthStrategy](
+    api: GitHub[A],
+    path: str,
+    *,
+    method: str = "GET",
+    body: object = None,
+    limit: int = MAX_JSON,
+    timeout: float = 60,
+) -> bytes:
+    # SDK error and redirect handling also reads bodies. Bound the underlying
+    # stream before that handling, as well as the decoded successful response.
+    async def bound_response(response: httpx.Response) -> None:
+        # GitHubKit buffers error bodies before returning them. Request identity
+        # encoding and reject compressed responses before its decoder can inflate
+        # an otherwise small wire body beyond the repository's byte budget.
+        if response.headers.get("content-encoding", "identity").strip().lower() not in {
+            "",
+            "identity",
+        }:
+            raise ValueError("GitHub response uses unexpected HTTP compression")
+        upstream = response.stream
+        if not isinstance(upstream, httpx.AsyncByteStream):
+            raise ValueError("expected an asynchronous GitHub response")
+        stream: httpx.AsyncByteStream = upstream
+
+        class LimitedBody(httpx.AsyncByteStream):
+            async def __aiter__(self) -> AsyncIterator[bytes]:
+                size = 0
+                try:
+                    async for chunk in stream:
+                        size += len(chunk)
+                        if size > limit:
+                            raise ValueError("GitHub response exceeds size limit")
+                        yield chunk
+                finally:
+                    with anyio.CancelScope(shield=True):
+                        await stream.aclose()
+
+            async def aclose(self) -> None:
+                with anyio.CancelScope(shield=True):
+                    await stream.aclose()
+
+        response.stream = LimitedBody()
+
+    async def fetch() -> bytes:
+        config = replace(
+            api.config,
+            http_cache=False,
+            auto_retry=None,
+            timeout=httpx.Timeout(timeout),
+            async_event_hooks={"response": [bound_response]},
+        )
+        async with GitHub(api.auth, config=config) as client:
+            with anyio.fail_after(timeout):
+                response = await client.arequest(
+                    method, path, json=body, stream=True, headers={"Accept-Encoding": "identity"}
+                )
+                data = bytearray()
+                async for chunk in response.aiter_bytes():
+                    if len(data) + len(chunk) > limit:
+                        raise ValueError("GitHub response exceeds size limit")
+                    data.extend(chunk)
+                return bytes(data)
+
+    try:
+        return anyio.run(fetch)
+    except (GitHubException, TimeoutError) as error:
+        # SDK error strings can contain response bodies or signed artifact URLs.
+        raise ValueError(
+            "GitHub request failed or exceeded its response limit or deadline"
+        ) from error
+
+
+def github_json[A: BaseAuthStrategy](
+    api: GitHub[A],
+    path: str,
+    *,
+    method: str = "GET",
+    body: object = None,
+) -> object:
+    return cast(object, json.loads(github_request(api, path, method=method, body=body)))
+
+
+def github_pages[A: BaseAuthStrategy](
+    api: GitHub[A],
+    path: str,
+    key: str | None = None,
+) -> list[dict[str, object]]:
+    result: list[dict[str, object]] = []
+    separator = "&" if "?" in path else "?"
+    for page in range(1, MAX_PAGES + 1):
+        response = github_json(api, f"{path}{separator}per_page=100&page={page}")
+        values = array(table(response)[key] if key else response)
+        result.extend(table(value) for value in values)
+        if len(values) < 100:
+            return result
+    raise PaginationLimit("GitHub pagination limit exceeded")
+
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ".github/workflows/cli-playground.yml"
@@ -38,39 +170,25 @@ def positive(value: object, maximum: int = 10**18) -> int:
 
 
 def discover(root: Path = ROOT) -> dict[str, str]:
-    manifest = tomllib.loads((root / "Cargo.toml").read_text())
-    workspace = manifest["workspace"]
-    excluded = {path for pattern in workspace.get("exclude", []) for path in root.glob(pattern)}
-    members = {path for pattern in workspace["members"] for path in root.glob(pattern)}
+    root = root.resolve()
+    members = discover_workspace(root)
+    if errors := check_layout(root, members):
+        raise ValueError("\n".join(map(str, errors)))
     packages: dict[str, str] = {}
-    for directory in sorted(members - excluded):
-        data = tomllib.loads((directory / "Cargo.toml").read_text())
-        if not (directory / "src/main.rs").is_file():
+    for package in members:
+        if not package.is_cli:
             continue
-        name = data["package"]["name"]
-        binaries = data.get("bin", [])
-        if (
-            not isinstance(name, str)
-            or not re.fullmatch(CLI_PATTERN, name)
-            or name != directory.name
-            or name in packages
-            or any((directory / "src/bin").glob("**/*.rs"))
-            or len(binaries) > 1
-            or binaries
-            and (
-                binaries[0].get("name") != name
-                or binaries[0].get("path", "src/main.rs") != "src/main.rs"
-            )
-        ):
+        name = package.name
+        if not re.fullmatch(CLI_PATTERN, name) or name in packages:
             raise ValueError("CLI package must define exactly its matching binary")
-        packages[name] = directory.relative_to(root).as_posix()
+        packages[name] = package.directory.relative_to(root).as_posix()
     if not packages or len(packages) > MAX_CLIS:
         raise ValueError("unexpected CLI package count")
     return packages
 
 
 def production(path: str, directory: str) -> bool:
-    prefix = directory + "/"
+    prefix = "" if directory == "." else directory + "/"
     if not path.startswith(prefix):
         return False
     relative = path.removeprefix(prefix)
@@ -165,7 +283,7 @@ class GatewayRequest(Protocol):
 
 
 def upload(
-    api: GitHub,
+    api: GitHub[TokenAuthStrategy],
     repo: str,
     base: str,
     token: str,
@@ -216,7 +334,7 @@ def stale_build(error: urllib.error.HTTPError) -> bool:
 
 
 def update_build(
-    api: GitHub,
+    api: GitHub[TokenAuthStrategy],
     repo: str,
     base: str,
     token: str,
@@ -272,9 +390,14 @@ def preview_url(base: str, response: dict[str, object], pr: int) -> str:
 
 
 def current_pull(
-    api: GitHub, repo: str, number: int, sha: str | None = None, *, state: str = "open"
+    api: GitHub[TokenAuthStrategy],
+    repo: str,
+    number: int,
+    sha: str | None = None,
+    *,
+    state: str = "open",
 ) -> bool:
-    pull = table(api.json(f"repos/{repo}/pulls/{number}"))
+    pull = table(github_json(api, f"repos/{repo}/pulls/{number}"))
     base = table(pull.get("base"))
     return (
         pull.get("number") == number
@@ -286,7 +409,7 @@ def current_pull(
 
 
 def lifecycle(
-    api: GitHub,
+    api: GitHub[TokenAuthStrategy],
     repo: str,
     number: int,
     action: str,
@@ -317,13 +440,13 @@ def lifecycle(
             raise ValueError("invalid reopen acknowledgement")
         # A build can finish before the lifecycle job clears the closed tombstone.
         # Replay its current state through the same trusted publisher after reopening.
-        pull = table(api.json(f"repos/{repo}/pulls/{number}"))
+        pull = table(github_json(api, f"repos/{repo}/pulls/{number}"))
         sha = table(pull.get("head")).get("sha")
         if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
             raise ValueError("invalid commit SHA")
         query = urllib.parse.urlencode({"event": "pull_request", "head_sha": sha})
-        runs = api.pages(
-            f"repos/{repo}/actions/workflows/cli-playground.yml/runs?{query}", "workflow_runs"
+        runs = github_pages(
+            api, f"repos/{repo}/actions/workflows/cli-playground.yml/runs?{query}", "workflow_runs"
         )
         latest = max(
             (
@@ -346,7 +469,7 @@ def lifecycle(
     message = f"Deleted {deleted} hosted playground environment(s) for closed PR #{number}."
     try:
         query = urllib.parse.urlencode({"environment": f"cli-playground/pr-{number}"})
-        deployments = api.pages(f"repos/{repo}/deployments?{query}")
+        deployments = github_pages(api, f"repos/{repo}/deployments?{query}")
     except PaginationLimit:
         return (
             message + " GitHub deployment status listing reached its pagination limit; "
@@ -358,7 +481,8 @@ def lifecycle(
         # Reopening can race with cleanup; its serialized event clears the tombstone.
         if not current_pull(api, repo, number, state="closed"):
             break
-        api.request(
+        github_request(
+            api,
             f"repos/{repo}/deployments/{positive(deployment.get('id'))}/statuses",
             method="POST",
             body={
@@ -371,7 +495,7 @@ def lifecycle(
 
 
 def publish(
-    api: GitHub,
+    api: GitHub[TokenAuthStrategy],
     repo: str,
     run_id: int,
     base_url: str,
@@ -383,7 +507,7 @@ def publish(
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
         raise ValueError("invalid repository")
     base = f"repos/{repo}"
-    run = table(api.json(f"{base}/actions/runs/{positive(run_id)}"))
+    run = table(github_json(api, f"{base}/actions/runs/{positive(run_id)}"))
     if (
         run.get("id") != run_id
         or run.get("event") != "pull_request"
@@ -394,7 +518,7 @@ def publish(
         or table(run.get("repository")).get("full_name") != repo
     ):
         return None
-    workflow = table(api.json(f"{base}/actions/workflows/cli-playground.yml"))
+    workflow = table(github_json(api, f"{base}/actions/workflows/cli-playground.yml"))
     if workflow.get("id") != run.get("workflow_id") or workflow.get("path") != WORKFLOW:
         return None
     sha = run.get("head_sha")
@@ -402,7 +526,7 @@ def publish(
         raise ValueError("invalid commit SHA")
     pulls = [table(item) for item in array(run.get("pull_requests", []))]
     if not pulls:
-        pulls = api.pages(f"{base}/commits/{sha}/pulls")
+        pulls = github_pages(api, f"{base}/commits/{sha}/pulls")
     matches = [
         positive(item.get("number"))
         for item in pulls
@@ -412,7 +536,7 @@ def publish(
         return None
     number = matches[0]
     revision = (positive(run.get("run_number")), positive(run.get("run_attempt")))
-    comments = api.pages(f"{base}/issues/{number}/comments")
+    comments = github_pages(api, f"{base}/issues/{number}/comments")
     owned = [
         item
         for item in comments
@@ -455,7 +579,9 @@ def publish(
             "**Build failed:** no new live previews were published. Check the build logs."
         )
     artifacts = (
-        api.pages(f"{base}/actions/runs/{run_id}/artifacts", "artifacts") if completed else []
+        github_pages(api, f"{base}/actions/runs/{run_id}/artifacts", "artifacts")
+        if completed
+        else []
     )
     artifact = max(
         (
@@ -493,8 +619,8 @@ def publish(
                     or str(artifact["created_at"]) < str(run["run_started_at"])
                 ):
                     raise ValueError("artifact belongs to an earlier run attempt")
-                bundle = api.request(
-                    f"{base}/actions/artifacts/{artifact_id}/zip", limit=MAX_ARCHIVE
+                bundle = github_request(
+                    api, f"{base}/actions/artifacts/{artifact_id}/zip", limit=MAX_ARCHIVE
                 )
                 count = len(binary_archive(bundle))
                 response = upload(
@@ -538,7 +664,8 @@ def publish(
         return None
     if url:
         deployment = table(
-            api.json(
+            github_json(
+                api,
                 f"{base}/deployments",
                 method="POST",
                 body={
@@ -552,7 +679,8 @@ def publish(
                 },
             )
         )
-        api.request(
+        github_request(
+            api,
             f"{base}/deployments/{positive(deployment.get('id'))}/statuses",
             method="POST",
             body={
@@ -572,8 +700,8 @@ def publish(
     comment_path = (
         f"issues/comments/{positive(owned[0].get('id'))}" if owned else f"issues/{number}/comments"
     )
-    api.request(
-        f"{base}/{comment_path}", method="PATCH" if owned else "POST", body={"body": markdown}
+    github_request(
+        api, f"{base}/{comment_path}", method="PATCH" if owned else "POST", body={"body": markdown}
     )
     if publish_failed:
         raise ValueError("Failed to publish the CLI preview")
@@ -635,7 +763,7 @@ def main() -> None:
                 for name in names:
                     shutil.copy2(ROOT / "target/release" / name, args.output / name)
         else:
-            api = GitHub()
+            api = github_client()
             base_url = os.environ.get("PLAYGROUND_URL", "")
             token = os.environ.get("PLAYGROUND_DEPLOY_TOKEN", "")
             if args.command == "lifecycle":

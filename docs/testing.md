@@ -86,6 +86,24 @@ root uv workspace and pytest test paths; run `uv lock` after dependency changes.
 Use pytest functions and shared fixtures in `conftest.py`; prefer `tmp_path` and
 `monkeypatch` for temporary files and environment changes.
 
+## CLI repository standards
+
+Run the same structural checks used by the local hook and Python CI job:
+
+```sh
+uv run --locked cli-check
+```
+
+[cli-check](../tools/cli-check/README.md) verifies package boundaries, CLI test
+registration, README links and benchmark coverage. Select `layout`, `tests`,
+`docs` or `benches` after the command to investigate one group. These checks read
+the workspace; execute the owning package's tests separately to verify behavior.
+
+Benchmark reporting and playground publication use GitHubKit from the root
+tooling project's runtime dependencies, including when invoked with `--no-dev`.
+They read `GH_TOKEN`, falling back to `GITHUB_TOKEN`. Their request limits and
+publication checks remain local to each publisher.
+
 ## Playground frontend
 
 The [CLI playground](../tools/cli-playground/README.md) uses the pinned Node.js
