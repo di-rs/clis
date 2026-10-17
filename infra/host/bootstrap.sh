@@ -4,9 +4,9 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 test "$(dpkg --print-architecture)" = amd64
 apt-get update
-apt-get install -y ca-certificates curl gnupg python3 unattended-upgrades
-# Prevent package post-install from starting Docker on the root filesystem.
-systemctl mask docker.service docker.socket
+apt-get install -y ca-certificates curl gnupg python3 unattended-upgrades unzip
+# Prevent package post-install from starting either daemon on the root filesystem.
+systemctl mask docker.service docker.socket containerd.service
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL --retry 3 https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
 chmod 0644 /etc/apt/keyrings/docker.asc
@@ -54,9 +54,10 @@ else
     mount /srv/clis
 fi
 /usr/local/sbin/clis-storage-guard
-install -d -m 0700 /etc/clis /srv/clis/docker
+install -d -m 0700 /etc/clis /srv/clis/docker /srv/clis/containerd
 install -d -m 0755 /opt/clis/releases /srv/clis/boxie /srv/clis/playground
-install -d -m 0755 /etc/docker /etc/systemd/system/docker.service.d
+install -d -m 0755 /etc/docker /etc/containerd \
+    /etc/systemd/system/docker.service.d /etc/systemd/system/containerd.service.d
 python3 - <<'PYTHON'
 import json
 from pathlib import Path
@@ -67,7 +68,14 @@ if config.get('data-root', '/srv/clis/docker') != '/srv/clis/docker':
 config['data-root'] = '/srv/clis/docker'
 p.write_text(json.dumps(config))
 PYTHON
-cat > /etc/systemd/system/docker.service.d/storage.conf <<'EOF'
+# Docker 29+ stores image contents and snapshots in the system containerd daemon.
+cat > /etc/containerd/config.toml <<'EOF'
+version = 2
+root = "/srv/clis/containerd"
+disabled_plugins = ["cri"]
+EOF
+for service in docker containerd; do
+    cat > "/etc/systemd/system/$service.service.d/storage.conf" <<'EOF'
 [Unit]
 RequiresMountsFor=/srv/clis
 After=srv-clis.mount
@@ -75,6 +83,7 @@ BindsTo=srv-clis.mount
 [Service]
 ExecStartPre=/usr/local/sbin/clis-storage-guard
 EOF
+done
 install -d /etc/systemd/journald.conf.d
 install -m 0644 /dev/stdin /etc/systemd/journald.conf.d/clis.conf <<'EOF'
 [Journal]
@@ -82,8 +91,9 @@ Storage=persistent
 SystemMaxUse=1G
 EOF
 systemctl daemon-reload
-systemctl unmask docker.service docker.socket
-systemctl enable docker
+systemctl unmask docker.service docker.socket containerd.service
+systemctl enable containerd docker
+systemctl restart containerd
 systemctl restart docker
 systemctl restart systemd-journald
 docker run --rm --runtime=runsc hello-world
