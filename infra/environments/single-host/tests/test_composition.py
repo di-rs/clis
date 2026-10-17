@@ -27,6 +27,7 @@ async def test_environment_composes_service_owned_routes(
                 "clis:runId": "1-1",
                 "clis:acmeEmail": "ops@example.com",
                 "clis:cloudflareDnsApiToken": "test-token",
+                "clis:registryConfig": "{}",
                 "clis:domain": "play.example.com",
                 "clis:cloudflareZoneId": "a" * 32,
                 "clis:cloudflareAccountId": "b" * 32,

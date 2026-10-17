@@ -1,57 +1,111 @@
-name: ☁️ Playground infrastructure setup
-
-on:
+name: ☁️ Single-host platform setup
+'on':
   workflow_dispatch:
-
+    inputs:
+      boxie_image:
+        description: Boxie runtime image@sha256 digest
+        required: true
+        type: string
+      playground_image:
+        description: Gateway image@sha256 digest
+        required: true
+        type: string
+      sandbox_image:
+        description: Sandbox image@sha256 digest
+        required: true
+        type: string
+      collector_image:
+        description: Collector image@sha256 digest
+        required: true
+        type: string
 permissions: {}
-
 jobs:
   provision:
-    name: ☁️ Provision playground infrastructure
+    name: Provision and install the shared host
     if: ${{ github.ref == 'refs/heads/master' }}
-    environment: playground
+    environment: platform
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     concurrency:
-      group: cli-playground-production
+      group: clis-production
       cancel-in-progress: false
     permissions:
       contents: read
+      packages: read
     env:
       PULUMI_SKIP_UPDATE_CHECK: 'true'
       PULUMI_BACKEND_URL: ${{ vars.PULUMI_BACKEND_URL }}
       PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
-      # The S3 client expects AWS names; these credentials belong to Cloudflare R2.
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       AWS_EC2_METADATA_DISABLED: 'true'
       HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
-      PLAYGROUND_URL: ${{ vars.PLAYGROUND_URL }}
+      SINGLE_HOST_CONFIG: ${{ vars.SINGLE_HOST_CONFIG }}
+      CLOUDFLARE_DNS_API_TOKEN: ${{ secrets.CLOUDFLARE_DNS_API_TOKEN }}
     steps:
-      - name: 📥 Check out reviewed infrastructure source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - name: 🐍 Set up uv and Python
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
-        with:
-          version: '0.13.0'
-          enable-cache: false
-      - name: 📦 Install locked Python workspace dependencies
-        run: uv sync --locked --all-packages
-      - name: ☁️ Set up Pulumi infrastructure tooling
-        uses: pulumi/setup-pulumi@b374ceb6168550de27c6eba92e01c1a774040e11 # v2
-        with:
-          pulumi-version: '3.268.0'
-      - name: 🔎 Validate production infrastructure configuration
-        run: uv run --locked python -m playground_infra.ci configure
-      - name: ☁️ Provision Hetzner host and Cloudflare DNS
-        working-directory: tools/cli-playground/infra
-        run: |
-          pulumi login "$PULUMI_BACKEND_URL" --non-interactive
-          pulumi stack select production --create --secrets-provider passphrase --non-interactive
-          pulumi preview --refresh --non-interactive --diff
-          pulumi up --yes --refresh --non-interactive --suppress-outputs
+    - name: 📥 Check out reviewed infrastructure source
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ github.sha }}
+        persist-credentials: 'false'
+    - name: 🐍 Set up uv and Python
+      uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+      with:
+        version: 0.13.0
+        enable-cache: 'false'
+    - name: 📦 Install locked Python workspace dependencies
+      run: uv sync --locked --all-packages
+    - name: ☁️ Set up Pulumi infrastructure tooling
+      uses: pulumi/setup-pulumi@b374ceb6168550de27c6eba92e01c1a774040e11
+      with:
+        pulumi-version: 3.268.0
+    - name: Prepare committed installation files
+      env:
+        BOXIE_RUNTIME_IMAGE: ${{ inputs.boxie_image }}
+        PLAYGROUND_IMAGE: ${{ inputs.playground_image }}
+        PLAYGROUND_SANDBOX_IMAGE: ${{ inputs.sandbox_image }}
+        OBS_COLLECTOR_IMAGE: ${{ inputs.collector_image }}
+      run: |
+        set -euo pipefail
+        umask 077
+        mkdir -p .installation/infra/environments .installation/tools/boxie .installation/tools/cli-playground
+        cp -a infra/host .installation/infra/
+        cp -a infra/environments/single-host .installation/infra/environments/
+        cp -a tools/boxie/infra .installation/tools/boxie/
+        cp -a tools/cli-playground/infra .installation/tools/cli-playground/
+        printf '%s\n' "$GITHUB_SHA" > .installation/revision
+        for key in BOXIE_RUNTIME_IMAGE PLAYGROUND_IMAGE PLAYGROUND_SANDBOX_IMAGE OBS_COLLECTOR_IMAGE; do
+            value=${!key}
+            [[ $value =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
+            printf '%s=%s\n' "$key" "$value" >> .installation/image.env
+        done
+    - name: Provision and install through Pulumi
+      working-directory: infra/environments/single-host
+      env:
+        REGISTRY_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        umask 077
+        pulumi login "$PULUMI_BACKEND_URL" --non-interactive
+        pulumi stack select production --create --secrets-provider passphrase --non-interactive
+        uv run --locked python - <<'PYCODE'
+        import json
+        import os
+        from pathlib import Path
+        import yaml
+        path = Path('Pulumi.production.yaml')
+        data = yaml.safe_load(path.read_text()) if path.exists() else {}
+        config = data.setdefault('config', {})
+        settings = json.loads(os.environ['SINGLE_HOST_CONFIG'])
+        allowed = {'domain', 'cloudflareZoneId', 'cloudflareAccountId', 'grafanaHostname', 'temporalHostname', 'operatorTeamName', 'operatorEmails', 'sshCidrs', 'sshPublicKey', 'location', 'serverType', 'diskSize', 'protect', 'acmeEmail'}
+        if not isinstance(settings, dict) or set(settings) - allowed:
+            raise SystemExit('Invalid platform configuration keys')
+        config.update({'clis:' + key: value for key, value in settings.items()})
+        config.update({'clis:install': True, 'clis:revision': os.environ['GITHUB_SHA'], 'clis:runId': os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT'], 'clis:sourceDirectory': str(Path(os.environ['GITHUB_WORKSPACE']) / '.installation')})
+        path.write_text(yaml.safe_dump(data))
+        PYCODE
+        printf '%s' "$CLOUDFLARE_DNS_API_TOKEN" | pulumi config set cloudflareDnsApiToken --secret --non-interactive
+        printf '{"auths":{"ghcr.io":{"auth":"%s"}}}' "$(printf '%s:%s' "$GITHUB_ACTOR" "$REGISTRY_TOKEN" | base64 -w0)" | pulumi config set registryConfig --secret --non-interactive
+        pulumi preview --refresh --non-interactive --diff --suppress-outputs
+        pulumi up --yes --refresh --non-interactive --suppress-outputs

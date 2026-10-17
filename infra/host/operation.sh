@@ -12,6 +12,7 @@ case $app in
 esac
 release="${CLIS_RELEASE_ROOT:-/opt/clis/releases}/$app/$run"
 state=${CLIS_STATE_DIR:-/srv/clis/deployment}
+if [[ -f $release/registry/config.json ]]; then export DOCKER_CONFIG="$release/registry"; fi
 revision=$(cat "$release/revision")
 [[ $revision =~ ^[a-f0-9]{40}$ ]] || exit 2
 # Nonsecret assignments are data, never evaluated as shell commands.

@@ -37,6 +37,7 @@ async def test_setup_uploads_before_start_and_preserves_pinned_trust(tmp_path: P
         host_id="host-123",
         settings=pulumi.Output.secret("private-setting"),
         tunnel_credentials=pulumi.Output.secret("private-tunnel"),
+        registry_config=pulumi.Output.secret("registry-token"),
         dependencies=[],
     )
     await operation.urn.future()
@@ -59,7 +60,7 @@ async def test_setup_uploads_before_start_and_preserves_pinned_trust(tmp_path: P
     copies = [
         value for (kind, _), value in mocks.inputs.items() if kind == "command:remote:CopyToRemote"
     ]
-    assert len(copies) == 3
+    assert len(copies) == 4
     assert all(
         value["connection"].get("value", value["connection"])["hostKey"] == "ssh-ed25519 YWJj"
         for value in copies

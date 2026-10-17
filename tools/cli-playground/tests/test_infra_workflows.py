@@ -27,59 +27,57 @@ def workflow(name: str) -> dict[str, Any]:
     return result
 
 
+@pytest.mark.parametrize("app", ["boxie", "playground"])
+def test_application_release_uses_native_ssh_without_cloud_state(app: str) -> None:
+    path = WORKFLOWS / ("boxie-release.yml" if app == "boxie" else "cli-playground-release.yml")
+    release = yaml.load(path.read_text(), Loader=yaml.BaseLoader)
+    deployment = release["jobs"]["deploy"]
+    assert deployment["environment"] == app
+    assert "github.ref == 'refs/heads/master'" in deployment["if"]
+    assert deployment["concurrency"] == {"group": "clis-production", "cancel-in-progress": "false"}
+    text = str(deployment)
+    for forbidden in (
+        "PULUMI",
+        "R2_",
+        "AWS_",
+        "HCLOUD",
+        "CLOUDFLARE",
+        "playground_infra.ci deploy",
+    ):
+        assert forbidden not in text
+    commands = "\n".join(step.get("run", "") for step in deployment["steps"])
+    for required in (
+        "scp -F",
+        "ssh -F",
+        "StrictHostKeyChecking yes",
+        "systemctl start",
+        "-p Result",
+        "-p SubState",
+        "-p ExecMainStatus",
+        "git merge-base --is-ancestor",
+        "expected-revision",
+    ):
+        assert required in commands
+    gate = release["jobs"]["release"]["if"]
+    assert "DEPLOYMENT_ACCEPTANCE_PASSED" in gate
+    assert "BOXIE_BACKUP_RESTORE_VERIFIED" in gate
+    assert "AUTO_DEPLOY" in gate
+    assert not any(
+        path.startswith(("coreutils/", "utils/")) for path in release["on"]["push"]["paths"]
+    )
+
+
 def test_only_manual_setup_can_provision_cloud_resources() -> None:
     setup = workflow("setup")
-    runtime = workflow("release")
     assert set(setup["on"]) == {"workflow_dispatch"}
     provision = setup["jobs"]["provision"]
-    deployment = runtime["jobs"]["deploy"]
-    for job in (provision, deployment):
-        assert job["environment"] == "playground"
-        assert job["if"] == "${{ github.ref == 'refs/heads/master' }}"
-        assert job["concurrency"] == {
-            "group": "cli-playground-production",
-            "cancel-in-progress": "false",
-        }
+    assert provision["environment"] == "platform"
+    assert provision["concurrency"]["group"] == "clis-production"
     assert {"HCLOUD_TOKEN", "CLOUDFLARE_API_TOKEN"} <= set(provision["env"])
-    assert not {"HCLOUD_TOKEN", "CLOUDFLARE_API_TOKEN"} & set(deployment["env"])
-    provision_commands = "\n".join(step.get("run", "") for step in provision["steps"])
-    runtime_commands = "\n".join(step.get("run", "") for step in deployment["steps"])
-    assert "pulumi preview --refresh" in provision_commands
-    assert "pulumi up --yes --refresh" in provision_commands
-    assert "playground_infra.ci deploy" in runtime_commands
-    assert "pulumi up" not in runtime_commands
-    assert "pulumi preview" not in runtime_commands
-    assert not (WORKFLOWS / "cli-playground-state.yml").exists()
-
-
-def test_setup_only_provisions_and_release_is_explicitly_unavailable() -> None:
-    setup = workflow("setup")
-    release = workflow("release")
-    assert set(setup["jobs"]) == {"provision"}
-    assert release["jobs"]["deploy"]["needs"] == "release"
-    first = release["jobs"]["release"]["steps"][0]
-    assert "Production activation is unavailable" in first["run"]
-    assert "exit 1" in first["run"]
-    assert set(release["on"]["workflow_call"]["secrets"]) == DEPLOYMENT_SECRETS
-
-
-def test_auto_release_is_opt_in_and_does_not_restart_runtime_for_ordinary_cli_changes() -> None:
-    release = workflow("release")
-    assert release["on"]["push"]["branches"] == ["master"]
-    assert "vars.PLAYGROUND_AUTO_DEPLOY == 'true'" in release["jobs"]["release"]["if"]
-    assert "github.event_name != 'push'" in release["jobs"]["release"]["if"]
-    assert "workflow_dispatch" in release["on"]
-    assert release["concurrency"] == {
-        "group": "cli-playground-release",
-        "cancel-in-progress": "false",
-    }
-    paths = release["on"]["push"]["paths"]
-    assert "tools/cli-playground/src/playground/**" in paths
-    assert "tools/cli-playground/frontend/**" in paths
-    assert "tools/cli-playground/infra/compose.production.yml" in paths
-    assert "tools/cli-playground/infra/host.py" not in paths
-    assert not any(path.startswith(("coreutils/", "utils/", "docs/")) for path in paths)
-    assert "tools/cli-playground/**" not in paths
+    assert any(
+        step.get("working-directory") == "infra/environments/single-host"
+        for step in provision["steps"]
+    )
 
 
 def test_preview_controller_keeps_privileged_code_on_the_default_branch() -> None:
@@ -196,3 +194,57 @@ def test_drift_check_only_previews_refresh_and_preserves_failure_status(
     assert (
         "No drift detected." if exit_code == 0 else "Drift check failed."
     ) in summary.read_text()
+
+
+def test_delayed_release_refuses_to_copy_over_newer_success(tmp_path: Path) -> None:
+    import json
+
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+
+    def git(*args: str) -> str:
+        return subprocess.check_output(
+            ["git", "-C", str(repository), *args], env=env, text=True
+        ).strip()
+
+    git("init", "-q")
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "Test")
+    git("-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-qm", "older")
+    older = git("rev-parse", "HEAD")
+    git("-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-qm", "newer")
+    newer = git("rev-parse", "HEAD")
+    commands = tmp_path / "bin"
+    commands.mkdir()
+    log = tmp_path / "calls"
+    for name in ("ssh", "scp"):
+        executable = commands / name
+        executable.write_text(
+            f'#!{sys.executable}\nimport json, os, sys\nwith open(os.environ["CALLS"], "a") as f: f.write(json.dumps(sys.argv) + "\\n")\nprint(os.environ["CURRENT"])\n'
+        )
+        executable.chmod(0o755)
+    script = workflow("release")["jobs"]["deploy"]["steps"][-1]["run"]
+    result = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", script],
+        cwd=repository,
+        env={
+            **env,
+            "PATH": str(commands) + ":" + env["PATH"],
+            "CALLS": str(log),
+            "CURRENT": newer,
+            "GITHUB_SHA": older,
+            "GITHUB_RUN_ID": "1",
+            "GITHUB_RUN_ATTEMPT": "1",
+            "DEPLOY_HOST": "example.com",
+            "DEPLOY_SSH_KEY": "private",
+            "DEPLOY_KNOWN_HOSTS": "known",
+        },
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "Refusing to replace a newer" in result.stderr
+    calls = [json.loads(line) for line in log.read_text().splitlines()]
+    assert len(calls) == 1
+    assert "current/revision" in calls[0][-1]

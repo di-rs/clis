@@ -53,5 +53,6 @@ if config.get_bool("install"):
         host_id=host.server.id,
         settings=settings,
         tunnel_credentials=operators.credentials,
+        registry_config=config.require_secret("registryConfig"),
         dependencies=[host.server, host.volume_attachment, *dns, *operators.resources],
     )

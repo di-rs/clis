@@ -38,6 +38,7 @@ bash "$release/tools/boxie/infra/credentials.sh" /etc/clis/boxie
 python3 "$release/tools/cli-playground/infra/playground_infra/installation.py" "$release"
 bash "/opt/clis/releases/boxie/$run/tools/boxie/infra/install.sh" "/opt/clis/releases/boxie/$run"
 bash "/opt/clis/releases/playground/$run/tools/cli-playground/infra/install.sh" "/opt/clis/releases/playground/$run"
+touch "/opt/clis/releases/playground/$run/gateway.changed"
 bash "/opt/clis/releases/playground/$run/tools/cli-playground/infra/deploy.sh" "/opt/clis/releases/playground/$run"
 
 # Only publish application records after the complete installation is healthy.

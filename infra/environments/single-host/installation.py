@@ -21,6 +21,7 @@ def provision_installation(
     host_id: pulumi.Input[str],
     settings: pulumi.Input[str],
     tunnel_credentials: pulumi.Input[str],
+    registry_config: pulumi.Input[str],
     dependencies: list[pulumi.Resource],
 ) -> remote.Command:
     validate_release(revision, run_id)
@@ -47,13 +48,17 @@ def provision_installation(
     )
     private_files = [
         remote.CopyToRemote(
-            f"installation-{name}",
+            f"installation-{name.replace('/', '-')}",
             connection=connection,
             source=pulumi.Output.secret(content).apply(pulumi.StringAsset),
             remote_path=f"{staging}/{name}",
             opts=pulumi.ResourceOptions(depends_on=[copied]),
         )
-        for name, content in [("settings.env", settings), ("tunnel.json", tunnel_credentials)]
+        for name, content in [
+            ("settings.env", settings),
+            ("tunnel.json", tunnel_credentials),
+            ("registry/config.json", registry_config),
+        ]
     ]
     command = (
         f"test ! -e {release} && chmod -R go-rwx {staging} && mv {staging} {release} && "
@@ -66,7 +71,15 @@ def provision_installation(
         connection=connection,
         create=command,
         update=command,
-        triggers=[archive, revision, run_id, host_id, settings, tunnel_credentials],
+        triggers=[
+            archive,
+            revision,
+            run_id,
+            host_id,
+            settings,
+            tunnel_credentials,
+            registry_config,
+        ],
         add_previous_output_in_env=False,
         logging=remote.Logging.NONE,
         opts=pulumi.ResourceOptions(

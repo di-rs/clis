@@ -44,7 +44,11 @@ def render(root: Path, source: Path) -> None:
             "CLOUDFLARE_DNS_API_TOKEN": os.environ["CLOUDFLARE_DNS_API_TOKEN"],
         },
     )
-    profiles_path = credentials / "profiles.json"
+    update_profile(root, source)
+
+
+def update_profile(root: Path, source: Path) -> None:
+    profiles_path = root / "boxie/profiles.json"
     profiles = json.loads(profiles_path.read_text()) if profiles_path.exists() else {}
     profile = profiles.get("playground")
     if profile is None:
@@ -53,14 +57,27 @@ def render(root: Path, source: Path) -> None:
         )["playground"]
     profile["image_digest"] = os.environ["PLAYGROUND_SANDBOX_IMAGE"]
     profiles["playground"] = profile
-    profiles_path.write_text(json.dumps(profiles, indent=2) + "\n")
+    with tempfile.NamedTemporaryFile(mode="w", dir=profiles_path.parent, delete=False) as output:
+        temporary = Path(output.name)
+        try:
+            output.write(json.dumps(profiles, indent=2) + "\n")
+            output.flush()
+            os.fsync(output.fileno())
+            temporary.replace(profiles_path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
+    parser.add_argument("--profile-only", action="store_true")
     args = parser.parse_args()
-    render(Path("/etc/clis"), args.source)
+    root = Path(os.environ.get("CLIS_CONFIG_DIR", "/etc/clis"))
+    if args.profile_only:
+        update_profile(root, args.source)
+    else:
+        render(root, args.source)
 
 
 if __name__ == "__main__":
