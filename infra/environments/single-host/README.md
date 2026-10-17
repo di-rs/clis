@@ -1,133 +1,133 @@
-# Single-host environment
+# Install the single-host deployment
 
-This is the initial Pulumi composition root, with one environment per stack. It
-selects the shared host/storage platform, Boxie, optional Playground DNS, and
-optional operator Access/Tunnel configuration. Components declare infrastructure
-and nonsecret configuration; application activation belongs to the separate
-release commands. No Pulumi callback starts containers or writes local artifacts.
+This Pulumi environment selects a shared host, Boxie, optional monitoring and
+operator dashboards, and optional Playground. Boxie owns PostgreSQL, Temporal,
+observability and ingress beside its code. Pulumi provisions cloud resources and
+exports inert handles; it never starts Compose services or runs schema jobs.
 
-The cloud resources are protected by default. The Hetzner host runs Ubuntu 24.04
-on x86_64 and uses gVisor systrap. A separately attached ext4 volume backs
-`/srv/boxie`, Docker’s entire data root and all shared data volumes. A bounded
-first-boot wait allows the attachment to complete; absent storage aborts setup.
-A persistent mount unit and Docker prestart guard keep reboot fail-closed too.
+Use the protected infrastructure review workflow with an explicitly reviewed
+full commit SHA before requesting provisioning credentials. PR48's preview and
+opt-in drift checks remain separate from deployment. The existing protected
+`platform` environment name is retained for its approvals and credential store.
+No provider-backed deployment was performed for this implementation.
 
-## Configure and provision
+## Select components and prepare the host
 
-From the repository root, run `uv sync --locked --all-packages`. Keep the existing
-remote Pulumi state backend; it is separate from application backups. In this
-directory, initialize/select the intended stack and copy `Pulumi.example.yaml`
-to `Pulumi.STACK.yaml`. Replace the installation UUID, approved registry digest,
-SSH allowlist, and deployment environment secret reference. Supply `HCLOUD_TOKEN`
-to Pulumi from the provisioning secret store, then run `pulumi preview` before
-`pulumi up`. No cloud mutation is part of the repository’s default tests.
+Copy [Pulumi.example.yaml](Pulumi.example.yaml) to an operator-owned stack config.
+`monitoring` defaults to false; selecting `operators` requires it. Playground is
+optional and an installation without it needs no product DNS or deployment token.
+No monitoring inputs are required for the base Boxie/Temporal manifests.
 
-The Boxie image must use an immutable registry SHA-256 digest. A generic environment
-requires no Playground hostname, product token or Cloudflare configuration. Add
-the `playground` object to provision the product and wildcard DNS records and open
-host ports 80/443. Its service receives Boxie’s private endpoint and consumer
-credential reference through the environment. Product DNS/ACME tokens belong to
-its consuming setup/release processes and never become host bootstrap inputs.
+After reviewing provider changes, use the manual setup workflow. Export the
+public `connectionProfile`, `sharedResources`, and `deploymentHandles` separately
+from the secret deployment key and tunnel credentials. Store the administrative
+SSH key in the appropriate protected deployment environments. The public profile
+pins host, port, host public key and an identity reference. Provision private
+registry pull access with a read-only credential, separate from CI publication.
 
-To select operator ingress, add `operators`, supply the Cloudflare provider token
-for provisioning, and set `operatorTunnelSecret` with `pulumi config set --secret`.
-The tunnel secret must be base64 encoding at least 32 random bytes. The existing
-operator ingress owner declares two exact Access applications, two proxied DNS
-records and a local tunnel. Its rendered nonsecret config enforces the respective
-Access audience at each origin and ends with a deny route. Validate live Access
-and direct-origin isolation using the ingress runbook; local declaration tests
-do not prove DNS or authentication on the real service.
+Copy `infra/host/host_infra/resources.py` from the reviewed revision and the
+exported resource plan to a root-owned setup directory on the target. Run
+`python3 resources.py --plan resources.json`. It checks the mounted persistent
+disk, resource labels, isolation and numeric readers before creating absent
+resources. It never adopts conflicting resources or starts workloads. Existing
+storage labels retain their identity across the package rename.
 
-## Transfer setup outputs
+The owner declarations create PostgreSQL storage for UID 999, Boxie and optional
+Playground storage for UID 10001, and selected monitoring storage for Vector
+65532, VictoriaLogs/Prometheus 65534 and Grafana 472. The approved-profile source
+is root-owned, group 10001 and mode 0750, separate from Boxie's retained versions.
+The host discovers the journal GID in `/etc/boxie-platform/journal-group-gid`.
+Private credentials must be readable by their actual container UID; source parent
+permissions and mount targets must be checked on the target host.
 
-`pulumi stack output connectionProfile --json` produces only
-`{host, host_public_key, identity_ref}`. Publish this nonsecret profile to the
-deployment environment. Transfer the separately secret `deploymentPrivateKey`
-output directly into that environment’s secret store under `identity_ref`, using
-its stdin/import interface. Never put a private key in the profile, a release
-manifest, CI artifacts or command logs. The key grants administrative SSH access.
-Ordinary component releases require the profile and resolved SSH identity; they
-require neither Pulumi state decryption nor cloud credentials.
+## Install owners in order
 
-Export `sharedResources`, `deploymentHandles`, and `observabilitySettings` separately with
-`pulumi stack output NAME --json`. Transfer the resource plan and the matching
-`infra/host/host_infra/resources.py` to a root-owned setup directory on
-the host using the profile’s pinned SSH host key. On the host, run:
+1. Prepare the host, protected disk, external networks and owner-declared volumes.
+2. Start [Boxie's PostgreSQL](../../../tools/boxie/infra/postgres/README.md) using
+   its base and production Compose files. An empty volume initializes distinct
+   Boxie, Temporal persistence and visibility roles/databases.
+3. Run explicit Boxie Alembic and upstream Temporal schema setup/update jobs.
+   These are separately approved forward operations. Application startup and
+   rollback never apply or reverse schemas.
+4. Start [Temporal](../../../tools/boxie/infra/temporal/README.md), run explicit
+   namespace bootstrap and verify mTLS readiness. If selected, start native
+   [monitoring](../../../tools/boxie/infra/observability/README.md) and protected
+   [operator ingress](../../../tools/boxie/infra/ingress/README.md).
+5. Prepare Boxie's two-process configuration, stable approved-profile directory,
+   dedicated mTLS identities and versioned private credential paths. Use the
+   generic release tool, then run the generic create/terminal/stop smoke.
+6. Optionally release [Playground](../../../tools/cli-playground/infra/README.md)
+   with its own image, storage, credentials and private Boxie endpoint. Verify
+   publication and terminal behavior through the product.
 
-```sh
-python3 /opt/clis-setup/resources.py --plan /opt/clis-setup/resources.json
-```
+Native `envsubst` handles the three Prometheus identity variables and the six
+operator tunnel variables. `observabilitySettings` exports the three identity
+values; Access outputs provide the tunnel ID and distinct audiences. Validate
+nonempty distinct audiences before substitution. There is no Python configuration
+renderer. Monitoring's native rules and exporter explicitly cover `/` and
+`/srv/boxie`. Grafana and Temporal UI remain private behind Access.
 
-This explicit platform preparation uses only Python’s standard library. It
-checks that the pinned persistent device is mounted, validates installation
-ownership and network isolation, then creates absent bridges and bind-backed
-external volumes. It rejects an existing name owned by a different installation,
-a public private bridge, a wrong backing directory, or a directory owner
-mismatch. It never deletes persistent state. Re-running a matching plan is safe.
-Use the exported environment handles in each independently owned Compose unit.
-`observabilitySettings` contains the selected stack/host identities, private
-metrics and Grafana-origin network handles, four external volume handles, both
-`/` and `/srv/boxie` backing mounts. Playground currently has no metrics exporter.
-Pass these settings to the observability owner’s renderer with explicit assets,
-published collector digest, Grafana URL and the numeric journal GID read from
-`/etc/boxie-platform/journal-group-gid` on the target host. The environment also
-passes the canonical observability-owned `journald.conf` into host bootstrap;
-its persistent policy, reader ACLs and bounded restart/flush are installed before
-Docker. No product hostname is required to provision a generic Boxie host.
-The selected Boxie and Playground outputs contain configuration and secret
-references; resolve credentials only at the consuming process.
+For monitored Boxie releases set public `BOXIE_MONITORING=true` and
+`OBS_METRICS_NETWORK` in `COMPONENT_SETTINGS`; the release adapter passes the
+committed monitoring overlay to native Compose. Base releases omit this selection.
+Temporal's native monitoring overlay is selected by the same public flag in its
+owner operation. Supporting resources remain independently owned.
 
-## Fresh installation and independent updates
+## Release and rotate independently
 
-1. Provision the host, firewall, volume and selected DNS; wait for cloud-init and
-   the Docker/gVisor smoke to finish. Transfer the connection profile and secret
-   SSH credential separately. Verify `/srv/boxie` against the exported device.
-2. Prepare shared resources. Start [platform PostgreSQL](../../host/README.md)
-   and apply Boxie SQL explicitly. Set up [Temporal](../../../tools/boxie/infra/temporal/README.md)
-   credentials/certificates, run its schema jobs and idempotent namespace bootstrap.
-3. Release Temporal, [observability](../../../tools/boxie/infra/observability/README.md), and selected
-   [operator ingress](../../../tools/boxie/infra/ingress/README.md). Check private dependency readiness,
-   telemetry and live Access protection before starting Boxie.
-4. Release [Boxie](../../../tools/boxie/infra/README.md) with API and orchestrator
-   on one approved image identity. Verify readiness and a generic
-   create/terminal/stop flow before adding a product consumer.
-5. Optionally release [Playground](../../../tools/cli-playground/infra/README.md)
-   and verify its public product/preview routes.
+Each application environment stores public `COMPONENT_SETTINGS` JSON separately
+from private `COMPONENT_ENVIRONMENT` JSON. The descriptor declares permitted
+private names. The image job publishes only image references; the protected job
+uses `deploy_tool manifest` to derive committed configuration hashes and public
+identity, then prepares private inputs and activates that component. Keep automatic
+application deployment opt-in. Application workflows cannot provision, migrate,
+update approvals or reconcile another component.
 
-Subsequent releases target one Compose unit and its declared dependencies. A
-Playground release must not invoke Pulumi or update Boxie, Temporal, PostgreSQL,
-observability or shared bridges/volumes. A Boxie release must not apply Temporal
-schema upgrades or update Playground. Preserve persistent resources on failed
-activation. Drain/terminate sessions for orchestrator changes; existing PTYs are not
-restored by a host or orchestrator restart. One host remains a failure domain. This
-project performs no migration of the old undeployed Playground Pulumi state,
-application backup, disaster recovery or cross-host placement.
+Public settings contain nonsecret versioned credential references and immutable
+mounted paths. Rotation requires a new path/reference and targeted recreation;
+retain old credential/configuration versions for rollback. Never mutate a mounted
+credential file in place and present it as an immutable release. Prepared bundles
+are private and must not be uploaded; only the public release manifest is saved.
 
-## Activation evidence and capacity gate
+The manual `boxie-supporting-release.yml` workflow selects exactly `postgres`,
+`temporal`, `observability` or `ingress`. It excludes schema/bootstrap/storage-init
+jobs, records native pins/configuration hashes privately on the host, and checks
+owner readiness. Database/server upgrades have explicit operator compatibility and
+recovery procedures; the workflow makes no automatic schema rollback promise.
+The separate `boxie-profiles-release.yml` invokes the acknowledged atomic profile
+operation. It holds the Boxie activation lock, verifies owner/image/installation,
+and changes no container identity.
 
-Local tests cover declarations and workload failure boundaries; they do not
-certify a provisioned host. Before enabling automatic application releases:
+Before either manual workflow, install its reviewed operator checkout at
+`/opt/clis/operator-checkouts/SHA`, root-owned and unchanged, including its Git
+metadata and `.venv`. Install uv 0.13.0/Python 3.15, run
+`uv sync --locked --all-packages` there, and retain that checkout for the operation.
+Host bootstrap's Python 3.12 is sufficient for generic app releases; these manual
+owner tools explicitly require the application SDK environment. They never fetch
+code using the deployment SSH credential.
 
-- Run a provider-backed `pulumi preview` and first install on the selected host.
-  Verify pinned SSH identity, fail-closed disk mounting after reboot, shared
-  network ownership, reader-owned credentials and writable directories.
-- Export `observabilitySettings` and use the observability owner's renderer. Its
-  mount list includes `/` and `/srv/boxie`; the current Boxie and native infrastructure scrapes are retained. Verify persistent journal collection, both disk series,
-  Grafana login/queries, Temporal UI and live Access/origin isolation.
-- Verify Boxie create/terminal/stop, actual gVisor restrictions and pending-cleanup
-  recovery before publishing Playground. Then verify native browser product flow.
-- With the complete stack running, exercise eight concurrent sandboxes and record
-  host memory, CPU, filesystem headroom, telemetry drops and provisioning/cleanup
-  latency. Inspect `docker stats --no-stream`, the provisioned dashboards and
-  `df -h / /srv/boxie`; retain the observations with the environment's activation
-  record. Reduce configured capacity or select a larger host if headroom is
-  insufficient. The example host type is a starting configuration, not a sizing
-  certification.
+The protected `boxie-operations` environment supplies `DEPLOYMENT_PROFILE`,
+`DEPLOYMENT_SSH_KEY` and private `OWNER_ENVIRONMENT` JSON. For Temporal include
+`TEMPORAL_PROBE_ADDRESS` reachable from the host and `TEMPORAL_OPERATOR_CERTS_DIR`.
+The protected `boxie-profiles` environment supplies the same SSH connection and
+public `PROFILE_OPERATION` JSON: `directory`, `installation-id`, `host-id`, exact
+`container`, immutable `image`, `profile`, and approved `command` array. The chosen
+profile file is read from the reviewed commit. Both workflows serialize owner
+operations and require reviewed source before requesting protected credentials.
 
-A failed application update preserves current/previous releases and persistent
-state. Inspect component `status.json`, Docker health and the local journal when
-the dashboard is unavailable. Reconcile owned pending cleanup before freeing
-capacity. Fix dependency or credential configuration explicitly; do not delete
-volumes, bypass storage guards or roll back Temporal schemas. Configuration and
-secret files referenced by retained application releases should use versioned
-host paths; changing a file in place also changes what an old release can read.
+## Recover and finish activation checks
+
+Handled cancellation cleans up owned command groups before releasing the app lock.
+Inspect uncertain `activating`, `recovery-required` and failed-rollback states
+before retrying; the next ordinary activation fails closed. SIGKILL, lost hosts,
+SSH disconnects and Docker daemon side effects require actual-state inspection.
+A Boxie release ends terminals, preserves volumes and cleanup accounting, and
+promises no PTY restoration. See the [release tool](../../../tools/deploy/README.md).
+
+Before production readiness, record provider preview, first boot/reboot,
+missing-disk refusal, private-network/UID access, authenticated dependency health,
+DNS/ACME/Access and bypass denial, native gVisor/browser behavior, and eight-slot
+combined-stack capacity on the selected VM. Local mocks and synthetic release
+smoke do not establish these facts. Backup/restore implementation and its restore
+proof remain activation work tracked by [issue #38](https://github.com/di-rs/clis/issues/38).
+Never use `down --volumes` on production data.

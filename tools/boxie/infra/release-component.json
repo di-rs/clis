@@ -2,7 +2,8 @@
   "component": "boxie",
   "compose_file": "compose.production.yml",
   "files": [
-    "pre-activate.sh"
+    "pre-activate.sh",
+    "compose.observability.yml"
   ],
   "services": [
     "api",
@@ -46,5 +47,8 @@
     "boxie_api": "v1",
     "temporal_server": "1.32.0"
   },
-  "secret_environment": []
+  "secret_environment": [],
+  "optional_compose_files": {
+    "BOXIE_MONITORING": "compose.observability.yml"
+  }
 }

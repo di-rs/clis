@@ -23,3 +23,18 @@ if environment.operators:
     pulumi.export("operatorGrafanaAudience", environment.operators.grafana_audience)
     pulumi.export("operatorTemporalAudience", environment.operators.temporal_audience)
     pulumi.export("operatorCredentials", environment.operators.tunnel_credentials_json)
+
+# Ordered owner inputs, with schema approval kept separate from normal releases.
+pulumi.export(
+    "installationOrder",
+    [
+        "host/resources",
+        "boxie/postgres",
+        "operator/schemas",
+        "boxie/temporal",
+        *(["boxie/observability"] if settings.monitoring else []),
+        *(["boxie/ingress"] if settings.operators else []),
+        "boxie/application",
+        *(["playground/application"] if settings.playground else []),
+    ],
+)

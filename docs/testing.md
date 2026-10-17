@@ -191,9 +191,9 @@ The full native file requires a Linux Docker host with persistent journald and
 real PostgreSQL/Temporal fixtures. Missing prerequisites fail when explicitly
 selected. Storage-pressure and live Cloudflare Access remain activation checks.
 
-## Component release and platform checks
+## Component release and host checks
 
-The root Python checks include platform resource ownership, Pulumi component
+The root Python checks include host resource ownership, Pulumi component
 mock graphs, single-host composition, private release preparation and the
 standalone SSH activation adapter. Host-side scripts are checked against Python
 3.12 grammar; application code remains on Python 3.15. No cloud resources are

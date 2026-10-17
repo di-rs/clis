@@ -117,17 +117,19 @@ elif sys.argv[1]=='digest':
 """
 
 
-def main() -> int:
+def main(argv: list[str] | None = None, *, quiet: bool = False) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--content", type=Path, required=True)
     parser.add_argument("--installation-id", type=UUID, required=True)
     parser.add_argument("--host-id", required=True)
+    parser.add_argument("--project", default="clis-boxie")
+    parser.add_argument("--release-root", type=Path, default=Path("/opt/clis"))
     parser.add_argument("--container", required=True)
     parser.add_argument("--image", required=True)
     parser.add_argument("--profile", required=True)
     parser.add_argument("--command", type=json.loads, required=True)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     identity = json.dumps({"installation_id": str(args.installation_id), "host_id": args.host_id})
 
     def docker(*argv: str, data: bytes | None = None) -> bytes:
@@ -136,72 +138,85 @@ def main() -> int:
         ).stdout
 
     try:
-        if not re.fullmatch(r"[a-f0-9]{64}", args.container) or not re.fullmatch(
-            r"[a-z0-9][a-z0-9.:-]*/[a-z0-9][a-z0-9./_-]*@sha256:[a-f0-9]{64}", args.image
-        ):
-            raise ProfileUpdateError(
-                "exact container ID and registry-qualified image digest required"
-            )
-        info = json.loads(docker("inspect", args.container))[0]
-        labels = info["Config"]["Labels"]
-        expected_image = (
-            docker("image", "inspect", "--format", "{{.Id}}", args.image).decode().strip()
-        )
-        if (
-            info["Image"] != expected_image
-            or not info["State"]["Running"]
-            or labels.get("com.docker.compose.project") != "clis-boxie"
-            or labels.get("com.docker.compose.service") != "orchestrator"
-            or not labels.get("clis.release-id")
-        ):
-            raise ProfileUpdateError("orchestrator ownership or approved image mismatch")
-        directory = args.directory.resolve(strict=True)
-        if (
-            args.directory.is_symlink()
-            or directory.stat().st_uid != 0
-            or directory.stat().st_mode & 0o022
-            or not any(
-                m["Source"] == str(directory)
-                and m["Destination"] == "/etc/boxie/approved"
-                and not m["RW"]
-                for m in info["Mounts"]
-            )
-        ):
-            raise ProfileUpdateError("root-owned stable read-only profile mount required")
-        content = args.content.read_bytes()
-        docker(
-            "exec", "-i", args.container, "python", "-c", REMOTE, "validate", identity, data=content
-        )
-        request = json.dumps(
-            {"profile_id": args.profile, "command": args.command, "env": {}}
-        ).encode()
-
-        def signal_reload() -> None:
-            docker("kill", "--signal", "HUP", args.container)
-
-        def read_digest() -> str:
-            return (
-                docker(
-                    "exec",
-                    "-i",
-                    args.container,
-                    "python",
-                    "-c",
-                    REMOTE,
-                    "digest",
-                    identity,
-                    data=request,
+        if not re.fullmatch(r"clis-[a-z][a-z0-9-]{0,47}", args.project):
+            raise ProfileUpdateError("explicit component project required")
+        component = args.release_root / args.project.removeprefix("clis-")
+        fd = os.open(component / "activation.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "w") as activation_lock:
+            fcntl.flock(activation_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if not re.fullmatch(r"[a-f0-9]{64}", args.container) or not re.fullmatch(
+                r"[a-z0-9][a-z0-9.:-]*/[a-z0-9][a-z0-9./_-]*@sha256:[a-f0-9]{64}", args.image
+            ):
+                raise ProfileUpdateError(
+                    "exact container ID and registry-qualified image digest required"
                 )
-                .decode()
-                .strip()
+            info = json.loads(docker("inspect", args.container))[0]
+            labels = info["Config"]["Labels"]
+            expected_image = (
+                docker("image", "inspect", "--format", "{{.Id}}", args.image).decode().strip()
             )
+            if (
+                info["Image"] != expected_image
+                or not info["State"]["Running"]
+                or labels.get("com.docker.compose.project") != args.project
+                or labels.get("com.docker.compose.service") != "orchestrator"
+                or not labels.get("clis.release-id")
+            ):
+                raise ProfileUpdateError("orchestrator ownership or approved image mismatch")
+            directory = args.directory.resolve(strict=True)
+            if (
+                args.directory.is_symlink()
+                or directory.stat().st_uid != 0
+                or directory.stat().st_mode & 0o022
+                or not any(
+                    m["Source"] == str(directory)
+                    and m["Destination"] == "/etc/boxie/approved"
+                    and not m["RW"]
+                    for m in info["Mounts"]
+                )
+            ):
+                raise ProfileUpdateError("root-owned stable read-only profile mount required")
+            content = args.content.read_bytes()
+            docker(
+                "exec",
+                "-i",
+                args.container,
+                "python",
+                "-c",
+                REMOTE,
+                "validate",
+                identity,
+                data=content,
+            )
+            request = json.dumps(
+                {"profile_id": args.profile, "command": args.command, "env": {}}
+            ).encode()
 
-        print(
-            json.dumps(
-                {"config_digest": update_profiles(directory, content, signal_reload, read_digest)}
-            )
-        )
-        return 0
+            def signal_reload() -> None:
+                docker("kill", "--signal", "HUP", args.container)
+
+            def read_digest() -> str:
+                return (
+                    docker(
+                        "exec",
+                        "-i",
+                        args.container,
+                        "python",
+                        "-c",
+                        REMOTE,
+                        "digest",
+                        identity,
+                        data=request,
+                    )
+                    .decode()
+                    .strip()
+                )
+
+            digest = update_profiles(directory, content, signal_reload, read_digest)
+            if not quiet:
+                print(json.dumps({"config_digest": digest}))
+            return 0
+
     except Exception:
         print(
             "profiles: operation failed; inspect approvals and acknowledged digest before retrying",

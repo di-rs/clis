@@ -86,3 +86,20 @@ UV_CACHE_DIR=/tmp/boxie-uv-cache uv run --locked pytest -m integration tools/box
 The fixture requires Docker, creates randomly named disposable containers and
 non-superuser test databases, then removes only those test-owned resources.
 Default pytest excludes integration and never starts Docker.
+
+
+## Independently targeted release
+
+Use the protected manual owner workflow with a reviewed full commit SHA and unit
+`postgres`. The fixed operator command uses this directory's native Compose files,
+approved immutable images and private owner inputs. It excludes schema/bootstrap
+and storage-init jobs, records native pins and committed configuration hashes,
+and checks readiness. See the [single-host procedure](../../../../infra/environments/single-host/README.md)
+for host tooling, credential readers, selection and activation limits.
+
+Use `compose.production.yml` with `compose.yml` to select `POSTGRES_VOLUME`,
+prepared by the host for UID 999. Empty-volume initialization is distinct from
+upgrades. Apply Boxie Alembic and upstream Temporal schemas explicitly; native
+service updates never run or reverse them. Back up and validate restore before
+an incompatible PostgreSQL upgrade. Ordinary release failure has no universal
+database rollback guarantee.

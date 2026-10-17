@@ -12,7 +12,7 @@ The shared host, disk, networks and persistent volumes belong to
 Complete the platform, Temporal, observability and Boxie installation before
 activating Playground. Use the exported `deploymentHandles` and Playground
 settings for the external consumer/proxy/metrics networks and data/certificate
-volumes. Copy [environment.example.json](environment.example.json) to a private
+volumes. Copy public [settings.example.json](settings.example.json) and private [environment.example.json](environment.example.json) to a private
 file outside the checkout and fill every field using those outputs. Store the
 server-side Boxie consumer credential on the host, owned by UID 10001 with mode
 0600, and use its absolute path for `PLAYGROUND_BOXIE_CREDENTIAL_FILE`.
@@ -39,7 +39,7 @@ The [release descriptor](release-component.json) owns exactly `gateway` and
 ```sh
 uv run --locked python -m deploy_tool prepare \
   --descriptor tools/cli-playground/infra/release-component.json \
-  --release /private/playground-release.json \
+  --repository . --release /private/playground-release.json \
   --environment /private/playground-environment.json \
   --output /private/playground-prepared
 uv run --locked python -m deploy_tool deploy \
@@ -79,3 +79,11 @@ open its browser terminal, publish a newer immutable revision, reset and expire
 the preview. Run [playground_infra.smoke](playground_infra/smoke.py) on the native
 Linux/gVisor environment. Local Compose/contract tests cannot prove public DNS,
 Access protection, whole-host sizing or native sandbox isolation.
+
+
+Public `COMPONENT_SETTINGS` comes from `settings.example.json`; private
+`COMPONENT_ENVIRONMENT` contains only descriptor-declared secret names. Use the
+shared [manifest serializer](../../deploy/README.md#prepare-committed-configuration)
+with the exact commit and images, then prepare with `--repository .`. Never copy
+an example revision/hash into a real release. Keep versioned private file paths
+for retained rollback inputs.

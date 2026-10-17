@@ -44,3 +44,20 @@ At activation, test both origins with unauthenticated, wrong-audience and valid
 operator requests through the real tunnel. Also test an unconfigured hostname
 and verify direct origins are unreachable externally. The local native ingress
 validator checks configuration shape; it does not prove live Access authorization.
+
+
+## Independently targeted release
+
+Use the protected manual owner workflow with a reviewed full commit SHA and unit
+`ingress`. The fixed operator command uses this directory's native Compose files,
+approved immutable images and private owner inputs. It excludes schema/bootstrap
+and storage-init jobs, records native pins and committed configuration hashes,
+and checks readiness. See the [single-host procedure](../../../../infra/environments/single-host/README.md)
+for host tooling, credential readers, selection and activation limits.
+
+`boxie_infra.access` contains only the necessary cloud declarations and inert
+IDs/audiences/credentials. Native `cloudflared.yml` remains the single routing
+policy. The private `/ready` probe verifies tunnel connectivity, while real
+Access authorization and direct-origin denial remain activation checks. Its
+metrics listener has no published host port. Credentials must be readable by
+UID 65532 from their private parent directory.

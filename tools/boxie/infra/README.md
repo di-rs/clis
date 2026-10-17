@@ -18,7 +18,7 @@ Production uses stable Compose project `clis-boxie`; local development retains
 
 ## Production activation
 
-Copy [environment.example.json](environment.example.json) outside the checkout,
+Copy public [settings.example.json](settings.example.json) and private [environment.example.json](environment.example.json) outside the checkout,
 replace its network/storage handles from the environment outputs, and supply the
 host-owned process configuration, approved profiles and credential paths. Keep
 this input mode 0600. The two processes use one `BOXIE_RUNTIME_IMAGE` digest
@@ -215,3 +215,11 @@ resolver. It does not restart API or orchestrator. Existing admissions retain
 their old snapshot. Missing acknowledgement restores the prior source and
 verifies it; uncertain restoration requires operator recovery. An ordinary
 application release cannot perform this operation.
+
+
+Public `COMPONENT_SETTINGS` comes from `settings.example.json`; private
+`COMPONENT_ENVIRONMENT` contains only descriptor-declared secret names. Use the
+shared [manifest serializer](../../deploy/README.md#prepare-committed-configuration)
+with the exact commit and images, then prepare with `--repository .`. Never copy
+an example revision/hash into a real release. Keep versioned private file paths
+for retained rollback inputs.

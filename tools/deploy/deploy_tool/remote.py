@@ -166,7 +166,7 @@ class Activator:
         return env
 
     def compose(self, bundle: dict[str, Any], directory: Path) -> list[str]:
-        return [
+        command = [
             "docker",
             "compose",
             "--env-file",
@@ -178,6 +178,11 @@ class Activator:
             "-f",
             str(directory / bundle["descriptor"]["compose_file"]),
         ]
+
+        for setting, name in bundle["descriptor"].get("optional_compose_files", {}).items():
+            if bundle["release"].get("settings", {}).get(setting, "false") == "true":
+                command += ["-f", str(safe_path(directory, name))]
+        return command
 
     def healthy(self, bundle: dict[str, Any], directory: Path) -> None:
         descriptor = bundle["descriptor"]

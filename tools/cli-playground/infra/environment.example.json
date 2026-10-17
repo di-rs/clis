@@ -1,14 +1,4 @@
 {
-  "ACME_EMAIL": "operator@example.com",
-  "CLOUDFLARE_DNS_API_TOKEN": "REPLACE_WITH_SECRET",
-  "OBS_METRICS_NETWORK": "clis-example-obs_metrics",
-  "PLAYGROUND_BOXIE_CREDENTIAL_FILE": "/srv/boxie/config/playground_boxie_credential_file",
-  "PLAYGROUND_BOXIE_PROFILE": "playground",
-  "PLAYGROUND_BOXIE_URL": "http://boxie-api:8090",
-  "PLAYGROUND_CERTIFICATES_VOLUME": "clis-example-certificates",
-  "PLAYGROUND_CONSUMER_NETWORK": "clis-example-playground_consumer",
-  "PLAYGROUND_DATA_VOLUME": "clis-example-playground-data",
   "PLAYGROUND_DEPLOY_TOKEN": "REPLACE_WITH_SECRET",
-  "PLAYGROUND_DOMAIN": "play.example.com",
-  "PLAYGROUND_PROXY_NETWORK": "clis-example-playground_proxy"
+  "CLOUDFLARE_DNS_API_TOKEN": "REPLACE_WITH_SECRET"
 }

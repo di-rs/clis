@@ -63,7 +63,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-      - name: 🔧 Record immutable component manifest
+      - name: 🔧 Record immutable component images
         env:
           COMPONENT_DIRECTORY: ${{ inputs.directory }}
           IMAGE_VARIABLE: ${{ inputs.image_variable }}
@@ -76,13 +76,13 @@ jobs:
           release = json.loads((Path(os.environ['COMPONENT_DIRECTORY']) / 'release.example.json').read_text())
           release['revision'] = os.environ['REVISION']
           release['images'][os.environ['IMAGE_VARIABLE']] = os.environ['IMAGE']
-          Path('release.json').write_text(json.dumps(release, indent=2) + '\n')
+          Path('images.json').write_text(json.dumps(release['images'], indent=2) + '\n')
           PY
       - name: 📤 Save immutable release manifest
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ${{ inputs.component }}-release
-          path: release.json
+          name: ${{ inputs.component }}-images
+          path: images.json
           if-no-files-found: error
           retention-days: 30
 
@@ -114,12 +114,13 @@ jobs:
       - name: 📥 Load immutable release manifest
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ${{ inputs.component }}-release
+          name: ${{ inputs.component }}-images
       - name: 🔧 Activate only this component
         env:
           COMPONENT_DIRECTORY: ${{ inputs.directory }}
           CONNECTION_PROFILE: ${{ vars.DEPLOYMENT_PROFILE }}
           SSH_IDENTITY: ${{ secrets.DEPLOYMENT_SSH_KEY }}
+          COMPONENT_SETTINGS: ${{ vars.COMPONENT_SETTINGS }}
           COMPONENT_ENVIRONMENT: ${{ secrets.COMPONENT_ENVIRONMENT }}
         run: |
           set -euo pipefail
@@ -130,9 +131,18 @@ jobs:
           import os
           from pathlib import Path
           root = Path(os.environ['DEPLOY_PRIVATE'])
-          for name, key in [('profile.json','CONNECTION_PROFILE'),('identity','SSH_IDENTITY'),('environment.json','COMPONENT_ENVIRONMENT')]:
+          for name, key in [('profile.json','CONNECTION_PROFILE'),('identity','SSH_IDENTITY'),('environment.json','COMPONENT_ENVIRONMENT'),('settings.json','COMPONENT_SETTINGS')]:
               with os.fdopen(os.open(root / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as f:
                   f.write(os.environ[key])
           PY
-          uv run --locked python -m deploy_tool prepare --descriptor "$COMPONENT_DIRECTORY/release-component.json" --release release.json --environment "$private/environment.json" --output "$private/prepared"
+          uv run --locked python -m deploy_tool manifest --repository . --descriptor "$COMPONENT_DIRECTORY/release-component.json" --revision "$GITHUB_SHA" --images images.json --settings "$private/settings.json" --output release.json
+          uv run --locked python -m deploy_tool prepare --repository . --descriptor "$COMPONENT_DIRECTORY/release-component.json" --release release.json --environment "$private/environment.json" --output "$private/prepared"
           uv run --locked python -m deploy_tool deploy --prepared "$private/prepared" --profile "$private/profile.json" --identity "$private/identity" --timeout 900
+      - name: 📤 Save public release identity
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.component }}-release
+          path: release.json
+          if-no-files-found: ignore
+          retention-days: 30

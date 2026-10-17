@@ -425,3 +425,31 @@ def test_same_image_with_old_release_label_is_not_promoted(
     result = remote(prepare_release(source, "old-label"), source / "host", bin_dir)
     assert result.returncode == 1
     assert json.loads(result.stdout)["outcome"] == "failed-no-previous"
+
+
+def test_selected_monitoring_overlay_is_passed_to_native_compose(
+    source: Path, docker: tuple[Path, Path]
+) -> None:
+    bin_dir, state = docker
+    descriptor = json.loads((source / "descriptor.json").read_text())
+    descriptor["files"] = ["monitoring.yml"]
+    descriptor["optional_compose_files"] = {"MONITORING": "monitoring.yml"}
+    (source / "monitoring.yml").write_text(
+        "services:\n  web:\n    environment:\n      METRICS: enabled\n"
+    )
+    (source / "descriptor.json").write_text(json.dumps(descriptor))
+    release = json.loads((source / "release.json").read_text())
+    release["settings"] = {
+        "MONITORING": "true",
+        "TOKEN_REF": "test/v1",
+        "TEST_DOCKER_STATE": str(state),
+    }
+    (source / "release.json").write_text(json.dumps(release))
+    result = remote(prepare_release(source, "monitored"), source / "host", bin_dir)
+    assert result.returncode == 0, result.stdout
+    calls = json.loads(state.read_text())["calls"]
+    assert all(
+        any(arg.endswith("/monitoring.yml") for arg in call)
+        for call in calls
+        if call[0] == "compose"
+    )

@@ -7,9 +7,9 @@ calls. Product preparation and session-drain policy remain in the owning service
 Run commands from the repository root using the locked uv workspace:
 
 ```sh
-uv run --locked python -m deploy_tool validate \
+uv run --locked python -m deploy_tool validate --repository . \
   --descriptor tools/boxie/infra/release-component.json --release release.json
-uv run --locked python -m deploy_tool prepare \
+uv run --locked python -m deploy_tool prepare --repository . \
   --descriptor tools/boxie/infra/release-component.json --release release.json \
   --environment /private/operator/boxie.environment.json --output /private/operator/prepared
 uv run --locked python -m deploy_tool deploy \
@@ -36,12 +36,14 @@ Compose `include` and service `extends` are rejected.
   "component": "example",
   "compose_file": "compose.production.yml",
   "files": ["routes.yml", "pre-activate.sh"],
-  "services": ["api", "worker"],
-  "image_variables": {"RUNTIME_IMAGE": ["api", "worker"]},
+  "services": ["api", "orchestrator"],
+  "image_variables": {"RUNTIME_IMAGE": ["api", "orchestrator"]},
   "required_environment": ["DATABASE_CREDENTIAL_FILE", "PRIVATE_NETWORK"],
+  "secret_environment": [],
+  "compatibility": {"schema": "example-v1", "dependency_api": "v1"},
   "healthchecks": {
     "api": {"kind": "docker"},
-    "worker": {"kind": "exec", "command": ["python", "-m", "example.health"]}
+    "orchestrator": {"kind": "exec", "command": ["python", "-m", "example.health"]}
   },
   "pre_activate": "pre-activate.sh"
 }
@@ -69,8 +71,8 @@ nonempty strings, and `schema` is mandatory.
 }
 ```
 
-`--environment` is a private JSON object of string values. Resolve only the
-selected component's dependencies and credentials. Host file references stay
+`--environment` is a private JSON object containing only declared secret names.
+Resolve nonsecret dependencies and versioned paths in the manifest settings. Host file references stay
 host paths; files explicitly declared by the descriptor are copied into the
 release directory. Required values must be nonempty. Immutable image variables
 and reserved `CLIS_`, `COMPOSE_`, `DOCKER_`, loader/Python, shell-startup, `HOME`,
@@ -79,10 +81,9 @@ not used for Compose interpolation. The remote adapter inherits only the SSH
 user's `PATH` and `HOME`, so preconfigured Docker registry authentication works.
 
 Preparation writes a new directory with mode 0700 and files with mode 0600 from
-creation. Its content identity hashes the descriptor, release manifest, file
-bytes, and resolved private environment. Changed configuration therefore creates
-a different release even at the same Git revision. Deployment verifies this
-identity again and requires the prepared environment to remain private. Prepared
+creation. Its public identity hashes the canonical release manifest, including committed
+configuration hashes, images, compatibility and nonsecret settings. A separate
+private payload checksum detects local bundle tampering. Deployment verifies both and requires the prepared environment to remain private. Prepared
 bundles contain secrets: do not publish them as CI artifacts or cache entries.
 
 The nonsecret connection profile comes from provisioning:
@@ -232,3 +233,9 @@ next activation. Reconcile state using the retained inputs and verify dependency
 readiness before an operator archives that status. Signal delivery alone cannot
 prove daemon-side mutations stopped. Ordinary rollback preserves volumes and
 schemas and ends terminals; it cannot restore their sessions.
+
+
+Descriptors may declare `optional_compose_files` mapping a public string selector
+to a committed file in `files`. Only `"true"` enables an overlay; omitted selectors
+are false. Monitoring overlays add owner networks/environment/labels without
+changing service, image or storage ownership. Native Compose performs the merge.

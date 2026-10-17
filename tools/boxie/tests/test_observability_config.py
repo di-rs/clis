@@ -45,6 +45,7 @@ def compose(*files: Path) -> dict[str, Any]:
         CLIS_RELEASE_REVISION="a" * 40,
         BOXIE_DOCKER_GID="999",
         OBS_METRICS_NETWORK="test-metrics",
+        OBS_COLLECTOR_IMAGE="registry.example/collector@sha256:" + "a" * 64,
         OBS_VECTOR_VOLUME="host-vector",
         OBS_LOGS_VOLUME="host-logs",
         OBS_PROMETHEUS_VOLUME="host-prometheus",

@@ -1,3 +1,6 @@
+services:
+  vector:
+    image: ${OBS_COLLECTOR_IMAGE:?Set approved immutable collector image}
 volumes:
   vector-data:
     external: true

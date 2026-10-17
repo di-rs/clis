@@ -13,12 +13,14 @@ config:
       backups: false
     boxie_image: ghcr.io/OWNER/boxie@sha256:REPLACE_WITH_64_LOWERCASE_HEX_DIGEST
     consumer_credential_ref: BOXIE_CONSUMER_CREDENTIAL
+    monitoring: false
     # Omit Playground entirely for a generic Boxie environment.
     # playground:
     #   domain: play.example.com
     #   cloudflare_zone_id: REPLACE_WITH_32_LOWERCASE_HEX_ID
     #   image: ghcr.io/OWNER/playground@sha256:REPLACE_WITH_64_LOWERCASE_HEX_DIGEST
     # Omit dashboard ingress until configuring operator Access and its secret.
+    # Set monitoring: true before selecting operators.
     # operators:
     #   account_id: REPLACE_WITH_32_LOWERCASE_HEX_ID
     #   zone_id: REPLACE_WITH_32_LOWERCASE_HEX_ID

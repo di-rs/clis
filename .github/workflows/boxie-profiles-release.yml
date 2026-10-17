@@ -1,0 +1,98 @@
+name: 🛠️ Boxie profiles operation
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Explicitly reviewed full same-repository commit SHA
+        type: string
+        required: true
+      profiles_file:
+        description: Reviewed repository-relative approved profiles JSON
+        type: string
+        required: true
+        default: tools/boxie/infra/profiles.example.json
+
+permissions: {}
+
+jobs:
+  revision:
+    name: 🔎 Validate reviewed revision
+    if: ${{ github.ref == 'refs/heads/master' && (github.event_name == 'workflow_dispatch' || vars.PLAYGROUND_INFRA_DRIFT_CHECK == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      revision: ${{ steps.resolve.outputs.revision }}
+    steps:
+      - name: 📥 Check out trusted workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 🔎 Resolve reviewed commit before requesting credentials
+        id: resolve
+        env:
+          REQUESTED_REVISION: ${{ inputs.revision }}
+        run: |
+          revision=${REQUESTED_REVISION:-$GITHUB_SHA}
+          if [[ ! $revision =~ ^[0-9a-f]{40}$ ]]; then
+            echo '::error::Use a full lowercase commit SHA for the reviewed revision.'
+            exit 1
+          fi
+          resolved=$(git rev-parse --verify "$revision^{commit}")
+          if [[ $resolved != "$revision" ]]; then
+            echo '::error::The revision must identify a commit, not a tag object.'
+            exit 1
+          fi
+          printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
+
+  activate:
+    name: 🛠️ Run reviewed owner operation
+    needs: revision
+    environment: boxie-profiles
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    concurrency:
+      group: boxie-owner-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - name: 📥 Check out explicitly reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.revision.outputs.revision }}
+          persist-credentials: false
+      - name: 🐍 Install pinned uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: '0.13.0'
+          enable-cache: false
+      - name: 📦 Install locked operator tooling
+        run: uv sync --locked --all-packages
+      - name: 🔐 Invoke only the selected reviewed owner command
+        env:
+          REVIEWED_REVISION: ${{ needs.revision.outputs.revision }}
+          OWNER_UNIT: profiles
+          PROFILE_SOURCE: ${{ inputs.profiles_file }}
+          CONNECTION_PROFILE: ${{ vars.DEPLOYMENT_PROFILE }}
+          SSH_IDENTITY: ${{ secrets.DEPLOYMENT_SSH_KEY }}
+          OWNER_REQUEST: ${{ vars.PROFILE_OPERATION }}
+        run: |
+          set -euo pipefail
+          private=$(mktemp -d)
+          trap 'rm -rf "$private"' EXIT
+          export OPERATOR_PRIVATE="$private"
+          python3 - <<'PYFILES'
+          import os
+          from pathlib import Path
+          root = Path(os.environ['OPERATOR_PRIVATE'])
+          for name, key in [('profile.json', 'CONNECTION_PROFILE'), ('identity', 'SSH_IDENTITY'), ('request.json', 'OWNER_REQUEST')]:
+              with os.fdopen(os.open(root / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as output:
+                  output.write(os.environ[key])
+          PYFILES
+          uv run --locked python -m boxie_infra.operations --repository . --revision "$REVIEWED_REVISION" \
+            --unit "$OWNER_UNIT" --request "$private/request.json" --connection "$private/profile.json" --identity "$private/identity" --profile-source "$PROFILE_SOURCE"

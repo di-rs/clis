@@ -250,6 +250,7 @@ version = "0.1.0"
 source = { editable = "tools/boxie/infra" }
 dependencies = [
     { name = "boxie" },
+    { name = "clis-deploy" },
     { name = "host-infra" },
     { name = "httpx" },
     { name = "pulumi" },
@@ -261,6 +262,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "boxie" },
+    { name = "clis-deploy" },
     { name = "host-infra" },
     { name = "httpx", specifier = ">=0.28" },
     { name = "pulumi", specifier = "==3.268.0" },

@@ -20,8 +20,8 @@ def object_map(value: object, label: str) -> dict[str, object]:
     return cast(dict[str, object], value)
 
 
-def json_bytes(content: bytes) -> dict[str, object]:
-    if len(content) > 65536:
+def json_bytes(content: bytes, *, limit: int = 65536) -> dict[str, object]:
+    if len(content) > limit:
         raise ReleaseError("JSON metadata exceeds 64 KiB")
 
     def unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -196,6 +196,32 @@ def validate(
         for value in object_map(compose.get(kind, {}), f"Compose {kind}").values():
             if object_map(value, f"Compose {kind}").get("external") is not True:
                 raise ReleaseError("shared networks and volumes require external ownership")
+    overlays = object_map(descriptor.get("optional_compose_files", {}), "optional Compose files")
+    for setting, filename in overlays.items():
+        string(setting, "overlay selector", r"[A-Z][A-Z0-9_]*")
+        if (
+            setting in private
+            or setting in variables
+            or settings.get(setting, "false") not in ("true", "false")
+        ):
+            raise ReleaseError("overlay selector must be a public boolean string")
+        name = relative_file(filename)
+        if name not in source_files:
+            raise ReleaseError("overlay must be a committed component file")
+        overlay = object_map(yaml.safe_load(files[name]), "Compose overlay")
+        if set(overlay) - {"services", "networks", "volumes"}:
+            raise ReleaseError("unsupported monitoring overlay fields")
+        for kind in ("networks", "volumes"):
+            for value in object_map(overlay.get(kind, {}), "overlay resources").values():
+                if object_map(value, "overlay resource").get("external") is not True:
+                    raise ReleaseError("overlay resources require external ownership")
+        for service, value in object_map(overlay.get("services", {}), "overlay services").items():
+            if service not in services or set(object_map(value, "overlay service")) - {
+                "networks",
+                "environment",
+                "labels",
+            }:
+                raise ReleaseError("monitoring overlay cannot replace application ownership")
     return Manifest(descriptor, release, files)
 
 

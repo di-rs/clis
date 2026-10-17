@@ -9,6 +9,8 @@ import signal
 import subprocess
 import tempfile
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import cast
 
@@ -16,11 +18,8 @@ from .manifests import ReleaseError, object_map, string
 from .prepare import canonical, identity, private_write
 
 
-def deploy_ssh(
-    bundle: dict[str, object], profile: dict[str, object], key: Path, timeout: int
-) -> dict[str, str]:
-    if not 60 <= timeout <= 900:
-        raise ReleaseError("SSH timeout must be between 60 and 900 seconds")
+@contextmanager
+def pinned_ssh(profile: dict[str, object], key: Path, remote_command: str) -> Iterator[list[str]]:
     host = string(profile.get("host"), "deployment host", r"[a-zA-Z0-9][a-zA-Z0-9.:-]*")
     user = string(profile.get("user", "root"), "SSH user", r"[a-z_][a-z0-9_-]*")
     port = profile.get("port", 22)
@@ -49,8 +48,6 @@ def deploy_ssh(
         or not key.stat().st_size
     ):
         raise ReleaseError("SSH identity must be a private regular file with mode 0600")
-    source = Path(__file__).with_name("remote.py").read_text()
-    remote_command = shlex.join(["python3", "-c", source, "--timeout", str(timeout - 30)])
     with tempfile.TemporaryDirectory(prefix="clis-deploy-ssh-") as temporary:
         known_hosts = Path(temporary) / "known_hosts"
         known_name = host if port == 22 else f"[{host}]:{port}"
@@ -86,6 +83,17 @@ def deploy_ssh(
             f"{user}@{host}",
             remote_command,
         ]
+        yield command
+
+
+def deploy_ssh(
+    bundle: dict[str, object], profile: dict[str, object], key: Path, timeout: int
+) -> dict[str, str]:
+    if not 60 <= timeout <= 900:
+        raise ReleaseError("SSH timeout must be between 60 and 900 seconds")
+    source = Path(__file__).with_name("remote.py").read_text()
+    remote_command = shlex.join(["python3", "-c", source, "--timeout", str(timeout - 30)])
+    with pinned_ssh(profile, key, remote_command) as command:
         result = run_ssh(command, canonical(bundle), timeout)
         if len(result.stdout) > 4096:
             raise ReleaseError("invalid SSH activation response")

@@ -80,8 +80,7 @@ Add a Compose override setting each matching volume key (`vector-data`, `logs-da
 `prometheus-data`, `grafana-data`) to `external: true` and `name: <existing-name>`.
 Inspect the merged `docker compose config` and confirm those exact names before
 starting the replacement project. Keep the collector buffer and checkpoint together
-in `vector-data`. Do not remove the previous volumes during cutover; switch to
-Compose-owned storage only after an explicit data migration and verification.
+in `vector-data`. Do not remove the previous volumes during cutover; change storage ownership only after an explicit data migration and verification.
 
 ## Resource and failure behavior
 
@@ -144,3 +143,21 @@ Before production activation:
 
 Live Access, whole-host/storage pressure and power-loss recovery require the
 actual Linux deployment. Ordinary tests do not establish those activation claims.
+
+
+## Independently targeted release
+
+Use the protected manual owner workflow with a reviewed full commit SHA and unit
+`observability`. The fixed operator command uses this directory's native Compose files,
+approved immutable images and private owner inputs. It excludes schema/bootstrap
+and storage-init jobs, records native pins and committed configuration hashes,
+and checks readiness. See the [single-host procedure](../../../../infra/environments/single-host/README.md)
+for host tooling, credential readers, selection and activation limits.
+
+Production also selects `compose.production.yml` for external host-owned volumes
+and `OBS_COLLECTOR_IMAGE`, an approved registry-qualified collector digest built
+from the pinned native collector Dockerfile. Host preparation supplies storage
+owners; production excludes the local storage-init helper. Native health probes
+check the private collector/store/metrics/dashboard endpoints. Keep Grafana's
+256 MiB hard cap and VictoriaLogs' 256 MiB cleanup target with its newest-two-day
+exception. No arbitrary consumer scrape renderer is involved.

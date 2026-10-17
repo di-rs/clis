@@ -2,7 +2,7 @@
 name = "boxie-infra"
 version = "0.1.0"
 requires-python = ">=3.15"
-dependencies = ["host-infra", "boxie", "pydantic>=2.14,<3", "pulumi==3.268.0", "pulumi-cloudflare==6.22.1", "httpx>=0.28", "websockets>=16"]
+dependencies = ["host-infra", "clis-deploy", "boxie", "pydantic>=2.14,<3", "pulumi==3.268.0", "pulumi-cloudflare==6.22.1", "httpx>=0.28", "websockets>=16"]
 
 [build-system]
 requires = ["uv_build==0.13.0"]
