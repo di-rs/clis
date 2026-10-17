@@ -61,6 +61,78 @@ def collector_image() -> Iterator[str]:
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    ("panel_id", "labels", "samples"),
+    [
+        (
+            2,
+            'job="boxie",instance="api:9000"',
+            {"boxie_capacity_reserved": 2, "boxie_capacity_limit": 8},
+        ),
+        (
+            5,
+            'job="boxie",instance="api:9000"',
+            {
+                "boxie_cleanup_pending": 2,
+                "boxie_cleanup_oldest_age_seconds": 120,
+                "boxie_cleanup_age_unknown": 0,
+            },
+        ),
+        (
+            6,
+            'job="boxie",instance="api:9000",dependency="temporal"',
+            {"boxie_dependency_ready": 0, "boxie_dependency_known": 1},
+        ),
+        (
+            8,
+            'job="boxie",instance="api:9000"',
+            {
+                "boxie_log_dropped_total": 3,
+                "boxie_log_sink_available": 1,
+                "boxie_snapshot_fresh": 0,
+            },
+        ),
+    ],
+    ids=["capacity", "cleanup", "dependencies", "telemetry-health"],
+)
+def test_dashboard_queries_preserve_distinct_metrics(
+    tmp_path: Path, panel_id: int, labels: str, samples: dict[str, int]
+) -> None:
+    dashboard = json.loads((OBS / "grafana/dashboards/boxie.json").read_text())
+    panel = next(panel for panel in dashboard["panels"] if panel["id"] == panel_id)
+    expected = [
+        {"labels": f"{metric}{{{labels}}}", "value": value} for metric, value in samples.items()
+    ]
+    case = {
+        "name": panel["title"],
+        "input_series": [
+            {"series": sample["labels"], "values": str(sample["value"])} for sample in expected
+        ]
+        + [{"series": f"boxie_unrelated{{{labels}}}", "values": "99"}],
+        "promql_expr_test": [
+            {"expr": panel["targets"][0]["expr"], "eval_time": "0m", "exp_samples": expected}
+        ],
+    }
+    (tmp_path / "dashboard-queries.json").write_text(json.dumps({"tests": [case]}))
+    docker(
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "--user",
+        "0",
+        "-v",
+        f"{tmp_path}:/tests:ro",
+        "--entrypoint",
+        "promtool",
+        PINS["images"]["prometheus"]["image"],
+        "test",
+        "rules",
+        "/tests/dashboard-queries.json",
+    )
+
+
+@pytest.mark.integration
 def test_native_configs(tmp_path: Path, collector_image: str) -> None:
     mount = f"{OBS}:/config:ro"
     for command in (["validate", "--skip-healthchecks"], ["test"]):

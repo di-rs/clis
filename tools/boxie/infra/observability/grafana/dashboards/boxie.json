@@ -72,7 +72,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "boxie_capacity_reserved or boxie_capacity_limit",
+          "expr": "{__name__=~\"boxie_capacity_reserved|boxie_capacity_limit\"}",
           "legendFormat": "{{__name__}} {{state}} {{outcome}} {{dependency}}"
         }
       ]
@@ -138,7 +138,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "boxie_cleanup_pending or boxie_cleanup_oldest_age_seconds or boxie_cleanup_age_unknown",
+          "expr": "{__name__=~\"boxie_cleanup_pending|boxie_cleanup_oldest_age_seconds|boxie_cleanup_age_unknown\"}",
           "legendFormat": "{{__name__}} {{state}} {{outcome}} {{dependency}}"
         }
       ]
@@ -160,7 +160,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "boxie_dependency_ready or boxie_dependency_known",
+          "expr": "{__name__=~\"boxie_dependency_ready|boxie_dependency_known\"}",
           "legendFormat": "{{__name__}} {{state}} {{outcome}} {{dependency}}"
         }
       ]
@@ -204,7 +204,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "boxie_log_dropped_total or boxie_log_sink_available or boxie_snapshot_fresh",
+          "expr": "{__name__=~\"boxie_log_dropped_total|boxie_log_sink_available|boxie_snapshot_fresh\"}",
           "legendFormat": "{{__name__}} {{state}} {{outcome}} {{dependency}}"
         }
       ]
