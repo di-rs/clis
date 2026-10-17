@@ -1,0 +1,1644 @@
+{
+  "uid": "boxie-telemetry",
+  "title": "Telemetry health",
+  "description": "Scrape success is not application readiness. Unknown/missing is distinct from observed zero. Service, Vector and storage losses are separate populations; journald/Docker loss before Vector is unmeasured. Counters reset per process. Only configured consumers and backing mounts appear.",
+  "schemaVersion": 41,
+  "version": 1,
+  "editable": false,
+  "tags": [
+    "boxie",
+    "operators"
+  ],
+  "refresh": "15s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "panels": [
+    {
+      "id": 101,
+      "title": "Service log queue occupancy",
+      "type": "stat",
+      "description": "Records queued in each process. Does not measure downstream durability.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "boxie-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Unknown",
+          "unit": "short",
+          "custom": {
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "gray"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(boxie_log_queue_occupancy{job=~\"boxie-api|boxie-orchestrator|boxie-orchestrator\"}) and on(job,instance) ((up{job=~\"boxie-api|boxie-orchestrator|boxie-orchestrator\"} == 1) and (time() - timestamp(up{job=~\"boxie-api|boxie-orchestrator|boxie-orchestrator\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "{{job}} queue occupancy"
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "title": "Service log sink enabled",
+      "type": "stat",
+      "description": "1=enabled, 0=disabled; enabled is not proof of delivery.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "boxie-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Unknown",
+          "unit": "short",
+          "custom": {
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "gray"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(boxie_log_sink_available{job=~\"boxie-api|boxie-orchestrator|boxie-orchestrator\"}) and on(job,instance) ((up{job=~\"boxie-api|boxie-orchestrator|boxie-orchestrator\"} == 1) and (time() - timestamp(up{job=~\"boxie-api|boxie-orchestrator|boxie-orchestrator\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "{{job}} sink enabled"
+        }
+      ]
+    },
+    {
+      "id": 103,
+      "title": "Service dropped events: process lifetime",
+      "type": "stat",
+      "description": "Aggregate drops per process; resets at restart. Not an end-to-end loss total.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "boxie-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Unknown",
+          "unit": "short",
+          "custom": {
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "gray"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(boxie_log_dropped_total{job=~\"boxie-api|boxie-orchestrator|boxie-orchestrator\"}) and on(job,instance) ((up{job=~\"boxie-api|boxie-orchestrator|boxie-orchestrator\"} == 1) and (time() - timestamp(up{job=~\"boxie-api|boxie-orchestrator|boxie-orchestrator\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "{{job}} dropped events"
+        }
+      ]
+    },
+    {
+      "id": 104,
+      "title": "Service dropped events: last 5m",
+      "type": "stat",
+      "description": "Per-series increase; first drop before first sample may be missed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "boxie-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Unknown",
+          "unit": "short",
+          "custom": {
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "gray"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(increase(boxie_log_dropped_total{job=~\"boxie-api|boxie-orchestrator|boxie-orchestrator\"}[5m])) and on(job,instance) ((up{job=~\"boxie-api|boxie-orchestrator|boxie-orchestrator\"} == 1) and (time() - timestamp(up{job=~\"boxie-api|boxie-orchestrator|boxie-orchestrator\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "{{job}} dropped events"
+        }
+      ]
+    },
+    {
+      "id": 105,
+      "title": "Vector disk buffer bytes / maximum",
+      "type": "stat",
+      "description": "Serialized unread disk bytes, configured disk storage ceiling, and usable unread capacity after the pinned 128 MiB data-file reserve.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "boxie-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported (possibly empty startup)",
+          "unit": "bytes",
+          "custom": {
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Not reported (possibly empty startup)",
+                  "color": "gray"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "Not reported (possibly empty startup)",
+                  "color": "gray"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "gray"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(vector_buffer_size_bytes{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"disk\",stage=\"0\"}) and on(job,instance) ((up{job=~\"vector\"} == 1) and (time() - timestamp(up{job=~\"vector\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "Actual buffer occupancy"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(vector_buffer_max_size_bytes{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"disk\",stage=\"0\"}) and on(job,instance) ((up{job=~\"vector\"} == 1) and (time() - timestamp(up{job=~\"vector\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "Configured buffer maximum"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(((vector_buffer_max_size_bytes{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"disk\",stage=\"0\"} >= 268435488) - 134217728)) and on(job,instance) ((up{job=~\"vector\"} == 1) and (time() - timestamp(up{job=~\"vector\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "Usable disk unread capacity"
+        }
+      ]
+    },
+    {
+      "id": 106,
+      "title": "Vector disk buffer utilization",
+      "type": "stat",
+      "description": "Disk unread bytes / (configured ceiling minus the pinned 128 MiB file reserve). Invalid or absent capacity is unknown.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "boxie-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported (possibly empty startup)",
+          "unit": "percent",
+          "custom": {
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Not reported (possibly empty startup)",
+                  "color": "gray"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "Not reported (possibly empty startup)",
+                  "color": "gray"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(100 * vector_buffer_size_bytes{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"disk\",stage=\"0\"} / ((vector_buffer_max_size_bytes{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"disk\",stage=\"0\"} >= 268435488) - 134217728)) and on(job,instance) ((up{job=~\"vector\"} == 1) and (time() - timestamp(up{job=~\"vector\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "Buffer used"
+        }
+      ]
+    },
+    {
+      "id": 107,
+      "title": "Vector discarded events: process lifetime",
+      "type": "stat",
+      "description": "Memory stage 1 intentional overflow loss and disk stage 0 unprocessable loss, separately. Lazy series are unknown when absent; increase can miss the first sample.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "boxie-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not emitted / unknown",
+          "unit": "short",
+          "custom": {
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Not emitted / unknown",
+                  "color": "gray"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "Not emitted / unknown",
+                  "color": "gray"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "gray"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(vector_buffer_discarded_events_total{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"disk\",stage=\"1\",intentional=\"true\"}) and on(job,instance) ((up{job=~\"vector\"} == 1) and (time() - timestamp(up{job=~\"vector\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "Memory overflow {{intentional}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(vector_buffer_discarded_events_total{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"disk\",stage=\"0\",intentional=\"false\"}) and on(job,instance) ((up{job=~\"vector\"} == 1) and (time() - timestamp(up{job=~\"vector\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "Disk unprocessable {{intentional}}"
+        }
+      ]
+    },
+    {
+      "id": 108,
+      "title": "Vector discarded events: last 5m",
+      "type": "stat",
+      "description": "Memory stage 1 intentional overflow loss and disk stage 0 unprocessable loss, separately. Lazy series are unknown when absent; increase can miss the first sample.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "boxie-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not emitted / unknown",
+          "unit": "short",
+          "custom": {
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Not emitted / unknown",
+                  "color": "gray"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "Not emitted / unknown",
+                  "color": "gray"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "gray"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by(job,instance,component_id,intentional) ((increase(vector_buffer_discarded_events_total{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"disk\",stage=\"1\",intentional=\"true\"}[5m])) and on(job,instance) ((up{job=~\"vector\"} == 1) and (time() - timestamp(up{job=~\"vector\"}) < 45)))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "Memory overflow {{intentional}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by(job,instance,component_id,intentional) ((increase(vector_buffer_discarded_events_total{job=\"vector\",component_id=\"storage\",buffer_id=\"storage\",buffer_type=\"disk\",stage=\"0\",intentional=\"false\"}[5m])) and on(job,instance) ((up{job=~\"vector\"} == 1) and (time() - timestamp(up{job=~\"vector\"}) < 45)))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "Disk unprocessable {{intentional}}"
+        }
+      ]
+    },
+    {
+      "id": 109,
+      "title": "VictoriaLogs ingestion rows / second",
+      "type": "timeseries",
+      "description": "Zero can mean idle; compare target and read-only status.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "boxie-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Unknown",
+          "unit": "short",
+          "custom": {
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(rate(vl_rows_ingested_total{job=\"victorialogs\",type=\"jsonline\"}[$__rate_interval])) and on(job,instance) ((up{job=~\"victorialogs\"} == 1) and (time() - timestamp(up{job=~\"victorialogs\"}) < 45))",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{__name__}} {{job}} {{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 110,
+      "title": "VictoriaLogs native ingestion bytes / second",
+      "type": "timeseries",
+      "description": "Zero can mean idle; compare target and read-only status.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "boxie-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Unknown",
+          "unit": "Bps",
+          "custom": {
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(rate(vl_bytes_ingested_total{job=\"victorialogs\",type=\"jsonline\"}[$__rate_interval])) and on(job,instance) ((up{job=~\"victorialogs\"} == 1) and (time() - timestamp(up{job=~\"victorialogs\"}) < 45))",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{__name__}} {{job}} {{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 111,
+      "title": "VictoriaLogs HTTP insert errors, last 5m",
+      "type": "stat",
+      "description": "HTTP 200 is not by itself a searchability/durability proof.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "boxie-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not emitted / unknown",
+          "unit": "short",
+          "custom": {
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Not emitted / unknown",
+                  "color": "gray"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "Not emitted / unknown",
+                  "color": "gray"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "gray"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(increase(vl_http_errors_total{job=\"victorialogs\",path=\"/insert/jsonline\"}[5m])) and on(job,instance) ((up{job=~\"victorialogs\"} == 1) and (time() - timestamp(up{job=~\"victorialogs\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "Insert errors"
+        }
+      ]
+    },
+    {
+      "id": 112,
+      "title": "VictoriaLogs dropped rows: process lifetime",
+      "type": "stat",
+      "description": "Separate population from upstream losses. Current observed zero is real zero.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "boxie-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Unknown",
+          "unit": "short",
+          "custom": {
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "gray"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(vl_rows_dropped_total{job=\"victorialogs\"}) and on(job,instance) ((up{job=~\"victorialogs\"} == 1) and (time() - timestamp(up{job=~\"victorialogs\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "{{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 113,
+      "title": "VictoriaLogs dropped rows: last 5m",
+      "type": "stat",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "boxie-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 48,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Unknown",
+          "unit": "short",
+          "custom": {
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "gray"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(increase(vl_rows_dropped_total{job=\"victorialogs\"}[5m])) and on(job,instance) ((up{job=~\"victorialogs\"} == 1) and (time() - timestamp(up{job=~\"victorialogs\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "{{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 114,
+      "title": "VictoriaLogs stored bytes",
+      "type": "stat",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "boxie-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 48,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Unknown",
+          "unit": "bytes",
+          "custom": {
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "gray"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(vl_data_size_bytes{job=\"victorialogs\",type=~\"storage|indexdb\"}) and on(job,instance) ((up{job=~\"victorialogs\"} == 1) and (time() - timestamp(up{job=~\"victorialogs\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "{{type}}"
+        }
+      ]
+    },
+    {
+      "id": 115,
+      "title": "VictoriaLogs native free / retention target bytes",
+      "type": "stat",
+      "description": "Retention target is not a hard disk quota; see backing filesystem health.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "boxie-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 56,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Unknown",
+          "unit": "bytes",
+          "custom": {
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "gray"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(vl_free_disk_space_bytes{job=\"victorialogs\",path=\"/victoria-logs-data\"}) and on(job,instance) ((up{job=~\"victorialogs\"} == 1) and (time() - timestamp(up{job=~\"victorialogs\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "Free disk space"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(vl_max_disk_space_usage_bytes{job=\"victorialogs\",path=\"/victoria-logs-data\"}) and on(job,instance) ((up{job=~\"victorialogs\"} == 1) and (time() - timestamp(up{job=~\"victorialogs\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "Retention cleanup target"
+        }
+      ]
+    },
+    {
+      "id": 116,
+      "title": "VictoriaLogs read-only state",
+      "type": "stat",
+      "description": "0=writable, 1=read-only.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "boxie-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 56,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Unknown",
+          "unit": "short",
+          "custom": {
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "gray"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(vl_storage_is_read_only{job=\"victorialogs\",path=\"/victoria-logs-data\"}) and on(job,instance) ((up{job=~\"victorialogs\"} == 1) and (time() - timestamp(up{job=~\"victorialogs\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "Read-only state"
+        }
+      ]
+    },
+    {
+      "id": 117,
+      "title": "Prometheus configuration reload success",
+      "type": "stat",
+      "description": "0=failure, 1=success.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "boxie-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 64,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Unknown",
+          "unit": "short",
+          "custom": {
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "gray"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(prometheus_config_last_reload_successful{job=\"prometheus\"}) and on(job,instance) ((up{job=~\"prometheus\"} == 1) and (time() - timestamp(up{job=~\"prometheus\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "Last reload succeeded"
+        }
+      ]
+    },
+    {
+      "id": 118,
+      "title": "Prometheus failures / corruptions, last 5m",
+      "type": "stat",
+      "description": "Lazy counters may be absent; no zero substitution.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "boxie-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 64,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not emitted / unknown",
+          "unit": "short",
+          "custom": {
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Not emitted / unknown",
+                  "color": "gray"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "Not emitted / unknown",
+                  "color": "gray"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "gray"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(increase(prometheus_rule_evaluation_failures_total{job=\"prometheus\"}[5m])) and on(job,instance) ((up{job=~\"prometheus\"} == 1) and (time() - timestamp(up{job=~\"prometheus\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "Rule evaluation failures"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(increase(prometheus_tsdb_wal_corruptions_total{job=\"prometheus\"}[5m])) and on(job,instance) ((up{job=~\"prometheus\"} == 1) and (time() - timestamp(up{job=~\"prometheus\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "WAL corruptions"
+        }
+      ]
+    },
+    {
+      "id": 119,
+      "title": "Prometheus active series",
+      "type": "stat",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "boxie-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 72,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Unknown",
+          "unit": "short",
+          "custom": {
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "gray"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(prometheus_tsdb_head_series{job=\"prometheus\"}) and on(job,instance) ((up{job=~\"prometheus\"} == 1) and (time() - timestamp(up{job=~\"prometheus\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "Active series"
+        }
+      ]
+    },
+    {
+      "id": 120,
+      "title": "Prometheus resident memory",
+      "type": "stat",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "boxie-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 72,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Unknown",
+          "unit": "bytes",
+          "custom": {
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "Unknown",
+                  "color": "gray"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "gray"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "boxie-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(process_resident_memory_bytes{job=\"prometheus\"}) and on(job,instance) ((up{job=~\"prometheus\"} == 1) and (time() - timestamp(up{job=~\"prometheus\"}) < 45))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "Resident memory"
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": []
+  }
+}

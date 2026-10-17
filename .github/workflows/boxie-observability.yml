@@ -2,15 +2,14 @@ name: Boxie observability faults
 
 on:
   pull_request:
-    branches: [master, refactor/boxie-service, feat/boxie-temporal, feat/boxie-observability]
+    branches: [master]
     paths:
       - '.github/workflows/boxie-observability.yml'
-      - 'infra/observability/**'
-      - 'infra/ingress/**'
-      - 'infra/platform/**'
-      - 'infra/temporal/**'
+      - 'tools/boxie/infra/observability/**'
+      - 'tools/boxie/infra/ingress/**'
+      - 'tools/boxie/infra/postgres/**'
+      - 'tools/boxie/infra/temporal/**'
       - 'tools/boxie/**'
-      - 'tools/service-telemetry/**'
       - 'tools/cli-playground/Sandbox.Dockerfile*'
       - 'tools/cli-playground/infra/**'
       - 'coreutils/echor/**'
@@ -59,8 +58,8 @@ jobs:
           uv sync --locked --all-packages
           fixture_suffix="$(uv run --locked python -c 'from uuid import uuid4; print(uuid4().hex[:12])')"
           printf 'BOXIE_SMOKE_ROOT=/var/tmp/boxie-observability-%s\n' "$fixture_suffix" >> "$GITHUB_ENV"
-          uv run --locked pytest infra/observability/tests/test_smoke.py infra/ingress/tests/test_access_smoke.py
-          uv run --locked pytest infra/observability/tests/test_smoke.py -m integration
+          uv run --locked pytest tools/boxie/infra/observability/tests/test_smoke.py tools/boxie/infra/ingress/tests/test_access_smoke.py
+          uv run --locked pytest tools/boxie/infra/observability/tests/test_smoke.py -m integration
       - name: Build final images and preflight owned journal, daemon, HTTP and PTY
         id: setup
         timeout-minutes: 21

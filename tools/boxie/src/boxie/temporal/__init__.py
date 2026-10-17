@@ -1,1 +1,1 @@
-"""Durable orchestration; workflow history contains only allowlisted lifecycle facts."""
+"""Workflow orchestration; history contains only allowlisted lifecycle facts."""

@@ -4,12 +4,11 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
-from service_telemetry import logging as producer
-from service_telemetry.asgi import RequestLogging as RequestLogging
-from service_telemetry.logging import LogRuntime as LogRuntime
-from service_telemetry.logging import LogSettings as LogSettings
-
 from boxie.observability.events import EVENTS
+from boxie.observability.telemetry import logging as producer
+from boxie.observability.telemetry.asgi import RequestLogging as RequestLogging
+from boxie.observability.telemetry.logging import LogRuntime as LogRuntime
+from boxie.observability.telemetry.logging import LogSettings as LogSettings
 
 if TYPE_CHECKING:
     from temporalio.runtime import Runtime
@@ -19,19 +18,22 @@ _temporal_runtime: Runtime | None = None
 # Exact trusted source templates; arguments never cross this boundary.
 _ROUTES = {
     (
-        "boxie.bootstrap.agent",
+        "boxie.bootstrap.orchestrator",
         "profile reload rejected; retaining approved profiles",
     ): "profile_reload_rejected",
     (
-        "boxie.sandbox.lifecycle",
+        "boxie.sandbox.execution.orchestrator",
         "execution journal persistence failed; new execution disabled",
     ): "journal_failed",
-    ("boxie.sandbox.lifecycle", "execution journal persistence recovered"): "journal_recovered",
     (
-        "boxie.sandbox.lifecycle",
+        "boxie.sandbox.execution.orchestrator",
+        "execution journal persistence recovered",
+    ): "journal_recovered",
+    (
+        "boxie.sandbox.execution.orchestrator",
         "sandbox reconciliation failed; retry pending: %s",
     ): "reconciliation_pending",
-    ("boxie.temporal.dispatcher", "outbox delivery pending: %s"): "outbox_pending",
+    ("boxie.temporal.dispatcher", "command delivery pending: %s"): "outbox_pending",
     ("boxie.temporal.dispatcher", "outbox persistence unavailable"): "outbox_unavailable",
 }
 _EVENTS = {
@@ -57,8 +59,6 @@ def process_logging(role: str) -> LogRuntime:
     runtime = bootstrap_logging(
         LogSettings(service="boxie", role=role, release=os.environ.get("BOXIE_RELEASE", "unknown"))
     )
-    if role == "agent":
-        return runtime
     global _temporal_runtime
     if _temporal_runtime is not None:
         return runtime
@@ -82,15 +82,15 @@ def process_logging(role: str) -> LogRuntime:
             logger=logging.getLogger("temporalio.core"), append_log_fields_to_message=False
         ),
     )
-    from service_telemetry.metrics import private_bind_host
+    from boxie.observability.telemetry.metrics import private_bind_host
 
-    host = private_bind_host(os.environ.get("BOXIE_METRICS_HOST", "127.0.0.1"))
     try:
+        host = private_bind_host(os.environ.get("BOXIE_METRICS_HOST", "127.0.0.1"))
         _temporal_runtime = Runtime(
             telemetry=TelemetryConfig(
                 logging=logging_config,
                 metrics=PrometheusConfig(
-                    bind_address=f"{host}:{9201 if role == 'api' else 9202}",
+                    bind_address=f"{host}:{9201 if role == 'api' else 9203}",
                     durations_as_seconds=True,
                     counters_total_suffix=True,
                     unit_suffix=True,

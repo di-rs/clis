@@ -7,13 +7,11 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from boxie.domain.lifecycle import AgentObservation
+from boxie.domain.lifecycle import OrchestratorObservation
 from boxie.domain.models import SandboxState, TerminationReason
 from boxie.observability.events import Transition
-from integration.conftest import postgres_dsn as postgres_dsn
-from integration.conftest import postgres_server as postgres_server
+from database_support import OWNER, add_check, database, upload
 from test_observability_metrics import metrics_type
-from test_postgres import OWNER, database, upload
 
 
 @pytest.mark.integration
@@ -52,9 +50,9 @@ def test_committed_outcomes_and_rebuilt_gauges(
             assert b'boxie_sandboxes{state="accepted"} 1.0' in metrics.render()
             assert [e.event for e in events] == ["sandbox.accepted"]
             boot = uuid4()
-            await life.bind_agent_boot(OWNER, config.identity, view.id, 1, None, boot)
+            await life.bind_orchestrator_boot(OWNER, config.identity, view.id, 1, None, boot)
             ready = outcome in ("ready", "coalesced_ready")
-            item = AgentObservation(
+            item = OrchestratorObservation(
                 view.id,
                 OWNER,
                 config.identity,
@@ -93,7 +91,7 @@ def test_committed_outcomes_and_rebuilt_gauges(
                 item = replace(item, event_version=2, ready_at=None)
                 assert await other.record_observation(item)
                 newer_boot = uuid4()
-                assert await life.bind_agent_boot(
+                assert await life.bind_orchestrator_boot(
                     OWNER, config.identity, view.id, 1, boot, newer_boot
                 )
                 item = replace(item, boot_id=newer_boot)
@@ -148,27 +146,27 @@ def test_committed_outcomes_and_rebuilt_gauges(
     asyncio.run(exercise())
 
 
-def test_agent_attachment_and_cleanup_attempt_events(tmp_path: Path) -> None:
-    from test_agent_lifecycle import settled, setup
+def test_orchestrator_attachment_and_cleanup_attempt_events(tmp_path: Path) -> None:
+    from lifecycle_support import settled, setup
 
     async def exercise() -> None:
-        agent, request, daemon, _, _ = await setup(tmp_path)
+        orchestrator, request, daemon, _, _ = await setup(tmp_path)
         events: list[Transition] = []
-        agent.diagnostics = events.append
+        orchestrator.diagnostics = events.append
         try:
-            await settled(agent, request.ref, SandboxState.READY)
-            await agent.reconcile()
+            await settled(orchestrator, request.ref, SandboxState.READY)
+            await orchestrator.reconcile()
             assert events == []
-            epoch = await agent.attach(request.ref, attachment_order=1)
-            await agent.write(request.ref, epoch, b"never-log-this")
-            await agent.detach(request.ref, epoch)
-            await agent.detach(request.ref, epoch)
+            epoch = await orchestrator.attach(request.ref, attachment_order=1)
+            await orchestrator.write(request.ref, epoch, b"never-log-this")
+            await orchestrator.detach(request.ref, epoch)
+            await orchestrator.detach(request.ref, epoch)
             assert [e.event for e in events] == ["terminal.attached", "terminal.detached"]
             daemon.unreachable = True
-            await agent.remove(request.ref, TerminationReason.REQUESTED)
+            await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
             assert events[-1].event == "cleanup.failed"
             daemon.unreachable = False
-            await agent.reconcile()
+            await orchestrator.reconcile()
             assert events[-1].event == "reconciliation.completed"
             assert events[-1].outcome == "confirmed"
             assert not any(
@@ -176,7 +174,7 @@ def test_agent_attachment_and_cleanup_attempt_events(tmp_path: Path) -> None:
                 for e in events
             )
         finally:
-            await agent.close()
+            await orchestrator.close()
 
     asyncio.run(exercise())
 
@@ -185,24 +183,30 @@ def test_agent_attachment_and_cleanup_attempt_events(tmp_path: Path) -> None:
 def test_rollback_and_diagnostic_failure_preserve_commit_semantics(
     postgres_dsn: str, tmp_path: Path
 ) -> None:
-    import psycopg
     from boxie.observability.snapshot import operational_snapshot
+    from boxie.persistence.models import Outbox
+    from sqlalchemy import CheckConstraint
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.schema import DropConstraint
+    from sqlmodel import col
 
     async def exercise() -> None:
         events: list[Transition] = []
         async with database(postgres_dsn, tmp_path) as (life, artifacts, pool, _):
             life.diagnostics = events.append
             spec = await upload(artifacts)
-            async with pool.connection() as conn:
-                await conn.execute(
-                    "ALTER TABLE outbox ADD CONSTRAINT fail_start CHECK (kind <> 'start')"
-                )
-            with pytest.raises(psycopg.errors.CheckViolation):
+            await add_check(pool, col(Outbox.kind) != "start", "fail_start")
+            with pytest.raises(IntegrityError):
                 await life.submit(OWNER, "rollback", spec)
             assert events == []
             assert (await operational_snapshot(pool)).reserved == 0
-            async with pool.connection() as conn:
-                await conn.execute("ALTER TABLE outbox DROP CONSTRAINT fail_start")
+            async with pool.begin() as session:
+                connection = await session.connection()
+                constraint = CheckConstraint(col(Outbox.kind) != "start", name="fail_start")
+                try:
+                    await connection.execute(DropConstraint(constraint))
+                finally:
+                    constraint.table.constraints.discard(constraint)
 
             def broken_sink(event: Transition) -> None:
                 raise RuntimeError("unavailable telemetry")
@@ -219,94 +223,57 @@ def test_rollback_and_diagnostic_failure_preserve_commit_semantics(
 
 @pytest.mark.integration
 def test_real_sql_http_worker_history_replay_does_not_emit(
-    postgres_dsn: str, tmp_path: Path
+    postgres_dsn: str,
+    temporal_stack: object,
+    tmp_path: Path,
 ) -> None:
-    import hashlib
+    from typing import Any, cast
+    from uuid import UUID
 
-    from boxie.bootstrap.worker import lifecycle_worker
+    from boxie.bootstrap.runtime import embedded_workers
     from boxie.observability.metrics import Metrics
     from boxie.observability.snapshot import operational_snapshot
     from boxie.temporal.workflows import SandboxLifecycle
-    from boxie_test_support.agent import bundle
-    from temporal_support import durable_stack, test_server_path
-    from temporalio.testing import WorkflowEnvironment
+    from boxie_test_support.api import artifact, create, ready
+    from temporal_support import lifecycle_stack, tls
+    from temporalio.client import Client
     from temporalio.worker import Replayer
 
     async def exercise() -> None:
-        async with await WorkflowEnvironment.start_time_skipping(
-            test_server_existing_path=str(test_server_path())
-        ) as env:
-            queue = "telemetry-" + uuid4().hex
-            async with durable_stack(postgres_dsn, tmp_path, env.client, queue) as (
-                http,
-                life,
-                agent,
-                daemon,
-                pool,
-                activities,
-                dispatcher,
-            ):
-                metrics = Metrics("api")
-                events: list[Transition] = []
+        fixture = cast(Any, temporal_stack)
+        client = await Client.connect(
+            fixture.address, namespace="boxie", tls=tls(fixture, "boxie-orchestrator")
+        )
+        async with lifecycle_stack(postgres_dsn, tmp_path, client) as stack:
+            metrics = Metrics("api")
+            events: list[Transition] = []
 
-                def sink(event: Transition) -> None:
-                    events.append(event)
-                    metrics.transition(event)
+            def sink(event: Transition) -> None:
+                events.append(event)
+                metrics.transition(event)
 
-                life.diagnostics = sink
-                content, artifact = bundle(), uuid4()
-                uploaded = await http.put(
-                    f"/v1/artifacts/{artifact}",
-                    content=content,
-                    headers={"X-Content-Sha256": hashlib.sha256(content).hexdigest()},
-                )
-                assert uploaded.status_code == 201
-                created = await http.post(
-                    "/v1/sandboxes",
-                    headers={"Idempotency-Key": "telemetry"},
-                    json={
-                        "artifact_id": str(artifact),
-                        "profile_id": "shell",
-                        "command": ["/bin/sh"],
-                        "env": {},
-                    },
-                )
-                assert created.status_code == 202
-                identifier = created.json()["id"]
-                async with lifecycle_worker(env.client, activities, task_queue=queue):
-                    await dispatcher.poll()
-                    handle = env.client.get_workflow_handle("boxie/sandbox/" + identifier)
-                    async with asyncio.timeout(15):
-                        while (await http.get("/v1/sandboxes/" + identifier)).json()[
-                            "state"
-                        ] != "ready":
-                            await asyncio.sleep(0.05)
-                    daemon.unreachable = True
-                    stopped = await http.delete("/v1/sandboxes/" + identifier)
-                    assert stopped.status_code == 200
-                    await dispatcher.poll()
-                    metrics.refresh(await operational_snapshot(pool))
-                    assert b"boxie_capacity_reserved 1.0" in metrics.render()
-                    assert b"boxie_cleanup_pending 1.0" in metrics.render()
-                    daemon.unreachable = False
-                    async with asyncio.timeout(20):
-                        while (await http.get("/v1/sandboxes/" + identifier)).json()[
-                            "cleanup_pending"
-                        ]:
-                            await agent.reconcile()
-                            await asyncio.sleep(0.05)
-                    await dispatcher.poll()
-                    await asyncio.wait_for(handle.result(), 20)
-                    history = await handle.fetch_history()
-                    before = [(e.event, e.outcome) for e in events]
-                    counters = metrics.provisioning.labels("ready")._value.get()
-                    await Replayer(workflows=[SandboxLifecycle]).replay_workflow(history)
-                    assert [(e.event, e.outcome) for e in events] == before
-                    assert metrics.provisioning.labels("ready")._value.get() == counters == 1
-                    assert sum(e.event == "cleanup.completed" for e in events) == 1
-                    restarted = Metrics("api")
-                    restarted.refresh(await operational_snapshot(pool))
-                    assert b"boxie_capacity_reserved 0.0" in restarted.render()
+            stack.life.diagnostics = sink
+            async with embedded_workers(client, stack.life, stack.orchestrator, stack.artifacts):
+                identifier = await create(stack.http, await artifact(stack.http))
+                await ready(stack.http, identifier)
+                stack.daemon.unreachable = True
+                assert (await stack.http.delete("/v1/sandboxes/" + identifier)).status_code == 200
+                metrics.refresh(await operational_snapshot(stack.sessions))
+                assert b"boxie_capacity_reserved 1.0" in metrics.render()
+                assert b"boxie_cleanup_pending 1.0" in metrics.render()
+                stack.daemon.unreachable = False
+                handle = client.get_workflow_handle("boxie/sandbox/" + identifier)
+                await asyncio.wait_for(handle.result(), 40)
+                assert not (await stack.life.get(OWNER, UUID(identifier))).cleanup_pending
+                history = await handle.fetch_history()
+                before = [(e.event, e.outcome) for e in events]
+                await Replayer(workflows=[SandboxLifecycle]).replay_workflow(history)
+                assert [(e.event, e.outcome) for e in events] == before
+                assert metrics.provisioning.labels("ready")._value.get() == 1
+                assert sum(e.event == "cleanup.completed" for e in events) == 1
+                restarted = Metrics("api")
+                restarted.refresh(await operational_snapshot(stack.sessions))
+                assert b"boxie_capacity_reserved 0.0" in restarted.render()
 
     asyncio.run(exercise())
 
@@ -316,7 +283,7 @@ def test_domain_events_reach_safe_logging_catalog() -> None:
     import os
 
     from boxie.observability.events import EVENTS
-    from service_telemetry.logging import LogRuntime, LogSettings
+    from boxie.observability.telemetry.logging import LogRuntime, LogSettings
 
     read, write = os.pipe()
     runtime = LogRuntime(
@@ -343,19 +310,23 @@ def test_telemetry_pool_timeout_does_not_consume_lifecycle_capacity(
 ) -> None:
     from boxie.observability.metrics import Metrics
     from boxie.observability.snapshot import operational_snapshot
-    from boxie.persistence.postgres import Pool
-    from psycopg.rows import dict_row
-    from psycopg_pool import PoolTimeout
+    from boxie.persistence.database import database as telemetry_database
+    from sqlalchemy.exc import TimeoutError as PoolTimeout
+    from sqlmodel import select
 
     async def exercise() -> None:
         async with database(postgres_dsn, tmp_path) as (life, artifacts, _, _):
             view = await life.submit(OWNER, "separate-pool", await upload(artifacts))
-            async with Pool(
-                postgres_dsn, min_size=1, max_size=1, kwargs={"row_factory": dict_row}
+            async with telemetry_database(
+                postgres_dsn,
+                pool_size=1,
+                max_overflow=0,
+                pool_timeout=0.05,
             ) as telemetry:
                 metrics = Metrics("api")
                 metrics.refresh(await operational_snapshot(telemetry))
-                async with telemetry.connection():
+                async with telemetry.begin() as held:
+                    await held.exec(select(1))
                     blocked = asyncio.create_task(operational_snapshot(telemetry))
                     assert (await life.get(OWNER, view.id)).state == SandboxState.ACCEPTED
                     assert (
@@ -367,5 +338,70 @@ def test_telemetry_pool_timeout_does_not_consume_lifecycle_capacity(
                     assert b"boxie_capacity_reserved 1.0" in metrics.render()
                 metrics.refresh(await operational_snapshot(telemetry))
                 assert b"boxie_cleanup_pending 1.0" in metrics.render()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("entrypoint", ["stop", "observation"])
+def test_existing_unknown_cleanup_age_stays_unknown(
+    postgres_dsn: str, tmp_path: Path, entrypoint: str
+) -> None:
+    from boxie.observability.snapshot import operational_snapshot
+    from boxie.persistence.models import Sandbox
+
+    async def exercise() -> None:
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
+            view = await life.submit(OWNER, "legacy-pending", await upload(artifacts))
+            boot = uuid4()
+            assert await life.bind_orchestrator_boot(OWNER, config.identity, view.id, 1, None, boot)
+            async with sessions() as session, session.begin():
+                row = await session.get(Sandbox, view.id)
+                assert row is not None
+                row.state, row.cleanup_pending = "terminating", True
+                row.cleanup_pending_since = None
+            if entrypoint == "stop":
+                await life.terminate(OWNER, view.id, TerminationReason.REQUESTED)
+            else:
+                assert await life.record_observation(
+                    OrchestratorObservation(
+                        view.id,
+                        OWNER,
+                        config.identity,
+                        1,
+                        boot,
+                        1,
+                        datetime.now(UTC),
+                        SandboxState.TERMINATING,
+                        True,
+                        cleanup_pending=True,
+                        reason=TerminationReason.REQUESTED,
+                    )
+                )
+            sample = await operational_snapshot(sessions)
+            assert sample.cleanup_pending == 1
+            assert sample.cleanup_unknown == 1
+            async with sessions() as session:
+                row = await session.get(Sandbox, view.id)
+                assert row is not None and row.cleanup_pending_since is None
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.integration
+def test_database_rejects_ready_timestamp_without_ready_outcome(
+    postgres_dsn: str, tmp_path: Path
+) -> None:
+    from boxie.persistence.models import Sandbox
+    from sqlalchemy.exc import IntegrityError
+
+    async def exercise() -> None:
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, _):
+            view = await life.submit(OWNER, "orphan-ready", await upload(artifacts))
+            with pytest.raises(IntegrityError, match="provisioning_ready_evidence"):
+                async with sessions() as session, session.begin():
+                    row = await session.get(Sandbox, view.id)
+                    assert row is not None and row.provisioning_outcome is None
+                    row.provisioning_ready_observed_at = datetime.now(UTC)
 
     asyncio.run(exercise())

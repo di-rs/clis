@@ -1,10 +1,10 @@
-"""Bounded domain diagnostics, invoked only after acknowledged durable writes."""
+"""Bounded lifecycle diagnostics, invoked only after acknowledged durable writes."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
 from uuid import UUID
 
-from service_telemetry.logging import configured_runtime
+from boxie.observability.telemetry.logging import configured_runtime
 
 EVENTS = {
     "sandbox.accepted": "Sandbox accepted",

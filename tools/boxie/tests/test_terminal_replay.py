@@ -8,12 +8,12 @@ from typing import Any
 import pytest
 from boxie.domain.errors import BoxieError
 from boxie.domain.models import SandboxState
-from test_agent_lifecycle import settled, setup
+from lifecycle_support import settled, setup
 
 
 def test_ring_retention_sequence_and_atomic_live_cursor() -> None:
-    assert importlib.util.find_spec("boxie.sandbox.replay"), "sequenced replay missing"
-    from boxie.sandbox.replay import ReplayBuffer, StreamGap
+    assert importlib.util.find_spec("boxie.sandbox.terminal.replay"), "sequenced replay missing"
+    from boxie.sandbox.terminal.replay import ReplayBuffer, StreamGap
 
     ring = ReplayBuffer(capacity=32768)
     ring.append(b"a" * 20000)
@@ -35,75 +35,89 @@ def test_reattach_fences_stale_controls_and_terminal_replies_do_not_renew_idle(
     tmp_path: Path,
 ) -> None:
     async def exercise() -> None:
-        agent, request, daemon, clock, _ = await setup(tmp_path)
+        orchestrator, request, daemon, clock, _ = await setup(tmp_path)
         try:
-            await settled(agent, request.ref, SandboxState.READY)
-            epoch = await agent.attach(request.ref, attachment_order=1)
-            newer = await agent.attach(request.ref, attachment_order=2)
+            await settled(orchestrator, request.ref, SandboxState.READY)
+            epoch = await orchestrator.attach(request.ref, attachment_order=1)
+            newer = await orchestrator.attach(request.ref, attachment_order=2)
             assert newer == epoch + 1
-            await agent.detach(request.ref, epoch)
-            assert agent.records[request.ref.id].attached
+            await orchestrator.detach(request.ref, epoch)
+            assert orchestrator.records[request.ref.id].attached
             for operation in (
-                agent.write(request.ref, epoch, b"stale"),
-                agent.resize(request.ref, epoch, 81, 25),
+                orchestrator.write(request.ref, epoch, b"stale"),
+                orchestrator.resize(request.ref, epoch, 81, 25),
             ):
                 with pytest.raises(BoxieError):
                     await operation
-            original = agent.deadlines[request.ref.id].idle
+            original = orchestrator.runtimes[request.ref.id].timers.idle
             clock.advance(20)
-            await agent.write(request.ref, newer, b"\x1b[1;1R", source="terminal")
-            assert agent.deadlines[request.ref.id].idle == original
-            assert agent.records[request.ref.id].last_input_at is None
-            await agent.write(request.ref, newer, b"hello", source="user")
-            assert agent.deadlines[request.ref.id].idle == clock.monotonic() + 600
+            await orchestrator.write(request.ref, newer, b"\x1b[1;1R", source="terminal")
+            assert orchestrator.runtimes[request.ref.id].timers.idle == original
+            assert orchestrator.records[request.ref.id].last_input_at is None
+            await orchestrator.write(request.ref, newer, b"hello", source="user")
+            assert orchestrator.runtimes[request.ref.id].timers.idle == clock.monotonic() + 600
         finally:
-            await agent.close()
+            await orchestrator.close()
 
     asyncio.run(exercise())
 
 
 def test_pty_drain_does_not_wait_for_reader_and_payload_cap_is_exact(tmp_path: Path) -> None:
     async def exercise() -> None:
-        agent, request, daemon, _, _ = await setup(tmp_path)
+        orchestrator, request, daemon, _, _ = await setup(tmp_path)
         try:
-            await settled(agent, request.ref, SandboxState.READY)
-            terminal = agent.terminals[request.ref.id]
+            await settled(orchestrator, request.ref, SandboxState.READY)
+            terminal = orchestrator.runtimes[request.ref.id].pty
             assert hasattr(terminal, "replay"), "PTY replay missing"
             stream = next(iter(daemon.streams.values()))
             # No terminal attachment or ACK: drain still reaches the hard cap.
             for _ in range(16):
                 await stream.queue.put(b"x" * 1024 * 1024)
-            await settled(agent, request.ref, SandboxState.TERMINATED)
-            assert agent.records[request.ref.id].reason.value == "output_limit"
+            await settled(orchestrator, request.ref, SandboxState.TERMINATED)
+            assert orchestrator.records[request.ref.id].reason == "output_limit"
             assert terminal.remaining == 0
             assert terminal.replay.retained_bytes == 1024 * 1024
             assert terminal.replay.tail == 1024
         finally:
-            await agent.close()
+            await orchestrator.close()
 
     asyncio.run(exercise())
 
 
 def test_network_replay_resize_barrier_and_browser_heartbeat(tmp_path: Path) -> None:
     import json
-    from types import SimpleNamespace
+    from collections.abc import AsyncIterator
+    from contextlib import asynccontextmanager
 
-    from boxie.sandbox.durable_server import create_durable_agent_app
-    from boxie.sandbox.reporting import ObservationReporter
+    from boxie.sandbox.transport.server import create_orchestrator_app
     from boxie_test_support.api import serve
+    from boxie_test_support.artifacts import Artifacts
+    from fastapi import FastAPI
     from websockets.asyncio.client import connect
 
     async def exercise() -> None:
-        agent, request, daemon, clock, _ = await setup(tmp_path)
+        orchestrator, request, daemon, clock, _ = await setup(tmp_path)
 
-        async def noop() -> None:
-            pass
+        @asynccontextmanager
+        async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+            try:
+                await orchestrator.start()
+                yield
+            finally:
+                await orchestrator.close()
 
-        artifacts: Any = SimpleNamespace(collect=noop, collect_orphans=noop)
-        reporter = ObservationReporter("http://127.0.0.1:1", b"unused")
-        app = create_durable_agent_app(agent, artifacts, credential=b"secret", reporter=reporter)
+        async def readiness() -> dict[str, bool]:
+            return {"docker": await daemon.ready(), "execution": orchestrator.execution_ready}
+
+        app = create_orchestrator_app(
+            orchestrator,
+            Artifacts(tmp_path / "artifacts"),
+            credential=b"secret",
+            readiness=readiness,
+            lifespan=lifespan,
+        )
         async with serve(app) as origin:
-            await settled(agent, request.ref, SandboxState.READY)
+            await settled(orchestrator, request.ref, SandboxState.READY)
             stream = next(iter(daemon.streams.values()))
             await stream.queue.put(b"first")
             await asyncio.sleep(0.01)
@@ -154,7 +168,7 @@ def test_network_replay_resize_barrier_and_browser_heartbeat(tmp_path: Path) -> 
                     "cols": 100,
                     "rows": 30,
                 }
-                assert agent.records[request.ref.id].last_input_at is None
+                assert orchestrator.records[request.ref.id].last_input_at is None
                 async with connect(
                     url, additional_headers={"Authorization": "Bearer secret"}
                 ) as new:
@@ -188,13 +202,16 @@ def test_network_replay_resize_barrier_and_browser_heartbeat(tmp_path: Path) -> 
                         "epoch": successor,
                         "nonce": 1,
                     }
-                    assert agent.records[request.ref.id].attached
+                    assert orchestrator.records[request.ref.id].attached
                     # Relay-local websocket pings still work, but no browser heartbeat does.
                     await (await new.ping())
                     clock.advance(30)
                     await asyncio.wait_for(new.wait_closed(), 2)
-                    assert not agent.records[request.ref.id].attached
-                    assert agent.deadlines[request.ref.id].disconnect == clock.monotonic() + 120
+                    assert not orchestrator.records[request.ref.id].attached
+                    assert (
+                        orchestrator.runtimes[request.ref.id].timers.disconnect
+                        == clock.monotonic() + 120
+                    )
 
     asyncio.run(exercise())
 
@@ -255,7 +272,7 @@ def test_terminal_end_during_replay_does_not_wait_for_resize(
 
 
 def test_replay_retains_geometry_without_unbounded_resize_journal() -> None:
-    from boxie.sandbox.replay import ReplayBuffer, StreamGap
+    from boxie.sandbox.terminal.replay import ReplayBuffer, StreamGap
 
     ring = ReplayBuffer()
     assert hasattr(ring, "geometry"), "replay geometry missing"
@@ -282,10 +299,10 @@ def test_failed_resize_releases_output_order_without_recording_unapplied_geometr
     tmp_path: Path, failure: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def exercise() -> None:
-        agent, request, daemon, _, _ = await setup(tmp_path, docker_timeout=0.02)
+        orchestrator, request, daemon, _, _ = await setup(tmp_path, docker_timeout=0.02)
         try:
-            await settled(agent, request.ref, SandboxState.READY)
-            epoch = await agent.attach(request.ref, attachment_order=1)
+            await settled(orchestrator, request.ref, SandboxState.READY)
+            epoch = await orchestrator.attach(request.ref, attachment_order=1)
             stream = next(iter(daemon.streams.values()))
 
             async def resize(cols: int, rows: int) -> None:
@@ -295,14 +312,14 @@ def test_failed_resize_releases_output_order_without_recording_unapplied_geometr
 
             monkeypatch.setattr(stream, "resize", resize)
             with pytest.raises((TimeoutError, OSError)):
-                await agent.resize(request.ref, epoch, 100, 30)
+                await orchestrator.resize(request.ref, epoch, 100, 30)
             stream.queue.put_nowait(b"after")
-            terminal = agent.terminals[request.ref.id]
+            terminal = orchestrator.runtimes[request.ref.id].pty
             await asyncio.wait_for(terminal.replay.changed.wait(), 0.2)
             assert terminal.replay.after(0)[0].geometry == (80, 24)
-            assert await agent.attach(request.ref, attachment_order=2) == epoch + 1
+            assert await orchestrator.attach(request.ref, attachment_order=2) == epoch + 1
         finally:
-            await agent.close()
+            await orchestrator.close()
 
     asyncio.run(exercise())
 
@@ -310,65 +327,65 @@ def test_failed_resize_releases_output_order_without_recording_unapplied_geometr
 def test_attachment_order_persists_and_preserves_cursor_and_journal_failure_fences(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from boxie.sandbox.execution import ExecutionJournal
+    from boxie.sandbox.execution.journal import ExecutionJournal
 
     async def exercise() -> None:
-        agent, request, _, _, _ = await setup(tmp_path)
-        original_save = agent.journal.save
+        orchestrator, request, _, _, _ = await setup(tmp_path)
+        original_save = orchestrator.journal.save
         try:
-            await settled(agent, request.ref, SandboxState.READY)
-            epoch = await agent.attach(request.ref, attachment_order=3, resume_after=0)
-            saved = ExecutionJournal(agent.journal.path, agent.config.identity).records[
-                request.ref.id
-            ]
+            await settled(orchestrator, request.ref, SandboxState.READY)
+            epoch = await orchestrator.attach(request.ref, attachment_order=3, resume_after=0)
+            saved = ExecutionJournal(
+                orchestrator.journal.path, orchestrator.config.identity
+            ).records[request.ref.id]
             assert (
                 saved.attachment_order == 3 and saved.attachment_epoch == epoch and saved.attached
             )
-            snapshot = agent.records[request.ref.id].model_dump()
-            deadlines = vars(agent.deadlines[request.ref.id]).copy()
+            snapshot = orchestrator.records[request.ref.id].model_dump()
+            deadlines = vars(orchestrator.runtimes[request.ref.id].timers).copy()
             for order in (1, 3):
                 with pytest.raises(BoxieError):
-                    await agent.attach(request.ref, attachment_order=order, resume_after=0)
+                    await orchestrator.attach(request.ref, attachment_order=order, resume_after=0)
             with pytest.raises(ValueError):
-                await agent.attach(request.ref, attachment_order=4, resume_after=999)
-            assert agent.records[request.ref.id].model_dump() == snapshot
-            assert vars(agent.deadlines[request.ref.id]) == deadlines
-            newer = await agent.attach(request.ref, attachment_order=4, resume_after=0)
-            await agent.detach(request.ref, epoch)
-            assert agent.records[request.ref.id].attached
+                await orchestrator.attach(request.ref, attachment_order=4, resume_after=999)
+            assert orchestrator.records[request.ref.id].model_dump() == snapshot
+            assert vars(orchestrator.runtimes[request.ref.id].timers) == deadlines
+            newer = await orchestrator.attach(request.ref, attachment_order=4, resume_after=0)
+            await orchestrator.detach(request.ref, epoch)
+            assert orchestrator.records[request.ref.id].attached
             assert newer == epoch + 1
 
             def failed_save() -> None:
                 raise OSError("journal unavailable")
 
-            monkeypatch.setattr(agent.journal, "save", failed_save)
+            monkeypatch.setattr(orchestrator.journal, "save", failed_save)
             with pytest.raises(OSError):
-                await agent.attach(request.ref, attachment_order=5, resume_after=0)
-            assert not agent.execution_ready
+                await orchestrator.attach(request.ref, attachment_order=5, resume_after=0)
+            assert not orchestrator.execution_ready
             with pytest.raises(BoxieError):
-                await agent.attach(request.ref, attachment_order=6, resume_after=0)
-            saved = ExecutionJournal(agent.journal.path, agent.config.identity).records[
-                request.ref.id
-            ]
+                await orchestrator.attach(request.ref, attachment_order=6, resume_after=0)
+            saved = ExecutionJournal(
+                orchestrator.journal.path, orchestrator.config.identity
+            ).records[request.ref.id]
             assert saved.attachment_order == 4 and saved.attachment_epoch == newer
-            monkeypatch.setattr(agent.journal, "save", original_save)
+            monkeypatch.setattr(orchestrator.journal, "save", original_save)
             # Same full-journal recovery boundary as the supervised sweeper.
-            agent._save()
-            saved = ExecutionJournal(agent.journal.path, agent.config.identity).records[
-                request.ref.id
-            ]
+            orchestrator._save()
+            saved = ExecutionJournal(
+                orchestrator.journal.path, orchestrator.config.identity
+            ).records[request.ref.id]
             assert saved.attachment_order == 5
             with pytest.raises(BoxieError):
-                await agent.attach(request.ref, attachment_order=5, resume_after=0)
-            await agent.attach(request.ref, attachment_order=6, resume_after=0)
+                await orchestrator.attach(request.ref, attachment_order=5, resume_after=0)
+            await orchestrator.attach(request.ref, attachment_order=6, resume_after=0)
         finally:
-            monkeypatch.setattr(agent.journal, "save", original_save)
-            await agent.close()
+            monkeypatch.setattr(orchestrator.journal, "save", original_save)
+            await orchestrator.close()
 
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize("boundary", ["api", "agent"])
+@pytest.mark.parametrize("boundary", ["api", "orchestrator"])
 @pytest.mark.parametrize("healthy", [False, True])
 def test_attachment_order_requires_json_integer_without_changing_epoch_or_grace(
     tmp_path: Path, boundary: str, healthy: bool
@@ -388,21 +405,21 @@ def test_attachment_order_requires_json_integer_without_changing_epoch_or_grace(
             await ready(net.api, identifier)
             url = terminal_url(net.api, identifier)
             headers = CONSUMER_AUTH
-            if boundary == "agent":
+            if boundary == "orchestrator":
                 url = (
-                    net.agent_url.replace("http:", "ws:")
+                    net.orchestrator_url.replace("http:", "ws:")
                     + f"/v1/sandboxes/{identifier}/terminal?consumer_id=one"
                 )
-                headers = {"Authorization": "Bearer agent-test-secret"}
+                headers = {"Authorization": "Bearer orchestrator-test-secret"}
             if healthy:
                 current = await connections.enter_async_context(
                     connect(url, additional_headers=headers)
                 )
                 await attach(current, order=1)
             net.clock.advance(10)
-            record = net.agent.records[UUID(identifier)]
+            record = net.orchestrator.records[UUID(identifier)]
             before = record.model_dump()
-            grace = vars(net.agent.deadlines[record.id]).copy()
+            grace = vars(net.orchestrator.runtimes[record.id].timers).copy()
             missing = object()
             for invalid in (True, False, "2", 3.0, None, missing, 0, -1, 2**53):
                 request: dict[str, object] = {
@@ -418,7 +435,7 @@ def test_attachment_order_requires_json_integer_without_changing_epoch_or_grace(
                     with pytest.raises(ConnectionClosed):
                         await asyncio.wait_for(rejected.recv(), 1)
                 assert record.model_dump() == before
-                assert vars(net.agent.deadlines[record.id]) == grace
+                assert vars(net.orchestrator.runtimes[record.id].timers) == grace
             if healthy:
                 assert current.close_code is None
                 await current.send(

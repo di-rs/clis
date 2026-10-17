@@ -6,7 +6,7 @@ on:
   push:
     branches: [master]
     paths:
-      - 'tools/cli-playground/playground/**'
+      - 'tools/cli-playground/src/playground/**'
       - 'tools/cli-playground/frontend/**'
       - 'tools/cli-playground/fixtures/**'
       - 'tools/cli-playground/infra/Playground.Dockerfile*'

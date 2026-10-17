@@ -3,7 +3,6 @@ name = "cli-playground"
 version = "0.1.0"
 requires-python = ">=3.15"
 dependencies = [
-    "service-telemetry",
     "aiohttp>=3.13,<4",
     "anyio>=4",
     "fastapi>=0.128",
@@ -13,13 +12,10 @@ dependencies = [
     "websockets>=16",
 ]
 
-[project.scripts]
-cli-playground = "playground.bootstrap:main"
-
 [build-system]
 requires = ["uv_build==0.13.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-root = ""
+module-root = "src"
 module-name = "playground"

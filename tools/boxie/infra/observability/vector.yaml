@@ -1,0 +1,60 @@
+data_dir: /var/lib/vector
+log_schema:
+  message_key: message
+sources:
+  journal:
+    type: journald
+    current_boot_only: false
+    batch_size: 16
+    log_namespace: false
+    journal_directory: /var/log/journal
+    journalctl_path: /usr/bin/journalctl
+    include_matches:
+      CONTAINER_TAG:
+      - boxie-api
+      - boxie-orchestrator
+  internal:
+    type: internal_metrics
+transforms:
+  normalize:
+    type: remap
+    inputs:
+    - journal
+    drop_on_error: true
+    reroute_dropped: false
+    source: abort
+sinks:
+  storage:
+    type: http
+    inputs:
+    - normalize
+    uri: http://victorialogs:9428/insert/jsonline?_stream_fields=service,role,environment,host&_msg_field=message&_time_field=timestamp
+    method: post
+    compression: none
+    encoding:
+      codec: json
+    framing:
+      method: newline_delimited
+    acknowledgements:
+      enabled: false
+    buffer:
+    - type: disk
+      max_size: 536870912
+      when_full: overflow
+    - type: memory
+      max_events: 1
+      when_full: drop_newest
+    batch:
+      max_bytes: 1048576
+      max_events: 64
+      timeout_secs: 1
+    request:
+      concurrency: 1
+      timeout_secs: 5
+    healthcheck:
+      enabled: false
+  metrics:
+    type: prometheus_exporter
+    inputs:
+    - internal
+    address: 0.0.0.0:9598

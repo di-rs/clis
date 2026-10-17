@@ -2,28 +2,23 @@
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import cast
-from uuid import UUID
 
 import pytest
 from boxie_test_support.terminal_network import attach
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from playground.boxie_client import TerminalPort
 from starlette.websockets import WebSocketDisconnect
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 from websockets.typing import Origin
 
+from .boxie_fake import FakeBoxie
 from .boxie_network import admit, boxie_network, product_server, publish, socket_url
 from .helpers import upload
 
 
-@pytest.mark.parametrize("limit", [16777216, 10], ids=["default-cap", "lower-agent-cap"])
-def test_agent_output_limit_reaches_browser_at_exact_cap(
+@pytest.mark.parametrize("limit", [16777216, 10], ids=["default-cap", "lower-orchestrator-cap"])
+def test_orchestrator_output_limit_reaches_browser_at_exact_cap(
     tmp_path: Path, limit: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def exercise() -> None:
@@ -38,12 +33,12 @@ def test_agent_output_limit_reaches_browser_at_exact_cap(
                 await asyncio.sleep(0.03)
 
             monkeypatch.setattr(WebSocket, "send_bytes", delayed_send)
-        async with boxie_network(tmp_path / "agent") as network:
+        async with boxie_network(tmp_path / "orchestrator") as network:
             profiles = json.loads(network.config.profiles_file.read_text())
             if limit != 16777216:
                 profiles["shell"]["limits"] = {"output_bytes": limit}
                 network.config.profiles_file.write_text(json.dumps(profiles))
-                network.agent.profiles.reload()
+                network.orchestrator.profiles.reload()
             async with product_server(tmp_path / "product", str(network.api.base_url)) as product:
                 identifier = (await publish(product, "a" * 40)).json()["id"]
                 binding = await admit(product, identifier, "a" * 40)
@@ -81,7 +76,7 @@ def test_agent_output_limit_reaches_browser_at_exact_cap(
 
 @pytest.mark.parametrize("split", [False, True], ids=["oversized-frame", "extra-frame"])
 def test_product_defensive_cap_reports_limit_for_misbehaving_peer(
-    api_client: TestClient, monkeypatch: pytest.MonkeyPatch, split: bool
+    api_client: TestClient, boxie: FakeBoxie, split: bool
 ) -> None:
     class Peer:
         def __init__(self) -> None:
@@ -91,17 +86,13 @@ def test_product_defensive_cap_reports_limit_for_misbehaving_peer(
                 else [(1).to_bytes(8, "big") + b"x" * 16777217]
             )
 
-        async def receive(self) -> bytes | str | None:
+        async def receive(self) -> bytes | None:
             return next(self.frames, None)
 
         async def send(self, message: str) -> None:
             pass
 
-    @asynccontextmanager
-    async def terminal(identifier: UUID) -> AsyncIterator[TerminalPort]:
-        yield Peer()
-
-    monkeypatch.setattr(cast(FastAPI, api_client.app).state.service.boxie, "terminal", terminal)
+    boxie.terminal_factory = Peer
     deployed = upload(api_client)
     binding = api_client.post(
         f"/api/environments/{deployed['id']}/sessions",
@@ -143,11 +134,11 @@ def test_final_control_preserves_buffered_product_status(
 
     async def exercise() -> None:
         barrier = CompletionBarrier(monkeypatch, HttpTerminal, phase, kind, close_code)
-        async with boxie_network(tmp_path / "agent") as network:
+        async with boxie_network(tmp_path / "orchestrator") as network:
             profiles = json.loads(network.config.profiles_file.read_text())
             profiles["shell"]["limits"] = {"output_bytes": 10}
             network.config.profiles_file.write_text(json.dumps(profiles))
-            network.agent.profiles.reload()
+            network.orchestrator.profiles.reload()
             async with product_server(tmp_path / "product", str(network.api.base_url)) as product:
                 barrier.port = urlsplit(str(product.http.base_url)).port
                 identifier = (await publish(product, "a" * 40)).json()["id"]
@@ -201,17 +192,19 @@ def test_closed_product_control_drain_keeps_abort_and_error_boundaries(
     monkeypatch: pytest.MonkeyPatch, scenario: str
 ) -> None:
     from boxie_test_support.terminal_completion import failed_drain
-    from playground import routes
+    from playground import transport
     from playground.boxie_client import BoxieUnavailable, TerminalWriteClosed
+    from playground.terminal_protocol import response
 
     async def exercise() -> None:
-        monkeypatch.setattr(routes, "TERMINAL_DRAIN_TIMEOUT", 0.02)
+        monkeypatch.setattr(transport, "TERMINAL_DRAIN_TIMEOUT", 0.02)
         result = await failed_drain(
-            routes.bridge_terminal,
+            transport.bridge_terminal,
             TerminalWriteClosed("closed"),
             BoxieUnavailable("transport failed"),
             scenario,
             None,
+            decode_event=response.validate_json,
         )
         if scenario == "malformed":
             assert isinstance(result, ValueError)

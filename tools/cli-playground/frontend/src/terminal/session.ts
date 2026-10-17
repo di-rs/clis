@@ -120,9 +120,11 @@ export function createSession({ terminal, input, geometry, prepare, onState }: S
   });
   function measuredSize(): Size {
     const size = geometry.measure();
+    const cols = Number.isFinite(size.cols) ? size.cols : terminal.cols;
+    const rows = Number.isFinite(size.rows) ? size.rows : terminal.rows;
     return {
-      cols: Math.max(1, Math.min(500, size.cols)),
-      rows: Math.max(1, Math.min(300, size.rows)),
+      cols: Math.max(1, Math.min(500, cols)),
+      rows: Math.max(1, Math.min(300, rows)),
     };
   }
   function requestSize() {

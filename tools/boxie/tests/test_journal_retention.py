@@ -1,4 +1,4 @@
-"""Local finality, durable receipt and bounded input persistence contracts."""
+"""Local finality, persisted receipt and bounded input persistence contracts."""
 
 import asyncio
 import json
@@ -10,55 +10,63 @@ import pytest
 from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import SandboxRef
 from boxie.domain.models import SandboxState, TerminationReason
-from test_agent_lifecycle import settled, setup
+from boxie_test_support.execution import Guard, launch_execution
+from lifecycle_support import settled, setup
 
 
 def test_input_is_coalesced_but_critical_boundary_forces_latest(tmp_path: Path) -> None:
     async def exercise() -> None:
-        agent, request, _, clock, _ = await setup(tmp_path)
-        await settled(agent, request.ref, SandboxState.READY)
-        epoch = await agent.attach(request.ref, attachment_order=1)
-        before = agent.journal.path.read_bytes()
+        orchestrator, request, _, clock, _ = await setup(tmp_path)
+        await settled(orchestrator, request.ref, SandboxState.READY)
+        epoch = await orchestrator.attach(request.ref, attachment_order=1)
+        before = orchestrator.journal.path.read_bytes()
         for _ in range(100):
             clock.advance_monotonic(0.001)
-            await agent.write(request.ref, epoch, b"x")
-        assert agent.journal.path.read_bytes() == before
-        assert (await agent.inspect(request.ref)).event_version > json.loads(before)["records"][0][
-            "event_version"
-        ]
-        await agent.detach(request.ref, epoch)
+            await orchestrator.write(request.ref, epoch, b"x")
+        assert orchestrator.journal.path.read_bytes() == before
+        assert (await orchestrator.inspect(request.ref)).event_version > json.loads(before)[
+            "records"
+        ][0]["event_version"]
+        await orchestrator.detach(request.ref, epoch)
         assert (
-            json.loads(agent.journal.path.read_bytes())["records"][0]["last_input_at"] is not None
+            json.loads(orchestrator.journal.path.read_bytes())["records"][0]["last_input_at"]
+            is not None
         )
-        await agent.close()
+        await orchestrator.close()
 
     asyncio.run(exercise())
 
 
 def test_final_record_requires_receipt_and_settled_sessions(tmp_path: Path) -> None:
     async def exercise() -> None:
-        agent, request, _, _, guard = await setup(tmp_path)
-        await settled(agent, request.ref, SandboxState.READY)
-        await agent.remove(request.ref, TerminationReason.REQUESTED)
-        await asyncio.gather(*agent.workers.values())
-        await agent.compact()
-        assert request.ref.id in agent.records
+        orchestrator, request, _, _, guard = await setup(tmp_path)
+        await settled(orchestrator, request.ref, SandboxState.READY)
+        await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
+        await asyncio.gather(
+            *(
+                runtime.activity
+                for runtime in orchestrator.runtimes.values()
+                if runtime.activity is not None
+            )
+        )
+        await orchestrator.compact()
+        assert request.ref.id in orchestrator.records
         guard.receipt = True
-        agent.sessions[request.ref.id] = 1
-        await agent.compact()
-        assert request.ref.id in agent.records
-        agent.sessions.clear()
-        await agent.compact()
-        assert not agent.records and not agent.locks and not agent.workers
-        assert json.loads(agent.journal.path.read_bytes())["records"] == []
+        orchestrator.runtimes[request.ref.id].sessions = 1
+        await orchestrator.compact()
+        assert request.ref.id in orchestrator.records
+        orchestrator.runtimes[request.ref.id].sessions = 0
+        await orchestrator.compact()
+        assert not orchestrator.records and not orchestrator.runtimes
+        assert json.loads(orchestrator.journal.path.read_bytes())["records"] == []
         guard.missing = True
         with pytest.raises(BoxieError):
-            await agent.ensure(request)
-        assert not agent.records and not agent.locks
+            await launch_execution(orchestrator, request)
+        assert not orchestrator.records and not orchestrator.runtimes
         with pytest.raises(BoxieError):
-            await agent.inspect(SandboxRef(uuid4(), 1))
-        assert not agent.locks
-        await agent.close()
+            await orchestrator.inspect(SandboxRef(uuid4(), 1))
+        assert not orchestrator.runtimes
+        await orchestrator.close()
 
     asyncio.run(exercise())
 
@@ -68,48 +76,54 @@ def test_compaction_failure_preserves_barrier_and_readiness(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, after_replace: bool
 ) -> None:
     async def exercise() -> None:
-        agent, request, _, _, guard = await setup(tmp_path)
-        await settled(agent, request.ref, SandboxState.READY)
-        await agent.remove(request.ref, TerminationReason.REQUESTED)
-        await asyncio.gather(*agent.workers.values())
+        orchestrator, request, _, _, guard = await setup(tmp_path)
+        await settled(orchestrator, request.ref, SandboxState.READY)
+        await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
+        await asyncio.gather(
+            *(
+                runtime.activity
+                for runtime in orchestrator.runtimes.values()
+                if runtime.activity is not None
+            )
+        )
         guard.receipt = True
-        save = agent.journal.save
+        save = orchestrator.journal.save
 
         def fail() -> None:
             if after_replace:
                 save()
             raise OSError("owned journal unavailable")
 
-        monkeypatch.setattr(agent.journal, "save", fail)
-        await agent.compact()
-        assert request.ref.id in agent.records and not agent.execution_ready
-        from boxie.sandbox.execution import ExecutionJournal
+        monkeypatch.setattr(orchestrator.journal, "save", fail)
+        await orchestrator.compact()
+        assert request.ref.id in orchestrator.records and not orchestrator.execution_ready
+        from boxie.sandbox.execution.journal import ExecutionJournal
 
-        recovered = ExecutionJournal(agent.journal.path, agent.config.identity)
+        recovered = ExecutionJournal(orchestrator.journal.path, orchestrator.config.identity)
         assert (request.ref.id in recovered.records) is not after_replace
         # An ambiguous successful replacement is safe across process loss: fresh
         # ensure still consults the immutable SQL guard and cannot resurrect it.
         if after_replace:
-            from boxie.sandbox.lifecycle import DurableAgent
+            from boxie.sandbox.execution.orchestrator import Orchestrator
 
-            replacement = DurableAgent(
-                agent.config,
-                agent.docker,
-                agent.artifact_path,
+            replacement = Orchestrator(
+                orchestrator.config,
+                orchestrator.docker,
+                orchestrator.artifact_path,
                 guard,
-                agent.clock,
-                agent.monotonic,
+                orchestrator.clock,
+                orchestrator.monotonic,
             )
             guard.missing = True
             with pytest.raises(BoxieError):
-                await replacement.ensure(request)
+                await launch_execution(replacement, request)
             assert not replacement.records
             await replacement.close()
-        monkeypatch.setattr(agent.journal, "save", save)
-        agent._save()
-        await agent.compact()
-        assert not agent.records and agent.execution_ready
-        await agent.close()
+        monkeypatch.setattr(orchestrator.journal, "save", save)
+        orchestrator._save()
+        await orchestrator.compact()
+        assert not orchestrator.records and orchestrator.execution_ready
+        await orchestrator.close()
 
     asyncio.run(exercise())
 
@@ -117,95 +131,75 @@ def test_compaction_failure_preserves_barrier_and_readiness(
 def test_admission_ceiling_serializes_live_and_cleanup_headroom(tmp_path: Path) -> None:
     from dataclasses import replace
 
-    from boxie.sandbox.execution import ExecutionRecord
+    from boxie.sandbox.execution.journal import ExecutionRecord
+    from boxie.sandbox.execution.runtime import ExecutionRuntime
 
     async def exercise() -> None:
-        agent, request, _, _, guard = await setup(tmp_path)
-        await settled(agent, request.ref, SandboxState.READY)
-        await agent.remove(request.ref, TerminationReason.REQUESTED)
-        original = agent.records[request.ref.id]
+        orchestrator, request, _, _, guard = await setup(tmp_path)
+        await settled(orchestrator, request.ref, SandboxState.READY)
+        await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
+        original = orchestrator.records[request.ref.id]
         # Retained final history models unavailable receipt collection, independently
         # of SQL's released slots. No age or count eviction may remove these records.
         for _ in range(125):
             record = ExecutionRecord.model_validate(original.model_dump())
             record.id = uuid4()
-            agent.records[record.id] = record
-        agent._save()
+            orchestrator.records[record.id] = record
+            orchestrator.runtimes[record.id] = ExecutionRuntime(orchestrator, record)
+        orchestrator._save()
         requests = [replace(request, ref=SandboxRef(uuid4(), 1)) for _ in range(10)]
-        results = await asyncio.gather(*(agent.ensure(r) for r in requests), return_exceptions=True)
-        assert len(agent.records) == 128
+        results = await asyncio.gather(
+            *(launch_execution(orchestrator, r) for r in requests), return_exceptions=True
+        )
+        assert len(orchestrator.records) == 128
         assert sum(isinstance(r, BoxieError) and r.status == 503 for r in results) == 8
         guard.stopped = True
         cleanup = [replace(request, ref=SandboxRef(uuid4(), 1)) for _ in range(12)]
-        results = await asyncio.gather(*(agent.ensure(r) for r in cleanup), return_exceptions=True)
-        assert len(agent.records) == 136 and not agent.execution_ready
+        results = await asyncio.gather(
+            *(launch_execution(orchestrator, r) for r in cleanup), return_exceptions=True
+        )
+        assert len(orchestrator.records) == 136 and not orchestrator.execution_ready
         assert sum(isinstance(r, BoxieError) and r.status == 503 for r in results) == 4
-        await asyncio.gather(*agent.workers.values())
+        await asyncio.gather(
+            *(
+                runtime.activity
+                for runtime in orchestrator.runtimes.values()
+                if runtime.activity is not None
+            )
+        )
         more = replace(request, ref=SandboxRef(uuid4(), 1))
         with pytest.raises(BoxieError) as error:
-            await agent.ensure(more)
-        assert error.value.status == 503 and len(agent.records) == 136
-        await agent.close()
-
-    asyncio.run(exercise())
-
-
-def test_report_response_after_forgetting_cannot_recreate_state(tmp_path: Path) -> None:
-    import httpx
-    from boxie.sandbox.reporting import ObservationReporter
-
-    async def exercise() -> None:
-        agent, request, _, _, _ = await setup(tmp_path)
-        await settled(agent, request.ref, SandboxState.READY)
-        entered, release = asyncio.Event(), asyncio.Event()
-
-        async def reply(message: httpx.Request) -> httpx.Response:
-            entered.set()
-            await release.wait()
-            return httpx.Response(204)
-
-        reporter = ObservationReporter("http://owned", b"unused")
-        await reporter.client.aclose()
-        reporter.client = httpx.AsyncClient(
-            base_url="http://owned", transport=httpx.MockTransport(reply)
-        )
-        reporter.offer(await agent.inspect(request.ref))
-        task = asyncio.create_task(reporter.flush())
-        await entered.wait()
-        reporter.forget(request.ref.id)
-        release.set()
-        await task
-        assert not reporter.latest and not reporter.sent
-        await reporter.close()
-        await agent.close()
+            await launch_execution(orchestrator, more)
+        assert error.value.status == 503 and len(orchestrator.records) == 136
+        await orchestrator.close()
 
     asyncio.run(exercise())
 
 
 def test_continuous_input_flushes_on_schedule_without_postponement(tmp_path: Path) -> None:
     async def exercise() -> None:
-        agent, request, _, clock, _ = await setup(tmp_path)
-        await settled(agent, request.ref, SandboxState.READY)
-        await agent.start()
-        epoch = await agent.attach(request.ref, attachment_order=1)
-        before = agent.journal.path.read_bytes()
+        orchestrator, request, _, clock, _ = await setup(tmp_path)
+        await settled(orchestrator, request.ref, SandboxState.READY)
+        await orchestrator.start()
+        epoch = await orchestrator.attach(request.ref, attachment_order=1)
+        before = orchestrator.journal.path.read_bytes()
         for _ in range(11):
-            await agent.write(request.ref, epoch, b"x")
+            await orchestrator.write(request.ref, epoch, b"x")
             clock.advance(0.1)
             await asyncio.sleep(0.012)
-        after = json.loads(agent.journal.path.read_bytes())["records"][0]
+        after = json.loads(orchestrator.journal.path.read_bytes())["records"][0]
         assert after["event_version"] > json.loads(before)["records"][0]["event_version"]
         assert after["last_input_at"] is not None
-        await agent.close()
+        await orchestrator.close()
 
     asyncio.run(exercise())
 
 
 def test_final_reader_callback_settles_before_forgetting(tmp_path: Path) -> None:
     async def exercise() -> None:
-        agent, request, daemon, _, guard = await setup(tmp_path)
-        await settled(agent, request.ref, SandboxState.READY)
-        terminal = agent.terminals[request.ref.id]
+        orchestrator, request, daemon, _, guard = await setup(tmp_path)
+        await settled(orchestrator, request.ref, SandboxState.READY)
+        terminal = orchestrator.runtimes[request.ref.id].pty
         original = terminal.terminate
         entered, release = asyncio.Event(), asyncio.Event()
 
@@ -220,15 +214,15 @@ def test_final_reader_callback_settles_before_forgetting(tmp_path: Path) -> None
         next(iter(daemon.streams.values())).queue.put_nowait(b"")
         await entered.wait()
         try:
-            await agent.compact()
-            assert request.ref.id in agent.records
+            await orchestrator.compact()
+            assert request.ref.id in orchestrator.records
         finally:
             release.set()
             assert terminal.reader is not None
             await terminal.reader
-        await agent.compact()
-        assert not agent.records
-        await agent.close()
+        await orchestrator.compact()
+        assert not orchestrator.records
+        await orchestrator.close()
 
     asyncio.run(exercise())
 
@@ -238,7 +232,7 @@ def test_active_final_protocol_session_blocks_compaction(
 ) -> None:
     from uuid import UUID
 
-    from boxie.sandbox import terminal_session
+    from boxie.sandbox.terminal import session as terminal_session
     from boxie_test_support.api import CONSUMER_AUTH, artifact, create, ready, terminal_url
     from boxie_test_support.terminal_network import attach, network
     from websockets.asyncio.client import connect
@@ -247,7 +241,7 @@ def test_active_final_protocol_session_blocks_compaction(
         async with network(tmp_path) as net:
             identifier = await create(net.api, await artifact(net.api))
             await ready(net.api, identifier)
-            ref = net.agent.records[UUID(identifier)].ref
+            ref = net.orchestrator.records[UUID(identifier)].ref
             entered, release = asyncio.Event(), asyncio.Event()
             close = terminal_session.close_socket
 
@@ -257,23 +251,27 @@ def test_active_final_protocol_session_blocks_compaction(
                 await close(socket, code)
 
             monkeypatch.setattr(terminal_session, "close_socket", held_close)
-            net.agent.guard.receipt = True
+            assert isinstance(net.orchestrator.guard, Guard)
+            net.orchestrator.guard.receipt = True
             async with connect(
                 terminal_url(net.api, identifier), additional_headers=CONSUMER_AUTH
             ) as socket:
                 await attach(socket, order=1)
-                await net.agent.remove(ref, TerminationReason.REQUESTED)
+                await net.orchestrator.remove(ref, TerminationReason.REQUESTED)
                 await asyncio.wait_for(entered.wait(), 2)
-                await net.agent.compact()
-                assert ref.id in net.agent.records and net.agent.sessions[ref.id] == 1
+                await net.orchestrator.compact()
+                assert (
+                    ref.id in net.orchestrator.records
+                    and net.orchestrator.runtimes[ref.id].sessions == 1
+                )
                 release.set()
             for _ in range(100):
-                if not net.agent.sessions:
+                if not any(r.sessions for r in net.orchestrator.runtimes.values()):
                     break
                 await asyncio.sleep(0.01)
-            assert not net.agent.sessions
-            await net.agent.compact()
-            assert not net.agent.records
+            assert not any(r.sessions for r in net.orchestrator.runtimes.values())
+            await net.orchestrator.compact()
+            assert not net.orchestrator.records
 
     asyncio.run(exercise())
 
@@ -283,28 +281,32 @@ def test_unknown_create_deleted_during_failed_save_remains_uncertain_after_resta
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def exercise() -> None:
-        from boxie.sandbox.lifecycle import DurableAgent
+        from boxie.sandbox.execution.orchestrator import Orchestrator
 
-        agent, request, daemon, clock, guard = await setup(tmp_path)
+        orchestrator, request, daemon, clock, guard = await setup(tmp_path)
         daemon.create_gate = asyncio.Event()
         daemon.lost_ack = True
         await daemon.create_entered.wait()
-        agent.workers[request.ref.id].cancel()
-        await asyncio.gather(agent.workers[request.ref.id], return_exceptions=True)
+        worker = orchestrator.runtimes[request.ref.id].activity
+        assert worker is not None
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
         daemon.create_gate.set()
-        await agent.creates[request.ref.id]
+        creating = orchestrator.runtimes[request.ref.id].create
+        assert creating is not None
+        await creating
         assert daemon.resources and not daemon.started
-        disk = agent.journal.path.read_bytes()
+        disk = orchestrator.journal.path.read_bytes()
         assert json.loads(disk)["records"][0]["creation_uncertain"]
 
         def unavailable() -> None:
             raise OSError("persistent journal outage")
 
         for _ in range(2):
-            replacement = DurableAgent(
-                agent.config,
+            replacement = Orchestrator(
+                orchestrator.config,
                 daemon,
-                agent.artifact_path,
+                orchestrator.artifact_path,
                 guard,
                 clock,
                 clock.monotonic,
@@ -318,10 +320,10 @@ def test_unknown_create_deleted_during_failed_save_remains_uncertain_after_resta
             assert replacement.sweeper is not None
             replacement.sweeper.cancel()
             await asyncio.gather(replacement.sweeper, return_exceptions=True)
-        recovered = DurableAgent(
-            agent.config,
+        recovered = Orchestrator(
+            orchestrator.config,
             daemon,
-            agent.artifact_path,
+            orchestrator.artifact_path,
             guard,
             clock,
             clock.monotonic,
@@ -330,7 +332,7 @@ def test_unknown_create_deleted_during_failed_save_remains_uncertain_after_resta
         pending = await recovered.inspect(request.ref)
         assert pending.cleanup_pending and not pending.removal_confirmed
         assert recovered.records[request.ref.id].creation_uncertain
-        assert not recovered.terminals and not daemon.started
+        assert not any(r.terminal for r in recovered.runtimes.values()) and not daemon.started
         await recovered.compact()
         assert request.ref.id in recovered.records
         await recovered.close()
@@ -340,17 +342,23 @@ def test_unknown_create_deleted_during_failed_save_remains_uncertain_after_resta
 
 def test_receipt_error_and_changed_version_never_authorize_forgetting(tmp_path: Path) -> None:
     async def exercise() -> None:
-        agent, request, _, _, guard = await setup(tmp_path)
-        await settled(agent, request.ref, SandboxState.READY)
-        await agent.remove(request.ref, TerminationReason.REQUESTED)
-        await asyncio.gather(*agent.workers.values())
+        orchestrator, request, _, _, guard = await setup(tmp_path)
+        await settled(orchestrator, request.ref, SandboxState.READY)
+        await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
+        await asyncio.gather(
+            *(
+                runtime.activity
+                for runtime in orchestrator.runtimes.values()
+                if runtime.activity is not None
+            )
+        )
 
         async def unavailable(request: Any) -> bool:
             raise OSError("receipt unavailable")
 
         guard.terminal_receipt = unavailable  # type: ignore[method-assign]
-        await agent.compact()
-        assert request.ref.id in agent.records
+        await orchestrator.compact()
+        assert request.ref.id in orchestrator.records
         entered, release = asyncio.Event(), asyncio.Event()
 
         async def held(request: Any) -> bool:
@@ -359,16 +367,16 @@ def test_receipt_error_and_changed_version_never_authorize_forgetting(tmp_path: 
             return True
 
         guard.terminal_receipt = held  # type: ignore[method-assign]
-        task = asyncio.create_task(agent.compact())
+        task = asyncio.create_task(orchestrator.compact())
         await entered.wait()
-        agent.records[request.ref.id].event_version += 1
-        agent._save()
+        orchestrator.records[request.ref.id].event_version += 1
+        orchestrator._save()
         release.set()
         await task
-        assert request.ref.id in agent.records
-        await agent.compact()
-        assert not agent.records
-        await agent.close()
+        assert request.ref.id in orchestrator.records
+        await orchestrator.compact()
+        assert not orchestrator.records
+        await orchestrator.close()
 
     asyncio.run(exercise())
 
@@ -380,30 +388,63 @@ def test_failed_cleanup_initialization_keeps_pending_without_creating(
     from dataclasses import replace
 
     async def exercise() -> None:
-        agent, first, daemon, _, guard = await setup(tmp_path)
-        await settled(agent, first.ref, SandboxState.READY)
-        await agent.remove(first.ref, TerminationReason.REQUESTED)
+        orchestrator, first, daemon, _, guard = await setup(tmp_path)
+        await settled(orchestrator, first.ref, SandboxState.READY)
+        await orchestrator.remove(first.ref, TerminationReason.REQUESTED)
         guard.stopped = True
         request = replace(first, ref=SandboxRef(uuid4(), 1))
-        save = agent.journal.save
+        save = orchestrator.journal.save
 
         def unavailable() -> None:
             raise OSError("initial cleanup save unavailable")
 
-        monkeypatch.setattr(agent.journal, "save", unavailable)
+        monkeypatch.setattr(orchestrator.journal, "save", unavailable)
         with pytest.raises(BoxieError) as error:
-            await agent.ensure(request)
+            await launch_execution(orchestrator, request)
         assert error.value.status == 503
-        pending = await agent.inspect(request.ref)
+        pending = await orchestrator.inspect(request.ref)
         assert pending.cleanup_pending and not pending.removal_confirmed
-        await agent.reconcile()
-        assert not (await agent.inspect(request.ref)).removal_confirmed
-        assert daemon.creates == 1 and not agent.execution_ready
-        monkeypatch.setattr(agent.journal, "save", save)
-        agent._save()
-        await agent.reconcile()
-        assert (await agent.inspect(request.ref)).removal_confirmed
+        await orchestrator.reconcile()
+        assert not (await orchestrator.inspect(request.ref)).removal_confirmed
+        assert daemon.creates == 1 and not orchestrator.execution_ready
+        monkeypatch.setattr(orchestrator.journal, "save", save)
+        orchestrator._save()
+        await orchestrator.reconcile()
+        assert (await orchestrator.inspect(request.ref)).removal_confirmed
         assert daemon.creates == 1
-        await agent.close()
+        await orchestrator.close()
+
+    asyncio.run(exercise())
+
+
+def test_cancelled_terminal_session_releases_retention_ownership(tmp_path: Path) -> None:
+    """Cancellation must release the session pin without discarding cleanup evidence."""
+    from lifecycle_support import settled, setup
+
+    async def exercise() -> None:
+        orchestrator, request, _, _, guard = await setup(tmp_path)
+        await settled(orchestrator, request.ref, SandboxState.READY)
+        entered = asyncio.Event()
+
+        async def hold() -> None:
+            with orchestrator.terminal_session(request.ref):
+                entered.set()
+                await asyncio.Event().wait()
+
+        task = asyncio.create_task(hold())
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
+            guard.receipt = True
+            await orchestrator.compact()
+            assert request.ref.id in orchestrator.records
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await orchestrator.compact()
+            assert request.ref.id not in orchestrator.records
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await orchestrator.close()
 
     asyncio.run(exercise())

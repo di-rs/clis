@@ -2,124 +2,23 @@
 
 import asyncio
 import importlib
-from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC
 from pathlib import Path
-from typing import Any
 from uuid import uuid4
 
 import pytest
-from temporalio import activity
-from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
+from workflow_support import Decisions as Decisions
 
 pytestmark = pytest.mark.integration
 
 
-class Decisions:
-    def __init__(self, mode: str) -> None:
-        from boxie.temporal.contracts import LifecycleFacts
-
-        self.mode = mode
-        self.facts = LifecycleFacts(
-            absolute_deadline=(datetime.now(UTC) + timedelta(hours=1)).timestamp(),
-            desired_stop=mode == "stop_first",
-            cleaned=False,
-        )
-        self.ensures = self.removals = self.inspections = 0
-        self.entered = asyncio.Event()
-        self.release = asyncio.Event()
-        if mode == "cancel_expire":
-            self.facts = replace(self.facts, absolute_deadline=0)
-        if mode in {"idle", "detached", "absolute"}:
-            seconds = {"idle": 600, "detached": 120, "absolute": 3600}[mode]
-            self.facts = replace(
-                self.facts, next_deadline=self.facts.absolute_deadline - 3600 + seconds
-            )
-
-    @activity.defn(name="load_request")
-    async def load(self, sandbox_id: str) -> Any:
-        if self.mode == "cancel_load":
-            self.entered.set()
-            await self.release.wait()
-        return self.facts
-
-    @activity.defn(name="ensure_sandbox")
-    async def ensure(self, sandbox_id: str) -> None:
-        self.ensures += 1
-        if self.mode == "cancel_ensure":
-            self.entered.set()
-            await self.release.wait()
-        if self.mode == "unsafe_failure":
-            try:
-                raise RuntimeError("SECRET-NESTED-CONTEXT")
-            except RuntimeError as error:
-                raise RuntimeError("SECRET-ENV-HTTP-ERROR") from error
-        if self.mode in {"idle", "detached", "absolute", "cancel_inspect", "cancel_expire"}:
-            return
-        if self.mode == "provision_failure":
-            raise ApplicationError("safe failure", type="DependencyUnavailable")
-        self.facts = replace(self.facts, desired_stop=True)
-
-    @activity.defn(name="inspect_and_renew")
-    async def inspect(self, sandbox_id: str) -> Any:
-        self.inspections += 1
-        if self.mode == "cancel_inspect":
-            self.entered.set()
-            await self.release.wait()
-        return self.facts
-
-    @activity.defn(name="expire_if_current")
-    async def expire(self, sandbox_id: str) -> Any:
-        if self.mode == "cancel_expire":
-            self.entered.set()
-            await self.release.wait()
-        self.facts = replace(self.facts, desired_stop=True)
-        return self.facts
-
-    @activity.defn(name="request_stop")
-    async def stop(self, request: dict[str, str]) -> None:
-        self.facts = replace(self.facts, desired_stop=True)
-
-    @activity.defn(name="remove_sandbox")
-    async def remove(self, sandbox_id: str) -> None:
-        self.removals += 1
-        if self.mode == "cancel_cleanup":
-            self.entered.set()
-            await self.release.wait()
-        if self.mode == "rollover" and self.removals <= 100:
-            raise ApplicationError("pending", type="CleanupPending", non_retryable=True)
-        if self.mode == "cleanup_failure" and self.removals < 12:
-            raise ApplicationError("pending cleanup", type="CleanupPending")
-        self.facts = replace(self.facts, cleaned=True)
-
-    @activity.defn(name="record_observation")
-    async def record(self, sandbox_id: str) -> None:
-        pass
-
-    @activity.defn(name="confirm_removed")
-    async def confirm(self, sandbox_id: str) -> bool:
-        return self.facts.cleaned
-
-    def activities(self) -> list[Any]:
-        return [
-            self.load,
-            self.ensure,
-            self.inspect,
-            self.expire,
-            self.stop,
-            self.remove,
-            self.record,
-            self.confirm,
-        ]
-
-
-@pytest.mark.parametrize("mode", ["stop_first", "normal", "provision_failure", "cleanup_failure"])
+@pytest.mark.parametrize("mode", ["stop_first", "normal", "provision_failure"])
 def test_lifecycle_cleanup_and_replay(mode: str, tmp_path: Path) -> None:
     async def exercise() -> None:
         workflow_module = importlib.import_module("boxie.temporal.workflows")
-        from temporal_support import test_server_path
+        from temporal_test_server import test_server_path
 
         async with await WorkflowEnvironment.start_time_skipping(
             test_server_existing_path=str(test_server_path())
@@ -144,8 +43,6 @@ def test_lifecycle_cleanup_and_replay(mode: str, tmp_path: Path) -> None:
                 assert decisions.ensures == (
                     0 if mode == "stop_first" else 5 if mode == "provision_failure" else 1
                 )
-                if mode == "cleanup_failure":
-                    assert decisions.removals >= 12
                 history = await handle.fetch_history()
                 (tmp_path / f"{mode}.json").write_text(history.to_json())
                 await Replayer(workflows=[workflow_module.SandboxLifecycle]).replay_workflow(
@@ -155,11 +52,13 @@ def test_lifecycle_cleanup_and_replay(mode: str, tmp_path: Path) -> None:
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize("mode,seconds", [("idle", 600), ("detached", 120), ("absolute", 3600)])
+# The workflow receives a timestamp, not a policy cause. Cover an earlier
+# policy deadline and the absolute bound; execution tests own each timer policy.
+@pytest.mark.parametrize("mode,seconds", [("detached", 120), ("absolute", 3600)])
 def test_earliest_workflow_deadline(mode: str, seconds: int) -> None:
     async def exercise() -> None:
         from boxie.temporal.workflows import SandboxLifecycle
-        from temporal_support import test_server_path
+        from temporal_test_server import test_server_path
 
         async with await WorkflowEnvironment.start_time_skipping(
             test_server_existing_path=str(test_server_path())
@@ -186,14 +85,27 @@ def test_earliest_workflow_deadline(mode: str, seconds: int) -> None:
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize("mode", ["cancel_ensure", "cancel_cleanup", "unsafe_failure", "rollover"])
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "cancel_ensure",
+        "cancel_cleanup",
+        "unsafe_failure",
+        "native_retry",
+        "terminal_stop_400",
+        "terminal_remove_404",
+        "terminal_stop_422",
+        "terminal_stop_application",
+        "terminal_remove_application",
+    ],
+)
 def test_cancellation_privacy_and_run_boundary(
     mode: str, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     async def exercise() -> None:
         from boxie.temporal.activities import SafeActivityErrors
         from boxie.temporal.workflows import SandboxLifecycle
-        from temporal_support import test_server_path
+        from temporal_test_server import test_server_path
         from temporalio.client import WorkflowHistory
 
         async with await WorkflowEnvironment.start_time_skipping(
@@ -259,9 +171,25 @@ def test_cancellation_privacy_and_run_boundary(
                         last.workflow_execution_continued_as_new_event_attributes.new_execution_run_id
                         or None
                     )
-                assert len(runs) == (2 if mode == "rollover" else 1)
+                assert len(runs) == 1
+                if mode == "native_retry":
+                    # Server-side retries retain one scheduled command even after
+                    # a long outage; workflow loops must not grow cleanup history.
+                    assert decisions.removal_attempts == list(range(1, 102))
+                    cleanup_commands = [
+                        event.activity_task_scheduled_event_attributes.activity_type.name
+                        for event in history.events
+                        if event.HasField("activity_task_scheduled_event_attributes")
+                    ]
+                    assert cleanup_commands.count("request_stop") == 1
+                    assert cleanup_commands.count("remove_sandbox") == 1
+                    assert "confirm_removed" not in cleanup_commands
                 if mode == "unsafe_failure":
                     assert decisions.ensures == 5
+                if mode.startswith("terminal_stop_"):
+                    assert decisions.stops == 2
+                if mode.startswith("terminal_remove_"):
+                    assert decisions.removal_attempts == [1, 2]
                 assert "SECRET-" not in caplog.text
 
     asyncio.run(exercise())

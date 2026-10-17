@@ -7,36 +7,33 @@ from dataclasses import dataclass
 
 from prometheus_client import Counter, Histogram
 from prometheus_client.core import GaugeMetricFamily, Metric
-from service_telemetry.logging import LogRuntime
-from service_telemetry.metrics import ProcessMetrics
 
 from boxie.domain.models import SandboxState
 from boxie.observability.events import Transition, emit
+from boxie.observability.telemetry.logging import LogRuntime
+from boxie.observability.telemetry.metrics import ProcessMetrics
 
 STATES = tuple(state.value for state in SandboxState)
-KINDS = ("start", "stop", "observation")
+KINDS = ("start", "stop")
 API_DEPENDENCIES = (
     "postgres",
-    "agent",
+    "orchestrator",
     "temporal",
     "namespace",
     "workflow_poller",
     "activity_poller",
+    "maintenance_workflow_poller",
+    "maintenance_activity_poller",
 )
-AGENT_DEPENDENCIES = ("postgres", "docker", "execution")
+ORCHESTRATOR_DEPENDENCIES = ("postgres", "docker", "execution")
 ROUTES = (
     "/healthz",
     "/readyz",
-    "/internal/observations",
     "/v1/sandboxes",
     "/v1/sandboxes/{sandbox_id}",
     "/v1/artifacts/{artifact_id}",
     "/v1/identity",
     "/v1/profiles/resolve",
-    *(
-        f"/v1/sandboxes/{{identifier}}/{action}"
-        for action in ("ensure", "inspect", "renew", "remove", "expire")
-    ),
 )
 
 
@@ -66,7 +63,11 @@ class Metrics(ProcessMetrics):
         self._refresh_success = False
         self._dependencies: dict[str, tuple[bool, float]] = {}
         self.dependencies = (
-            API_DEPENDENCIES if role == "api" else AGENT_DEPENDENCIES if role == "agent" else ()
+            API_DEPENDENCIES
+            if role == "api"
+            else ORCHESTRATOR_DEPENDENCIES
+            if role == "orchestrator"
+            else ()
         )
         self._lease: tuple[int, float | None, float] | None = None
         super().__init__("boxie", routes=ROUTES, logs=logs)
@@ -140,15 +141,15 @@ class Metrics(ProcessMetrics):
         if self.dependencies:
             yield known_family
             yield ready_family
-        if self.role == "agent" and lease is not None and now - lease[2] <= 5:
+        if self.role == "orchestrator" and lease is not None and now - lease[2] <= 5:
             yield GaugeMetricFamily(
-                "boxie_agent_control_lease_active",
+                "boxie_orchestrator_control_lease_active",
                 "Current boot eligible executions",
                 value=lease[0],
             )
             if lease[1] is not None:
                 yield GaugeMetricFamily(
-                    "boxie_agent_control_lease_remaining_seconds",
+                    "boxie_orchestrator_control_lease_remaining_seconds",
                     "Minimum remaining monotonic control lease",
                     value=max(0, lease[1] - max(0, now - lease[2])),
                 )

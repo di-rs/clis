@@ -185,7 +185,7 @@ test("viewport input waits for the current resize acknowledgement instead of old
   }
 });
 
-test("real product/API/agent reconnect preserves one PTY and Unicode screen, loses no applied cursor, never replays input, and reload is fresh", async ({
+test("real product/API/orchestrator reconnect preserves one PTY and Unicode screen, loses no applied cursor, never replays input, and reload is fresh", async ({
   page,
   request,
 }) => {

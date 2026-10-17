@@ -1,86 +1,40 @@
-"""Bounded reporter behavior independent of external clocks and dependencies."""
+"""Live lifecycle edges publish directly; input does not create delivery work."""
 
 import asyncio
-from dataclasses import replace
-from datetime import UTC, datetime
-from uuid import uuid4
+from pathlib import Path
 
-import httpx
-import pytest
-from boxie.domain.lifecycle import AgentObservation
-from boxie.domain.models import AgentIdentity, Principal, SandboxState
-from boxie.sandbox.reporting import ObservationReporter
+from boxie.domain.lifecycle import OrchestratorObservation
+from boxie.domain.models import SandboxState
+from lifecycle_support import settled, setup
 
 
-def test_input_is_coalesced_edges_are_immediate_and_outage_keeps_latest(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_attachment_publishes_directly_and_failed_delivery_does_not_undo_it(tmp_path: Path) -> None:
     async def exercise() -> None:
-
-        elapsed = 0.0
-        monkeypatch.setattr("boxie.sandbox.reporting.time.monotonic", lambda: elapsed)
-        delivered: list[int] = []
+        orchestrator, request, _, _, _ = await setup(tmp_path)
+        await settled(orchestrator, request.ref, SandboxState.READY)
+        observed: list[OrchestratorObservation] = []
         unavailable = False
 
-        async def transport(request: httpx.Request) -> httpx.Response:
-            import json
-
-            assert request.headers["Authorization"] == "Bearer reporter-agent-secret"
+        async def project(fact: OrchestratorObservation) -> None:
             if unavailable:
-                return httpx.Response(503)
-            delivered.append(json.loads(request.content)["event_version"])
-            return httpx.Response(200, json={"accepted": True})
+                raise OSError("SQL unavailable")
+            observed.append(fact)
 
-        reporter = ObservationReporter("http://api.invalid", b"reporter-agent-secret")
-        await reporter.client.aclose()
-        reporter.client = httpx.AsyncClient(
-            base_url="http://api.invalid",
-            headers={"Authorization": "Bearer reporter-agent-secret"},
-            transport=httpx.MockTransport(transport),
-        )
-        observation = AgentObservation(
-            uuid4(),
-            Principal("one"),
-            AgentIdentity(uuid4(), "host"),
-            1,
-            uuid4(),
-            1,
-            datetime.now(UTC),
-            SandboxState.READY,
-            True,
-        )
+        orchestrator.observer = project
         try:
-            reporter.offer(observation)
-            await reporter.flush()
-            assert delivered == [1]
-            reporter.offer(replace(observation, event_version=2, last_input_at=datetime.now(UTC)))
-            elapsed = 1
-            await reporter.flush()
-            assert delivered == [1]
-            reporter.offer(replace(observation, event_version=3, attachment_epoch=1))
-            await reporter.flush()
-            assert delivered == [1, 3]
-            reporter.offer(
-                replace(
-                    observation,
-                    event_version=4,
-                    attachment_epoch=1,
-                    last_input_at=datetime.now(UTC),
-                )
-            )
-            elapsed = 11
-            await reporter.flush()
-            assert delivered == [1, 3, 4]
+            epoch = await orchestrator.attach(request.ref, attachment_order=1)
+            assert observed[-1].attachment_epoch == epoch
+            assert observed[-1].disconnected_at is None
+            await orchestrator.write(request.ref, epoch, b"active")
+            assert len(observed) == 1
             unavailable = True
-            elapsed = 30
-            for version in range(5, 10005):
-                reporter.offer(replace(observation, event_version=version, attachment_epoch=2))
-            await reporter.flush()
-            assert len(reporter.latest) == 1 and delivered == [1, 3, 4]
+            await orchestrator.detach(request.ref, epoch)
+            assert (await orchestrator.inspect(request.ref)).disconnected_at is not None
             unavailable = False
-            await reporter.flush()
-            assert delivered == [1, 3, 4, 10004]
+            await orchestrator.publish(request.ref)
+            assert observed[-1].disconnected_at is not None
+            assert observed[-1].last_input_at is not None
         finally:
-            await reporter.close()
+            await orchestrator.close()
 
     asyncio.run(exercise())

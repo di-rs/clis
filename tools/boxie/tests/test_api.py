@@ -9,12 +9,10 @@ from uuid import uuid4
 import httpx
 import pytest
 from boxie.api.app import ApiConfig, create_app
-from boxie.sandbox.client import AgentClient
-from boxie_test_support.agent import bundle, request
+from boxie.sandbox.transport.client import OrchestratorClient
 from boxie_test_support.api import CONSUMER_AUTH, FOREIGN_AUTH, artifact, create, ready, serve
-from integration.conftest import postgres_dsn as postgres_dsn
-from integration.conftest import postgres_server as postgres_server
-from test_postgres import counts, database
+from boxie_test_support.orchestrator import bundle, request
+from database_support import counts, database
 
 pytestmark = pytest.mark.integration
 
@@ -22,7 +20,9 @@ pytestmark = pytest.mark.integration
 @asynccontextmanager
 async def stack(dsn: str, root: Path) -> AsyncIterator[tuple[httpx.AsyncClient, Any]]:
     async with database(dsn, root) as (life, artifacts, pool, _):
-        async with AgentClient("http://127.0.0.1:1", b"agent-test-secret") as terminal:
+        async with OrchestratorClient(
+            "http://127.0.0.1:1", b"orchestrator-test-secret"
+        ) as terminal:
             app = create_app(
                 ApiConfig("test", {"one": b"consumer-one-secret", "two": b"consumer-two-secret"}),
                 life,
