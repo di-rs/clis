@@ -55,9 +55,15 @@ while IFS='=' read -r name image; do
     [[ $image =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
 done < "$payload/image.env"
 
+if [[ $app == setup ]]; then
+    ssh -F "$private/config" deployment 'cloud-init status --wait >/dev/null'
+fi
 ssh -F "$private/config" deployment "test ! -e /opt/clis/releases/$app/$run && install -d -m 0700 /opt/clis/staging/$app/$run /opt/clis/releases/$app"
 scp -F "$private/config" -r "$payload" "deployment:/opt/clis/staging/$app/$run/payload"
 ssh -F "$private/config" deployment "mv /opt/clis/staging/$app/$run/payload /opt/clis/releases/$app/$run"
+if [[ $app == setup ]]; then
+    ssh -F "$private/config" deployment "flock -n /run/lock/clis-deployment.lock /bin/bash -ec 'test ! -e /srv/clis/deployment/pending && /usr/local/sbin/clis-storage-guard && install -m 0700 /opt/clis/releases/setup/$run/infra/host/operation.sh /usr/local/sbin/clis-operation && install -m 0644 /opt/clis/releases/setup/$run/infra/host/systemd/*.service /etc/systemd/system/ && systemctl daemon-reload'"
+fi
 unit="clis-$app@$run.service"
 printf 'Operation: %s\n' "$unit" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 if ! ssh -F "$private/config" deployment "systemctl start $unit"; then

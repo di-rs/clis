@@ -119,6 +119,18 @@ def test_only_manual_setup_can_provision_cloud_resources() -> None:
     )
 
 
+def test_setup_applies_infrastructure_before_private_ssh_installation() -> None:
+    steps = workflow("setup")["jobs"]["provision"]["steps"]
+    scripts = "\n".join(step.get("run", "") for step in steps)
+    assert "pulumi up" in scripts
+    assert "render_inputs" in scripts
+    assert "submit-release.sh setup" in scripts
+    assert scripts.index("pulumi up") < scripts.index("render_inputs")
+    assert scripts.index("render_inputs") < scripts.index("submit-release.sh setup")
+    assert "config set registryConfig" not in scripts
+    assert "config set cloudflareDnsApiToken" not in scripts
+
+
 def test_preview_controller_keeps_privileged_code_on_the_default_branch() -> None:
     preview = workflow("preview")
     assert preview["on"]["workflow_run"] == {
@@ -170,6 +182,13 @@ def test_infrastructure_checks_require_trusted_dispatch_or_opted_in_schedule() -
     assert preview["with"]["suppress-outputs"] == "true"
     assert preview["with"]["comment-on-summary"] == "true"
     assert preview["with"]["comment-on-pr"] == "false"
+
+
+def test_infrastructure_review_does_not_stage_application_installation() -> None:
+    steps = workflow("infra-check")["jobs"]["check"]["steps"]
+    commands = "\n".join(step.get("run", "") for step in steps)
+    assert ".installation" not in commands
+    assert "sourceDirectory" not in commands
 
 
 @pytest.mark.parametrize("requested", ["default", "head", "HEAD", "master", "0" * 40, "x\nrun=bad"])

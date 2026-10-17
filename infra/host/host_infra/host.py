@@ -11,7 +11,6 @@ from typing import Literal
 import pulumi
 import pulumi_hcloud as hcloud
 import pulumi_tls as tls
-from pulumi_command import remote
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -81,19 +80,6 @@ def cloud_init(host_private_key: str, host_public_key: str, volume_id: str) -> s
             },
             "write_files": [
                 {
-                    "path": "/usr/local/sbin/clis-operation",
-                    "permissions": "0700",
-                    "content": (source / "operation.sh").read_text(),
-                },
-                *[
-                    {
-                        "path": f"/etc/systemd/system/{unit.name}",
-                        "permissions": "0644",
-                        "content": unit.read_text(),
-                    }
-                    for unit in sorted((source / "systemd").glob("*.service"))
-                ],
-                {
                     "path": "/etc/clis/storage-device",
                     "permissions": "0600",
                     "content": f"/dev/disk/by-id/scsi-0HC_Volume_{volume_id}\n",
@@ -125,7 +111,6 @@ def cloud_init(host_private_key: str, host_public_key: str, volume_id: str) -> s
 class HostResources:
     server: hcloud.Server
     volume_attachment: hcloud.VolumeAttachment
-    connection: remote.ConnectionArgs
 
 
 def provision(config: HostConfig) -> hcloud.Server:
@@ -227,15 +212,4 @@ def provision_resources(config: HostConfig) -> HostResources:
     pulumi.export("ipv4", ipv4.ip_address)
     pulumi.export("sshPrivateKey", pulumi.Output.secret(deployment_key.private_key_openssh))
     pulumi.export("sshHostPublicKey", host_public_key)
-    return HostResources(
-        server,
-        attachment,
-        remote.ConnectionArgs(
-            host=ipv4.ip_address,
-            user="root",
-            private_key=pulumi.Output.secret(deployment_key.private_key_openssh),
-            host_key=host_public_key,
-            per_dial_timeout=15,
-            dial_error_limit=20,
-        ),
-    )
+    return HostResources(server, attachment)

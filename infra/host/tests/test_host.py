@@ -94,27 +94,26 @@ def test_storage_guard_refuses_missing_disk(tmp_path: Path) -> None:
     assert "persistent disk" in result.stderr
 
 
-def test_cloud_init_installs_bounded_operation_units() -> None:
+def test_cloud_init_contains_only_immutable_first_boot_files() -> None:
     from host_infra.host import cloud_init
 
     data = json.loads(cloud_init("private", "public", "123").removeprefix("#cloud-config\n"))
     files = {item["path"]: item["content"] for item in data["write_files"]}
-    assert "/usr/local/sbin/clis-operation" in files
-    for app in ("setup", "boxie", "playground"):
-        unit = files[f"/etc/systemd/system/clis-{app}@.service"]
-        assert "TimeoutStartSec=900" in unit
-        assert "KillMode=control-group" in unit
-        assert "RemainAfterExit=yes" in unit
-        assert "/usr/bin/flock -n /run/lock/clis-deployment.lock" in unit
+    assert "/usr/local/sbin/clis-operation" not in files
+    assert not any(name.startswith("/etc/systemd/system/clis-") for name in files)
+    assert "/usr/local/sbin/clis-bootstrap" in files
+    assert "/usr/local/sbin/clis-storage-guard" in files
 
 
 @pulumi.runtime.test  # type: ignore[untyped-decorator]
-async def test_host_exposes_pinned_setup_connection_and_attachment() -> None:
+async def test_host_exposes_private_ssh_output_and_attachment() -> None:
     from host_infra.host import HostConfig, provision_resources
 
     mocks = HostMocks()
     host = provision_resources(HostConfig())
     await mocks.finish()
-    assert await pulumi.Output.from_input(host.connection.host_key).future() == "ssh-ed25519 YWJj"
-    assert await pulumi.Output.from_input(host.connection.private_key).is_secret()
+    assert not hasattr(host, "connection")
+    root = get_root_resource()
+    assert isinstance(root, Stack)
+    assert await pulumi.Output.from_input(root.outputs["sshPrivateKey"]).is_secret()
     assert await host.volume_attachment.urn.future()

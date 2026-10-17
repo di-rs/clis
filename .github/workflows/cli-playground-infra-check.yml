@@ -86,19 +86,13 @@ jobs:
         uses: pulumi/setup-pulumi@b374ceb6168550de27c6eba92e01c1a774040e11 # v2
         with:
           pulumi-version: '3.268.0'
-      - name: 🔎 Read existing configuration and prepare reviewed source
+      - name: 🔎 Read existing infrastructure configuration
         run: |
           umask 077
-          mkdir -p .installation/infra/environments .installation/tools/boxie .installation/tools/cli-playground
-          cp -a infra/host .installation/infra/
-          cp -a infra/environments/single-host .installation/infra/environments/
-          cp -a tools/boxie/infra .installation/tools/boxie/
-          cp -a tools/cli-playground/infra .installation/tools/cli-playground/
           cd infra/environments/single-host
           pulumi login "$PULUMI_BACKEND_URL" --non-interactive
           pulumi stack select production --non-interactive
           pulumi config refresh --force --non-interactive
-          pulumi config set sourceDirectory "$GITHUB_WORKSPACE/.installation" --non-interactive
       - name: 🔍 Preview reviewed infrastructure and summarize changes
         id: preview
         if: ${{ github.event_name == 'workflow_dispatch' }}

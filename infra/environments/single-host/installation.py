@@ -1,92 +1,9 @@
-"""Initial installation through Pulumi's pinned SSH transport."""
+"""Render private setup inputs after Pulumi has provisioned the host."""
 
+import json
+import os
 import re
 from pathlib import Path
-
-import pulumi
-from pulumi_command import remote
-
-
-def validate_release(revision: str, run_id: str) -> None:
-    if not re.fullmatch(r"[a-f0-9]{40}", revision) or not re.fullmatch(r"[0-9]+-[0-9]+", run_id):
-        raise ValueError("Use a full commit SHA and numeric run ID-attempt")
-
-
-def provision_installation(
-    connection: remote.ConnectionArgs,
-    source: Path,
-    revision: str,
-    run_id: str,
-    *,
-    host_id: pulumi.Input[str],
-    settings: pulumi.Input[str],
-    tunnel_credentials: pulumi.Input[str],
-    registry_config: pulumi.Input[str],
-    dependencies: list[pulumi.Resource],
-) -> remote.Command:
-    validate_release(revision, run_id)
-    parent = f"/opt/clis/staging/setup/{run_id}"
-    staging = parent + "/source"
-    release = f"/opt/clis/releases/setup/{run_id}"
-    prepare_command = f"cloud-init status --wait >/dev/null && install -d -m 0700 {parent} /opt/clis/releases/setup && test ! -e {staging}"
-    prepare = remote.Command(
-        "installation-prepare",
-        connection=connection,
-        create=prepare_command,
-        update=prepare_command,
-        triggers=[revision, run_id, host_id],
-        opts=pulumi.ResourceOptions(depends_on=dependencies),
-    )
-    archive = pulumi.FileArchive(str(source))
-    copied = remote.CopyToRemote(
-        "installation-source",
-        connection=connection,
-        source=archive,
-        remote_path=staging,
-        triggers=[revision, run_id, host_id],
-        opts=pulumi.ResourceOptions(depends_on=[prepare]),
-    )
-    private_files = [
-        remote.Command(
-            f"installation-{name.replace('/', '-')}",
-            connection=connection,
-            create=f"umask 077; install -d -m 0700 {staging}/registry && cat > {staging}/{name}",
-            update=f"umask 077; install -d -m 0700 {staging}/registry && cat > {staging}/{name}",
-            stdin=pulumi.Output.secret(content),
-            triggers=[revision, run_id, host_id],
-            logging=remote.Logging.NONE,
-            add_previous_output_in_env=False,
-            opts=pulumi.ResourceOptions(
-                depends_on=[copied], additional_secret_outputs=["stdout", "stderr"]
-            ),
-        )
-        for name, content in [
-            ("settings.env", settings),
-            ("tunnel.json", tunnel_credentials),
-            ("registry/config.json", registry_config),
-        ]
-    ]
-    command = (
-        f"test ! -e {release} && chmod 0700 {staging} {staging}/registry && "
-        f"chmod 0600 {staging}/settings.env {staging}/tunnel.json {staging}/registry/config.json && mv {staging} {release} && "
-        f"systemctl start clis-setup@{run_id}.service && "
-        f'test "$(systemctl show clis-setup@{run_id}.service -p Result --value)" = success && '
-        f'test "$(cat /srv/clis/deployment/setup/current/revision)" = {revision}'
-    )
-    return remote.Command(
-        "installation",
-        connection=connection,
-        create=command,
-        update=command,
-        # Each setup attempt has a new run ID. Secret stdin belongs to the
-        # writers; unknown secret values in triggers break provider preview.
-        triggers=[archive, revision, run_id, host_id],
-        add_previous_output_in_env=False,
-        logging=remote.Logging.NONE,
-        opts=pulumi.ResourceOptions(
-            depends_on=private_files, additional_secret_outputs=["stdout", "stderr"]
-        ),
-    )
 
 
 def serialize_settings(values: dict[str, str]) -> str:
@@ -94,3 +11,29 @@ def serialize_settings(values: dict[str, str]) -> str:
         if not re.fullmatch(r"[A-Z_]+", key) or any(char in value for char in "\n\r\x00'$`\\"):
             raise ValueError(f"Invalid installation setting: {key}")
     return "".join(f"{key}='{value}'\n" for key, value in values.items())
+
+
+def render_inputs(settings: dict[str, str], tunnel_credentials: str, target: Path) -> None:
+    """Validate and write mode-0600 setup files without logging their contents."""
+    environment = serialize_settings(settings)
+    credentials = json.loads(tunnel_credentials)
+    if (
+        not isinstance(credentials, dict)
+        or set(credentials)
+        != {
+            "AccountTag",
+            "TunnelID",
+            "TunnelSecret",
+        }
+        or not all(isinstance(value, str) and value for value in credentials.values())
+    ):
+        raise ValueError("Invalid tunnel credentials")
+    target.mkdir(parents=True, exist_ok=True, mode=0o700)
+    for name, content in (
+        ("settings.env", environment),
+        ("tunnel.json", json.dumps(credentials, separators=(",", ":")) + "\n"),
+    ):
+        destination = target / name
+        descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w") as output:
+            output.write(content)

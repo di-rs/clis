@@ -8,9 +8,6 @@ if [[ $phase == apply ]]; then
 install -d -m 0700 /etc/clis
 install -m 0600 "$release/settings.env" /etc/clis/settings.env
 install -m 0600 "$release/tunnel.json" /etc/clis/tunnel.json
-install -m 0700 "$release/infra/host/operation.sh" /usr/local/sbin/clis-operation
-install -m 0644 "$release"/infra/host/systemd/*.service /etc/systemd/system/
-systemctl daemon-reload
 fi
 set -a
 # shellcheck disable=SC1091

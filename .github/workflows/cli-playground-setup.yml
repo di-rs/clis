@@ -104,10 +104,8 @@ jobs:
             [[ $value =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
             printf '%s=%s\n' "$key" "$value" >> .installation/image.env
         done
-    - name: Provision and install through Pulumi
+    - name: Provision shared infrastructure
       working-directory: infra/environments/single-host
-      env:
-        REGISTRY_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
         umask 077
@@ -125,11 +123,60 @@ jobs:
         allowed = {'domain', 'cloudflareZoneId', 'cloudflareAccountId', 'grafanaHostname', 'temporalHostname', 'operatorTeamName', 'operatorEmails', 'sshCidrs', 'sshPublicKey', 'location', 'serverType', 'diskSize', 'protect', 'acmeEmail'}
         if not isinstance(settings, dict) or set(settings) - allowed:
             raise SystemExit('Invalid platform configuration keys')
-        config.update({'clis:' + key: value for key, value in settings.items()})
-        config.update({'clis:install': True, 'clis:revision': os.environ['GITHUB_SHA'], 'clis:runId': os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT'], 'clis:sourceDirectory': str(Path(os.environ['GITHUB_WORKSPACE']) / '.installation')})
+        config.update({'clis:' + key: value for key, value in settings.items() if key != 'acmeEmail'})
         path.write_text(yaml.safe_dump(data))
         PYCODE
-        printf '%s' "$CLOUDFLARE_DNS_API_TOKEN" | pulumi config set cloudflareDnsApiToken --secret --non-interactive
-        printf '{"auths":{"ghcr.io":{"auth":"%s"}}}' "$(printf '%s:%s' "$GITHUB_ACTOR" "$REGISTRY_TOKEN" | base64 -w0)" | pulumi config set registryConfig --secret --non-interactive
         pulumi preview --refresh --non-interactive --diff --suppress-outputs
         pulumi up --yes --refresh --non-interactive --suppress-outputs
+    - name: Render private setup inputs and install over pinned SSH
+      env:
+        REGISTRY_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        umask 077
+        private=$(mktemp -d)
+        trap 'rm -rf "$private" .installation' EXIT
+        (cd infra/environments/single-host && pulumi stack output --json --show-secrets) > "$private/outputs.json"
+        uv run --locked python - "$private/outputs.json" .installation "$private" <<'PYCODE'
+        import ipaddress
+        import json
+        import os
+        import runpy
+        import sys
+        from pathlib import Path
+        output = json.loads(Path(sys.argv[1]).read_text())
+        target = Path(sys.argv[2])
+        private = Path(sys.argv[3])
+        settings = json.loads(os.environ['SINGLE_HOST_CONFIG'])
+        host = str(ipaddress.ip_address(output['ipv4']))
+        host_key = output['sshHostPublicKey']
+        if not host_key.startswith('ssh-ed25519 '):
+            raise SystemExit('Expected a pinned Ed25519 host key')
+        render = runpy.run_path('infra/environments/single-host/installation.py')['render_inputs']
+        render({
+            'PLAYGROUND_DOMAIN': settings['domain'],
+            'ACME_EMAIL': settings['acmeEmail'],
+            'CLOUDFLARE_DNS_API_TOKEN': os.environ['CLOUDFLARE_DNS_API_TOKEN'],
+            'OPERATOR_GRAFANA_HOSTNAME': settings['grafanaHostname'],
+            'OPERATOR_TEMPORAL_HOSTNAME': settings['temporalHostname'],
+            'OPERATOR_TEAM_NAME': settings['operatorTeamName'],
+            'OPERATOR_GRAFANA_AUDIENCE': output['grafanaAudience'],
+            'OPERATOR_TEMPORAL_AUDIENCE': output['temporalAudience'],
+            'OPERATOR_TUNNEL_ID': output['operatorTunnelId'],
+        }, output['operatorTunnelCredentials'], target)
+        for name, value in (
+            ('host', host),
+            ('key', output['sshPrivateKey']),
+            ('known_hosts', f'{host} {host_key}'),
+        ):
+            path = private / name
+            path.write_text(value + '\n')
+            path.chmod(0o600)
+        PYCODE
+        mkdir -m 0700 .installation/registry
+        printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$(printf '%s:%s' "$GITHUB_ACTOR" "$REGISTRY_TOKEN" | base64 -w0)" > .installation/registry/config.json
+        DEPLOY_HOST=$(cat "$private/host")
+        DEPLOY_SSH_KEY=$(cat "$private/key")
+        DEPLOY_KNOWN_HOSTS=$(cat "$private/known_hosts")
+        export DEPLOY_HOST DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS
+        bash infra/host/submit-release.sh setup .installation

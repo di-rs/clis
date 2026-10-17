@@ -103,3 +103,16 @@ def test_disconnected_start_reports_unknown_outcome(tmp_path: Path) -> None:
     assert result.returncode != 0
     assert "requires inspection" in result.stderr
     assert any("systemctl start" in str(call["args"]) for call in calls)
+
+
+def test_setup_waits_for_cloud_init_and_installs_units_under_lock(tmp_path: Path) -> None:
+    result, calls = submission(tmp_path, "setup")
+    assert result.returncode == 0, result.stderr
+    commands = [" ".join(call["args"]) for call in calls]
+    assert next(
+        i for i, command in enumerate(commands) if "cloud-init status --wait" in command
+    ) < next(i for i, command in enumerate(commands) if "systemctl start clis-setup" in command)
+    install = next(command for command in commands if "clis-operation" in command)
+    assert "flock" in install
+    assert "deployment/pending" in install
+    assert "systemctl daemon-reload" in install
