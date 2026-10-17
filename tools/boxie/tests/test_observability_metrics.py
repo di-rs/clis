@@ -21,7 +21,7 @@ def test_authoritative_snapshot_is_atomic_stale_and_restartable() -> None:
     now = [10.0]
     metrics = Metrics("api", clock=lambda: now[0])
     assert b"boxie_capacity_reserved " not in metrics.render()
-    sample = Snapshot(1000, (1, 0, 0, 1, 0, 0), 2, 8, 1, 120.0, 0, ((2, 5.0), (1, 2.0), (0, 0.0)))
+    sample = Snapshot(1000, (1, 0, 0, 1, 0, 0), 2, 8, 1, 120.0, 0, ((2, 5.0), (1, 2.0)))
     metrics.refresh(sample)
     body = metrics.render()
     assert b"boxie_capacity_reserved 2.0" in body
@@ -38,21 +38,21 @@ def test_authoritative_snapshot_is_atomic_stale_and_restartable() -> None:
     assert b'boxie_provisioning_total{outcome="ready"} 0.0' in restarted.render()
     restarted.refresh(replace(sample, cleanup_unknown=1))
     assert b"boxie_cleanup_oldest_age_seconds " not in restarted.render()
-    assert b"boxie_capacity_reserved " not in Metrics("worker").render()
+    assert b"boxie_capacity_reserved " not in Metrics("orchestrator").render()
 
 
 def test_bounded_labels_and_lease_unknown_empty_expired() -> None:
     Metrics, _ = metrics_type()
     now = [10.0]
-    metrics = Metrics("agent", clock=lambda: now[0])
+    metrics = Metrics("orchestrator", clock=lambda: now[0])
     metrics.refresh_lease(0, None)
-    assert b"boxie_agent_control_lease_active 0.0" in metrics.render()
-    assert b"boxie_agent_control_lease_remaining_seconds " not in metrics.render()
+    assert b"boxie_orchestrator_control_lease_active 0.0" in metrics.render()
+    assert b"boxie_orchestrator_control_lease_remaining_seconds " not in metrics.render()
     metrics.refresh_lease(2, 3)
     now[0] = 14
-    assert b"boxie_agent_control_lease_remaining_seconds 0.0" in metrics.render()
+    assert b"boxie_orchestrator_control_lease_remaining_seconds 0.0" in metrics.render()
     now[0] = 16
-    assert b"boxie_agent_control_lease_active " not in metrics.render()
+    assert b"boxie_orchestrator_control_lease_active " not in metrics.render()
     for identifier in ("sandbox-secret", "request-secret", "/v1/sandboxes/secret"):
         metrics.http_completed(identifier, identifier, "200", 0.1)
     body = metrics.render()
@@ -68,7 +68,7 @@ def test_bounded_labels_and_lease_unknown_empty_expired() -> None:
 def test_http_completion_uses_bounded_route_template() -> None:
     import asyncio
 
-    from service_telemetry.asgi import RequestLogging
+    from boxie.observability.telemetry.asgi import RequestLogging
 
     Metrics, _ = metrics_type()
     metrics = Metrics("api")
@@ -101,14 +101,14 @@ def test_private_listener_collision_recovers_and_closes() -> None:
     import time
     import urllib.request
 
-    from service_telemetry.metrics import MetricsListener
+    from boxie.observability.telemetry.metrics import MetricsListener
 
     Metrics, _ = metrics_type()
     with socket.socket() as occupied:
         occupied.bind(("127.0.0.1", 0))
         occupied.listen()
         port = occupied.getsockname()[1]
-        listener = MetricsListener(Metrics("worker"), "127.0.0.1", port, retry_seconds=0.02)
+        listener = MetricsListener(Metrics("orchestrator"), "127.0.0.1", port, retry_seconds=0.02)
         listener.start()
         assert listener.address is None
     try:
@@ -120,7 +120,7 @@ def test_private_listener_collision_recovers_and_closes() -> None:
             assert b"boxie_provisioning_total" in response.read()
     finally:
         listener.close()
-    replacement = MetricsListener(Metrics("worker"), "127.0.0.1", port)
+    replacement = MetricsListener(Metrics("orchestrator"), "127.0.0.1", port)
     replacement.start()
     try:
         deadline = time.monotonic() + 2
@@ -153,8 +153,8 @@ with socket.socket() as occupied:
 
 
 def test_disabled_log_sink_is_visible_without_traffic() -> None:
-    from service_telemetry.logging import LogRuntime, LogSettings
-    from service_telemetry.metrics import ProcessMetrics
+    from boxie.observability.telemetry.logging import LogRuntime, LogSettings
+    from boxie.observability.telemetry.metrics import ProcessMetrics
 
     runtime = LogRuntime(LogSettings(service="boxie", role="api"), {}, {}, None, 4096, "disabled")
     try:
@@ -173,13 +173,13 @@ def test_disconnect_completion_is_cancelled_once(
     import os
 
     from boxie.observability.metrics import Metrics
-    from service_telemetry.asgi import RequestLogging
-    from service_telemetry.logging import LogRuntime, LogSettings
+    from boxie.observability.telemetry.asgi import RequestLogging
+    from boxie.observability.telemetry.logging import LogRuntime, LogSettings
 
     read, write = os.pipe()
     runtime = LogRuntime(LogSettings(service="boxie", role="api"), {}, {}, write, 4096, "enabled")
     metrics = Metrics("api")
-    monkeypatch.setattr("service_telemetry.asgi.configured_runtime", lambda: runtime)
+    monkeypatch.setattr("boxie.observability.telemetry.asgi.configured_runtime", lambda: runtime)
 
     async def receive() -> dict[str, str]:
         return {"type": "http.disconnect"}
@@ -218,3 +218,93 @@ def test_disconnect_completion_is_cancelled_once(
     finally:
         runtime.close()
         os.close(read)
+
+
+def test_dependency_probes_follow_configured_namespace_and_owned_queues() -> None:
+    import asyncio
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from boxie.domain.models import OrchestratorIdentity
+    from boxie.observability.metrics import Metrics
+    from boxie.observability.runtime import api_dependencies
+    from boxie.temporal.contracts import lifecycle_queue, maintenance_queue
+    from google.protobuf.timestamp_pb2 import Timestamp
+    from temporalio.api.taskqueue.v1 import PollerInfo
+    from temporalio.api.workflowservice.v1 import (
+        DescribeNamespaceRequest,
+        DescribeNamespaceResponse,
+        DescribeTaskQueueRequest,
+        DescribeTaskQueueResponse,
+    )
+
+    async def exercise() -> None:
+        identity = OrchestratorIdentity(uuid4(), "configured host")
+        seen: list[tuple[str, str, int]] = []
+        observed = asyncio.Event()
+
+        async def ready() -> bool:
+            return True
+
+        async def namespace(
+            request: DescribeNamespaceRequest, **kwargs: Any
+        ) -> DescribeNamespaceResponse:
+            assert request.namespace == "configured-namespace"
+            return DescribeNamespaceResponse()
+
+        async def queue(
+            request: DescribeTaskQueueRequest, **kwargs: Any
+        ) -> DescribeTaskQueueResponse:
+            seen.append((request.namespace, request.task_queue.name, request.task_queue_type))
+            if len(seen) == 4:
+                observed.set()
+            timestamp = Timestamp()
+            timestamp.FromDatetime(datetime.now(UTC))
+            return DescribeTaskQueueResponse(pollers=[PollerInfo(last_access_time=timestamp)])
+
+        temporal: Any = SimpleNamespace(
+            namespace="configured-namespace",
+            service_client=SimpleNamespace(check_health=ready),
+            workflow_service=SimpleNamespace(
+                describe_namespace=namespace, describe_task_queue=queue
+            ),
+        )
+        orchestrator: Any = SimpleNamespace(ready=ready)
+        metrics = Metrics("api")
+        task = asyncio.create_task(api_dependencies(metrics, orchestrator, temporal, identity))
+        try:
+            await asyncio.wait_for(observed.wait(), 1)
+            await asyncio.sleep(0)
+            assert {(namespace, queue) for namespace, queue, _ in seen} == {
+                ("configured-namespace", lifecycle_queue(identity)),
+                ("configured-namespace", maintenance_queue(identity)),
+            }
+            assert all(
+                f'boxie_dependency_ready{{dependency="{name}"}} 1.0'.encode() in metrics.render()
+                for name in (
+                    "workflow_poller",
+                    "activity_poller",
+                    "maintenance_workflow_poller",
+                    "maintenance_activity_poller",
+                )
+            )
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(exercise())
+
+
+def test_invalid_metrics_bind_does_not_prevent_application_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from boxie.observability.runtime import run_metrics_process
+    from boxie.observability.telemetry.logging import LogRuntime, LogSettings
+
+    runtime = LogRuntime(LogSettings(service="boxie", role="api"), {}, {}, None, 4096, "disabled")
+    monkeypatch.setenv("BOXIE_METRICS_HOST", "never-log-this.invalid")
+    started: list[str] = []
+    run_metrics_process(runtime, "api", lambda metrics: started.append(metrics.role))
+    assert started == ["api"]
+    assert runtime.stats.configuration_errors == 1

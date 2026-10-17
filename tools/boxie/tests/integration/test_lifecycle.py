@@ -9,15 +9,24 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
+from boxie.persistence.models import (
+    Artifact,
+    CapacitySlot,
+    OrchestratorObservationRecord,
+    Sandbox,
+    SandboxArtifactRef,
+)
 from boxie.temporal.workflows import SandboxLifecycle
-from boxie_test_support.agent import bundle
+from boxie_test_support.orchestrator import bundle
+from sqlalchemy import and_, func
+from sqlmodel import col, select
+from temporal_support import tls
 from temporalio.client import Client
 from temporalio.worker import Replayer
-from test_temporal_deployment import tls
 
 from integration.stack import LifecycleStack
 
@@ -29,11 +38,11 @@ def assert_journal_failure(logs: str) -> None:
     assert any(
         event.get("schema_version") == 1
         and event.get("service") == "boxie"
-        and event.get("role") == "agent"
+        and event.get("role") == "orchestrator"
         and event.get("level") == "ERROR"
         and event.get("event") == "journal_failed"
         for event in events
-    ), "structured agent journal failure event missing"
+    ), "structured orchestrator journal failure event missing"
 
 
 @pytest.fixture
@@ -58,7 +67,7 @@ async def until(client: httpx.AsyncClient, identifier: str, state: str) -> dict[
 
 
 async def publish(client: httpx.AsyncClient) -> str:
-    identifier, data = str(uuid4()), bundle({"message.txt": b"native durable bytes\n"})
+    identifier, data = str(uuid4()), bundle({"message.txt": b"native artifact bytes\n"})
     result = await client.put(
         f"/v1/artifacts/{identifier}",
         content=data,
@@ -84,10 +93,21 @@ async def create(client: httpx.AsyncClient, artifact: str, key: str) -> str:
     return str(response.json()["id"])
 
 
-def accounting(stack: LifecycleStack, identifier: str, count: int) -> None:
-    rows = stack.rows(
-        "SELECT (SELECT count(*) FROM capacity_slots WHERE sandbox_id=%s) AS slots, (SELECT count(*) FROM sandbox_artifact_refs WHERE sandbox_id=%s) AS refs",
-        (identifier, identifier),
+async def accounting(stack: LifecycleStack, identifier: str, count: int) -> None:
+    sid = UUID(identifier)
+    rows = await stack.rows(
+        select(
+            select(func.count())
+            .select_from(CapacitySlot)
+            .where(col(CapacitySlot.sandbox_id) == sid)
+            .scalar_subquery()
+            .label("slots"),
+            select(func.count())
+            .select_from(SandboxArtifactRef)
+            .where(col(SandboxArtifactRef.sandbox_id) == sid)
+            .scalar_subquery()
+            .label("refs"),
+        )
     )
     assert rows == [{"slots": count, "refs": count}]
 
@@ -95,22 +115,33 @@ def accounting(stack: LifecycleStack, identifier: str, count: int) -> None:
 async def pending_after_restart(
     stack: LifecycleStack, client: httpx.AsyncClient, identifier: str
 ) -> None:
-    boot = await asyncio.to_thread(stack.agent_boot)
+    boot = await asyncio.to_thread(stack.orchestrator_boot)
     # Failed journal saves deliberately suppress push reports. The workflow's
     # 30s authenticated inspection (or cleanup retry) binds the new boot and
     # repairs SQL; startup or a fixed 3s delay is not a projection barrier.
     # Cleanup may bind then fail its RPC before an observation can be saved.
-    # Its durable SQL stop remains authoritative even with no observation row.
+    # Its committed SQL stop remains authoritative even with no observation row.
     async with asyncio.timeout(90):
         while True:
-            accounting(stack, identifier, 1)
-            rows = stack.rows(
-                """SELECT s.agent_boot_id, s.state, s.cleanup_pending, o.removal_confirmed
-                FROM sandboxes s LEFT JOIN agent_observations o
-                ON o.sandbox_id=s.id AND o.boot_id=s.agent_boot_id WHERE s.id=%s""",
-                (identifier,),
+            await accounting(stack, identifier, 1)
+            rows = await stack.rows(
+                select(
+                    Sandbox.orchestrator_boot_id,
+                    Sandbox.state,
+                    Sandbox.cleanup_pending,
+                    OrchestratorObservationRecord.removal_confirmed,
+                )
+                .outerjoin(
+                    OrchestratorObservationRecord,
+                    and_(
+                        col(OrchestratorObservationRecord.sandbox_id) == col(Sandbox.id),
+                        col(OrchestratorObservationRecord.boot_id)
+                        == col(Sandbox.orchestrator_boot_id),
+                    ),
+                )
+                .where(col(Sandbox.id) == UUID(identifier))
             )
-            if rows and rows[0]["agent_boot_id"] == boot:
+            if rows and rows[0]["orchestrator_boot_id"] == boot:
                 assert not rows[0]["removal_confirmed"]
                 if rows[0]["state"] != "terminating" or not rows[0]["cleanup_pending"]:
                     await asyncio.sleep(0.2)
@@ -133,11 +164,11 @@ def test_process_loss_failed_delete_and_history_replay(lifecycle_stack: Lifecycl
             timeout=30,
         ) as client:
             artifact = await publish(client)
-            for service in ("api", "worker", "temporal", "agent"):
+            for service in ("api", "temporal", "orchestrator"):
                 key = uuid4().hex
                 identifier = await create(client, artifact, key)
                 original = await until(client, identifier, "ready")
-                accounting(stack, identifier, 1)
+                await accounting(stack, identifier, 1)
                 assert stack.children()
                 stack.fault("fail_delete", True)
                 await asyncio.to_thread(stack.process, service, "kill")
@@ -152,18 +183,18 @@ def test_process_loss_failed_delete_and_history_replay(lifecycle_stack: Lifecycl
                     current["cleanup_pending"]
                     and current["absolute_deadline"] == original["absolute_deadline"]
                 )
-                accounting(stack, identifier, 1)
+                await accounting(stack, identifier, 1)
                 if service != "api":
                     await asyncio.to_thread(stack.process, service, "start")
                 async with asyncio.timeout(60):
                     while not (stack.root / "faults/delete_seen").exists():
                         await asyncio.sleep(0.1)
                 assert stack.children()
-                accounting(stack, identifier, 1)
+                await accounting(stack, identifier, 1)
                 stack.fault("fail_delete", False)
                 (stack.root / "faults/delete_seen").unlink(missing_ok=True)
                 await until(client, identifier, "terminated")
-                accounting(stack, identifier, 0)
+                await accounting(stack, identifier, 0)
                 assert not stack.children()
                 handle = temporal.get_workflow_handle("boxie/sandbox/" + identifier)
                 await asyncio.wait_for(handle.result(), 60)
@@ -176,7 +207,7 @@ def test_process_loss_failed_delete_and_history_replay(lifecycle_stack: Lifecycl
     asyncio.run(exercise())
 
 
-def test_successful_artifact_commit_lost_ack_collector_overlap_and_agent_restart(
+def test_successful_artifact_commit_lost_ack_collector_overlap_and_orchestrator_restart(
     lifecycle_stack: LifecycleStack,
 ) -> None:
     async def exercise() -> None:
@@ -211,8 +242,12 @@ def test_successful_artifact_commit_lost_ack_collector_overlap_and_agent_restart
                 async with asyncio.timeout(20):
                     while not (stack.root / "faults/commit_seen").exists():
                         await asyncio.sleep(0.05)
-                row = stack.rows(
-                    "SELECT storage_id, digest FROM artifacts WHERE id=%s", (artifact,)
+                row = (
+                    await stack.rows(
+                        select(Artifact.storage_id, Artifact.digest).where(
+                            col(Artifact.id) == UUID(artifact)
+                        )
+                    )
                 )[0]
                 storage = stack.root / "data/artifacts" / str(row["storage_id"])
                 assert (
@@ -229,9 +264,9 @@ def test_successful_artifact_commit_lost_ack_collector_overlap_and_agent_restart
                 assert not upload.done() and storage.exists()
                 # Entry without completion proves the real collector waits behind
                 # the publication still awaiting its successful COMMIT response.
-                await asyncio.to_thread(stack.process, "agent", "kill")
+                await asyncio.to_thread(stack.process, "orchestrator", "kill")
                 stack.fault("hold_commit", False)
-                await asyncio.to_thread(stack.process, "agent", "start")
+                await asyncio.to_thread(stack.process, "orchestrator", "start")
                 await asyncio.to_thread(stack.wait_ready)
                 response = await upload
                 assert response.status_code == 503
@@ -247,12 +282,12 @@ def test_successful_artifact_commit_lost_ack_collector_overlap_and_agent_restart
                 ).read_bytes() == b"committed bytes survive lost acknowledgment\n"
                 identifier = await create(client, artifact, uuid4().hex)
                 await until(client, identifier, "ready")
-                accounting(stack, identifier, 1)
+                await accounting(stack, identifier, 1)
                 await client.delete(f"/v1/artifacts/{artifact}")
                 assert storage.exists()
                 await client.delete(f"/v1/sandboxes/{identifier}")
                 await until(client, identifier, "terminated")
-                accounting(stack, identifier, 0)
+                await accounting(stack, identifier, 0)
                 async with asyncio.timeout(40):
                     while storage.exists():
                         await asyncio.sleep(0.2)
@@ -265,7 +300,7 @@ def test_successful_artifact_commit_lost_ack_collector_overlap_and_agent_restart
 
 
 @pytest.mark.parametrize("unknown_create", [False, True])
-def test_sustained_journal_failure_across_agent_restart(
+def test_sustained_journal_failure_across_orchestrator_restart(
     lifecycle_stack: LifecycleStack,
     unknown_create: bool,
 ) -> None:
@@ -286,13 +321,18 @@ def test_sustained_journal_failure_across_agent_restart(
                         await asyncio.sleep(0.1)
             else:
                 await until(client, identifier, "ready")
-            accounting(stack, identifier, 1)
+            await accounting(stack, identifier, 1)
             assert stack.children()
-            await asyncio.to_thread(stack.process, "agent", "kill")
+            await asyncio.to_thread(stack.process, "orchestrator", "kill")
             stack.env["BOXIE_TEST_DATA_MODE"] = "ro"
             stack.fault("hold_create", False)
             await asyncio.to_thread(
-                stack.runtime_command, "up", "--detach", "--no-deps", "--force-recreate", "agent"
+                stack.runtime_command,
+                "up",
+                "--detach",
+                "--no-deps",
+                "--force-recreate",
+                "orchestrator",
             )
             async with asyncio.timeout(40):
                 while stack.children():
@@ -300,27 +340,32 @@ def test_sustained_journal_failure_across_agent_restart(
             # Profiles alone remain writable for bootstrap; execution.json and its
             # parent stay read-only. Physical deletion proves startup reached cleanup.
             logs = await asyncio.to_thread(
-                stack.runtime_command, "logs", "--no-color", "--no-log-prefix", "agent"
+                stack.runtime_command, "logs", "--no-color", "--no-log-prefix", "orchestrator"
             )
             assert_journal_failure(logs)
-            await asyncio.to_thread(stack.process, "agent", "kill")
-            await asyncio.to_thread(stack.process, "agent", "start")
+            await asyncio.to_thread(stack.process, "orchestrator", "kill")
+            await asyncio.to_thread(stack.process, "orchestrator", "start")
             await pending_after_restart(stack, client, identifier)
             assert (await client.get("/readyz")).status_code == 503
             stack.env["BOXIE_TEST_DATA_MODE"] = "rw"
             await asyncio.to_thread(
-                stack.runtime_command, "up", "--detach", "--no-deps", "--force-recreate", "agent"
+                stack.runtime_command,
+                "up",
+                "--detach",
+                "--no-deps",
+                "--force-recreate",
+                "orchestrator",
             )
             if unknown_create:
-                # Discovery/deletion during a failed save was never durable. A new
+                # Discovery/deletion during a failed save was never saved to the journal. A new
                 # boot sees unknown create + absence and must retain the reservation.
                 await pending_after_restart(stack, client, identifier)
-                accounting(stack, identifier, 1)
+                await accounting(stack, identifier, 1)
                 assert not stack.children()
                 # Only fixture teardown disposes of this entire owned environment.
             else:
                 await until(client, identifier, "terminated")
-                accounting(stack, identifier, 0)
+                await accounting(stack, identifier, 0)
                 assert not stack.children()
                 await asyncio.to_thread(stack.wait_ready)
                 await client.delete(f"/v1/artifacts/{artifact}")
@@ -328,7 +373,7 @@ def test_sustained_journal_failure_across_agent_restart(
     asyncio.run(exercise())
 
 
-def test_unknown_create_ack_loss_recovers_with_durable_discovery(
+def test_unknown_create_ack_loss_recovers_with_persisted_discovery(
     lifecycle_stack: LifecycleStack,
 ) -> None:
     async def exercise() -> None:
@@ -344,13 +389,13 @@ def test_unknown_create_ack_loss_recovers_with_durable_discovery(
             async with asyncio.timeout(40):
                 while not (stack.root / "faults/create_seen").exists():
                     await asyncio.sleep(0.1)
-            accounting(stack, identifier, 1)
+            await accounting(stack, identifier, 1)
             assert stack.children()
-            await asyncio.to_thread(stack.process, "agent", "kill")
+            await asyncio.to_thread(stack.process, "orchestrator", "kill")
             stack.fault("hold_create", False)
-            await asyncio.to_thread(stack.process, "agent", "start")
+            await asyncio.to_thread(stack.process, "orchestrator", "start")
             await until(client, identifier, "terminated")
-            accounting(stack, identifier, 0)
+            await accounting(stack, identifier, 0)
             assert not stack.children()
             await client.delete(f"/v1/artifacts/{artifact}")
 

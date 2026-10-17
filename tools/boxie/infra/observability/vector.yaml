@@ -1,0 +1,143 @@
+data_dir: /var/lib/vector
+log_schema:
+  message_key: message
+sources:
+  journal:
+    type: journald
+    current_boot_only: false
+    batch_size: 16
+    log_namespace: false
+    journal_directory: /var/log/journal
+    journalctl_path: /usr/bin/journalctl
+    include_matches:
+      CONTAINER_TAG:
+      - boxie-api
+      - boxie-orchestrator
+  internal:
+    type: internal_metrics
+transforms:
+  normalize:
+    type: remap
+    inputs:
+    - journal
+    drop_on_error: true
+    reroute_dropped: false
+    source: |
+      tag = string(.CONTAINER_TAG) ?? ""
+      service = "boxie"
+      role = if tag == "boxie-api" { "api" } else { "orchestrator" }
+      raw = string(.message) ?? ""
+      event = {}
+      valid = includes(["boxie-api", "boxie-orchestrator"], tag) && length(raw) <= 8192
+      if valid { parsed, err = parse_json(raw); if err == null && is_object(parsed) { event = object!(parsed) } else { valid = false } }
+      valid = valid && event.service == service && event.role == role
+      valid = valid && (event.schema_version == 1)
+      valid = valid && (is_string(event.timestamp) && match(string(event.timestamp) ?? "", r'Z$'))
+      valid = valid && (includes(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"], event.level))
+      valid = valid && (is_string(event.event) && match(string(event.event) ?? "", r'^[a-z_]+([.][a-z_]+)*$') && length(string(event.event) ?? "") <= 64)
+      valid = valid && (is_string(event.message) && length(string(event.message) ?? "") >= 1 && length(string(event.message) ?? "") <= 128)
+      valid = valid && (includes(["boxie", "unknown"], event.service))
+      valid = valid && (includes(["api", "orchestrator", "unknown"], event.role))
+      valid = valid && (is_string(event.release) && match(string(event.release) ?? "", r'^(unknown|[a-f0-9]{40}|[a-f0-9]{64})$'))
+      valid = valid && (is_string(event.instance_id) && match(string(event.instance_id) ?? "", r'^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$'))
+      valid = valid && (includes(["boxie", "uvicorn", "temporalio", "dependency"], event.logger))
+      valid = valid && ((!exists(event.request_id) || (is_string(event.request_id) && match(string(event.request_id) ?? "", r'^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$'))))
+      valid = valid && ((!exists(event.sandbox_id) || (is_string(event.sandbox_id) && match(string(event.sandbox_id) ?? "", r'^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$'))))
+      valid = valid && ((!exists(event.run_id) || (is_string(event.run_id) && match(string(event.run_id) ?? "", r'^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$'))))
+      valid = valid && ((!exists(event.operation_id) || (is_string(event.operation_id) && match(string(event.operation_id) ?? "", r'^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$'))))
+      valid = valid && ((!exists(event.workflow_id) || (is_string(event.workflow_id) && match(string(event.workflow_id) ?? "", r'^boxie/sandbox/[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$'))))
+      valid = valid && ((!exists(event.consumer_id) || (is_string(event.consumer_id) && length(string(event.consumer_id) ?? "") <= 64)))
+      valid = valid && ((!exists(event.activity_attempt) || (is_integer(event.activity_attempt) && ((to_float(event.activity_attempt) ?? -1.0) >= 0 && (to_float(event.activity_attempt) ?? -1.0) <= 2147483647))))
+      valid = valid && ((!exists(event.generation) || (is_integer(event.generation) && ((to_float(event.generation) ?? -1.0) >= 0 && (to_float(event.generation) ?? -1.0) <= 2147483647))))
+      valid = valid && ((!exists(event.duration_ms) || ((is_integer(event.duration_ms) || is_float(event.duration_ms)) && ((to_float(event.duration_ms) ?? -1.0) >= 0 && (to_float(event.duration_ms) ?? -1.0) <= 86400000))))
+      valid = valid && ((!exists(event.outcome) || (includes(["succeeded", "failed", "pending", "cancelled", "ready", "stopped", "confirmed"], event.outcome))))
+      valid = valid && ((!exists(event.reason) || (includes(["unavailable", "invalid", "timeout", "cancelled", "unknown", "requested", "expired", "idle", "disconnected", "output_limit", "exited", "provisioning_failed", "control_plane_lost", "orchestrator_restart", "orchestrator_shutdown", "delete_unconfirmed", "create_pending", "dependency_unavailable", "journal_unavailable", "InvalidRequest", "ProvisioningStopped", "CleanupPending", "DependencyUnavailable"], event.reason))))
+      valid = valid && ((!exists(event.error_type) || (is_string(event.error_type) && length(string(event.error_type) ?? "") <= 32)))
+      valid = valid && ((!exists(event.error_message) || (event.error_message == "operation failed")))
+      valid = valid && ((!exists(event.error_stack) || (is_string(event.error_stack) && length(string(event.error_stack) ?? "") <= 512)))
+      valid = valid && ((!exists(event.truncated) || (event.truncated == true)))
+      valid = valid && length(keys(event)) <= 25
+      for_each(keys(event)) -> |_index, key| { if !includes(["schema_version", "timestamp", "level", "event", "message", "service", "role", "release", "instance_id", "logger", "request_id", "sandbox_id", "run_id", "operation_id", "workflow_id", "consumer_id", "activity_attempt", "generation", "duration_ms", "outcome", "reason", "error_type", "error_message", "error_stack", "truncated"], key) { valid = false } }
+      _, timestamp_error = parse_timestamp(string(event.timestamp) ?? "", format: "%+")
+      valid = valid && timestamp_error == null
+      if !valid { event = {"timestamp": format_timestamp!(now(), format: "%+"), "message": "event rejected", "event": "collector.rejected", "reason": "invalid", "service": service, "role": role} }
+      event.environment = get_env_var!("BOXIE_ENVIRONMENT")
+      event.host = get_env_var!("BOXIE_HOST_ID")
+      if length(encode_json(event)) > 16383 { event = {"timestamp": format_timestamp!(now(), format: "%+"), "message": "event rejected", "event": "collector.rejected", "reason": "oversized", "service": service, "role": role, "environment": event.environment, "host": event.host} }
+      . = event
+sinks:
+  storage:
+    type: http
+    inputs:
+    - normalize
+    uri: http://victorialogs:9428/insert/jsonline?_stream_fields=service,role,environment,host&_msg_field=message&_time_field=timestamp
+    method: post
+    compression: none
+    encoding:
+      codec: json
+    framing:
+      method: newline_delimited
+    acknowledgements:
+      enabled: false
+    buffer:
+    - type: disk
+      max_size: 536870912
+      when_full: overflow
+    - type: memory
+      max_events: 1
+      when_full: drop_newest
+    batch:
+      max_bytes: 1048576
+      max_events: 64
+      timeout_secs: 1
+    request:
+      concurrency: 1
+      timeout_secs: 5
+    healthcheck:
+      enabled: false
+  metrics:
+    type: prometheus_exporter
+    inputs:
+    - internal
+    address: 0.0.0.0:9598
+tests:
+- name: safe correlated event survives
+  inputs:
+  - insert_at: normalize
+    type: log
+    log_fields:
+      CONTAINER_TAG: boxie-api
+      message: '{"schema_version": 1, "timestamp": "2026-10-17T10:00:00.000Z", "level": "ERROR", "event":
+        "provisioning.completed", "message": "Provisioning completed", "service": "boxie", "role": "api",
+        "release": "unknown", "instance_id": "00000000-0000-0000-0000-000000000001", "logger": "boxie",
+        "request_id": "00000000-0000-0000-0000-000000000002", "outcome": "failed"}'
+  outputs:
+  - extract_from: normalize
+    conditions:
+    - .request_id == "00000000-0000-0000-0000-000000000002" && .outcome == "failed" && .role == "api"
+- name: reject unknown fields without retaining secret
+  inputs:
+  - insert_at: normalize
+    type: log
+    log_fields:
+      CONTAINER_TAG: boxie-api
+      message: '{"schema_version": 1, "timestamp": "2026-10-17T10:00:00.000Z", "level": "ERROR", "event":
+        "provisioning.completed", "message": "Provisioning completed", "service": "boxie", "role": "api",
+        "release": "unknown", "instance_id": "00000000-0000-0000-0000-000000000001", "logger": "boxie",
+        "request_id": "00000000-0000-0000-0000-000000000002", "outcome": "failed", "token": "SENTINEL-secret"}'
+  outputs:
+  - extract_from: normalize
+    conditions:
+    - .event == "collector.rejected" && !exists(.token) && !exists(.request_id) && .message == "event
+      rejected"
+- name: reject malformed content
+  inputs:
+  - insert_at: normalize
+    type: log
+    log_fields:
+      CONTAINER_TAG: boxie-api
+      message: SENTINEL-terminal-content
+  outputs:
+  - extract_from: normalize
+    conditions:
+    - .event == "collector.rejected" && .message == "event rejected"

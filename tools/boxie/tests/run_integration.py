@@ -11,7 +11,9 @@ import secrets
 import shutil
 import socket
 import subprocess
+import sys
 import time
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
@@ -35,12 +37,13 @@ class CommandRunner(Protocol):
 
 
 class ProductionStack:
-    def __init__(self, root: Path, *, command_runner: CommandRunner = command) -> None:
-        self._command_runner = command_runner
+    def __init__(self, root: Path, *, command_runner: CommandRunner | None = None) -> None:
+        self._command_runner = command_runner or command
         self.root = root
         self.name = "boxie-integration-" + uuid4().hex[:12]
-        self.platform = self.name + "-platform"
+        self.postgres = self.name + "-postgres"
         self.temporal = self.name + "-temporal"
+        self.network_id: str | None = None
         self.env = dict(os.environ)
         self.env.update(
             {
@@ -55,24 +58,28 @@ class ProductionStack:
         )
         self.env.update(
             BOXIE_CONTROL_NETWORK=self.name,
-            OBS_METRICS_NETWORK=self.name + "-metrics",
-            OBS_GRAFANA_ORIGIN_NETWORK=self.name + "-grafana",
-            OBS_TEMPORAL_UI_ORIGIN_NETWORK=self.name + "-temporal-ui",
             TEMPORAL_CERTS_DIR=str(root / "server"),
             TEMPORAL_OPERATOR_CERTS_DIR=str(root / "operator"),
             TEMPORAL_UI_CERTS_DIR=str(root / "ui"),
         )
-        self.build_network: str | None = None
+        # Compose resolves the operations-only image even when that service is
+        # unused. This fixture executes bootstrap with the installed host SDK;
+        # LifecycleStack replaces this with its built runtime for application jobs.
+        self.env.setdefault("BOXIE_RUNTIME_IMAGE", "boxie:lifecycle")
         self.address = ""
         self.ui_address = ""
         self.pg_port = ""
         self.evidence: dict[str, Any] = {}
-        self.shared_networks: list[str] = []
 
     def command(self, args: list[str], *, env: dict[str, str] | None = None) -> str:
         return self._command_runner(args, env=self.env if env is None else env)
 
     def compose(self, package: str, *args: str) -> str:
+        directory = (
+            ROOT / "tools/boxie/infra/temporal"
+            if package == "temporal"
+            else ROOT / "tools/boxie/infra/postgres"
+        )
         return self.command(
             [
                 "docker",
@@ -80,7 +87,7 @@ class ProductionStack:
                 "--project-name",
                 getattr(self, package),
                 "--file",
-                str(ROOT / "infra" / package / "compose.yml"),
+                str(directory / "compose.yml"),
                 "--file",
                 str(self.root / f"{package}-override.yml"),
                 *args,
@@ -118,7 +125,7 @@ class ProductionStack:
             ("operator", "client", "operator", "clientAuth", "operator"),
             ("ui-client", "client", "ui", "clientAuth", "ui"),
             ("boxie-api", "client", "boxie-api", "clientAuth", "clients"),
-            ("boxie-worker", "client", "boxie-worker", "clientAuth", "clients"),
+            ("boxie-orchestrator", "client", "boxie-orchestrator", "clientAuth", "clients"),
             ("untrusted", "untrusted", "untrusted", "clientAuth", "clients"),
         ):
             target = self.root / directory
@@ -171,24 +178,14 @@ class ProductionStack:
             shutil.copy(ca / f"{name}.pem", self.root / "server" / f"{name}-ca.pem")
 
     def write_overrides(self) -> None:
-        # These non-journal service tests intentionally use Docker local logging.
         # The host Temporal client survives process kill/start in native scenarios.
         with socket.socket() as reservation:
             reservation.bind(("127.0.0.1", 0))
             temporal_port = reservation.getsockname()[1]
-        (self.root / "platform-override.yml").write_text(
+        (self.root / "postgres-override.yml").write_text(
             yaml.safe_dump(
                 {
-                    "services": {
-                        "postgres": {
-                            "ports": ["127.0.0.1::5432"],
-                            "logging": {
-                                "driver": "local",
-                                "options": {"mode": "non-blocking", "max-buffer-size": "4m"},
-                            },
-                        }
-                    },
-                    "networks": {"control": {"internal": False}},
+                    "services": {"postgres": {"ports": ["127.0.0.1::5432"]}},
                 }
             )
         )
@@ -196,76 +193,42 @@ class ProductionStack:
             yaml.safe_dump(
                 {
                     "services": {
-                        "schema": {
-                            "logging": {
-                                "driver": "local",
-                                "options": {"max-size": "10m", "max-file": "3"},
-                            }
-                        },
-                        "bootstrap": {
-                            **(
-                                {"build": {"network": self.build_network}}
-                                if self.build_network
-                                else {}
-                            ),
-                            "logging": {
-                                "driver": "local",
-                                "options": {"max-size": "10m", "max-file": "3"},
-                            },
-                        },
-                        "temporal": {
-                            "ports": [f"127.0.0.1:{temporal_port}:7233"],
-                            "logging": {
-                                "driver": "local",
-                                "options": {"mode": "non-blocking", "max-buffer-size": "4m"},
-                            },
-                        },
-                        "ui": {
-                            "ports": ["127.0.0.1::8080"],
-                            "logging": {
-                                "driver": "local",
-                                "options": {"mode": "non-blocking", "max-buffer-size": "4m"},
-                            },
-                        },
+                        "temporal": {"ports": [f"127.0.0.1:{temporal_port}:7233"]},
+                        "ui": {"ports": ["127.0.0.1::8080"]},
                     }
                 }
             )
         )
-        for name in ("platform-override.yml", "temporal-override.yml"):
-            path = self.root / name
-            path.write_text(path.read_text().replace("logging:", "logging: !override"))
+
+        # Dependency diagnostics remain local and bounded during journal faults.
+        for name, roles in (
+            ("postgres", ("postgres",)),
+            ("temporal", ("temporal", "ui", "schema", "bootstrap")),
+        ):
+            path = self.root / f"{name}-override.yml"
+            data = yaml.safe_load(path.read_text())
+            for role in roles:
+                data["services"].setdefault(role, {})["logging"] = {
+                    "driver": "local",
+                    "options": {
+                        "mode": "non-blocking",
+                        "max-buffer-size": "4m",
+                        "max-size": "10m",
+                        "max-file": "3",
+                    },
+                }
+            path.write_text(yaml.safe_dump(data).replace("logging:", "logging: !override"))
 
     def start(self) -> None:
         self.certificates()
         self.write_overrides()
-        self.compose("platform", "up", "--detach", "--wait", "--wait-timeout", "90")
-        # Compose omits unused declarations. The fixture explicitly owns these
-        # bridges, just as production platform bootstrap must own its handles.
-        for variable in (
-            "OBS_METRICS_NETWORK",
-            "OBS_GRAFANA_ORIGIN_NETWORK",
-            "OBS_TEMPORAL_UI_ORIGIN_NETWORK",
-        ):
-            network_id = self.command(
-                [
-                    "docker",
-                    "network",
-                    "create",
-                    "--internal",
-                    "--label",
-                    f"io.boxie.test.owner={self.name}",
-                    self.env[variable],
-                ]
-            )
-            self.shared_networks.append(network_id)
-            network = json.loads(self.command(["docker", "network", "inspect", network_id]))[0]
-            if not network["Internal"] or network["Labels"].get("io.boxie.test.owner") != self.name:
-                raise RuntimeError("fixture network ownership/internal verification failed")
-        self.pg_port = self.compose("platform", "port", "postgres", "5432").rsplit(":", 1)[1]
-        self.compose("temporal", "build", "bootstrap")
-        self.compose(
-            "temporal", "run", "--rm", "--entrypoint", "/usr/local/bin/jq", "bootstrap", "--version"
+        # The harness owns this external bridge separately from both projects.
+        # Host-side SQL/Temporal clients require a non-internal disposable bridge.
+        self.network_id = self.command(
+            ["docker", "network", "create", "--label", f"boxie.integration={self.name}", self.name]
         )
+        self.compose("postgres", "up", "--detach", "--wait", "--wait-timeout", "90")
+        self.pg_port = self.compose("postgres", "port", "postgres", "5432").rsplit(":", 1)[1]
         self.compose("temporal", "run", "--rm", "schema", "setup")
         # Exercise upgrade path independently from first-install setup.
         self.compose("temporal", "run", "--rm", "schema", "update")
@@ -275,7 +238,7 @@ class ProductionStack:
         last_error = ""
         for _ in range(10):
             try:
-                self.compose("temporal", "run", "--rm", "bootstrap")
+                self.bootstrap()
                 break
             except RuntimeError as error:
                 last_error = str(error)
@@ -288,48 +251,55 @@ class ProductionStack:
                 + "\n"
                 + self.compose("temporal", "logs", "--tail", "100")
             )
-        self.compose("temporal", "run", "--rm", "bootstrap")
         self.evidence = {
             "server": self.command(
                 ["docker", "version", "--format", "{{.Server.Version}} {{.Server.Arch}}"]
             ),
-            "bootstrap_local_image_id": self.command(
-                ["docker", "image", "inspect", self.temporal + "-bootstrap", "--format", "{{.Id}}"]
-            ),
-            "images": json.loads((ROOT / "infra/temporal/versions.json").read_text()),
+            "bootstrap_sdk": version("temporalio"),
+            "images": json.loads((ROOT / "tools/boxie/infra/temporal/versions.json").read_text()),
             "schema": "fresh setup and explicit update succeeded for distinct databases",
-            "namespace": "bootstrap succeeded twice and checked seven-day retention",
+            "namespace": "bootstrap succeeded and checked seven-day retention",
         }
         (self.root / "evidence.json").write_text(json.dumps(self.evidence, indent=2))
 
+    def bootstrap(self) -> str:
+        return self.command(
+            [
+                sys.executable,
+                "-m",
+                "boxie.bootstrap.temporal",
+                "--address",
+                self.address,
+                "--ca-file",
+                str(self.root / "operator/frontend-ca.pem"),
+                "--cert-file",
+                str(self.root / "operator/operator.pem"),
+                "--key-file",
+                str(self.root / "operator/operator.key"),
+            ]
+        )
+
     def close(self) -> None:
         failures: list[str] = []
-        for package in ("temporal", "platform"):
+        for package in ("temporal", "postgres"):
             if (self.root / f"{package}-override.yml").exists():
                 try:
                     self.compose(package, "down", "--volumes", "--remove-orphans")
                 except Exception as error:
                     failures.append(str(error))
-        for network_id in self.shared_networks:
+        if self.network_id is not None:
             try:
-                remaining = self.command(
-                    [
-                        "docker",
-                        "network",
-                        "ls",
-                        "--filter",
-                        f"id={network_id}",
-                        "--format",
-                        "{{.ID}}",
-                    ]
-                )
-                if remaining:
-                    network = json.loads(
-                        self.command(["docker", "network", "inspect", network_id])
-                    )[0]
-                    if network["Labels"].get("io.boxie.test.owner") != self.name:
-                        raise RuntimeError("refusing cleanup of foreign fixture network")
-                    self.command(["docker", "network", "rm", network_id])
+                item = json.loads(self.command(["docker", "network", "inspect", self.network_id]))[
+                    0
+                ]
+                if (
+                    item["Id"] != self.network_id
+                    or item["Name"] != self.name
+                    or item.get("Labels", {}).get("boxie.integration") != self.name
+                ):
+                    raise RuntimeError("refusing cleanup of foreign control network")
+                self.command(["docker", "network", "rm", self.network_id])
+                self.network_id = None
             except Exception as error:
                 failures.append(str(error))
         if failures:
@@ -349,7 +319,13 @@ def main() -> None:
     selected = (
         ["tools/boxie/tests/integration/test_lifecycle.py"]
         if args.runtime
-        else ["tools/boxie/tests/test_postgres.py", "tools/boxie/tests/test_temporal_deployment.py"]
+        else [
+            "tools/boxie/tests/test_postgres.py",
+            "tools/boxie/tests/test_temporal_deployment.py",
+            "tools/boxie/tests/test_migrations.py",
+            "tools/boxie/tests/test_observability_lifecycle.py",
+            "tools/boxie/tests/test_observability_logging.py",
+        ]
     )
     raise SystemExit(
         subprocess.call(

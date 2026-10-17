@@ -1,27 +1,34 @@
-name: Git Policy
+name: 📜 Commit and PR title policy
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened, edited, ready_for_review, labeled]
 
 permissions:
   contents: read
 
 jobs:
   git-policy:
+    if: >-
+      ${{
+        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
+      }}
+    # This check name is required by branch protection; keep its context stable.
     name: git-policy
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: 📥 Check out full Git history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+      - name: 🛠️ Install Git policy hooks
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: prek@0.5.5
           fallback: none
-      - name: Load trusted Gitmoji policy
+      - name: 📜 Load pinned Gitmoji policy
         env:
           # Pin the policy independently of the PR checkout. Update after review.
           POLICY_COMMIT: 9da5407f9a30c1b2ed1687ed09435c3936ac51ad
@@ -29,7 +36,7 @@ jobs:
           git fetch --no-tags origin "$POLICY_COMMIT"
           mkdir -p "$RUNNER_TEMP/git-policy"
           git show "$POLICY_COMMIT:prek.toml" > "$RUNNER_TEMP/git-policy/prek.toml"
-      - name: Check commits and squash title
+      - name: ✅ Validate commit subjects and squash title
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}

@@ -1,0 +1,16 @@
+services:
+  temporal:
+    networks:
+      metrics:
+        aliases: [temporal]
+  ui:
+    networks:
+      operator-origin:
+        aliases: [temporal-ui]
+networks:
+  metrics:
+    external: true
+    name: ${OBS_METRICS_NETWORK:-boxie-metrics}
+  operator-origin:
+    external: true
+    name: ${OBS_TEMPORAL_UI_ORIGIN_NETWORK:-boxie-temporal-ui-origin}

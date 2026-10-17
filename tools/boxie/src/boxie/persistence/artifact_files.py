@@ -1,4 +1,4 @@
-"""Generic bounded ZIP extraction shared by agent-owned storage implementations."""
+"""Generic bounded ZIP extraction shared by orchestrator-owned storage implementations."""
 
 import asyncio
 import os

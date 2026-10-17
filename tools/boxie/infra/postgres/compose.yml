@@ -1,0 +1,25 @@
+name: boxie-postgres
+services:
+  postgres:
+    image: postgres:17.11@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?provide PostgreSQL administrator password}
+      BOXIE_DB_PASSWORD: ${BOXIE_DB_PASSWORD:?provide Boxie database password}
+      TEMPORAL_DB_PASSWORD: ${TEMPORAL_DB_PASSWORD:?provide persistence database password}
+      VISIBILITY_DB_PASSWORD: ${VISIBILITY_DB_PASSWORD:?provide visibility database password}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-databases.sql:/docker-entrypoint-initdb.d/01-databases.sql:ro
+    networks: [control]
+    healthcheck:
+      test: [CMD-SHELL, 'PGPASSWORD="$${POSTGRES_PASSWORD}" psql -h 127.0.0.1 -U postgres -d postgres -c "SELECT 1" >/dev/null']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+volumes:
+  postgres-data:
+networks:
+  control:
+    external: true
+    name: ${BOXIE_CONTROL_NETWORK:?provide private control network name}

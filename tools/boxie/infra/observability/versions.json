@@ -1,0 +1,41 @@
+{
+  "images": {
+    "victorialogs": {
+      "version": "v1.53.0",
+      "image": "docker.io/victoriametrics/victoria-logs@sha256:251121fa882af99b95ba0c230a4a2f412ea602d2698c64a96c58dc9842bb755d"
+    },
+    "prometheus": {
+      "version": "v3.15.0",
+      "image": "docker.io/prom/prometheus@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e"
+    },
+    "grafana": {
+      "version": "13.2.4",
+      "image": "docker.io/grafana/grafana@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f"
+    },
+    "node-exporter": {
+      "version": "v1.12.1",
+      "image": "ghcr.io/prometheus/node-exporter@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0"
+    },
+    "cloudflared": {
+      "version": "2026.10.0",
+      "image": "docker.io/cloudflare/cloudflared@sha256:9b49eed8f62806d5d45ddf59ecefb5710429598ea6d3fcccd2af938f621b2b07"
+    }
+  },
+  "collector": {
+    "version": "0.59.0",
+    "journalctl": ">=258 required; Ubuntu 26.04 provides 259",
+    "source_image": "docker.io/timberio/vector@sha256:98e7b4dfe50750e61470697bbd2fbeca643d12bea97f351005038ef506eab630",
+    "base": "docker.io/library/ubuntu@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
+  },
+  "plugins": {
+    "victoriametrics-logs-datasource": {
+      "version": "0.32.0",
+      "url": "https://github.com/VictoriaMetrics/victorialogs-datasource/releases/download/v0.32.0/victoriametrics-logs-datasource-v0.32.0.zip",
+      "sha256": "8204d097b17f53b1c3a71761047734b7980bd983710c6cfcef8d938abe5eeef0"
+    },
+    "prometheus": {
+      "version": "13.2.3",
+      "delivery": "bundled in pinned Grafana 13.2.4"
+    }
+  }
+}

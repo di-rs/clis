@@ -11,7 +11,7 @@ import pytest
 SCRIPT = Path(__file__).parents[1] / "infra/pre-activate.sh"
 
 
-@pytest.mark.parametrize("fail", ["", "api", "worker", "agent"])
+@pytest.mark.parametrize("fail", ["", "api", "orchestrator"])
 def test_update_stops_in_order_and_propagates_failure(tmp_path: Path, fail: str) -> None:
     docker = tmp_path / "docker"
     log = tmp_path / "calls.jsonl"
@@ -38,7 +38,7 @@ def test_update_stops_in_order_and_propagates_failure(tmp_path: Path, fail: str)
     )
     assert (result.returncode == 0) == (not fail), result.stderr
     calls = [json.loads(line) for line in log.read_text().splitlines()]
-    expected = ["api", "worker", "agent"]
+    expected = ["api", "orchestrator"]
     if fail:
         expected = expected[: expected.index(fail) + 1]
     assert [call[-1] for call in calls] == expected

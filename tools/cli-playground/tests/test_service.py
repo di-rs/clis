@@ -4,10 +4,12 @@ import asyncio
 import threading
 from collections.abc import AsyncIterator
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from playground import service as service_module
 from playground.artifacts import stage_archive
+from playground.boxie_client import SandboxRequest, SandboxView
 from playground.config import Settings
 from playground.models import BuildIdentity, BuildUpdate
 from playground.service import PlaygroundService
@@ -15,22 +17,21 @@ from playground.session_store import SessionStore
 from playground.storage import ArtifactConflictError, EnvironmentStore
 
 from .boxie_fake import FakeBoxie
-from .helpers import binary_bundle, elf_binary
+from .helpers import MutableClock, binary_bundle, elf_binary
 
 
-@pytest.mark.usefixtures("configured_environment")
 def test_expiry_cleanup_preserves_build_refreshed_during_session_shutdown(
+    docker_settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def exercise() -> None:
-        service = make_service(Settings())
-        now = 1_000_000.0
-        monkeypatch.setattr("playground.storage.time.time", lambda: now)
+        clock = MutableClock(1_000_000.0)
+        service = make_service(docker_settings, clock=clock)
         previous = BuildUpdate(
             sha="a" * 40, run_id=1000, run_number=10, run_attempt=1, state="building"
         )
         metadata = service.update_build(123, previous)
-        now += service.settings.preview_seconds + 1
+        clock.now += service.settings.preview_seconds + 1
         entered, release = asyncio.Event(), asyncio.Event()
 
         async def delayed_shutdown() -> None:
@@ -57,15 +58,15 @@ def test_expiry_cleanup_preserves_build_refreshed_during_session_shutdown(
     asyncio.run(exercise())
 
 
-@pytest.mark.usefixtures("configured_environment")
 def test_archive_timeout_waits_for_worker_without_blocking_metadata(
+    docker_settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def body() -> AsyncIterator[bytes]:
         yield binary_bundle({"echor": elf_binary()})
 
     async def exercise() -> None:
-        service = make_service(Settings())
+        service = make_service(docker_settings)
         environment = await service.deploy(body(), "a" * 40, 123)
         loop = asyncio.get_running_loop()
         entered, release = asyncio.Event(), threading.Event()
@@ -77,7 +78,7 @@ def test_archive_timeout_waits_for_worker_without_blocking_metadata(
             return stage_archive(source, destination, limit)
 
         monkeypatch.setattr(service_module, "stage_archive", blocked_stage)
-        monkeypatch.setattr(asyncio, "timeout", lambda _: deadline)
+        monkeypatch.setattr(service_module, "timeout", lambda _: deadline)
         deploying = asyncio.create_task(service.deploy(body(), "b" * 40, 123))
         try:
             await asyncio.wait_for(entered.wait(), timeout=1)
@@ -103,10 +104,11 @@ def test_archive_timeout_waits_for_worker_without_blocking_metadata(
     asyncio.run(exercise())
 
 
-@pytest.mark.usefixtures("configured_environment")
-def test_newer_build_event_supersedes_a_streaming_upload() -> None:
+def test_newer_build_event_supersedes_a_streaming_upload(
+    docker_settings: Settings,
+) -> None:
     async def exercise() -> None:
-        service = make_service(Settings())
+        service = make_service(docker_settings)
         started, release = asyncio.Event(), asyncio.Event()
 
         async def body() -> AsyncIterator[bytes]:
@@ -143,15 +145,15 @@ def test_newer_build_event_supersedes_a_streaming_upload() -> None:
     asyncio.run(exercise())
 
 
-@pytest.mark.usefixtures("configured_environment")
 def test_failed_manifest_swap_leaves_the_previous_batch_readable(
+    docker_settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def body() -> AsyncIterator[bytes]:
         yield binary_bundle({"echor": elf_binary()})
 
     async def exercise() -> None:
-        service = make_service(Settings())
+        service = make_service(docker_settings)
         previous = await service.deploy(body(), "a" * 40, 123)
         replace = Path.replace
 
@@ -171,9 +173,16 @@ def test_failed_manifest_swap_leaves_the_previous_batch_readable(
     asyncio.run(exercise())
 
 
-def make_service(settings: Settings, client: FakeBoxie | None = None) -> PlaygroundService:
+def make_service(
+    settings: Settings, client: FakeBoxie | None = None, *, clock: MutableClock | None = None
+) -> PlaygroundService:
+    clock = clock or MutableClock()
     return PlaygroundService(
-        settings, EnvironmentStore(settings), SessionStore(settings.data_dir), client or FakeBoxie()
+        settings,
+        EnvironmentStore(settings, clock=clock),
+        SessionStore(settings.data_dir),
+        client or FakeBoxie(clock=clock),
+        clock=clock,
     )
 
 
@@ -182,8 +191,8 @@ def boxie(service: PlaygroundService) -> FakeBoxie:
     return service.boxie
 
 
-@pytest.mark.usefixtures("configured_environment")
 def test_failed_remote_upload_preserves_ready_and_retries_the_same_artifact(
+    docker_settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from playground.boxie_client import BoxieUnavailable
@@ -192,7 +201,7 @@ def test_failed_remote_upload_preserves_ready_and_retries_the_same_artifact(
         yield binary_bundle({"echor": elf_binary()})
 
     async def exercise() -> None:
-        service = make_service(Settings())
+        service = make_service(docker_settings)
         previous = await service.deploy(body(), "a" * 40, 123)
         remote = boxie(service)
         upload = remote.upload
@@ -216,15 +225,15 @@ def test_failed_remote_upload_preserves_ready_and_retries_the_same_artifact(
     asyncio.run(exercise())
 
 
-@pytest.mark.usefixtures("configured_environment")
 def test_interrupted_product_commit_recovers_the_uploaded_identity(
+    docker_settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def body() -> AsyncIterator[bytes]:
         yield binary_bundle({"echor": elf_binary()})
 
     async def exercise() -> None:
-        service = make_service(Settings())
+        service = make_service(docker_settings)
         previous = await service.deploy(body(), "a" * 40, 123)
         original = service.store._write_record
 
@@ -246,20 +255,19 @@ def test_interrupted_product_commit_recovers_the_uploaded_identity(
     asyncio.run(exercise())
 
 
-@pytest.mark.usefixtures("configured_environment")
 @pytest.mark.parametrize("close", [False, True])
 def test_build_or_closure_during_remote_upload_retires_the_abandoned_artifact(
-    monkeypatch: pytest.MonkeyPatch, close: bool
+    docker_settings: Settings, monkeypatch: pytest.MonkeyPatch, close: bool
 ) -> None:
     async def body() -> AsyncIterator[bytes]:
         yield binary_bundle({"echor": elf_binary()})
 
     async def exercise() -> None:
-        service = make_service(Settings())
+        service = make_service(docker_settings)
         original = boxie(service).upload
 
-        async def racing(*args: object) -> None:
-            await original(*args)  # type: ignore[arg-type]
+        async def racing(identifier: UUID, digest: str, archive: Path) -> None:
+            await original(identifier, digest, archive)
             if close:
                 service.store.close_pull_request(123)
             else:
@@ -286,22 +294,22 @@ def test_build_or_closure_during_remote_upload_retires_the_abandoned_artifact(
     asyncio.run(exercise())
 
 
-@pytest.mark.usefixtures("configured_environment")
 def test_cancelled_create_recovers_same_id_and_stops_abandoned_response(
+    docker_settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def body() -> AsyncIterator[bytes]:
         yield binary_bundle({"echor": elf_binary()})
 
     async def exercise() -> None:
-        service = make_service(Settings())
+        service = make_service(docker_settings)
         environment = await service.deploy(body(), "a" * 40, 123)
         remote = boxie(service)
         create = remote.create
         created = asyncio.Event()
 
-        async def ambiguous(*args: object) -> object:
-            result = await create(*args)  # type: ignore[arg-type]
+        async def ambiguous(key: str, spec: SandboxRequest) -> SandboxView:
+            result = await create(key, spec)
             created.set()
             await asyncio.Event().wait()
             return result
@@ -321,8 +329,8 @@ def test_cancelled_create_recovers_same_id_and_stops_abandoned_response(
     asyncio.run(exercise())
 
 
-@pytest.mark.usefixtures("configured_environment")
 def test_abandoned_create_and_upload_retry_without_a_backend_restart(
+    docker_settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from playground.boxie_client import BoxieUnavailable
@@ -331,13 +339,15 @@ def test_abandoned_create_and_upload_retry_without_a_backend_restart(
         yield binary_bundle({"echor": elf_binary()})
 
     async def exercise() -> None:
-        service = make_service(Settings(cleanup_interval_seconds=0.01))
+        service = make_service(
+            docker_settings.model_copy(update={"cleanup_interval_seconds": 0.01})
+        )
         env = await service.deploy(body(), "a" * 40, 123)
         remote = boxie(service)
         original = remote.create
 
-        async def lost(*args: object) -> object:
-            await original(*args)  # type: ignore[arg-type]
+        async def lost(key: str, spec: SandboxRequest) -> SandboxView:
+            await original(key, spec)
             raise BoxieUnavailable()
 
         monkeypatch.setattr(remote, "create", lost)
@@ -356,20 +366,20 @@ def test_abandoned_create_and_upload_retry_without_a_backend_restart(
     asyncio.run(exercise())
 
 
-@pytest.mark.usefixtures("configured_environment")
 def test_rerun_during_remote_admission_compensates_the_created_sandbox(
+    docker_settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def body() -> AsyncIterator[bytes]:
         yield binary_bundle({"echor": elf_binary()})
 
     async def exercise() -> None:
-        service = make_service(Settings())
+        service = make_service(docker_settings)
         original = await service.deploy(body(), "a" * 40, 123)
         create = boxie(service).create
 
-        async def racing(*args: object) -> object:
-            sandbox = await create(*args)  # type: ignore[arg-type]
+        async def racing(key: str, spec: SandboxRequest) -> SandboxView:
+            sandbox = await create(key, spec)
             await service.deploy(body(), "b" * 40, 123)
             return sandbox
 
@@ -382,10 +392,10 @@ def test_rerun_during_remote_admission_compensates_the_created_sandbox(
     asyncio.run(exercise())
 
 
-@pytest.mark.usefixtures("configured_environment")
 @pytest.mark.parametrize("ci", [False, True])
 @pytest.mark.parametrize("failure", ["upload", "commit"])
 def test_close_reopen_never_recovers_a_previous_generation_upload(
+    docker_settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
     ci: bool,
     failure: str,
@@ -396,7 +406,7 @@ def test_close_reopen_never_recovers_a_previous_generation_upload(
         yield binary_bundle({"echor": elf_binary()})
 
     async def exercise() -> None:
-        service = make_service(Settings())
+        service = make_service(docker_settings)
         build = (
             BuildIdentity(sha="a" * 40, run_id=1000, run_number=10, run_attempt=1) if ci else None
         )

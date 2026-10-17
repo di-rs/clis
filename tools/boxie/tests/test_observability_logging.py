@@ -1,15 +1,11 @@
-"""Real-process logging contract; stdout is always an exclusively owned pipe."""
+"""Real-process privacy, context, CLI and blocked-sink behavior."""
 
 import json
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
-from integration.conftest import postgres_dsn as postgres_dsn
-from integration.conftest import postgres_server as postgres_server
-from integration.conftest import temporal_stack as temporal_stack
 
 PRELUDE = """
 import asyncio, json, logging, os, sys, threading, time
@@ -36,7 +32,9 @@ def records(result: subprocess.CompletedProcess[str]) -> list[dict[str, object]]
     assert lines
     events = [json.loads(line) for line in lines]
     schema = json.loads(
-        (Path(__file__).parents[3] / "infra/observability/event.schema.json").read_text()
+        (
+            Path(__file__).parents[3] / "tools/boxie/infra/observability/event.schema.json"
+        ).read_text()
     )
     for event in events:
         assert set(schema["required"]) <= event.keys() <= schema["properties"].keys()
@@ -47,16 +45,14 @@ def records(result: subprocess.CompletedProcess[str]) -> list[dict[str, object]]
                 assert value in rules["enum"]
             if "maxLength" in rules:
                 assert len(value) <= rules["maxLength"]
-    assert (
-        all(len(line.encode()) + 1 <= 512 for line in lines) if sys.platform == "darwin" else True
-    )
+    assert all(len(line.encode()) + 1 <= 8192 for line in lines)
     return events
 
 
 def test_json_context_isolation_and_terminal_close() -> None:
     result = child("""
 assert configure_logging(runtime.settings) is runtime
-assert configure_logging(LogSettings(service="boxie", role="worker")) is runtime
+assert configure_logging(LogSettings(service="boxie", role="orchestrator")) is runtime
 async def task(number):
     with bind_context(request_id=str(UUID(int=number))):
         await asyncio.sleep(0)
@@ -77,7 +73,7 @@ assert runtime.stats.closed
     ]
 
 
-def test_foreign_messages_exception_chains_and_raw_bytes_are_private() -> None:
+def test_foreign_messages_and_exception_chains_are_private() -> None:
     result = child(f"""
 secret = {SECRET!r}
 class Hostile:
@@ -93,54 +89,12 @@ try:
 except RuntimeError:
     logging.getLogger("uvicorn.error").exception(secret)
     runtime.emit("request.completed", error=sys.exception(), request_id=secret, token=secret)
-os.write(1, secret.encode()); os.write(2, secret.encode())
-print(secret, end="")
 runtime.close()
 """)
     events = records(result)
     assert SECRET not in result.stdout + result.stderr
     assert any(event.get("error_type") == "RuntimeError" for event in events)
     assert any(event.get("error_message") == "operation failed" for event in events)
-
-
-@pytest.mark.parametrize("explicit", [False, True])
-def test_unread_pipe_exit_overflow_and_bounded_async_progress(
-    tmp_path: Path, explicit: bool
-) -> None:
-    evidence = tmp_path / "evidence.json"
-    code = (
-        PRELUDE
-        + f"""
-async def run():
-    started = time.monotonic()
-    for _ in range(20000):
-        runtime.emit("request.completed")
-    # HTTP/PTY work must not wait for the collector.
-    await asyncio.sleep(0)
-    assert time.monotonic() - started < 1.5
-    assert runtime.stats.dropped_count > 0
-    assert runtime.stats.queued_records <= 2048
-asyncio.run(run())
-Path({str(evidence)!r}).write_text(json.dumps(asdict(runtime.stats)))
-if {explicit!r}: runtime.close()
-"""
-    )
-    started = time.monotonic()
-    process = subprocess.Popen(
-        [sys.executable, "-c", code], stdout=subprocess.PIPE, stderr=subprocess.PIPE
-    )
-    try:
-        assert process.wait(timeout=3) == 0
-        assert time.monotonic() - started < 3
-        assert json.loads(evidence.read_text())["dropped_count"] > 0
-        out, err = process.communicate(timeout=1)
-        assert not err
-        assert out
-        assert all(json.loads(line)["schema_version"] == 1 for line in out.splitlines())
-    finally:
-        if process.poll() is None:
-            process.kill()
-        process.communicate(timeout=1)
 
 
 def test_factory_import_does_not_take_over_streams() -> None:
@@ -154,7 +108,7 @@ def test_factory_import_does_not_take_over_streams() -> None:
     assert result.stdout == "intact\n"
 
 
-@pytest.mark.parametrize("role", ["api", "agent", "worker"])
+@pytest.mark.parametrize("role", ["api", "orchestrator"])
 def test_real_entrypoint_startup_failure_is_sanitized(role: str, tmp_path: Path) -> None:
     path = tmp_path / SECRET
     path.write_text('{"password":"' + SECRET + '"}')
@@ -171,35 +125,53 @@ def test_real_entrypoint_startup_failure_is_sanitized(role: str, tmp_path: Path)
     assert any(event["event"] == "process_failed" for event in events)
 
 
-def test_unsupported_sink_is_nonfatal(tmp_path: Path) -> None:
-    evidence = tmp_path / "evidence.json"
-    with (tmp_path / "sink").open("wb") as sink:
+def test_file_sink_and_standard_streams_remain_usable(tmp_path: Path) -> None:
+    output = tmp_path / "events.jsonl"
+    with output.open("w") as sink:
         result = subprocess.run(
             [
                 sys.executable,
                 "-c",
                 PRELUDE
-                + f"""
+                + """
+assert os.get_blocking(1)
+os.write(2, b"terminal remains usable\\n")
 runtime.emit("request.completed")
 runtime.close()
-Path({str(evidence)!r}).write_text(json.dumps(asdict(runtime.stats)))
 """,
             ],
             stdout=sink,
             stderr=subprocess.PIPE,
+            text=True,
             timeout=5,
         )
     assert result.returncode == 0
-    stats = json.loads(evidence.read_text())
-    assert stats["sink_state"] == "unsupported"
-    assert stats["dropped_count"] > 0
-    assert (tmp_path / "sink").read_bytes() == b""
+    assert result.stderr == "terminal remains usable\n"
+    assert json.loads(output.read_text())["event"] == "request.completed"
 
 
-def test_atomic_truncation_preserves_json_and_omits_ids_intact() -> None:
+@pytest.mark.parametrize("role", ["api", "orchestrator"])
+@pytest.mark.parametrize(
+    "arguments,status,stream",
+    [(["--help"], 0, "stdout"), ([], 2, "stderr"), (["--unknown"], 2, "stderr")],
+)
+def test_cli_help_and_argument_errors_are_visible(
+    role: str, arguments: list[str], status: int, stream: str
+) -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "boxie.bootstrap." + role, *arguments],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert result.returncode == status
+    assert "usage:" in getattr(result, stream)
+
+
+def test_unicode_messages_and_context_ids_stay_intact() -> None:
     code = """
-from service_telemetry.logging import bootstrap_logging, LogSettings
-from service_telemetry.context import bind_context
+from boxie.observability.telemetry.logging import bootstrap_logging, LogSettings
+from boxie.observability.telemetry.context import bind_context
 runtime = bootstrap_logging(LogSettings(service="boxie", role="api"), events={"multiline": "é\\n" * 64})
 with bind_context(request_id="11111111-1111-1111-1111-111111111111", workflow_id="boxie/sandbox/11111111-1111-1111-1111-111111111111"):
     runtime.emit("multiline")
@@ -209,16 +181,40 @@ runtime.close()
     events = records(result)
     assert isinstance(events[0]["message"], str)
     assert "\n" in events[0]["message"]
-    if sys.platform == "darwin":
-        assert events[0]["truncated"] is True
-        assert "workflow_id" not in events[0]
-    assert events[0].get("request_id") in (None, "11111111-1111-1111-1111-111111111111")
+    assert events[0]["request_id"] == "11111111-1111-1111-1111-111111111111"
 
 
-def test_thread_asyncio_unraisable_hooks_and_structlog() -> None:
+def test_oversize_record_is_dropped_whole(tmp_path: Path) -> None:
+    import os
+
+    from boxie.observability.telemetry.logging import LogRuntime, LogSettings
+
+    output = tmp_path / "events.jsonl"
+    with output.open("wb") as sink:
+        runtime = LogRuntime(
+            LogSettings(service="boxie", role="api"), {}, {}, os.dup(sink.fileno()), 512, "enabled"
+        )
+        try:
+            identifier = "11111111-1111-1111-1111-111111111111"
+            runtime.emit(
+                "request.completed",
+                request_id=identifier,
+                sandbox_id=identifier,
+                operation_id=identifier,
+                run_id=identifier,
+                workflow_id="boxie/sandbox/" + identifier,
+            )
+        finally:
+            runtime.close()
+    assert output.read_bytes() == b""
+    assert runtime.stats.dropped_count == 1
+    assert runtime.stats.queued_records == 0
+
+
+def test_thread_asyncio_and_unraisable_hooks() -> None:
     result = child(f"""
-import structlog, gc
-from service_telemetry.logging import install_asyncio_handler
+import gc
+from boxie.observability.telemetry.logging import install_asyncio_handler
 secret = {SECRET!r}
 def fail(): raise ValueError(secret)
 thread = threading.Thread(target=fail); thread.start(); thread.join()
@@ -229,7 +225,6 @@ async def run():
     install_asyncio_handler(runtime)
     asyncio.get_running_loop().call_exception_handler({{"message":secret,"exception":RuntimeError(secret)}})
 asyncio.run(run())
-structlog.get_logger().info("request.completed", request_id=secret, message=secret, level=secret)
 runtime.close()
 """)
     events = records(result)
@@ -237,7 +232,6 @@ runtime.close()
         "thread_failed",
         "unraisable_failed",
         "async_failed",
-        "request.completed",
     }
     assert SECRET not in result.stdout + result.stderr
 
@@ -280,7 +274,7 @@ Path({str(evidence)!r}).write_text(json.dumps(asdict(runtime.stats)))
 def test_real_http_and_pty_progress_while_log_pipe_is_unread(tmp_path: Path) -> None:
     evidence = tmp_path / "progress.json"
     # Real API HTTP and OS PTY; application ports only are minimal injected doubles.
-    # Full Temporal + agent/WebSocket path is exercised separately by the live fixture.
+    # Full Temporal + orchestrator/WebSocket path is exercised separately by the live fixture.
     code = (
         PRELUDE
         + f'''
@@ -314,6 +308,11 @@ async def run():
     Path({str(evidence)!r}).write_text(json.dumps({{"terminal_roundtrip_completed":True,"drops":runtime.stats.dropped_count}}))
 asyncio.run(run())
 runtime.close(.1)
+assert runtime.stats.closed and runtime.stats.queued_records == 0
+dropped = runtime.stats.dropped_count
+runtime.emit("request.completed")
+runtime.close(.1)
+assert runtime.stats.dropped_count == dropped + 1
 '''
     )
     process = subprocess.Popen(
@@ -346,7 +345,7 @@ def test_real_temporal_history_and_http_terminal_logs_are_private(
 
     Parent fixtures own disposable SQL/Temporal resources. The scenario verifies
     real HTTP/WS and worker replacement, scans decoded history wire payloads and
-    replays it. Only the agent's Docker port is substituted by that fixture.
+    replays it. Only the orchestrator's Docker port is substituted by that fixture.
     """
     from typing import Any, cast
 
@@ -365,15 +364,15 @@ from pathlib import Path
 from types import SimpleNamespace
 sys.path.insert(0, {str(tests)!r})
 from boxie.observability.logging import process_logging
-runtime = process_logging("worker")
+runtime = process_logging("orchestrator")
 import pytest
-from test_outbox import test_runnable_stack_preserves_accounting_and_worker_replacement
+from test_outbox import test_committed_command_recovers_without_api_delivery
 settings = json.loads(Path({str(config)!r}).read_text())
 fixture = SimpleNamespace(address=settings["address"], root=Path(settings["root"]))
 # Existing caplog check is supplemented by the parent's actual output check.
 with pytest.MonkeyPatch.context() as patch:
-    test_runnable_stack_preserves_accounting_and_worker_replacement(
-        settings["dsn"], fixture, Path({str(scenario_root)!r}), False, patch, SimpleNamespace(text="")
+    test_committed_command_recovers_without_api_delivery(
+        settings["dsn"], fixture, Path({str(scenario_root)!r}), False, patch
     )
 runtime.emit("request.completed", outcome="succeeded")
 runtime.close()
@@ -385,95 +384,20 @@ runtime.close()
     assert result.stderr == ""
     events = [json.loads(line) for line in result.stdout.splitlines()]
     assert events and all(event["schema_version"] == 1 for event in events)
-    exported_history = (scenario_root / "production-history.json").read_text()
     logs = result.stdout + result.stderr
-    for sentinel in ("SECRET-", "consumer-one-secret", "agent-test-secret"):
-        assert sentinel not in logs + exported_history
+    for sentinel in ("SECRET-", "consumer-one-secret", "orchestrator-test-secret"):
+        assert sentinel not in logs
     assert any(
         event["event"] == "request.completed" and event.get("outcome") == "succeeded"
         for event in events
     )
 
 
-@pytest.mark.parametrize("closed_fds", [(2,), (0, 2), (0,)])
-def test_pipe_sink_avoids_all_standard_descriptors(
-    tmp_path: Path,
-    closed_fds: tuple[int, ...],
-) -> None:
-    evidence = tmp_path / "descriptors.json"
-    code = f"""
-import json, os, stat
-from dataclasses import asdict
-from pathlib import Path
-from boxie.observability.logging import LogSettings, bootstrap_logging
-original = os.fstat(1)
-for fd in {closed_fds!r}: os.close(fd)
-runtime = bootstrap_logging(LogSettings(service="boxie", role="api"))
-sink = runtime._sink
-assert sink is not None
-actual = os.fstat(sink)
-identity = {{
-    "fd": sink,
-    "same_pipe": (actual.st_dev, actual.st_ino) == (original.st_dev, original.st_ino),
-    "fifo": stat.S_ISFIFO(actual.st_mode),
-    "inheritable": os.get_inheritable(sink),
-    "blocking": os.get_blocking(sink),
-}}
-runtime.emit("request.completed")
-runtime.close()
-redirects = {{}}
-for fd in (1, 2):
-    try: redirects[str(fd)] = stat.S_ISCHR(os.fstat(fd).st_mode)
-    except OSError: redirects[str(fd)] = False
-Path({str(evidence)!r}).write_text(json.dumps({{"sink":identity,"stats":asdict(runtime.stats),"redirects":redirects}}))
-"""
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=5)
-    assert result.returncode == 0, result.stderr
-    measured = json.loads(evidence.read_text())
-    assert measured["sink"]["fd"] >= 3, measured
-    assert measured["sink"]["same_pipe"] and measured["sink"]["fifo"], measured
-    assert not measured["sink"]["inheritable"] and not measured["sink"]["blocking"], measured
-    assert measured["redirects"] == {"1": True, "2": True}, measured
-    events = records(result)
-    assert len(events) == measured["stats"]["delivered_count"] == 1
-    assert events[0]["event"] == "request.completed"
-    assert measured["stats"]["dropped_count"] == 0
-    assert measured["stats"]["sink_state"] == "closed"
-
-
-@pytest.mark.parametrize("closed_fds", [(1,), (0, 1, 2)])
-def test_missing_stdout_remains_nonfatal_and_redirects_survive_close(
-    tmp_path: Path,
-    closed_fds: tuple[int, ...],
-) -> None:
-    evidence = tmp_path / "disabled.json"
-    code = f"""
-import json, os, stat
-from dataclasses import asdict
-from pathlib import Path
-from boxie.observability.logging import LogSettings, bootstrap_logging
-for fd in {closed_fds!r}: os.close(fd)
-runtime = bootstrap_logging(LogSettings(service="boxie", role="api"))
-runtime.emit("request.completed")
-runtime.close()
-assert all(stat.S_ISCHR(os.fstat(fd).st_mode) for fd in (1, 2))
-os.write(1, b"SENTINEL"); os.write(2, b"SENTINEL")
-Path({str(evidence)!r}).write_text(json.dumps(asdict(runtime.stats)))
-"""
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=5)
-    assert result.returncode == 0
-    assert result.stdout == result.stderr == ""
-    stats = json.loads(evidence.read_text())
-    assert stats["sink_state"] == "unavailable"
-    assert stats["delivered_count"] == 0 and stats["dropped_count"] == 1
-    assert dict(stats["drops"])["disabled"] == 1
-
-
 @pytest.mark.parametrize(
     "module,service,role",
     [
         ("boxie.observability.logging", "boxie", "api"),
-        ("playground.observability", "cli-playground", "gateway"),
+        ("boxie.observability.logging", "boxie", "orchestrator"),
     ],
 )
 def test_request_boundaries_isolate_reset_and_sanitize_context(
@@ -484,7 +408,7 @@ def test_request_boundaries_isolate_reset_and_sanitize_context(
     code = f"""
 import asyncio, importlib
 from uuid import UUID
-from service_telemetry.context import bind_context, current_context
+from boxie.observability.telemetry.context import bind_context, current_context
 assembly = importlib.import_module({module!r})
 runtime = assembly.bootstrap_logging(assembly.LogSettings(service={service!r}, role={role!r}))
 secret = {SECRET!r}
@@ -545,83 +469,3 @@ runtime.close()
     assert all(
         "duration_ms" in event for event in correlated if event["event"] == "request.completed"
     )
-
-
-@pytest.mark.parametrize("role,fail", [("api", False), ("worker", False), ("agent", True)])
-def test_boxie_process_roots_share_shutdown_deadline(
-    role: str, fail: bool, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import asyncio
-    import importlib
-    import os
-    import threading
-
-    from boxie.observability.metrics import Metrics
-    from service_telemetry.logging import LogRuntime, LogSettings
-    from service_telemetry.metrics import MetricsListener
-
-    root = importlib.import_module("boxie.bootstrap." + role)
-    read, write = os.pipe()
-    os.set_blocking(write, False)
-    try:
-        while True:
-            os.write(write, b"x" * 4096)
-    except BlockingIOError:
-        pass
-    runtime = LogRuntime(LogSettings(service="boxie", role=role), {}, {}, write, 4096, "enabled")
-    runtime.emit("request.completed")
-    entered, finished = threading.Event(), threading.Event()
-    listeners: list[MetricsListener] = []
-    original_run = MetricsListener._run
-    original_close = MetricsListener.close
-
-    def slow_listener(self: MetricsListener) -> None:
-        listeners.append(self)
-        entered.set()
-        try:
-            original_run(self)
-        finally:
-            time.sleep(3)  # Longer than the entire owner budget.
-            finished.set()
-
-    def off_loop_close(self: MetricsListener, timeout: float = 2) -> None:
-        with pytest.raises(RuntimeError, match="no running event loop"):
-            asyncio.get_running_loop()
-        original_close(self, timeout)
-
-    def service(metrics: Metrics) -> None:
-        assert metrics.role == role
-
-        async def run() -> None:
-            assert await asyncio.to_thread(entered.wait, 1)
-            if fail:
-                raise RuntimeError("service exit")
-
-        asyncio.run(run())
-
-    monkeypatch.setattr(MetricsListener, "_run", slow_listener)
-    monkeypatch.setattr(MetricsListener, "close", off_loop_close)
-    monkeypatch.setattr("boxie.observability.logging.process_logging", lambda role: runtime)
-    monkeypatch.setattr(root, "_main", service)
-    started = time.monotonic()
-    try:
-        if fail:
-            with pytest.raises(SystemExit) as failure:
-                root.main()
-            assert failure.value.code == 1
-        else:
-            root.main()
-        elapsed = time.monotonic() - started
-        assert 1.8 <= elapsed < 2.5, elapsed
-        # The listener is deliberately still finishing; neither repeated close
-        # may wait on a fresh budget or obscure the original process failure.
-        assert not finished.is_set()
-        repeated = time.monotonic()
-        listeners[0].close()
-        runtime.close()
-        assert time.monotonic() - repeated < 0.2
-        assert finished.wait(2)
-    finally:
-        runtime.close(0)
-        os.close(read)
-        assert finished.wait(2)

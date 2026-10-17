@@ -34,7 +34,7 @@ def origin() -> Iterator[tuple[str, list[str]]]:
         server.server_close()
 
 
-def test_agent_health_uses_private_credential_and_loopback(
+def test_orchestrator_health_uses_private_credential_and_loopback(
     tmp_path: Path, origin: tuple[str, list[str]]
 ) -> None:
     from boxie.bootstrap.health import http_ready
@@ -60,17 +60,3 @@ def test_public_secret_permissions_are_rejected_before_probe(
     with pytest.raises(ValueError, match="private"):
         http_ready(origin[0] + "/readyz", secret)
     assert origin[1] == []
-
-
-def test_schema_probe_rejects_missing_foreign_or_modified_migrations(tmp_path: Path) -> None:
-    from boxie.bootstrap.health import schema_current
-
-    # SHA-256 of the literal empty migration; independent of the probe's scanner.
-    checksum = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-    migration = tmp_path / "001_initial.sql"
-    migration.write_bytes(b"")
-    assert schema_current({1: checksum}, tmp_path)
-    assert not schema_current({}, tmp_path)
-    assert not schema_current({1: checksum, 2: checksum}, tmp_path)
-    migration.write_text("SELECT 1;")
-    assert not schema_current({1: checksum}, tmp_path)

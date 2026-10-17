@@ -67,7 +67,7 @@ mismatch. It never deletes persistent state. Re-running a matching plan is safe.
 Use the exported environment handles in each independently owned Compose unit.
 `observabilitySettings` contains the selected stack/host identities, private
 metrics and Grafana-origin network handles, four external volume handles, both
-`/` and `/srv/boxie` backing mounts, and the Playground scrape only when selected.
+`/` and `/srv/boxie` backing mounts. Playground currently has no metrics exporter.
 Pass these settings to the observability owner’s renderer with explicit assets,
 published collector digest, Grafana URL and the numeric journal GID read from
 `/etc/boxie-platform/journal-group-gid` on the target host. The environment also
@@ -83,12 +83,12 @@ references; resolve credentials only at the consuming process.
    the Docker/gVisor smoke to finish. Transfer the connection profile and secret
    SSH credential separately. Verify `/srv/boxie` against the exported device.
 2. Prepare shared resources. Start [platform PostgreSQL](../../platform/README.md)
-   and apply Boxie SQL explicitly. Set up [Temporal](../../temporal/README.md)
+   and apply Boxie SQL explicitly. Set up [Temporal](../../../tools/boxie/infra/temporal/README.md)
    credentials/certificates, run its schema jobs and idempotent namespace bootstrap.
 3. Release Temporal, [observability](../../observability/README.md), and selected
    [operator ingress](../../ingress/README.md). Check private dependency readiness,
    telemetry and live Access protection before starting Boxie.
-4. Release [Boxie](../../../tools/boxie/infra/README.md) with API, worker and agent
+4. Release [Boxie](../../../tools/boxie/infra/README.md) with API and orchestrator
    on one approved image identity. Verify readiness and a generic
    create/terminal/stop flow before adding a product consumer.
 5. Optionally release [Playground](../../../tools/cli-playground/infra/README.md)
@@ -98,8 +98,8 @@ Subsequent releases target one Compose unit and its declared dependencies. A
 Playground release must not invoke Pulumi or update Boxie, Temporal, PostgreSQL,
 observability or shared bridges/volumes. A Boxie release must not apply Temporal
 schema upgrades or update Playground. Preserve persistent resources on failed
-activation. Drain/terminate sessions for agent changes; existing PTYs are not
-restored by a host or agent restart. One host remains a failure domain. This
+activation. Drain/terminate sessions for orchestrator changes; existing PTYs are not
+restored by a host or orchestrator restart. One host remains a failure domain. This
 project performs no migration of the old undeployed Playground Pulumi state,
 application backup, disaster recovery or cross-host placement.
 
@@ -112,8 +112,7 @@ certify a provisioned host. Before enabling automatic application releases:
   Verify pinned SSH identity, fail-closed disk mounting after reboot, shared
   network ownership, reader-owned credentials and writable directories.
 - Export `observabilitySettings` and use the observability owner's renderer. Its
-  mount list includes `/` and `/srv/boxie`; the optional product scrape is selected
-  by this environment. Verify persistent journal collection, both disk series,
+  mount list includes `/` and `/srv/boxie`; the current Boxie and native infrastructure scrapes are retained. Verify persistent journal collection, both disk series,
   Grafana login/queries, Temporal UI and live Access/origin isolation.
 - Verify Boxie create/terminal/stop, actual gVisor restrictions and pending-cleanup
   recovery before publishing Playground. Then verify native browser product flow.

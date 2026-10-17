@@ -5,7 +5,7 @@
     "BOXIE_RUNTIME_IMAGE": "ghcr.io/di-rs/clis-boxie@sha256:0000000000000000000000000000000000000000000000000000000000000000"
   },
   "compatibility": {
-    "schema": "boxie-003",
+    "schema": "boxie-alembic-0004",
     "boxie_api": "v1",
     "temporal_server": "1.32.0"
   }

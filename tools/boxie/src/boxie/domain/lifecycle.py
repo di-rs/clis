@@ -1,4 +1,4 @@
-"""Durable ownership and observation facts shared by agent and orchestration."""
+"""Sandbox ownership and observation facts shared by orchestrator and orchestration."""
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -7,7 +7,7 @@ from typing import Literal, Protocol
 from uuid import UUID
 
 from boxie.domain.models import (
-    AgentIdentity,
+    OrchestratorIdentity,
     Principal,
     ProfileSnapshot,
     SandboxSpec,
@@ -17,14 +17,14 @@ from boxie.domain.models import (
 
 
 @dataclass(frozen=True)
-class DurableRequest:
+class SandboxRequest:
     """Sensitive repository result. Never serialize this into workflow history."""
 
     sandbox_id: UUID
     principal: Principal
-    identity: AgentIdentity
+    identity: OrchestratorIdentity
     generation: int
-    agent_boot_id: UUID | None
+    orchestrator_boot_id: UUID | None
     spec: SandboxSpec
     snapshot: ProfileSnapshot
     accepted_at: datetime
@@ -34,10 +34,10 @@ class DurableRequest:
 
 
 @dataclass(frozen=True)
-class AgentObservation:
-    """Accepted only from the authenticated agent bound to this ownership fence.
+class OrchestratorObservation:
+    """Accepted only from the authenticated orchestrator bound to this ownership fence.
 
-    Boot changes require an explicit compare-and-set bind_agent_boot call by a
+    Boot changes require an explicit compare-and-set bind_orchestrator_boot call by a
     trusted control-plane caller; a report cannot select its own current boot.
     removal_confirmed means a successful physical absence check, never merely a
     terminal state or an unavailable runtime. Versions are monotonic per boot.
@@ -45,7 +45,7 @@ class AgentObservation:
 
     sandbox_id: UUID
     principal: Principal
-    identity: AgentIdentity
+    identity: OrchestratorIdentity
     generation: int
     boot_id: UUID
     event_version: int
@@ -96,14 +96,14 @@ class SandboxRef:
 class EnsureRequest:
     ref: SandboxRef
     principal: Principal
-    identity: AgentIdentity
+    identity: OrchestratorIdentity
     spec: SandboxSpec
     profile_snapshot: ProfileSnapshot
     accepted_at: datetime
     absolute_deadline: datetime
 
     @classmethod
-    def from_durable(cls, request: DurableRequest) -> EnsureRequest:
+    def from_request(cls, request: SandboxRequest) -> EnsureRequest:
         return cls(
             SandboxRef(request.sandbox_id, request.generation),
             request.principal,
@@ -115,22 +115,8 @@ class EnsureRequest:
         )
 
 
-@dataclass(frozen=True)
-class ExpiryRequest:
-    ref: SandboxRef
-    reason: TerminationReason
-    observed_event_version: int
-    boot_id: UUID
-
-
-@dataclass(frozen=True)
-class ExpiryDecision:
-    applied: bool
-    observation: AgentObservation
-
-
 class StartGuard(Protocol):
-    """Agent-owned guard. The callback is only the bounded final Docker start.
+    """Orchestrator-owned guard. The callback is only the bounded final Docker start.
 
     start_allowed validates immutable admission AND its retained artifact reference,
     before mount and again before READY. It is not final-start authorization.

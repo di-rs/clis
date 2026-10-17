@@ -15,6 +15,8 @@ def test_environment_settings_render_persistent_disk_and_selected_scrapes(
 ) -> None:
     settings = {
         "environment": "production",
+        "installation_id": "00000000-0000-0000-0000-000000000001",
+        "temporal_namespace": "boxie",
         "host": "single-host",
         "metrics_network": "clis-metrics",
         "grafana_origin_network": "clis-grafana-origin",
@@ -40,7 +42,7 @@ def test_environment_settings_render_persistent_disk_and_selected_scrapes(
             "--settings",
             str(path),
             "--assets",
-            str(Path(__file__).parents[1]),
+            str(Path("tools/boxie/infra/observability")),
             "--collector-image",
             "ghcr.io/example/collector@sha256:" + "a" * 64,
             "--journal-gid-file",

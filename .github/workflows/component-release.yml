@@ -1,4 +1,4 @@
-name: Component application release
+name: 🚀 Component application release
 
 on:
   workflow_call:
@@ -20,6 +20,7 @@ permissions: {}
 
 jobs:
   release:
+    name: 🐳 Publish immutable component image
     if: ${{ github.ref == 'refs/heads/master' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -29,24 +30,29 @@ jobs:
     env:
       DOCKER_BUILD_RECORD_UPLOAD: 'false'
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: 📥 Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - id: image
+      - name: 🏷️ Select component image name
+        id: image
         env:
           REPOSITORY: ${{ github.repository }}
           COMPONENT: ${{ inputs.component }}
         run: echo "name=ghcr.io/${REPOSITORY,,}-${COMPONENT}" >> "$GITHUB_OUTPUT"
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: 🐳 Set up image builder
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           cache-binary: false
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      - name: 🔑 Log in to component registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-      - id: build
+      - name: 🐳 Build and publish component image
+        id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -57,7 +63,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-      - name: Record immutable component manifest
+      - name: 🔧 Record immutable component manifest
         env:
           COMPONENT_DIRECTORY: ${{ inputs.directory }}
           IMAGE_VARIABLE: ${{ inputs.image_variable }}
@@ -72,7 +78,8 @@ jobs:
           release['images'][os.environ['IMAGE_VARIABLE']] = os.environ['IMAGE']
           Path('release.json').write_text(json.dumps(release, indent=2) + '\n')
           PY
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - name: 📤 Save immutable release manifest
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.component }}-release
           path: release.json
@@ -80,6 +87,7 @@ jobs:
           retention-days: 30
 
   deploy:
+    name: 🚀 Activate selected component
     needs: release
     if: ${{ github.ref == 'refs/heads/master' }}
     environment: ${{ inputs.component }}
@@ -91,19 +99,23 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: 📥 Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: 🐍 Set up uv and Python
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: '0.13.0'
           enable-cache: false
-      - run: uv sync --locked --all-packages
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - name: 📦 Install locked workspace dependencies
+        run: uv sync --locked --all-packages
+      - name: 📥 Load immutable release manifest
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ${{ inputs.component }}-release
-      - name: Activate only this component
+      - name: 🔧 Activate only this component
         env:
           COMPONENT_DIRECTORY: ${{ inputs.directory }}
           CONNECTION_PROFILE: ${{ vars.DEPLOYMENT_PROFILE }}

@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import pytest
@@ -109,6 +109,8 @@ async def failed_drain(
     transport_error: Exception,
     scenario: str,
     eof_error: Exception | None,
+    *,
+    decode_event: Callable[[str], object] | None = None,
 ) -> BaseException | None:
     """Exercise aborts while a real ASGI socket has final output in flight."""
     from starlette.websockets import WebSocketState
@@ -136,10 +138,14 @@ async def failed_drain(
                 ['{"type":"attached","epoch":7}', (2).to_bytes(8, "big") + b"last"]
             )
 
-        async def receive(self) -> str | bytes | None:
+        async def receive(self) -> object:
             frame = next(self.frames, None)
             if frame is not None:
-                return frame
+                return (
+                    decode_event(frame)
+                    if decode_event is not None and isinstance(frame, str)
+                    else frame
+                )
             if eof_error is not None:
                 raise eof_error
             return None

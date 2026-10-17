@@ -10,7 +10,7 @@ import pytest
 from boxie.domain.models import SandboxState, TerminationReason
 from integration.faults import Faults
 from integration.stack import LifecycleStack
-from test_agent_lifecycle import setup
+from lifecycle_support import setup
 
 
 def test_start_fault_matches_exact_route_and_restores_forwarding(
@@ -65,7 +65,9 @@ def test_start_fault_matches_exact_route_and_restores_forwarding(
 
 
 @pytest.mark.parametrize("boundary", ["create", "start"])
-def test_injection_boundary_determines_real_agent_finality(tmp_path: Path, boundary: str) -> None:
+def test_injection_boundary_determines_real_orchestrator_finality(
+    tmp_path: Path, boundary: str
+) -> None:
     async def exercise() -> None:
         agent, request, daemon, _, _ = await setup(tmp_path)
         known: list[str] = []
@@ -77,7 +79,9 @@ def test_injection_boundary_determines_real_agent_finality(tmp_path: Path, bound
 
         setattr(daemon, boundary, fail)
         try:
-            await asyncio.wait_for(agent.workers[request.ref.id], 2)
+            task = agent.runtimes[request.ref.id].activity
+            assert task is not None
+            await asyncio.wait_for(task, 2)
             observation = await agent.inspect(request.ref)
             if boundary == "create":
                 assert observation.cleanup_pending and not observation.removal_confirmed

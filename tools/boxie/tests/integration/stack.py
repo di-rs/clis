@@ -10,12 +10,10 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import httpx
-import psycopg
+from boxie.persistence.database import database
 from boxie.persistence.migrate import migrate
-from psycopg.rows import dict_row
-from run_integration import ROOT, CommandRunner, ProductionStack, command
-
-from integration.diagnostics import readiness_details
+from run_integration import ROOT, CommandRunner, ProductionStack
+from sqlalchemy.sql import Select
 
 
 class LifecycleStack(ProductionStack):
@@ -23,12 +21,12 @@ class LifecycleStack(ProductionStack):
         self,
         root: Path,
         *,
-        command_runner: CommandRunner = command,
+        command_runner: CommandRunner | None = None,
         runtime_overlay: Path | None = None,
     ) -> None:
         super().__init__(root, command_runner=command_runner)
         self.runtime_overlay = runtime_overlay
-        self.runtime_services = ("faults", "agent", "api", "worker", "playground")
+        self.runtime_services = ("faults", "orchestrator", "api", "playground")
         self.capture_teardown_logs = True
         self.installation = str(uuid4())
         self.host = self.name
@@ -43,23 +41,22 @@ class LifecycleStack(ProductionStack):
             # Bind-mounted private files and writable storage belong to this runner.
             # UID 0 with cap_drop ALL cannot bypass another UID's mode-0600 files.
             BOXIE_TEST_USER=f"{os.getuid()}:{os.getgid()}",
-            BOXIE_TEST_AGENT_SCRIPT=str(Path(__file__).with_name("agent_fixture.py")),
+            BOXIE_TEST_ORCHESTRATOR_SCRIPT=str(Path(__file__).with_name("orchestrator_fixture.py")),
             BOXIE_TEST_FAULTS_SCRIPT=str(Path(__file__).with_name("faults.py")),
             BOXIE_RUNTIME_IMAGE=os.environ.get("BOXIE_RUNTIME_IMAGE", "boxie:lifecycle"),
             PLAYGROUND_IMAGE=os.environ.get("PLAYGROUND_IMAGE", "cli-playground:lifecycle"),
             BOXIE_DATA_DIR=str(root / "data"),
-            BOXIE_AGENT_CONFIG=str(root / "agent.json"),
+            BOXIE_ORCHESTRATOR_CONFIG=str(root / "orchestrator.json"),
             BOXIE_API_CONFIG=str(root / "api.json"),
-            BOXIE_WORKER_CONFIG=str(root / "worker.json"),
             BOXIE_PROFILES_FILE=str(root / "profiles.json"),
-            BOXIE_AGENT_CREDENTIAL_FILE=str(root / "agent.secret"),
+            BOXIE_ORCHESTRATOR_CREDENTIAL_FILE=str(root / "orchestrator.secret"),
             BOXIE_CONSUMER_CREDENTIAL_FILE=str(root / "consumer.secret"),
             BOXIE_POSTGRES_DSN_FILE=str(root / "postgres-dsn"),
             BOXIE_TEMPORAL_CA_FILE=str(root / "clients/frontend-ca.pem"),
             BOXIE_API_TEMPORAL_CERT_FILE=str(root / "clients/boxie-api.pem"),
             BOXIE_API_TEMPORAL_KEY_FILE=str(root / "clients/boxie-api.key"),
-            BOXIE_WORKER_TEMPORAL_CERT_FILE=str(root / "clients/boxie-worker.pem"),
-            BOXIE_WORKER_TEMPORAL_KEY_FILE=str(root / "clients/boxie-worker.key"),
+            BOXIE_ORCHESTRATOR_TEMPORAL_CERT_FILE=str(root / "clients/boxie-orchestrator.pem"),
+            BOXIE_ORCHESTRATOR_TEMPORAL_KEY_FILE=str(root / "clients/boxie-orchestrator.key"),
             BOXIE_CONSUMER_NETWORK=self.name + "-consumer",
             PLAYGROUND_DEPLOY_TOKEN=self.deploy,
             PLAYGROUND_PUBLIC_URL="http://127.0.0.1:1",
@@ -74,7 +71,11 @@ class LifecycleStack(ProductionStack):
                 self.runtime,
                 "--file",
                 str(ROOT / "tools/boxie/infra/compose.test.yml"),
-                *(["--file", str(self.runtime_overlay)] if self.runtime_overlay else []),
+                *(
+                    ["--file", str(self.runtime_overlay)]
+                    if self.runtime_overlay is not None
+                    else []
+                ),
                 *args,
             ],
             env=self.env,
@@ -86,29 +87,31 @@ class LifecycleStack(ProductionStack):
             raise RuntimeError(
                 "native lifecycle requires Linux amd64 Docker with configured runsc; no fallback"
             )
-        if not self.binary.is_file():
+        if "playground" in self.runtime_services and not self.binary.is_file():
             raise RuntimeError("native echor binary is required (BOXIE_NATIVE_BINARY)")
         super().start()
         for name, value in (
-            ("agent.secret", secrets.token_hex(24)),
+            ("orchestrator.secret", secrets.token_hex(24)),
             ("consumer.secret", self.consumer),
         ):
             path = self.root / name
             path.write_text(value)
             path.chmod(0o600)
         self.dsn = f"host=127.0.0.1 port={self.pg_port} dbname=boxie user=boxie password={self.env['BOXIE_DB_PASSWORD']} sslmode=disable"
-        for name, host in (("postgres-dsn", "postgres"), ("agent-dsn", "faults")):
+        for name, host in (("postgres-dsn", "postgres"), ("orchestrator-dsn", "faults")):
             path = self.root / name
             path.write_text(
                 f"host={host} dbname=boxie user=boxie password={self.env['BOXIE_DB_PASSWORD']} sslmode=disable"
             )
             path.chmod(0o600)
-        migrate(self.dsn, ROOT / "tools/boxie/src/boxie/persistence/migrations")
+        migrate(self.dsn, ROOT / "tools/boxie/alembic")
         # Compose's nested profiles bind must not create a root-owned directory.
         (self.root / "data/profiles").mkdir(parents=True, mode=0o700)
         (self.root / "faults").mkdir()
-        profiles = json.loads(
-            (ROOT / "tools/cli-playground/infra/profiles/playground.json").read_text()
+        profiles = (
+            json.loads((ROOT / "tools/cli-playground/infra/profiles/playground.json").read_text())
+            if "playground" in self.runtime_services
+            else {}
         )
         profiles.update(json.loads((ROOT / "tools/boxie/infra/profiles.example.json").read_text()))
         image = self.command(
@@ -116,7 +119,7 @@ class LifecycleStack(ProductionStack):
                 "docker",
                 "image",
                 "inspect",
-                os.environ.get("BOXIE_SANDBOX_IMAGE", "clis-playground-sandbox:lifecycle"),
+                self.env.get("BOXIE_SANDBOX_IMAGE", "clis-playground-sandbox:lifecycle"),
                 "--format",
                 "{{.Id}}",
             ]
@@ -188,25 +191,23 @@ class LifecycleStack(ProductionStack):
         raise RuntimeError(
             f"lifecycle API {self.api_url} did not become ready: {last}; "
             f"published={self.runtime_command('port', 'api', '8090')}\n"
-            + readiness_details(self)
-            + "\n"
             + self.runtime_command("logs", "--tail", "80")
         )
 
-    def agent_boot(self) -> UUID:
-        """Read the running agent's authenticated identity after startup reconciliation."""
+    def orchestrator_boot(self) -> UUID:
+        """Read the running orchestrator's authenticated identity after startup reconciliation."""
         return UUID(
             self.runtime_command(
                 "exec",
                 "-T",
-                "agent",
+                "orchestrator",
                 "python",
                 "-c",
                 """
 import time
 from pathlib import Path
 import httpx
-credential = Path('/run/secrets/agent').read_text().strip()
+credential = Path('/run/secrets/orchestrator').read_text().strip()
 with httpx.Client(headers={'Authorization': 'Bearer ' + credential}, timeout=1, trust_env=False) as client:
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
@@ -218,7 +219,7 @@ with httpx.Client(headers={'Authorization': 'Bearer ' + credential}, timeout=1, 
         except httpx.HTTPError:
             time.sleep(0.2)
     else:
-        raise RuntimeError('restarted agent identity unavailable')
+        raise RuntimeError('restarted orchestrator identity unavailable')
 """,
             )
         )
@@ -233,24 +234,27 @@ with httpx.Client(headers={'Authorization': 'Bearer ' + credential}, timeout=1, 
             path.unlink(missing_ok=True)
 
     def process(self, service: str, action: str) -> None:
-        if service not in {"api", "worker", "agent", "temporal"} or action not in {"kill", "start"}:
+        if service not in {"api", "orchestrator", "temporal"} or action not in {
+            "kill",
+            "start",
+        }:
             raise ValueError("unknown owned process action")
         if service == "temporal":
             self.compose("temporal", action, service)
         else:
             self.runtime_command(action, service)
 
-    def rows(self, query: str, args: tuple[object, ...] = ()) -> list[dict[str, Any]]:
-        with psycopg.connect(self.dsn, row_factory=dict_row) as conn:
-            return conn.execute(query, args).fetchall()
+    async def rows(self, statement: Select[Any]) -> list[dict[str, Any]]:
+        async with database(self.dsn) as sessions, sessions() as session:
+            connection = await session.connection()
+            return [dict(row) for row in (await connection.execute(statement)).mappings()]
 
     def children(self) -> list[str]:
         ids = self.command(
             [
                 "docker",
                 "ps",
-                "--all",
-                "--quiet",
+                "-aq",
                 "--no-trunc",
                 "--filter",
                 "label=boxie.installation=" + self.installation,
@@ -263,22 +267,11 @@ with httpx.Client(headers={'Authorization': 'Bearer ' + credential}, timeout=1, 
             try:
                 info = json.loads(self.command(["docker", "inspect", identifier]))[0]
             except RuntimeError:
-                # Cleanup can remove a listed child before inspection. Confirm
-                # its exact ID is absent, without ownership filters masking it.
-                remains = self.command(
-                    [
-                        "docker",
-                        "ps",
-                        "--all",
-                        "--quiet",
-                        "--no-trunc",
-                        "--filter",
-                        "id=" + identifier,
-                    ]
-                )
-                if not remains:
-                    continue
-                raise
+                if self.command(
+                    ["docker", "ps", "-aq", "--no-trunc", "--filter", "id=" + identifier]
+                ):
+                    raise
+                continue
             labels = info["Config"]["Labels"]
             if (
                 labels.get("boxie.installation") == self.installation
@@ -324,10 +317,14 @@ with httpx.Client(headers={'Authorization': 'Bearer ' + credential}, timeout=1, 
         for name in ("hold_create", "hold_commit", "fail_delete", "fail_start"):
             self.fault(name, False)
         for operation in (
-            lambda: (self.root / "runtime.log").write_text(
-                self.runtime_command("logs", "--no-color")
+            *(
+                [
+                    lambda: (self.root / "runtime.log").write_text(
+                        self.runtime_command("logs", "--no-color")
+                    )
+                ]
                 if self.capture_teardown_logs
-                else "disabled by smoke evidence policy"
+                else []
             ),
             lambda: self.runtime_command("down", "--volumes", "--remove-orphans"),
             self.clean_children,

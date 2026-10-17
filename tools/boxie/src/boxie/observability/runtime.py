@@ -7,21 +7,22 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from service_telemetry.logging import LogRuntime, run_process
-from service_telemetry.metrics import MetricsListener
 from temporalio.api.enums.v1 import TaskQueueType
 from temporalio.api.taskqueue.v1 import TaskQueue
 from temporalio.api.workflowservice.v1 import DescribeNamespaceRequest, DescribeTaskQueueRequest
 
 from boxie.observability.metrics import Metrics
-from boxie.temporal.contracts import TASK_QUEUE
+from boxie.observability.telemetry.logging import LogRuntime, run_process
+from boxie.observability.telemetry.metrics import MetricsListener
+from boxie.temporal.contracts import lifecycle_queue, maintenance_queue
 
 if TYPE_CHECKING:
     from temporalio.client import Client
 
-    from boxie.persistence.postgres import Pool
-    from boxie.sandbox.durable_client import DurableAgentClient
-    from boxie.sandbox.lifecycle import DurableAgent
+    from boxie.domain.models import OrchestratorIdentity
+    from boxie.persistence.database import SessionFactory
+    from boxie.sandbox.execution.orchestrator import Orchestrator
+    from boxie.sandbox.transport.client import OrchestratorClient
 
 
 def run_metrics_process(logs: LogRuntime, role: str, run: Callable[[Metrics], None]) -> None:
@@ -31,12 +32,16 @@ def run_metrics_process(logs: LogRuntime, role: str, run: Callable[[Metrics], No
     def start() -> None:
         nonlocal listener
         metrics = Metrics(role, logs=logs)
-        listener = MetricsListener(
-            metrics,
-            os.environ.get("BOXIE_METRICS_HOST", "127.0.0.1"),
-            {"api": 9101, "worker": 9102, "agent": 9103}[role],
-        )
-        listener.start()
+        try:
+            listener = MetricsListener(
+                metrics,
+                os.environ.get("BOXIE_METRICS_HOST", "127.0.0.1"),
+                {"api": 9101, "orchestrator": 9103}[role],
+            )
+        except ValueError:
+            logs.configuration_error()
+        else:
+            listener.start()
         run(metrics)
 
     def close_metrics(remaining: float) -> None:
@@ -54,26 +59,33 @@ async def _probe(metrics: Metrics, name: str, check: Callable[[], Awaitable[bool
     metrics.dependency(name, ready)
 
 
-async def sql_ready(pool: Pool) -> bool:
-    async with pool.connection(timeout=0.5) as conn:
-        await conn.execute("SELECT 1")
+async def sql_ready(sessions: SessionFactory) -> bool:
+    from sqlmodel import select
+
+    async with sessions() as session:
+        await session.exec(select(1))
     return True
 
 
-async def api_dependencies(metrics: Metrics, agent: DurableAgentClient, temporal: Client) -> None:
+async def api_dependencies(
+    metrics: Metrics,
+    orchestrator: OrchestratorClient,
+    temporal: Client,
+    identity: OrchestratorIdentity,
+) -> None:
     async def namespace() -> bool:
         await temporal.workflow_service.describe_namespace(
             DescribeNamespaceRequest(namespace=temporal.namespace), timeout=timedelta(seconds=5)
         )
         return True
 
-    async def poller(kind: TaskQueueType.ValueType) -> bool:
-        from boxie.bootstrap.durable import WORKER_PRESENCE_SECONDS
+    async def poller(kind: TaskQueueType.ValueType, queue_name: str) -> bool:
+        from boxie.bootstrap.dependencies import WORKER_PRESENCE_SECONDS
 
         queue = await temporal.workflow_service.describe_task_queue(
             DescribeTaskQueueRequest(
                 namespace=temporal.namespace,
-                task_queue=TaskQueue(name=TASK_QUEUE),
+                task_queue=TaskQueue(name=queue_name),
                 task_queue_type=kind,
             ),
             timeout=timedelta(seconds=5),
@@ -85,17 +97,25 @@ async def api_dependencies(metrics: Metrics, agent: DurableAgentClient, temporal
         )
 
     async def workflow() -> bool:
-        return await poller(TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW)
+        return await poller(TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW, lifecycle_queue(identity))
 
     async def activity() -> bool:
-        return await poller(TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY)
+        return await poller(TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY, lifecycle_queue(identity))
+
+    async def maintenance_workflow() -> bool:
+        return await poller(TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW, maintenance_queue(identity))
+
+    async def maintenance_activity() -> bool:
+        return await poller(TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY, maintenance_queue(identity))
 
     checks = (
-        ("agent", agent.ready),
+        ("orchestrator", orchestrator.ready),
         ("temporal", temporal.service_client.check_health),
         ("namespace", namespace),
         ("workflow_poller", workflow),
         ("activity_poller", activity),
+        ("maintenance_workflow_poller", maintenance_workflow),
+        ("maintenance_activity_poller", maintenance_activity),
     )
     while True:
         try:
@@ -106,29 +126,33 @@ async def api_dependencies(metrics: Metrics, agent: DurableAgentClient, temporal
         await asyncio.sleep(15)
 
 
-async def agent_cache(metrics: Metrics, agent: DurableAgent) -> None:
+async def orchestrator_cache(metrics: Metrics, orchestrator: Orchestrator) -> None:
     while True:
         remaining = [
-            max(0, deadline.lease - agent.monotonic())
-            for identifier, deadline in agent.deadlines.items()
-            if identifier in agent.records
-            and agent.records[identifier].state.value in ("accepted", "provisioning", "ready")
+            max(0, runtime.deadlines.lease - orchestrator.monotonic())
+            for identifier, runtime in orchestrator.runtimes.items()
+            if runtime.deadlines is not None
+            and identifier in orchestrator.records
+            and orchestrator.records[identifier].state.value
+            in ("accepted", "provisioning", "ready")
         ]
         metrics.refresh_lease(len(remaining), min(remaining) if remaining else None)
-        metrics.dependency("execution", agent.execution_ready)
+        metrics.dependency("execution", orchestrator.execution_ready)
         await asyncio.sleep(1)
 
 
-async def agent_dependencies(metrics: Metrics, agent: DurableAgent, pool: Pool) -> None:
+async def orchestrator_dependencies(
+    metrics: Metrics, orchestrator: Orchestrator, sessions: SessionFactory
+) -> None:
     async def postgres() -> bool:
-        return await sql_ready(pool)
+        return await sql_ready(sessions)
 
     while True:
         try:
             async with asyncio.timeout(5):
                 await asyncio.gather(
                     _probe(metrics, "postgres", postgres),
-                    _probe(metrics, "docker", agent.docker.ready),
+                    _probe(metrics, "docker", orchestrator.docker.ready),
                 )
         except TimeoutError:
             pass

@@ -28,7 +28,7 @@ package = false
 required-version = ">=0.13.0"
 
 [tool.uv.workspace]
-members = ["infra/platform", "tools/deploy", "infra/ingress", "infra/observability", "tools/service-telemetry", "tools/boxie", "tools/boxie/tests/support", "tools/cli-playground", "tools/boxie/infra", "tools/cli-playground/infra", "tools/cli-bench", "tools/cli-testing"]
+members = ["infra/platform", "tools/deploy", "infra/ingress", "infra/observability", "tools/boxie", "tools/boxie/tests/support", "tools/cli-playground", "tools/boxie/infra", "tools/cli-playground/infra", "tools/cli-bench", "tools/cli-testing"]
 
 [tool.ruff]
 target-version = "py315"
@@ -51,7 +51,7 @@ strict = true
 [tool.pytest]
 testpaths = ["infra/environments/single-host/tests", "infra/platform/tests", "tools/deploy/tests", "infra/ingress/tests", "infra/observability/tests", "tools/boxie/tests", "tools/ci/tests", "tools/cli-bench/tests", "tools/cli-playground/tests", "tools/cli-testing/tests"]
 pythonpath = ["tools", "tools/cli-bench"]
-addopts = ["--strict-config", "--strict-markers", "-m", "not integration"]
+addopts = ["--strict-config", "--strict-markers", "-p", "boxie_test_support.dependencies", "-m", "not integration"]
 markers = ["integration: real isolated builds/installations and external-tool checks; prerequisites required"]
 
 [tool.uv.sources]
@@ -59,7 +59,6 @@ platform-infra = { workspace = true }
 clis-deploy = { workspace = true }
 ingress-infra = { workspace = true }
 observability-infra = { workspace = true }
-service-telemetry = { workspace = true }
 boxie = { workspace = true }
 boxie-test-support = { workspace = true }
 cli-playground = { workspace = true }

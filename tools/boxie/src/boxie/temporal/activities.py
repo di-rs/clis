@@ -1,27 +1,27 @@
 """Activity-owned I/O: sensitive requests never cross the workflow boundary."""
 
 import asyncio
-from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
+from sqlmodel import select
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 from temporalio.worker import ActivityInboundInterceptor, ExecuteActivityInput, Interceptor
 
 from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import (
-    AgentObservation,
-    DurableRequest,
     EnsureRequest,
-    ExpiryRequest,
+    OrchestratorObservation,
     SandboxRef,
+    SandboxRequest,
 )
 from boxie.domain.models import SandboxState, TerminationReason
 from boxie.observability.context import bind_context
 from boxie.observability.events import Transition, deliver, emit
+from boxie.persistence.models import Sandbox
 from boxie.persistence.postgres import PostgresLifecycle
-from boxie.sandbox.durable_client import DurableAgentClient
+from boxie.sandbox.execution.orchestrator import Orchestrator
 from boxie.temporal.contracts import LifecycleFacts, StopRequest
 
 
@@ -55,6 +55,10 @@ class SafeActivityInbound(ActivityInboundInterceptor):
                 }:
                     category = error.type
                     non_retryable = error.non_retryable
+                # Cleanup has no terminal failure: accepted ownership must survive
+                # even malformed or temporarily missing dependency state.
+                if activity.info().activity_type in {"request_stop", "remove_sandbox"}:
+                    non_retryable = False
                 deliver(emit, Transition("activity.failed", reason=category, outcome="failed"))
                 # Sanitize before SDK logging, including nested context and details.
                 raise ApplicationError(
@@ -76,56 +80,41 @@ class SafeActivityErrors(Interceptor):
 
 
 class LifecycleActivities:
-    def __init__(self, repository: PostgresLifecycle, agent: DurableAgentClient) -> None:
-        self.repository, self.agent = repository, agent
+    def __init__(self, repository: PostgresLifecycle, orchestrator: Orchestrator) -> None:
+        self.repository, self.orchestrator = repository, orchestrator
 
-    async def _request(self, sandbox_id: str) -> DurableRequest:
+    async def _request(self, sandbox_id: str) -> SandboxRequest:
         return await self.repository.load_request(UUID(sandbox_id))
 
-    async def _bind(self, request: DurableRequest) -> UUID:
-        boot = await self.agent.boot(request.identity)
-        if not await self.repository.bind_agent_boot(
+    async def _bind(self, request: SandboxRequest) -> UUID:
+        if request.identity != self.orchestrator.config.identity:
+            raise BoxieError(404, "orchestrator identity not found")
+        boot = self.orchestrator.boot_id
+        if not await self.repository.bind_orchestrator_boot(
             request.principal,
             request.identity,
             request.sandbox_id,
             request.generation,
-            request.agent_boot_id,
+            request.orchestrator_boot_id,
             boot,
         ):
-            raise BoxieError(409, "agent boot changed")
+            raise BoxieError(409, "orchestrator boot changed")
         return boot
 
-    async def _record(self, observation: AgentObservation) -> None:
+    async def _record(self, observation: OrchestratorObservation) -> None:
         await self.repository.record_observation(observation)
 
     @activity.defn
     async def load_request(self, sandbox_id: str) -> LifecycleFacts:
         request = await self._request(sandbox_id)
-        async with self.repository.pool.connection() as conn:
-            row = await (
-                await conn.execute(
-                    """SELECT s.cleaned_at,s.state,o.ready_at,o.last_input_at,o.disconnected_at
-                FROM sandboxes s LEFT JOIN agent_observations o ON o.sandbox_id=s.id
-                WHERE s.id=%s""",
-                    (request.sandbox_id,),
-                )
-            ).fetchone()
-        assert row is not None
-        deadlines = [request.absolute_deadline]
-        if row["ready_at"]:
-            deadlines.append(
-                (row["last_input_at"] or row["ready_at"])
-                + timedelta(seconds=request.spec.policy.idle_seconds)
-            )
-        if row["disconnected_at"]:
-            deadlines.append(
-                row["disconnected_at"] + timedelta(seconds=request.spec.policy.disconnect_seconds)
-            )
+        async with self.repository.sessions() as session:
+            row = (
+                await session.exec(select(Sandbox).where(Sandbox.id == request.sandbox_id))
+            ).one()
         return LifecycleFacts(
             request.absolute_deadline.timestamp(),
-            request.desired_stop or row["state"] in ("terminating", "terminated", "failed"),
-            row["cleaned_at"] is not None,
-            min(deadlines).timestamp(),
+            request.desired_stop or row.state in ("terminating", "terminated", "failed"),
+            row.cleaned_at is not None,
         )
 
     @activity.defn
@@ -133,14 +122,9 @@ class LifecycleActivities:
         request = await self._request(sandbox_id)
         if request.desired_stop:
             return
-        boot = await self._bind(request)
-        observation = await self.agent.ensure_execution(EnsureRequest.from_durable(request), boot)
+        await self._bind(request)
+        observation = await self.orchestrator.ensure_ready(EnsureRequest.from_request(request))
         await self._record(observation)
-        while observation.state in (SandboxState.ACCEPTED, SandboxState.PROVISIONING):
-            activity.heartbeat()
-            await asyncio.sleep(1)
-            observation = await self.agent.inspect_execution(request, boot)
-            await self._record(observation)
         if observation.state != SandboxState.READY:
             raise ApplicationError(
                 "provisioning stopped", type="ProvisioningStopped", non_retryable=True
@@ -149,78 +133,44 @@ class LifecycleActivities:
     @activity.defn
     async def inspect_and_renew(self, sandbox_id: str) -> LifecycleFacts:
         request = await self._request(sandbox_id)
-        if (await self.load_request(sandbox_id)).cleaned:
-            return await self.load_request(sandbox_id)
+        facts = await self.load_request(sandbox_id)
+        if facts.cleaned:
+            return facts
         boot = await self._bind(request)
+        ref = SandboxRef(request.sandbox_id, request.generation)
         try:
-            observation = await self.agent.inspect_execution(request, boot)
+            observation = await self.orchestrator.inspect(ref)
         except BoxieError as error:
             if error.status != 404:
                 raise
-            # Provision has not registered yet; only ensure may initiate it.
-            return await self.load_request(sandbox_id)
+            return facts
+        record = self.orchestrator.records[ref.id]
+        if self.orchestrator._expiry(record) is not None:
+            await self.orchestrator._supervised_reconcile(record)
+            observation = await self.orchestrator.inspect(ref)
         if not request.desired_stop and observation.state in (
             SandboxState.ACCEPTED,
             SandboxState.PROVISIONING,
             SandboxState.READY,
         ):
             try:
-                observation = await self.agent.renew_execution(request, boot)
+                observation = await self.orchestrator.renew_control_lease(ref, boot)
             except BoxieError as error:
                 if error.status != 409:
                     raise
-                observation = await self.agent.inspect_execution(request, boot)
+                observation = await self.orchestrator.inspect(ref)
+        if observation.reason is not None:
+            await self.repository.terminate(
+                request.principal, request.sandbox_id, observation.reason
+            )
         await self._record(observation)
         return await self.load_request(sandbox_id)
 
     @activity.defn
-    async def expire_if_current(self, sandbox_id: str) -> LifecycleFacts:
-        request = await self._request(sandbox_id)
-        now = datetime.now(UTC)
-        if now >= request.absolute_deadline:
-            await self.repository.terminate(
-                request.principal, request.sandbox_id, TerminationReason.EXPIRED
-            )
-        else:
-            boot = await self._bind(request)
-            observation = await self.agent.inspect_execution(request, boot)
-            choices: list[tuple[datetime, TerminationReason]] = []
-            if observation.ready_at:
-                choices.append(
-                    (
-                        (observation.last_input_at or observation.ready_at)
-                        + timedelta(seconds=request.spec.policy.idle_seconds),
-                        TerminationReason.IDLE,
-                    )
-                )
-            if observation.disconnected_at:
-                choices.append(
-                    (
-                        observation.disconnected_at
-                        + timedelta(seconds=request.spec.policy.disconnect_seconds),
-                        TerminationReason.DISCONNECTED,
-                    )
-                )
-            if choices:
-                deadline, reason = min(choices, key=lambda item: item[0])
-                if now >= deadline:
-                    observation = await self.agent.expire_execution(
-                        request,
-                        ExpiryRequest(
-                            SandboxRef(request.sandbox_id, request.generation),
-                            reason,
-                            observation.event_version,
-                            boot,
-                        ),
-                    )
-            await self._record(observation)
-        return await self.load_request(sandbox_id)
-
-    @activity.defn
     async def request_stop(self, request: StopRequest) -> None:
-        durable = await self._request(request.sandbox_id)
+        sandbox = await self._request(request.sandbox_id)
         await self.repository.terminate(
-            durable.principal, durable.sandbox_id, TerminationReason(request.reason)
+            sandbox.principal, sandbox.sandbox_id, TerminationReason(request.reason)
         )
 
     @activity.defn
@@ -229,41 +179,24 @@ class LifecycleActivities:
             return
         request = await self._request(sandbox_id)
         if not request.desired_stop:
-            raise BoxieError(409, "durable stop required before removal")
-        boot = await self._bind(request)
-        try:
-            observation = await self.agent.remove_execution(request, boot)
-        except BoxieError as error:
-            if error.status != 404:
-                raise
-            # Initialize a fenced absent identity. Durable stop is already committed;
-            # the agent-owned SQL guard forbids create/start even if this RPC is lost.
-            await self.agent.ensure_execution(EnsureRequest.from_durable(request), boot)
-            observation = await self.agent.remove_execution(request, boot)
+            raise BoxieError(409, "stop must be committed to SQL before removal")
+        await self._bind(request)
+        await self.orchestrator.initialize(EnsureRequest.from_request(request))
+        observation = await self.orchestrator.remove(
+            SandboxRef(request.sandbox_id, request.generation),
+            request.reason or TerminationReason.REQUESTED,
+        )
         await self._record(observation)
-        if not observation.removal_confirmed:
+        # A racing boot transition or newer observation can reject the report.
+        # Activity completion must prove committed SQL finality, not only RPC success.
+        if not (await self.load_request(sandbox_id)).cleaned:
             raise ApplicationError("physical cleanup pending", type="CleanupPending")
-
-    @activity.defn
-    async def record_observation(self, sandbox_id: str) -> None:
-        request = await self._request(sandbox_id)
-        boot = await self._bind(request)
-        await self._record(await self.agent.inspect_execution(request, boot))
-
-    @activity.defn
-    async def confirm_removed(self, sandbox_id: str) -> bool:
-        # Agent confirmation was persisted atomically with release; activity replay
-        # after a lost SQL acknowledgement is a read, never a second release.
-        return (await self.load_request(sandbox_id)).cleaned
 
     def registered(self) -> list[Any]:
         return [
             self.load_request,
             self.ensure_sandbox,
             self.inspect_and_renew,
-            self.expire_if_current,
             self.request_stop,
             self.remove_sandbox,
-            self.record_observation,
-            self.confirm_removed,
         ]

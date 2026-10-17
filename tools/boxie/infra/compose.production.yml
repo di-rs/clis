@@ -8,7 +8,7 @@ services:
     - /etc/boxie/api.json
     volumes:
     - ${BOXIE_API_CONFIG:?Set API config file}:/etc/boxie/api.json:ro
-    - ${BOXIE_AGENT_CREDENTIAL_FILE:?Set agent credential file}:/run/secrets/agent:ro
+    - ${BOXIE_ORCHESTRATOR_CREDENTIAL_FILE:?Set orchestrator credential file}:/run/secrets/orchestrator:ro
     - ${BOXIE_CONSUMER_CREDENTIAL_FILE:?Set consumer credential file}:/run/secrets/consumer:ro
     - ${BOXIE_POSTGRES_DSN_FILE:?Set Boxie database DSN file}:/run/secrets/postgres-dsn:ro
     - ${BOXIE_TEMPORAL_CA_FILE:?Set Temporal frontend CA}:/run/secrets/temporal-ca.pem:ro
@@ -31,16 +31,18 @@ services:
     - no-new-privileges:true
     init: true
     restart: unless-stopped
+    environment:
+      BOXIE_RELEASE: ${CLIS_RELEASE_REVISION:?Set release revision}
+      BOXIE_METRICS_HOST: 0.0.0.0
     logging:
       driver: journald
       options:
         mode: non-blocking
         max-buffer-size: 4m
         tag: boxie-api
-    environment:
-      BOXIE_METRICS_HOST: 0.0.0.0
-      BOXIE_RELEASE: ${CLIS_RELEASE_REVISION:?Set release revision}
+    pids_limit: 256
     user: 10001:10001
+    mem_limit: 512m
     healthcheck:
       test:
       - CMD
@@ -55,26 +57,27 @@ services:
       retries: 8
       start_period: 30s
     stop_grace_period: 10s
-    mem_limit: 512m
-    pids_limit: 256
-  agent:
+  orchestrator:
     image: ${BOXIE_RUNTIME_IMAGE:?Set approved immutable Boxie image}
     command:
-    - boxie-agent
+    - boxie-orchestrator
     - --config
-    - /etc/boxie/agent.json
+    - /etc/boxie/orchestrator.json
     volumes:
     - /var/run/docker.sock:/var/run/docker.sock
     - ${BOXIE_DATA_DIR:?Set absolute daemon host data directory}:${BOXIE_DATA_DIR}
-    - ${BOXIE_AGENT_CONFIG:?Set agent config file}:/etc/boxie/agent.json:ro
+    - ${BOXIE_ORCHESTRATOR_CONFIG:?Set orchestrator config file}:/etc/boxie/orchestrator.json:ro
     - ${BOXIE_PROFILES_FILE:?Set approved profiles file}:/etc/boxie/profiles.json:ro
-    - ${BOXIE_AGENT_CREDENTIAL_FILE}:/run/secrets/agent:ro
+    - ${BOXIE_ORCHESTRATOR_CREDENTIAL_FILE}:/run/secrets/orchestrator:ro
     - ${BOXIE_POSTGRES_DSN_FILE:?Set Boxie database DSN file}:/run/secrets/postgres-dsn:ro
+    - ${BOXIE_TEMPORAL_CA_FILE:?Set Temporal frontend CA}:/run/secrets/temporal-ca.pem:ro
+    - ${BOXIE_ORCHESTRATOR_TEMPORAL_CERT_FILE:?Set dedicated Temporal client certificate}:/run/secrets/temporal-client.pem:ro
+    - ${BOXIE_ORCHESTRATOR_TEMPORAL_KEY_FILE:?Set dedicated Temporal client key}:/run/secrets/temporal-client.key:ro
     networks:
       control: {}
       metrics:
         aliases:
-        - boxie-agent
+        - boxie-orchestrator
     read_only: true
     tmpfs:
     - /tmp:size=67108864,nosuid,nodev,noexec
@@ -84,87 +87,34 @@ services:
     - no-new-privileges:true
     init: true
     restart: unless-stopped
+    environment:
+      BOXIE_RELEASE: ${CLIS_RELEASE_REVISION:?Set release revision}
+      BOXIE_METRICS_HOST: 0.0.0.0
     logging:
       driver: journald
       options:
         mode: non-blocking
         max-buffer-size: 4m
-        tag: boxie-agent
-    environment:
-      BOXIE_METRICS_HOST: 0.0.0.0
-      BOXIE_RELEASE: ${CLIS_RELEASE_REVISION:?Set release revision}
+        tag: boxie-orchestrator
+    pids_limit: 256
     user: 10001:10001
+    mem_limit: 768m
+    healthcheck:
+      test:
+      - CMD
+      - /app/.venv/bin/python
+      - -m
+      - boxie.bootstrap.health
+      - orchestrator
+      - --config
+      - /etc/boxie/orchestrator.json
+      interval: 15s
+      timeout: 12s
+      retries: 8
+      start_period: 30s
+    stop_grace_period: 60s
     group_add:
     - ${BOXIE_DOCKER_GID:?Set host Docker group}
-    healthcheck:
-      test:
-      - CMD
-      - /app/.venv/bin/python
-      - -m
-      - boxie.bootstrap.health
-      - agent
-      - --config
-      - /etc/boxie/agent.json
-      interval: 15s
-      timeout: 12s
-      retries: 8
-      start_period: 30s
-    stop_grace_period: 45s
-    mem_limit: 512m
-    pids_limit: 256
-  worker:
-    image: ${BOXIE_RUNTIME_IMAGE:?Set approved immutable Boxie image}
-    command:
-    - boxie-worker
-    - --config
-    - /etc/boxie/worker.json
-    volumes:
-    - ${BOXIE_WORKER_CONFIG:?Set worker config file}:/etc/boxie/worker.json:ro
-    - ${BOXIE_AGENT_CREDENTIAL_FILE}:/run/secrets/agent:ro
-    - ${BOXIE_POSTGRES_DSN_FILE}:/run/secrets/postgres-dsn:ro
-    - ${BOXIE_TEMPORAL_CA_FILE:?Set Temporal frontend CA}:/run/secrets/temporal-ca.pem:ro
-    - ${BOXIE_WORKER_TEMPORAL_CERT_FILE:?Set dedicated Temporal client certificate}:/run/secrets/temporal-client.pem:ro
-    - ${BOXIE_WORKER_TEMPORAL_KEY_FILE:?Set dedicated Temporal client key}:/run/secrets/temporal-client.key:ro
-    networks:
-      control: {}
-      metrics:
-        aliases:
-        - boxie-worker
-    read_only: true
-    tmpfs:
-    - /tmp:size=67108864,nosuid,nodev,noexec
-    cap_drop:
-    - ALL
-    security_opt:
-    - no-new-privileges:true
-    init: true
-    restart: unless-stopped
-    logging:
-      driver: journald
-      options:
-        mode: non-blocking
-        max-buffer-size: 4m
-        tag: boxie-worker
-    environment:
-      BOXIE_METRICS_HOST: 0.0.0.0
-      BOXIE_RELEASE: ${CLIS_RELEASE_REVISION:?Set release revision}
-    user: 10001:10001
-    healthcheck:
-      test:
-      - CMD
-      - /app/.venv/bin/python
-      - -m
-      - boxie.bootstrap.health
-      - worker
-      - --config
-      - /etc/boxie/worker.json
-      interval: 15s
-      timeout: 12s
-      retries: 8
-      start_period: 30s
-    stop_grace_period: 25s
-    mem_limit: 768m
-    pids_limit: 256
 networks:
   consumer:
     external: true

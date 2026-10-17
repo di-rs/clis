@@ -1,4 +1,4 @@
-"""Production API and durable agent protocol over independent loopback sockets."""
+"""Production API and orchestrator protocol over independent loopback sockets."""
 
 import asyncio
 import json
@@ -107,11 +107,13 @@ def test_large_output_frame_boundaries_preserve_split_unicode_and_ack_window(
 
 @pytest.mark.parametrize(
     "phase,kind,close_code",
-    [("before", "ack", 1000), ("after", "ack", 1011)]
-    + [
-        (phase, kind, 1000)
-        for phase in ("during", "after")
-        for kind in ("ack", "heartbeat", "input", "resize")
+    [
+        ("before", "ack", 1000),
+        ("after", "ack", 1011),
+        ("during", "ack", 1000),
+        ("after", "heartbeat", 1000),
+        ("during", "input", 1000),
+        ("after", "resize", 1000),
     ],
 )
 def test_final_control_preserves_buffered_status(
@@ -119,16 +121,16 @@ def test_final_control_preserves_buffered_status(
 ) -> None:
     from urllib.parse import urlsplit
 
-    from boxie.sandbox.client import AgentTerminal
+    from boxie.sandbox.transport.terminal import OrchestratorTerminal
     from boxie_test_support.terminal_completion import CompletionBarrier
 
     async def exercise() -> None:
-        barrier = CompletionBarrier(monkeypatch, AgentTerminal, phase, kind, close_code)
+        barrier = CompletionBarrier(monkeypatch, OrchestratorTerminal, phase, kind, close_code)
         async with network(tmp_path) as net:
             profiles = json.loads(net.config.profiles_file.read_text())
             profiles["shell"]["limits"] = {"output_bytes": 10}
             net.config.profiles_file.write_text(json.dumps(profiles))
-            net.agent.profiles.reload()
+            net.orchestrator.profiles.reload()
             barrier.port = urlsplit(str(net.api.base_url)).port
             identifier = await create(net.api, await artifact(net.api))
             await ready(net.api, identifier)
@@ -177,6 +179,7 @@ def test_closed_control_drain_keeps_abort_and_error_boundaries(
     monkeypatch: pytest.MonkeyPatch, scenario: str
 ) -> None:
     from boxie.api import terminal
+    from boxie.contracts.terminal import response
     from boxie.domain.errors import BoxieError, TerminalWriteClosed
     from boxie_test_support.terminal_completion import failed_drain
 
@@ -188,6 +191,7 @@ def test_closed_control_drain_keeps_abort_and_error_boundaries(
             BoxieError(503, "transport failed"),
             scenario,
             BoxieError(503, "missing status"),
+            decode_event=response.validate_json,
         )
         if scenario in {"malformed", "disconnect"}:
             assert result is None

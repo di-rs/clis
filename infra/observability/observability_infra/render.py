@@ -21,6 +21,8 @@ def main() -> int:
     try:
         settings: dict[str, Any] = json.loads(args.settings.read_text())
         allowed = {
+            "installation_id",
+            "temporal_namespace",
             "environment",
             "host",
             "metrics_network",

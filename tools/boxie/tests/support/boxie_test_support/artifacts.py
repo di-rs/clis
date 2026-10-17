@@ -1,6 +1,6 @@
 """Explicit in-memory metadata boundary for terminal-only tests, with real ZIP extraction.
 
-No persistence, SQL accounting or publication durability is claimed by this helper.
+This helper provides no persistence, SQL accounting or publication commit guarantee.
 """
 
 import hashlib

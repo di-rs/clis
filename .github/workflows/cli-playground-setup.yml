@@ -1,4 +1,4 @@
-name: Single host platform setup
+name: ☁️ Single host platform setup
 
 on:
   workflow_dispatch:
@@ -7,6 +7,7 @@ permissions: {}
 
 jobs:
   provision:
+    name: ☁️ Provision playground infrastructure
     if: ${{ github.ref == 'refs/heads/master' }}
     environment: platform
     runs-on: ubuntu-24.04
@@ -30,19 +31,23 @@ jobs:
       PLATFORM_CONFIG: ${{ vars.PLATFORM_CONFIG }}
       OPERATOR_TUNNEL_SECRET: ${{ secrets.OPERATOR_TUNNEL_SECRET }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: 📥 Check out reviewed infrastructure source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: 🐍 Set up uv and Python
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: '0.13.0'
           enable-cache: false
-      - run: uv sync --locked --all-packages
-      - uses: pulumi/setup-pulumi@b374ceb6168550de27c6eba92e01c1a774040e11 # v2
+      - name: 📦 Install locked Python workspace dependencies
+        run: uv sync --locked --all-packages
+      - name: ☁️ Set up Pulumi infrastructure tooling
+        uses: pulumi/setup-pulumi@b374ceb6168550de27c6eba92e01c1a774040e11 # v2
         with:
           pulumi-version: '3.268.0'
-      - name: Materialize the reviewed nonsecret environment settings
+      - name: 🔧 Materialize the reviewed nonsecret environment settings
         run: |
           python3 - <<'PYCONFIG'
           import json, os
@@ -50,7 +55,7 @@ jobs:
           value = json.loads(os.environ['PLATFORM_CONFIG'])
           Path('infra/environments/single-host/Pulumi.production.yaml').write_text(json.dumps({'config': {'single-host:environment': value}}))
           PYCONFIG
-      - name: Provision shared host, storage and selected DNS
+      - name: 🔧 Provision shared host, storage and selected DNS
         working-directory: infra/environments/single-host
         run: |
           pulumi login "$PULUMI_BACKEND_URL" --non-interactive

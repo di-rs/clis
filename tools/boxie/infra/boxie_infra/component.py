@@ -10,13 +10,13 @@ class BoxieConfig(BaseModel):
 
     image: str = Field(pattern="^" + IMAGE + "$")
     consumer_credential_ref: str = Field(pattern="^" + REFERENCE + "$")
-    agent_credential_ref: str = Field(pattern="^" + REFERENCE + "$")
+    orchestrator_credential_ref: str = Field(pattern="^" + REFERENCE + "$")
     postgres_dsn_ref: str = Field(pattern="^" + REFERENCE + "$")
     temporal_address: str = Field(pattern=r"^[a-z][a-z0-9-]{0,62}:[1-9][0-9]{0,4}$")
     temporal_namespace: str = Field(pattern=r"^[a-z][a-z0-9-]{0,62}$")
     temporal_ca_ref: str = Field(pattern="^" + REFERENCE + "$")
     temporal_api_identity_ref: str = Field(pattern="^" + REFERENCE + "$")
-    temporal_worker_identity_ref: str = Field(pattern="^" + REFERENCE + "$")
+    temporal_orchestrator_identity_ref: str = Field(pattern="^" + REFERENCE + "$")
 
 
 class Boxie(pulumi.ComponentResource):

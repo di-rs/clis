@@ -193,7 +193,7 @@ async def test_environment_supplies_the_observability_owned_journal_policy() -> 
         item["path"]: item["content"]
         for item in json.loads(raw.removeprefix("#cloud-config\n"))["write_files"]
     }
-    policy = Path("infra/observability/journald.conf").read_text()
+    policy = Path("tools/boxie/infra/observability/journald.conf").read_text()
     assert files.get("/etc/systemd/journald.conf.d/60-clis.conf") == policy
 
 
@@ -223,9 +223,7 @@ async def test_observability_settings_cover_actual_persistent_disk_and_selected_
         assert hasattr(result, "observability_settings"), "observability wiring settings missing"
         settings = dict(result.observability_settings)
         assert settings["backing_mounts"] == ["/", "/srv/boxie"]
-        assert settings["consumer_scrapes"] == (
-            [{"job": "playground", "address": "playground:9104"}] if selected else []
-        )
+        assert settings["consumer_scrapes"] == []
         settings["consumer_scrapes"] = tuple(
             ScrapeEndpoint(**item) for item in settings["consumer_scrapes"]
         )
@@ -233,7 +231,7 @@ async def test_observability_settings_cover_actual_persistent_disk_and_selected_
         directory = tmp_path / str(selected)
         config = ObservabilityConfig(
             **settings,
-            assets_dir=Path("infra/observability"),
+            assets_dir=Path("tools/boxie/infra/observability"),
             journal_group_gid=190,
             collector_image="ghcr.io/example/collector@sha256:" + "a" * 64,
             grafana_public_url="https://grafana.example.com",
@@ -251,5 +249,5 @@ async def test_observability_settings_cover_actual_persistent_disk_and_selected_
             job["job_name"]
             for job in yaml.safe_load((directory / "prometheus.yml").read_text())["scrape_configs"]
         }
-        assert ("playground" in jobs) is selected
+        assert "playground" not in jobs
         await result.host.connection_profile.future()

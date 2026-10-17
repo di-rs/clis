@@ -73,13 +73,13 @@ def compose(
     boxie_config = BoxieConfig(
         image=config.boxie_image,
         consumer_credential_ref=config.consumer_credential_ref,
-        agent_credential_ref="BOXIE_AGENT_CREDENTIAL",
+        orchestrator_credential_ref="BOXIE_ORCHESTRATOR_CREDENTIAL",
         postgres_dsn_ref="BOXIE_POSTGRES_DSN",
         temporal_address="temporal:7233",
         temporal_namespace="boxie",
         temporal_ca_ref="TEMPORAL_FRONTEND_CA",
         temporal_api_identity_ref="BOXIE_TEMPORAL_API_IDENTITY",
-        temporal_worker_identity_ref="BOXIE_TEMPORAL_WORKER_IDENTITY",
+        temporal_orchestrator_identity_ref="BOXIE_TEMPORAL_ORCHESTRATOR_IDENTITY",
     )
     product_config = None
     if config.playground:
@@ -94,7 +94,7 @@ def compose(
     networks = NetworkHandles.for_installation(installation)
     # The environment selects/wires owners. Pulumi never reconciles Compose containers.
     journal_policy = (
-        Path(__file__).resolve().parents[2] / "observability/journald.conf"
+        Path(__file__).resolve().parents[3] / "tools/boxie/infra/observability/journald.conf"
     ).read_text()
     host = Host(
         "host",
@@ -189,8 +189,8 @@ def compose(
         "prometheus_volume": handles["OBS_PROMETHEUS_VOLUME"],
         "grafana_volume": handles["OBS_GRAFANA_VOLUME"],
         "backing_mounts": ["/", host_handle.data_root],
-        "consumer_scrapes": [{"job": "playground", "address": "playground:9104"}]
-        if product
-        else [],
+        "consumer_scrapes": [],
+        "installation_id": installation,
+        "temporal_namespace": "boxie",
     }
     return Environment(host, boxie, product, operators, resources, handles, observability_settings)

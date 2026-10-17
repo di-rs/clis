@@ -10,17 +10,13 @@ services:
       PLAYGROUND_BOXIE_CREDENTIAL_FILE: /run/secrets/consumer
       PLAYGROUND_BOXIE_PROFILE: ${PLAYGROUND_BOXIE_PROFILE:-playground}
       PLAYGROUND_PREVIEW_DOMAIN: ${PLAYGROUND_DOMAIN}
-      PLAYGROUND_METRICS_HOST: 0.0.0.0
       PLAYGROUND_RELEASE: ${CLIS_RELEASE_REVISION:?Set release revision}
     volumes:
     - data:/var/lib/cli-playground
     - ${PLAYGROUND_BOXIE_CREDENTIAL_FILE:?Set consumer credential file}:/run/secrets/consumer:ro
     networks:
-      consumer: {}
-      proxy: {}
-      metrics:
-        aliases:
-        - playground
+    - consumer
+    - proxy
     read_only: true
     tmpfs:
     - /tmp:size=67108864,nosuid,nodev,noexec
@@ -88,11 +84,10 @@ services:
     restart: unless-stopped
     mem_limit: 256m
     logging:
-      driver: journald
+      driver: local
       options:
-        mode: non-blocking
-        max-buffer-size: 4m
-        tag: playground-proxy
+        max-size: 10m
+        max-file: '3'
     networks:
     - proxy
 volumes:
@@ -109,6 +104,3 @@ networks:
   proxy:
     external: true
     name: ${PLAYGROUND_PROXY_NETWORK:?Set proxy network}
-  metrics:
-    external: true
-    name: ${OBS_METRICS_NETWORK:?Set private metrics network}

@@ -1,16 +1,17 @@
-name: Boxie release
+name: 🚀 Boxie release
 'on':
   push:
     branches:
     - master
     paths:
     - tools/boxie/src/**
+    - tools/boxie/alembic/**
+    - tools/boxie/alembic.ini
     - tools/boxie/pyproject.toml
     - tools/boxie/infra/Runtime.Dockerfile*
     - tools/boxie/infra/compose.production.yml
     - tools/boxie/infra/release*.json
     - tools/deploy/**
-    - tools/service-telemetry/**
     - .github/workflows/component-release.yml
     - pyproject.toml
     - uv.lock

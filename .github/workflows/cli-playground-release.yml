@@ -1,16 +1,15 @@
-name: CLI playground release
+name: 🚀 CLI playground release
 'on':
   push:
     branches:
     - master
     paths:
-    - tools/cli-playground/playground/**
+    - tools/cli-playground/src/playground/**
     - tools/cli-playground/pyproject.toml
     - tools/cli-playground/infra/Playground.Dockerfile*
     - tools/cli-playground/infra/compose.production.yml
     - tools/cli-playground/infra/release*.json
     - tools/deploy/**
-    - tools/service-telemetry/**
     - .github/workflows/component-release.yml
     - pyproject.toml
     - uv.lock

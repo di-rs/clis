@@ -2,13 +2,12 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from boxie.domain.errors import BoxieError
 from boxie.sandbox.profiles import ProfileRegistry
-from boxie_test_support.agent import IMAGE, configuration
-from integration.conftest import postgres_dsn as postgres_dsn
-from integration.conftest import postgres_server as postgres_server
+from boxie_test_support.orchestrator import IMAGE, configuration
 
 
 def test_reload_is_atomic_and_retains_approved_snapshot(tmp_path: Path) -> None:
@@ -62,18 +61,20 @@ def test_local_content_addressed_image_is_approved(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
-def test_service_sighup_reload_is_atomic(tmp_path: Path, postgres_dsn: str) -> None:
+def test_service_sighup_reload_is_atomic(
+    tmp_path: Path, postgres_dsn: str, temporal_stack: Any
+) -> None:
     import asyncio
     import signal
     import socket
     import sys
 
     import httpx
-    from boxie_test_support.agent import AUTH
+    from boxie_test_support.orchestrator import AUTH
 
     async def exercise() -> None:
         from boxie.persistence.migrate import migrate
-        from test_postgres import MIGRATIONS
+        from database_support import MIGRATIONS
 
         await asyncio.to_thread(migrate, postgres_dsn, MIGRATIONS)
         config = configuration(tmp_path)
@@ -83,7 +84,7 @@ def test_service_sighup_reload_is_atomic(tmp_path: Path, postgres_dsn: str) -> N
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
             port = listener.getsockname()[1]
-        settings = tmp_path / "agent.json"
+        settings = tmp_path / "orchestrator.json"
         settings.write_text(
             json.dumps(
                 {
@@ -95,16 +96,26 @@ def test_service_sighup_reload_is_atomic(tmp_path: Path, postgres_dsn: str) -> N
                         "host_id": "host-1",
                     },
                     "bind_port": port,
-                    "postgres_dsn_file": str(dsn_file),
-                    "api_url": "http://127.0.0.1:1",
+                    "lifecycle": {
+                        "postgres_dsn_file": str(dsn_file),
+                        "temporal_address": temporal_stack.address,
+                        "temporal_server_name": "temporal",
+                        "temporal_ca_file": str(temporal_stack.root / "clients/frontend-ca.pem"),
+                        "temporal_cert_file": str(
+                            temporal_stack.root / "clients/boxie-orchestrator.pem"
+                        ),
+                        "temporal_key_file": str(
+                            temporal_stack.root / "clients/boxie-orchestrator.key"
+                        ),
+                    },
                 }
             )
         )
-        with (tmp_path / "agent.log").open("wb") as log:
+        with (tmp_path / "orchestrator.log").open("wb") as log:
             process = await asyncio.create_subprocess_exec(
                 sys.executable,
                 "-m",
-                "boxie.bootstrap.agent",
+                "boxie.bootstrap.orchestrator",
                 "--config",
                 str(settings),
                 stdout=log,
@@ -122,7 +133,7 @@ def test_service_sighup_reload_is_atomic(tmp_path: Path, postgres_dsn: str) -> N
                         except httpx.ConnectError:
                             await asyncio.sleep(0.01)
                     else:
-                        raise AssertionError((tmp_path / "agent.log").read_text())
+                        raise AssertionError((tmp_path / "orchestrator.log").read_text())
                     assert first.json()["image_digest"] == IMAGE
                     data = json.loads(config.profiles_file.read_text())
                     replacement = "sha256:" + "4" * 64
@@ -142,8 +153,9 @@ def test_service_sighup_reload_is_atomic(tmp_path: Path, postgres_dsn: str) -> N
                         "image_digest"
                     ] == replacement
             finally:
-                process.terminate()
+                if process.returncode is None:
+                    process.terminate()
                 await asyncio.wait_for(process.wait(), 5)
-        assert "agent-test-secret" not in (tmp_path / "agent.log").read_text()
+        assert "orchestrator-test-secret" not in (tmp_path / "orchestrator.log").read_text()
 
     asyncio.run(exercise())

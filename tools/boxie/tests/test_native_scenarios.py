@@ -16,13 +16,14 @@ import yaml
 from run_integration import ROOT, ProductionStack, command
 
 
-def test_collection_observer_reaches_actual_agent_bootstrap(
+def test_collection_observer_reaches_actual_orchestrator_bootstrap(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import runpy
     import sys
 
-    from boxie.bootstrap import agent, config, durable
+    from boxie.bootstrap import config, orchestrator
+    from boxie.observability.telemetry import logging as producer
     from boxie.persistence.postgres_artifacts import PostgresArtifactStore
 
     class ReachedStore(Exception):
@@ -38,29 +39,31 @@ def test_collection_observer_reaches_actual_agent_bootstrap(
         observed.append(type(self).__name__)
         raise ReachedStore
 
-    monkeypatch.setattr(sys, "argv", ["agent_fixture.py", "--config", "/unused"])
+    monkeypatch.setattr(sys, "argv", ["orchestrator_fixture.py", "--config", "/unused"])
     monkeypatch.setattr(
-        config.AgentConfig,
+        config.OrchestratorConfig,
         "from_file",
-        lambda _: SimpleNamespace(postgres_dsn_file="unused", api_url="unused", data_dir=tmp_path),
+        lambda _: SimpleNamespace(
+            lifecycle=SimpleNamespace(postgres_dsn_file="unused"), data_dir=tmp_path
+        ),
     )
-    monkeypatch.setattr(durable, "pool_for", pool)
+    monkeypatch.setattr(orchestrator, "database_for", pool)
     monkeypatch.setattr(PostgresArtifactStore, "__init__", inspect_store)
-    monkeypatch.setattr(agent, "install_asyncio_handler", lambda _: None)
-    monkeypatch.setattr(agent, "log_runtime", lambda: None)
-    monkeypatch.setattr(agent, "main", lambda: agent._main(None))  # type: ignore[arg-type]
+    monkeypatch.setattr(producer, "install_asyncio_handler", lambda _: None)
+    monkeypatch.setattr(producer, "log_runtime", lambda: None)
+    monkeypatch.setattr(orchestrator, "main", lambda: orchestrator._main(None, Path("/unused")))  # type: ignore[arg-type]
     # Restore the test wrapper's module substitution after exercising the real _main import.
     monkeypatch.setattr(
         "boxie.persistence.postgres_artifacts.PostgresArtifactStore", PostgresArtifactStore
     )
     with pytest.raises(ReachedStore):
         runpy.run_path(
-            str(ROOT / "tools/boxie/tests/integration/agent_fixture.py"), run_name="__main__"
+            str(ROOT / "tools/boxie/tests/integration/orchestrator_fixture.py"), run_name="__main__"
         )
     assert observed == ["ObservedArtifacts"]
 
 
-def test_native_journal_check_requires_structured_agent_error() -> None:
+def test_native_journal_check_requires_structured_orchestrator_error() -> None:
     import json
     import subprocess
     import sys
@@ -73,8 +76,8 @@ def test_native_journal_check_requires_structured_agent_error() -> None:
             "-c",
             "import logging\n"
             "from boxie.observability.logging import LogSettings, bootstrap_logging\n"
-            "runtime = bootstrap_logging(LogSettings(service='boxie', role='agent'))\n"
-            "logging.getLogger('boxie.sandbox.lifecycle').error("
+            "runtime = bootstrap_logging(LogSettings(service='boxie', role='orchestrator'))\n"
+            "logging.getLogger('boxie.sandbox.execution.orchestrator').error("
             "'execution journal persistence failed; new execution disabled')\n"
             "runtime.close()\n",
         ],
@@ -226,7 +229,7 @@ def test_readiness_probe_exports_only_allowlisted_booleans(monkeypatch: pytest.M
     import io
     import json
 
-    from integration.diagnostics import AGENT_PROBE
+    from integration.diagnostics import ORCHESTRATOR_PROBE
 
     original_client = httpx.Client
     secret = "secret-do-not-export"
@@ -247,7 +250,7 @@ def test_readiness_probe_exports_only_allowlisted_booleans(monkeypatch: pytest.M
             )
         return httpx.Response(
             200,
-            text='boxie_dependency_ready{dependency="agent"} 0\nboxie_dependency_known{dependency="agent"} 1\nprivate_metric{secret="'
+            text='boxie_dependency_ready{dependency="orchestrator"} 0\nboxie_dependency_known{dependency="orchestrator"} 1\nprivate_metric{secret="'
             + secret
             + '"} 7\n',
         )
@@ -260,14 +263,14 @@ def test_readiness_probe_exports_only_allowlisted_booleans(monkeypatch: pytest.M
     monkeypatch.setattr(Path, "read_text", lambda self: secret)
     output = io.StringIO()
     with contextlib.redirect_stdout(output):
-        exec(AGENT_PROBE, {})
+        exec(ORCHESTRATOR_PROBE, {})
     assert secret not in output.getvalue()
     data = json.loads(output.getvalue())
-    assert data["agent"] == {
+    assert data["orchestrator"] == {
         "status": 503,
         "dependencies": {"docker": True, "postgres": False, "execution": False},
     }
-    assert data["dependencies"]["boxie_dependency_ready"]["agent"] == 0
+    assert data["dependencies"]["boxie_dependency_ready"]["orchestrator"] == 0
 
 
 def test_readiness_details_exclude_container_error_and_configuration_secrets() -> None:
@@ -280,7 +283,7 @@ def test_readiness_details_exclude_container_error_and_configuration_secrets() -
         "Config": {
             "Labels": {
                 "com.docker.compose.project": "owned",
-                "com.docker.compose.service": "agent",
+                "com.docker.compose.service": "orchestrator",
             },
             "Env": [secret],
         },
@@ -299,6 +302,6 @@ def test_readiness_details_exclude_container_error_and_configuration_secrets() -
     )
     output = readiness_details(stack)
     assert secret not in output
-    state = json.loads(output)["containers"]["agent"]
+    state = json.loads(output)["containers"]["orchestrator"]
     assert state["oom_killed"] is True and state["exit_code"] == 137 and state["running"] is False
-    assert json.loads(output)["containers"]["worker"] == {"error_type": "ValueError"}
+    assert json.loads(output)["containers"]["faults"] == {"error_type": "ValueError"}

@@ -19,7 +19,7 @@ node_modules/
 !/tools/cli-playground/infra/Pulumi.example.yaml
 !/tools/cli-playground/infra/Pulumi.production.yaml
 
-/tools/cli-playground/playground/static/
+/tools/cli-playground/src/playground/static/
 !/tools/boxie/infra/config.example.env
 
 /.superpowers/

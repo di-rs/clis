@@ -12,8 +12,12 @@ import httpx
 import psycopg
 import pytest
 import yaml
-from integration.conftest import temporal_stack as temporal_stack
+from google.protobuf.duration_pb2 import Duration
+from run_integration import ProductionStack, command
+from temporal_support import tls
 from temporalio import activity, workflow
+from temporalio.api.namespace.v1 import NamespaceConfig
+from temporalio.api.workflowservice.v1 import UpdateNamespaceRequest
 from temporalio.client import Client
 from temporalio.service import TLSConfig
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
@@ -21,25 +25,62 @@ from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 ROOT = Path(__file__).parents[3]
 
 
+@pytest.mark.integration
+def test_postgres_requires_operator_supplied_control_network(tmp_path: Path) -> None:
+    stack = ProductionStack(tmp_path)
+    stack.write_overrides()
+    try:
+        with pytest.raises(
+            RuntimeError, match="network.*(not found|could not be found|does not exist)"
+        ):
+            stack.compose("postgres", "up", "--detach")
+    finally:
+        stack.close()
+
+
+@pytest.mark.integration
+def test_postgres_preserves_operator_owned_control_network(tmp_path: Path) -> None:
+    stack = ProductionStack(tmp_path)
+    stack.write_overrides()
+    network = stack.env["BOXIE_CONTROL_NETWORK"]
+    command(["docker", "network", "create", "--internal", network])
+    try:
+        stack.compose("postgres", "up", "--detach", "--wait", "--wait-timeout", "90")
+        stack.compose("postgres", "down", "--volumes", "--remove-orphans")
+        info = json.loads(command(["docker", "network", "inspect", network]))
+        assert info[0]["Internal"] is True
+    finally:
+        try:
+            stack.close()
+        finally:
+            command(["docker", "network", "rm", network])
+
+
 def test_private_production_deployment_has_explicit_jobs_and_trust() -> None:
-    platform_path = ROOT / "infra/platform/compose.yml"
-    assert platform_path.exists(), "independent platform deployment missing"
-    platform = yaml.safe_load(platform_path.read_text())
-    temporal = yaml.safe_load((ROOT / "infra/temporal/compose.yml").read_text())
-    versions = json.loads((ROOT / "infra/temporal/versions.json").read_text())
-    for package in (platform, temporal):
-        for service in package["services"].values():
+    postgres_path = ROOT / "tools/boxie/infra/postgres/compose.yml"
+    assert postgres_path.exists(), "Boxie PostgreSQL deployment missing"
+    postgres = yaml.safe_load(postgres_path.read_text())
+    temporal = yaml.safe_load((ROOT / "tools/boxie/infra/temporal/compose.yml").read_text())
+    versions = json.loads((ROOT / "tools/boxie/infra/temporal/versions.json").read_text())
+    for package in (postgres, temporal):
+        for name, service in package["services"].items():
             assert not service.get("ports"), "production ports must remain private"
-            if "build" in service:
-                assert service["build"]["dockerfile"] == "admin-tools.Dockerfile"
+            assert "build" not in service, "operation jobs reuse existing runtime images"
+            if package is temporal and name == "bootstrap":
+                assert service["image"].startswith("${BOXIE_RUNTIME_IMAGE:?")
+                assert service["entrypoint"] == ["python", "-m", "boxie.bootstrap.temporal"]
+                assert service["user"] == "1000:1000"
             else:
                 assert "@sha256:" in service["image"]
             assert not any("docker.sock" in str(mount) for mount in service.get("volumes", []))
     assert temporal["services"]["temporal"]["image"] == versions["server"]["image"]
     assert temporal["services"]["schema"]["profiles"] == ["operations"]
+    assert temporal["services"]["schema"]["image"] == versions["admin_tools"]["image"]
     assert temporal["services"]["bootstrap"]["profiles"] == ["operations"]
     config = yaml.safe_load(
-        re.sub(r"{{.*?}}", "test-value", (ROOT / "infra/temporal/config.yaml").read_text())
+        re.sub(
+            r"{{.*?}}", "test-value", (ROOT / "tools/boxie/infra/temporal/config.yaml").read_text()
+        )
     )
     tls = config["global"]["tls"]
     for plane in ("frontend", "internode"):
@@ -67,23 +108,11 @@ class DeploymentWorkflow:
         )
 
 
-def tls(stack: Any, identity: str, *, domain: str = "temporal") -> TLSConfig:
-    directory = (
-        "operator" if identity == "operator" else "ui" if identity == "ui-client" else "clients"
-    )
-    return TLSConfig(
-        server_root_ca_cert=(stack.root / "clients/frontend-ca.pem").read_bytes(),
-        domain=domain,
-        client_cert=(stack.root / directory / f"{identity}.pem").read_bytes(),
-        client_private_key=(stack.root / directory / f"{identity}.key").read_bytes(),
-    )
-
-
 @pytest.mark.integration
 def test_production_mtls_workflow_ui_and_database_isolation(temporal_stack: Any) -> None:
     async def exercise() -> None:
         stack = temporal_stack
-        for identity in ("boxie-api", "boxie-worker", "operator", "ui-client"):
+        for identity in ("boxie-api", "boxie-orchestrator", "operator", "ui-client"):
             client = await asyncio.wait_for(
                 Client.connect(stack.address, namespace="boxie", tls=tls(stack, identity)), 10
             )
@@ -105,7 +134,7 @@ def test_production_mtls_workflow_ui_and_database_isolation(temporal_stack: Any)
             rejections[name] = type(rejected.value).__name__ + ": " + str(rejected.value)[:500]
         stack.evidence["client_rejections"] = rejections
         client = await Client.connect(
-            stack.address, namespace="boxie", tls=tls(stack, "boxie-worker")
+            stack.address, namespace="boxie", tls=tls(stack, "boxie-orchestrator")
         )
         queue = "deployment-" + uuid4().hex
         async with Worker(
@@ -155,41 +184,29 @@ def test_production_mtls_workflow_ui_and_database_isolation(temporal_stack: Any)
                     with pytest.raises(psycopg.OperationalError, match="permission denied"):
                         psycopg.connect(**parameters)
 
-        def set_retention(retention: str) -> None:
-            stack.compose(
-                "temporal",
-                "run",
-                "--rm",
-                "--entrypoint",
-                "temporal",
-                "bootstrap",
-                "operator",
-                "namespace",
-                "update",
-                "--namespace",
-                "boxie",
-                "--retention",
-                retention,
-                "--address",
-                "temporal:7233",
-                "--tls",
-                "--tls-ca-path",
-                "/certs/frontend-ca.pem",
-                "--tls-cert-path",
-                "/certs/operator.pem",
-                "--tls-key-path",
-                "/certs/operator.key",
-                "--tls-server-name",
-                "temporal",
-                "--command-timeout",
-                "10s",
+        operator = await Client.connect(
+            stack.address, namespace="boxie", tls=tls(stack, "operator")
+        )
+
+        async def set_retention(seconds: int) -> None:
+            await operator.workflow_service.update_namespace(
+                UpdateNamespaceRequest(
+                    namespace="boxie",
+                    config=NamespaceConfig(
+                        workflow_execution_retention_ttl=Duration(seconds=seconds)
+                    ),
+                ),
+                timeout=timedelta(seconds=10),
             )
 
-        await asyncio.to_thread(set_retention, "1d")
+        await set_retention(86400)
         with pytest.raises(RuntimeError):
-            await asyncio.to_thread(stack.compose, "temporal", "run", "--rm", "bootstrap")
-        await asyncio.to_thread(set_retention, "7d")
-        await asyncio.to_thread(stack.compose, "temporal", "run", "--rm", "bootstrap")
+            await asyncio.to_thread(stack.bootstrap)
+        await set_retention(604800)
+        # Repeating bootstrap against the existing namespace verifies idempotence
+        # here, without repeating its propagation grace in every native fixture.
+        await asyncio.to_thread(stack.bootstrap)
+        stack.evidence["namespace"] = "repeated bootstrap verified existing seven-day retention"
         stack.evidence["security"] = (
             "valid API/worker/operator/UI; rejected no cert, foreign CA, wrong hostname; 6 cross-database denials"
         )

@@ -8,11 +8,12 @@ from pathlib import Path, PurePosixPath
 
 from pydantic import Field, ValidationError, field_validator, model_validator
 
+from boxie.contracts.common import WireModel
+from boxie.contracts.execution import LimitsWire
 from boxie.domain.errors import BoxieError
 from boxie.domain.models import ProfileSnapshot
 from boxie.domain.policy import validate_limits
 from boxie.persistence.atomic import atomic_write
-from boxie.sandbox.protocol import LimitsWire, WireModel
 
 
 class ProfileConfig(WireModel):

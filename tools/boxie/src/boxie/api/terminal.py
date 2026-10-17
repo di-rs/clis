@@ -1,4 +1,4 @@
-"""Translate bounded consumer JSON input into the byte-preserving agent stream."""
+"""Translate bounded consumer JSON input into the byte-preserving orchestrator stream."""
 
 import asyncio
 from contextlib import suppress
@@ -10,9 +10,8 @@ from pydantic import ValidationError
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from boxie.api.auth import ConsumerAuth
-from boxie.application.service import Service, TerminalConnection
-from boxie.domain.errors import BoxieError, TerminalWriteClosed
-from boxie.sandbox.terminal_protocol import (
+from boxie.application.ports import Lifecycle, TerminalAccess, TerminalConnection
+from boxie.contracts.terminal import (
     Ack,
     Attached,
     AttachRequest,
@@ -20,8 +19,8 @@ from boxie.sandbox.terminal_protocol import (
     Input,
     Resize,
     control,
-    response,
 )
+from boxie.domain.errors import BoxieError, TerminalWriteClosed
 
 DRAIN_TIMEOUT = 2.0
 
@@ -81,14 +80,11 @@ async def proxy(websocket: WebSocket, connection: TerminalConnection) -> None:
             async with asyncio.timeout(20):
                 if isinstance(message, bytes):
                     if not 9 <= len(message) <= 16392:
-                        raise BoxieError(503, "invalid agent output frame")
+                        raise BoxieError(503, "invalid orchestrator output frame")
                     cursor = int.from_bytes(message[:8], "big")
                     await websocket.send_bytes(message)
                 else:
-                    try:
-                        status = response.validate_json(message)
-                    except ValidationError:
-                        raise BoxieError(503, "invalid agent terminal status") from None
+                    status = message
                     if isinstance(status, Attached):
                         epoch = status.epoch
                     await websocket.send_text(status.model_dump_json())
@@ -116,15 +112,17 @@ async def proxy(websocket: WebSocket, connection: TerminalConnection) -> None:
                 raise result
 
 
-def terminal_routes(service: Service, auth: ConsumerAuth) -> APIRouter:
+def terminal_routes(
+    lifecycle: Lifecycle, terminal_access: TerminalAccess, auth: ConsumerAuth
+) -> APIRouter:
     router = APIRouter()
 
     @router.websocket("/v1/sandboxes/{sandbox_id}/terminal")
     async def terminal(websocket: WebSocket, sandbox_id: UUID) -> None:
         try:
             principal = auth.resolve(websocket.headers.get("Authorization", ""))
-            await service.lifecycle.get(principal, sandbox_id)
-            async with service.terminal.attach(principal, sandbox_id) as connection:
+            await lifecycle.get(principal, sandbox_id)
+            async with terminal_access.attach(principal, sandbox_id) as connection:
                 async with asyncio.timeout(10):
                     await websocket.accept()
                 await proxy(websocket, connection)
