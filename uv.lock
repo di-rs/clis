@@ -11,6 +11,7 @@ members = [
     "cli-check",
     "cli-playground",
     "clis-tools",
+    "host-infra",
     "playground-infra",
 ]
 
@@ -587,6 +588,25 @@ httpx = [
 ]
 
 [[package]]
+name = "host-infra"
+version = "0.1.0"
+source = { editable = "infra/host" }
+dependencies = [
+    { name = "pulumi" },
+    { name = "pulumi-hcloud" },
+    { name = "pulumi-tls" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pulumi", specifier = "==3.268.0" },
+    { name = "pulumi-hcloud", specifier = "==1.43.1" },
+    { name = "pulumi-tls", specifier = "==5.6.2" },
+    { name = "pydantic", specifier = ">=2.14,<3" },
+]
+
+[[package]]
 name = "httpcore"
 version = "1.0.9"
 source = { registry = "https://pypi.org/simple" }
@@ -1029,6 +1049,7 @@ source = { editable = "tools/cli-playground/infra" }
 dependencies = [
     { name = "boxie-infra" },
     { name = "cli-playground" },
+    { name = "host-infra" },
     { name = "pulumi" },
     { name = "pulumi-cloudflare" },
     { name = "pulumi-hcloud" },
@@ -1041,6 +1062,7 @@ dependencies = [
 requires-dist = [
     { name = "boxie-infra" },
     { name = "cli-playground" },
+    { name = "host-infra" },
     { name = "pulumi", specifier = "==3.268.0" },
     { name = "pulumi-cloudflare", specifier = "==6.22.1" },
     { name = "pulumi-hcloud", specifier = "==1.43.1" },

@@ -1,0 +1,6 @@
+name: clis
+runtime:
+  name: python
+  options:
+    virtualenv: ../../../.venv
+description: Shared host with Boxie and CLI Playground
