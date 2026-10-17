@@ -64,6 +64,14 @@ plus `tools/boxie/infra/temporal/compose.observability.yml`. Base deployments ne
 `OBS_*` values or monitoring bridges. Grafana and Temporal UI have no published
 ports. Follow the [operator ingress guide](../ingress/README.md) for Access/Tunnel.
 
+For an existing deployment, preserve its four current volumes and checkpoints.
+Add a Compose override setting each matching volume key (`vector-data`, `logs-data`,
+`prometheus-data`, `grafana-data`) to `external: true` and `name: <existing-name>`.
+Inspect the merged `docker compose config` and confirm those exact names before
+starting the replacement project. Keep the collector buffer and checkpoint together
+in `vector-data`. Do not remove the previous volumes during cutover; switch to
+Compose-owned storage only after an explicit data migration and verification.
+
 ## Resource and failure behavior
 
 Grafana has a fixed hard 256 MiB memory cap. VictoriaLogs has a seven-day maximum
