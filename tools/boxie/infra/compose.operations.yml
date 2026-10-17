@@ -11,3 +11,20 @@ services:
     tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
+  smoke:
+    image: ${BOXIE_RUNTIME_IMAGE:?Set approved immutable Boxie image}
+    profiles: [operations]
+    entrypoint: [python, -m, boxie_infra.smoke]
+    command: [--boxie-url, 'http://api:8090', --credential-file, /run/secrets/consumer, --profile, playground]
+    environment:
+      PYTHONPATH: /opt/operations
+      BOXIE_SMOKE_DOCKER_SOCKET: /var/run/docker.sock
+    volumes:
+    - ./boxie_infra:/opt/operations/boxie_infra:ro
+    - /var/run/docker.sock:/var/run/docker.sock
+    - ${BOXIE_CONSUMER_CREDENTIAL_FILE:?Set consumer credential file}:/run/secrets/consumer:ro
+    networks: [consumer]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]

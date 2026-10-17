@@ -79,6 +79,19 @@ def cloud_init(host_private_key: str, host_public_key: str, volume_id: str) -> s
             },
             "write_files": [
                 {
+                    "path": "/usr/local/sbin/clis-operation",
+                    "permissions": "0700",
+                    "content": (source / "operation.sh").read_text(),
+                },
+                *[
+                    {
+                        "path": f"/etc/systemd/system/{unit.name}",
+                        "permissions": "0644",
+                        "content": unit.read_text(),
+                    }
+                    for unit in sorted((source / "systemd").glob("*.service"))
+                ],
+                {
                     "path": "/etc/clis/storage-device",
                     "permissions": "0600",
                     "content": f"/dev/disk/by-id/scsi-0HC_Volume_{volume_id}\n",

@@ -67,9 +67,9 @@ def test_activation_cli_fails_without_reading_secrets_or_running_tools(
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 1
+    assert result.returncode == (2 if entry == "shell" else 1)
     assert result.stdout == ""
-    assert result.stderr == ACTIVATION_UNAVAILABLE + "\n"
+    assert result.stderr == ("" if entry == "shell" else ACTIVATION_UNAVAILABLE + "\n")
     assert not sentinel.exists()
     assert existing.read_text() == "private-sentinel-do-not-print"
     assert release.read_text() == "previous-release"

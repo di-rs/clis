@@ -89,3 +89,17 @@ def test_storage_guard_refuses_missing_disk(tmp_path: Path) -> None:
     )
     assert result.returncode == 1
     assert "persistent disk" in result.stderr
+
+
+def test_cloud_init_installs_bounded_operation_units() -> None:
+    from host_infra.host import cloud_init
+
+    data = json.loads(cloud_init("private", "public", "123").removeprefix("#cloud-config\n"))
+    files = {item["path"]: item["content"] for item in data["write_files"]}
+    assert "/usr/local/sbin/clis-operation" in files
+    for app in ("setup", "boxie", "playground"):
+        unit = files[f"/etc/systemd/system/clis-{app}@.service"]
+        assert "TimeoutStartSec=900" in unit
+        assert "KillMode=control-group" in unit
+        assert "RemainAfterExit=yes" in unit
+        assert "/usr/bin/flock -n /run/lock/clis-deployment.lock" in unit
