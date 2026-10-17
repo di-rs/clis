@@ -193,3 +193,14 @@ unchanged rerun, independent updates, migration failure/recovery, SSH interrupti
 unit timeout, missing-disk refusal and reboot persistence. Verify PR artifact
 publication and close/reopen behavior against the resulting public URL. Fake Docker
 command tests and Docker Desktop do not establish these host properties.
+
+The opt-in systemd tests create uniquely named temporary units and remove them
+on exit. On the disposable native host, run as root from this checkout:
+
+```sh
+CLIS_NATIVE_OPERATION_TESTS=1 uv run --locked pytest infra/host/tests/test_native_operation.py
+```
+
+They verify that an operation finishes after its initiating `systemctl` client
+exits and that a shortened unit timeout kills children while retaining the
+pending marker. They do not replace real SSH-disconnection or reboot testing.

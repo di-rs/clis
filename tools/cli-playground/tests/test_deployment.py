@@ -16,6 +16,9 @@ def test_gateway_release_targets_only_gateway(tmp_path: Path) -> None:
         f"#!{sys.executable}\nimport json, os, sys\nwith open(os.environ['CALLS'], 'a') as f: f.write(json.dumps(sys.argv[1:]) + '\\n')\n"
     )
     docker.chmod(0o755)
+    config = tmp_path / "config"
+    config.mkdir()
+    (config / "playground.env").write_text("SETTING=value\n")
     release = tmp_path / "release"
     release.mkdir()
     (release / "gateway.changed").touch()
@@ -25,11 +28,17 @@ def test_gateway_release_targets_only_gateway(tmp_path: Path) -> None:
     )
     result = subprocess.run(
         ["bash", str(ROOT / "tools/cli-playground/infra/deploy.sh"), str(release)],
-        env={**os.environ, "PATH": str(tmp_path) + ":" + os.environ["PATH"], "CALLS": str(log)},
+        env={
+            **os.environ,
+            "PATH": str(tmp_path) + ":" + os.environ["PATH"],
+            "CALLS": str(log),
+            "CLIS_CONFIG_DIR": str(config),
+        },
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0, result.stderr
+    assert (release / "playground.env").read_text() == "SETTING=value\n"
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     updates = [call for call in calls if "up" in call]
     assert len(updates) == 1

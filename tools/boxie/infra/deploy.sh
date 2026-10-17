@@ -11,6 +11,10 @@ revision=$(cat "$release/revision")
 export BOXIE_RELEASE=$revision
 umask 077
 export BOXIE_API_CONFIG="$release/api.json"
+export BOXIE_ORCHESTRATOR_CONFIG="$release/orchestrator.json"
+[[ -e $release/boxie.env ]] || install -m 0600 "$config/boxie.env" "$release/boxie.env"
+[[ -e $BOXIE_ORCHESTRATOR_CONFIG ]] || install -m 0600 "$config/boxie/orchestrator.json" "$BOXIE_ORCHESTRATOR_CONFIG"
+if [[ ! -e $BOXIE_API_CONFIG ]]; then
 python3 - "$config/boxie/api.json" "$BOXIE_API_CONFIG" "$revision" <<'PY'
 import json
 import sys
@@ -19,7 +23,8 @@ configuration = json.loads(Path(sys.argv[1]).read_text())
 configuration['release'] = sys.argv[3]
 Path(sys.argv[2]).write_text(json.dumps(configuration) + '\n')
 PY
-compose() { docker compose --env-file "$config/boxie.env" --env-file "$release/image.env" -f "$owner/compose.production.yml" -f "$owner/compose.operations.yml" "$@"; }
+fi
+compose() { docker compose --env-file "$release/boxie.env" --env-file "$release/image.env" -f "$owner/compose.production.yml" -f "$owner/compose.operations.yml" "$@"; }
 stage validating
 compose config --quiet
 stage pulling

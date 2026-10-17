@@ -21,8 +21,9 @@ if [[ -f $release/sandbox.changed ]]; then
     bash "$current/tools/boxie/infra/deploy.sh" "$(readlink -f "$current")"
 fi
 [[ -f $release/gateway.changed ]] || exit 0
+[[ -e $release/playground.env ]] || install -m 0600 "$config/playground.env" "$release/playground.env"
 compose() {
-    docker compose --env-file "$config/playground.env" --env-file "$release/image.env" \
+    docker compose --env-file "$release/playground.env" --env-file "$release/image.env" \
         -f "$release/tools/cli-playground/infra/compose.production.yml" "$@"
 }
 stage validating

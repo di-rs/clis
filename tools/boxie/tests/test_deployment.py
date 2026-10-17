@@ -35,6 +35,7 @@ def test_boxie_deployment_stops_only_after_pull_and_leaves_failed_migration_stop
     (config / "boxie").mkdir(parents=True)
     (config / "boxie.env").write_text("")
     (config / "boxie/api.json").write_text('{"release":"local"}')
+    (config / "boxie/orchestrator.json").write_text("{}")
     for name in ("installation-id", "host-id"):
         (config / "boxie" / name).write_text("11111111-1111-1111-1111-111111111111")
     release = tmp_path / "release"
@@ -61,6 +62,25 @@ def test_boxie_deployment_stops_only_after_pull_and_leaves_failed_migration_stop
     else:
         assert result.returncode == 0, result.stderr
         assert json.loads((release / "api.json").read_text())["release"] == "a" * 40
+        assert (release / "boxie.env").read_text() == ""
+        assert (release / "orchestrator.json").read_text() == "{}"
+        saved = (release / "api.json").read_bytes()
+        (config / "boxie/api.json").write_text('{"release":"changed","unrelated":"setting"}')
+        repeated = subprocess.run(
+            ["bash", str(ROOT / "tools/boxie/infra/deploy.sh"), str(release)],
+            env={
+                **os.environ,
+                "PATH": str(commands) + ":" + os.environ["PATH"],
+                "CALLS": str(log),
+                "FAILURE": "",
+                "CLIS_CONFIG_DIR": str(config),
+            },
+            capture_output=True,
+            text=True,
+        )
+        assert repeated.returncode == 0, repeated.stderr
+        assert (release / "api.json").read_bytes() == saved
+
     stopped = [call for call in calls if "stop" in call]
     started = [call for call in calls if "up" in call]
     assert bool(stopped) == (failure != "pull")
