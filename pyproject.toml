@@ -7,8 +7,6 @@ dependencies = []
 [dependency-groups]
 dev = [
     "boxie-test-support",
-    "observability-infra",
-    "ingress-infra",
     "httpx",
     "mypy",
     "pulumi==3.268.0",
@@ -26,7 +24,7 @@ package = false
 required-version = ">=0.13.0"
 
 [tool.uv.workspace]
-members = ["tools/boxie/infra/ingress", "tools/boxie/infra/observability", "tools/boxie", "tools/boxie/tests/support", "tools/cli-playground", "tools/boxie/infra", "tools/cli-playground/infra", "tools/cli-bench", "tools/cli-testing"]
+members = ["tools/boxie", "tools/boxie/tests/support", "tools/cli-playground", "tools/boxie/infra", "tools/cli-playground/infra", "tools/cli-bench", "tools/cli-testing"]
 
 [tool.ruff]
 target-version = "py315"
@@ -43,14 +41,12 @@ mypy_path = ["tools"]
 strict = true
 
 [tool.pytest]
-testpaths = ["tools/boxie/infra/ingress/tests", "tools/boxie/infra/observability/tests", "tools/boxie/tests", "tools/ci/tests", "tools/cli-bench/tests", "tools/cli-playground/tests", "tools/cli-testing/tests"]
+testpaths = ["tools/boxie/tests", "tools/ci/tests", "tools/cli-bench/tests", "tools/cli-playground/tests", "tools/cli-testing/tests"]
 pythonpath = ["tools", "tools/cli-bench"]
 addopts = ["--strict-config", "--strict-markers", "-p", "boxie_test_support.dependencies", "-m", "not integration"]
 markers = ["integration: real isolated builds/installations and external-tool checks; prerequisites required"]
 
 [tool.uv.sources]
-ingress-infra = { workspace = true }
-observability-infra = { workspace = true }
 boxie = { workspace = true }
 boxie-test-support = { workspace = true }
 cli-playground = { workspace = true }

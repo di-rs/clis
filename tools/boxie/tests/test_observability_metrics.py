@@ -220,46 +220,6 @@ def test_disconnect_completion_is_cancelled_once(
         os.close(read)
 
 
-def test_private_listener_expires_stalled_clients_without_stderr(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    import socket
-    import time
-    import urllib.request
-
-    from boxie.observability.metrics import Metrics
-    from boxie.observability.telemetry.metrics import MetricsListener
-
-    listener = MetricsListener(Metrics("orchestrator"), "127.0.0.1", 0)
-    listener.start()
-    clients: list[socket.socket] = []
-    try:
-        deadline = time.monotonic() + 2
-        while listener.address is None and time.monotonic() < deadline:
-            time.sleep(0.01)
-        assert listener.address is not None
-        for _ in range(8):
-            client = socket.create_connection(listener.address, timeout=1)
-            client.sendall(b"GET /metrics HTTP/1.1\r\nX-Private: never-log-this")
-            clients.append(client)
-        time.sleep(1.2)
-        # A finite header deadline returns capacity, including under slow-client load.
-        with urllib.request.urlopen(
-            f"http://{listener.address[0]}:{listener.address[1]}/metrics", timeout=2
-        ) as response:
-            assert response.status == 200
-        for client in clients:
-            try:
-                assert client.recv(1) == b""
-            except ConnectionResetError:
-                pass  # Excess concurrent clients may be rejected without a response.
-        assert not capsys.readouterr().err
-    finally:
-        for client in clients:
-            client.close()
-        listener.close()
-
-
 def test_dependency_probes_follow_configured_namespace_and_owned_queues() -> None:
     import asyncio
     from datetime import UTC, datetime

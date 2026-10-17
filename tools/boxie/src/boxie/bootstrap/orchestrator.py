@@ -70,7 +70,7 @@ def create_orchestrator_app(
     return app
 
 
-def _main(metrics: Metrics) -> None:
+def _main(metrics: Metrics, config_path: Path) -> None:
     import uvicorn
 
     from boxie.bootstrap.runtime import embedded_workers
@@ -86,10 +86,7 @@ def _main(metrics: Metrics) -> None:
     from boxie.sandbox.execution.orchestrator import Orchestrator
     from boxie.sandbox.execution.ownership import acquire_owner_lock
 
-    parser = argparse.ArgumentParser(description="Boxie private sandbox orchestrator")
-    parser.add_argument("--config", type=Path, required=True)
-    args = parser.parse_args()
-    config = OrchestratorConfig.from_file(args.config)
+    config = OrchestratorConfig.from_file(config_path)
 
     if config.lifecycle is None:
         raise ValueError("orchestrator requires PostgreSQL and Temporal lifecycle configuration")
@@ -166,12 +163,15 @@ def _main(metrics: Metrics) -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Boxie private sandbox orchestrator")
+    parser.add_argument("--config", type=Path, required=True)
+    args = parser.parse_args()
     from boxie.observability.logging import process_logging
 
     logs = process_logging("orchestrator")
     from boxie.observability.runtime import run_metrics_process
 
-    run_metrics_process(logs, "orchestrator", _main)
+    run_metrics_process(logs, "orchestrator", lambda metrics: _main(metrics, args.config))
 
 
 if __name__ == "__main__":

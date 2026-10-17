@@ -24,11 +24,11 @@ scrape_configs:
     action: keep
   - source_labels:
     - namespace
-    regex: boxie|
+    regex: ${BOXIE_TEMPORAL_NAMESPACE}|
     action: keep
   - source_labels:
     - task_queue
-    regex: boxie-lifecycle|
+    regex: boxie/${BOXIE_INSTALLATION_ID}/${BOXIE_HOST_ID}/(lifecycle|maintenance)|
     action: keep
   - source_labels:
     - activity_type
@@ -51,11 +51,11 @@ scrape_configs:
     action: keep
   - source_labels:
     - namespace
-    regex: boxie|
+    regex: ${BOXIE_TEMPORAL_NAMESPACE}|
     action: keep
   - source_labels:
     - task_queue
-    regex: boxie-lifecycle|
+    regex: boxie/${BOXIE_INSTALLATION_ID}/${BOXIE_HOST_ID}/(lifecycle|maintenance)|
     action: keep
   - source_labels:
     - activity_type
@@ -78,11 +78,11 @@ scrape_configs:
     action: keep
   - source_labels:
     - namespace
-    regex: boxie|_tag_excluded_|
+    regex: ${BOXIE_TEMPORAL_NAMESPACE}|_tag_excluded_|
     action: keep
   - source_labels:
     - taskqueue
-    regex: boxie-lifecycle|_tag_excluded_|
+    regex: boxie/${BOXIE_INSTALLATION_ID}/${BOXIE_HOST_ID}/(lifecycle|maintenance)|_tag_excluded_|
     action: keep
   - source_labels:
     - task_type

@@ -139,6 +139,14 @@ that access belongs to the test runner, never the Playground service.
 
 ## Observability and operator access
 
-[Observability](observability/README.md) and [operator ingress](ingress/README.md) are Boxie-owned deployment units beside PostgreSQL and Temporal. Allocate the external internal networks `OBS_METRICS_NETWORK`, `OBS_GRAFANA_ORIGIN_NETWORK`, and `OBS_TEMPORAL_UI_ORIGIN_NETWORK` before starting their manifests. Only API/orchestrator and Temporal join the metrics network; Playground stays on the consumer network. Render the observability assets with the same installation UUID, host ID and Temporal namespace as the running orchestrator before activation. The source Vector file intentionally rejects every event until rendered.
+[Observability](observability/README.md) and [operator ingress](ingress/README.md)
+are Boxie-owned native configuration beside PostgreSQL and Temporal. Their guides
+cover the optional network overlays, three shared private bridges, bounded storage
+and the small environment substitution step for installation-specific Prometheus
+and Access values. Base Boxie and Temporal deployment needs no monitoring inputs.
+Only API/orchestrator and Temporal join metrics; Playground stays on the consumer
+network. The official collector includes journalctl; there are no infrastructure
+Python renderers or derived collector images.
 
-Runtime images install only their application package. The root lockfile still lists all workspace member manifests, so image build stages copy their metadata for resolution; they do not install the infrastructure renderers or another application's source.
+Runtime images install only their application package. The root lockfile lists
+workspace member manifests, whose metadata is copied for dependency resolution.

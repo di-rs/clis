@@ -386,22 +386,3 @@ def test_existing_unknown_cleanup_age_stays_unknown(
                 assert row is not None and row.cleanup_pending_since is None
 
     asyncio.run(exercise())
-
-
-@pytest.mark.integration
-def test_database_rejects_ready_timestamp_without_ready_outcome(
-    postgres_dsn: str, tmp_path: Path
-) -> None:
-    from boxie.persistence.models import Sandbox
-    from sqlalchemy.exc import IntegrityError
-
-    async def exercise() -> None:
-        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, _):
-            view = await life.submit(OWNER, "orphan-ready", await upload(artifacts))
-            with pytest.raises(IntegrityError, match="provisioning_ready_evidence"):
-                async with sessions() as session, session.begin():
-                    row = await session.get(Sandbox, view.id)
-                    assert row is not None and row.provisioning_outcome is None
-                    row.provisioning_ready_observed_at = datetime.now(UTC)
-
-    asyncio.run(exercise())

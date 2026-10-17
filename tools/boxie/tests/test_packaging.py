@@ -159,7 +159,6 @@ def test_resolved_compose_isolated_topology(
         "BOXIE_DATA_DIR": str(tmp_path / "data"),
         "BOXIE_CONSUMER_NETWORK": "test-consumers",
         "BOXIE_CONTROL_NETWORK": "test-control",
-        "OBS_METRICS_NETWORK": "test-boxie-metrics",
         "PLAYGROUND_IMAGE": "playground:test",
         "PLAYGROUND_BOXIE_URL": "http://independent-boxie:8090",
         "PLAYGROUND_BOXIE_CREDENTIAL_FILE": str(tmp_path / "consumer.secret"),
@@ -213,7 +212,7 @@ def test_resolved_compose_isolated_topology(
         if name == "orchestrator":
             mount = next(v for v in entry["volumes"] if v["target"] == values["BOXIE_DATA_DIR"])
             assert mount["source"] == mount["target"]
-            assert set(entry["networks"]) == {"control", "metrics"}
+            assert set(entry["networks"]) == {"control"}
         if name == "api":
             assert not any(v["target"] == values["BOXIE_DATA_DIR"] for v in entry["volumes"])
         if name == "gateway":

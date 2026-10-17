@@ -385,7 +385,6 @@ class PostgresLifecycle:
                     row.provisioning_outcome = outcome
                     duration = None
                     if outcome == "ready":
-                        row.provisioning_ready_observed_at = now
                         duration = max(0, (now - row.accepted_at).total_seconds())
                     events.append(
                         Transition(

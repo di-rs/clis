@@ -1,8 +1,28 @@
 name: boxie-observability
 services:
+  storage-init:
+    image: docker.io/timberio/vector@sha256:98e7b4dfe50750e61470697bbd2fbeca643d12bea97f351005038ef506eab630
+    user: 0:0
+    read_only: true
+    cap_drop:
+    - ALL
+    cap_add:
+    - CHOWN
+    security_opt:
+    - no-new-privileges:true
+    network_mode: none
+    pids_limit: 16
+    mem_limit: 33554432
+    entrypoint:
+    - /bin/sh
+    - -ec
+    command:
+    - chown 65532:65532 /vector-data; chown 65534:65534 /logs-data
+    volumes:
+    - vector-data:/vector-data
+    - logs-data:/logs-data
   vector:
-    image: ${OBS_COLLECTOR_IMAGE:?Set published derived collector digest}
-    platform: linux/amd64
+    image: docker.io/timberio/vector@sha256:98e7b4dfe50750e61470697bbd2fbeca643d12bea97f351005038ef506eab630
     user: 65532:65532
     read_only: true
     cap_drop:
@@ -11,7 +31,7 @@ services:
     - no-new-privileges:true
     restart: unless-stopped
     pids_limit: 128
-    mem_limit: ${OBS_VECTOR_MEMORY_BYTES:?Set memory cap}
+    mem_limit: ${OBS_VECTOR_MEMORY_BYTES:-268435456}
     logging:
       driver: journald
       options:
@@ -29,19 +49,23 @@ services:
     - ${OBS_JOURNAL_GROUP_GID:?Set numeric host journal group}
     environment:
       VECTOR_LOG: info
+      BOXIE_ENVIRONMENT: ${BOXIE_ENVIRONMENT:-production}
+      BOXIE_HOST_ID: ${BOXIE_HOST_ID:-boxie-host}
     command:
     - --config
     - /etc/vector/vector.yaml
     volumes:
     - ./vector.yaml:/etc/vector/vector.yaml:ro
-    - ${OBS_JOURNAL_DIRECTORY:?Set persistent journal directory}:/var/log/journal:ro
-    - ${OBS_MACHINE_ID_PATH:?Set machine identity}:/etc/machine-id:ro
+    - ${OBS_JOURNAL_DIRECTORY:-/var/log/journal}:/var/log/journal:ro
+    - ${OBS_MACHINE_ID_PATH:-/etc/machine-id}:/etc/machine-id:ro
     - vector-data:/var/lib/vector
     tmpfs:
     - /tmp:size=16777216
+    depends_on:
+      storage-init:
+        condition: service_completed_successfully
   victorialogs:
-    image: ${OBS_VICTORIALOGS_IMAGE:?Set immutable image}
-    platform: linux/amd64
+    image: docker.io/victoriametrics/victoria-logs@sha256:251121fa882af99b95ba0c230a4a2f412ea602d2698c64a96c58dc9842bb755d
     user: 65534:65534
     read_only: true
     cap_drop:
@@ -50,7 +74,7 @@ services:
     - no-new-privileges:true
     restart: unless-stopped
     pids_limit: 128
-    mem_limit: ${OBS_LOGS_MEMORY_BYTES:?Set memory cap}
+    mem_limit: ${OBS_LOGS_MEMORY_BYTES:-1073741824}
     logging:
       driver: journald
       options:
@@ -70,15 +94,17 @@ services:
     command:
     - -httpListenAddr=:9428
     - -storageDataPath=/victoria-logs-data
-    - -retentionPeriod=${OBS_LOGS_RETENTION_DAYS}d
-    - -retention.maxDiskSpaceUsageBytes=${OBS_LOGS_DISK_BYTES}
+    - -retentionPeriod=${OBS_LOGS_RETENTION_DAYS:-7}d
+    - -retention.maxDiskSpaceUsageBytes=${OBS_LOGS_DISK_BYTES:-268435456}
     - -metrics.exposeMetadata
     - -loggerLevel=INFO
     volumes:
     - logs-data:/victoria-logs-data
+    depends_on:
+      storage-init:
+        condition: service_completed_successfully
   prometheus:
-    image: ${OBS_PROMETHEUS_IMAGE:?Set immutable image}
-    platform: linux/amd64
+    image: docker.io/prom/prometheus@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
     user: 65534:65534
     read_only: true
     cap_drop:
@@ -87,7 +113,7 @@ services:
     - no-new-privileges:true
     restart: unless-stopped
     pids_limit: 128
-    mem_limit: ${OBS_PROMETHEUS_MEMORY_BYTES:?Set memory cap}
+    mem_limit: ${OBS_PROMETHEUS_MEMORY_BYTES:-536870912}
     logging:
       driver: journald
       options:
@@ -104,17 +130,16 @@ services:
     command:
     - --config.file=/etc/prometheus/prometheus.yml
     - --storage.tsdb.path=/prometheus
-    - --storage.tsdb.retention.time=${OBS_PROMETHEUS_RETENTION_DAYS}d
-    - --storage.tsdb.retention.size=${OBS_PROMETHEUS_RETENTION_BYTES}B
+    - --storage.tsdb.retention.time=${OBS_PROMETHEUS_RETENTION_DAYS:-7}d
+    - --storage.tsdb.retention.size=${OBS_PROMETHEUS_RETENTION_BYTES:-2147483648}B
     - --web.listen-address=0.0.0.0:9090
     - --log.level=info
     volumes:
-    - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    - ${OBS_PROMETHEUS_CONFIG_FILE:-./prometheus.yml}:/etc/prometheus/prometheus.yml:ro
     - ./rules:/etc/prometheus/rules:ro
     - prometheus-data:/prometheus
   grafana:
-    image: ${OBS_GRAFANA_IMAGE:?Set immutable image}
-    platform: linux/amd64
+    image: docker.io/grafana/grafana@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f
     user: '472:0'
     read_only: true
     cap_drop:
@@ -123,7 +148,7 @@ services:
     - no-new-privileges:true
     restart: unless-stopped
     pids_limit: 256
-    mem_limit: ${OBS_GRAFANA_MEMORY_BYTES:?Set memory cap}
+    mem_limit: 268435456
     logging:
       driver: journald
       options:
@@ -155,17 +180,18 @@ services:
       GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
       GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: 'false'
       GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_SERVER_ROOT_URL: https://${OBS_GRAFANA_HOSTNAME:?Set exact Grafana hostname}
     volumes:
     - grafana-data:/var/lib/grafana
     - ./grafana/provisioning:/etc/grafana/provisioning:ro
     - ./grafana/dashboards:/etc/grafana/dashboards:ro
     - ${OBS_GRAFANA_PLUGIN_DIR:?Set verified pinned plugins}:/var/lib/grafana/plugins:ro
-    - ${OBS_GRAFANA_ADMIN_PASSWORD_FILE:?Set private Grafana admin file}:/run/secrets/grafana-admin:ro
     tmpfs:
     - /tmp:size=16777216
+    secrets:
+    - grafana-admin
   node-exporter:
-    image: ${OBS_NODE_EXPORTER_IMAGE:?Set immutable image}
-    platform: linux/amd64
+    image: ghcr.io/prometheus/node-exporter@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
     user: 65534:65534
     read_only: true
     cap_drop:
@@ -174,7 +200,7 @@ services:
     - no-new-privileges:true
     restart: unless-stopped
     pids_limit: 128
-    mem_limit: ${OBS_EXPORTER_MEMORY_BYTES:?Set memory cap}
+    mem_limit: ${OBS_EXPORTER_MEMORY_BYTES:-67108864}
     logging:
       driver: journald
       options:
@@ -206,26 +232,21 @@ services:
     - /host/run:ro,nosuid,nodev,noexec,mode=000,size=4096
     - /host/var/run:ro,nosuid,nodev,noexec,mode=000,size=4096
 volumes:
-  vector-data:
-    external: true
-    name: ${OBS_VECTOR_VOLUME:?Set independent external volume}
-  logs-data:
-    external: true
-    name: ${OBS_LOGS_VOLUME:?Set independent external volume}
-  prometheus-data:
-    external: true
-    name: ${OBS_PROMETHEUS_VOLUME:?Set independent external volume}
-  grafana-data:
-    external: true
-    name: ${OBS_GRAFANA_VOLUME:?Set independent external volume}
+  vector-data: {}
+  logs-data: {}
+  prometheus-data: {}
+  grafana-data: {}
 networks:
   metrics:
     external: true
-    name: ${OBS_METRICS_NETWORK}
+    name: ${OBS_METRICS_NETWORK:-boxie-metrics}
   grafana-origin:
     external: true
-    name: ${OBS_GRAFANA_ORIGIN_NETWORK}
+    name: ${OBS_GRAFANA_ORIGIN_NETWORK:-boxie-grafana-origin}
   ingest:
     internal: true
   query:
     internal: true
+secrets:
+  grafana-admin:
+    file: ${OBS_GRAFANA_ADMIN_PASSWORD_FILE:?Set private Grafana admin file}

@@ -1,13 +1,18 @@
 """Domain-neutral HTTP/log metrics and an owned, fail-open private listener."""
 
 import ipaddress
-import socket
 import threading
 import time
 from collections.abc import Iterable
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from wsgiref.simple_server import WSGIServer
 
-from prometheus_client import CollectorRegistry, Counter, Histogram, generate_latest
+from prometheus_client import (
+    CollectorRegistry,
+    Counter,
+    Histogram,
+    generate_latest,
+    start_http_server,
+)
 from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily, Metric
 
 from boxie.observability.telemetry.logging import LogRuntime
@@ -77,42 +82,6 @@ def private_bind_host(host: str) -> str:
     return host
 
 
-class _MetricsServer(ThreadingHTTPServer):
-    """Finite concurrent requests; slow readers never create an unbounded thread set."""
-
-    daemon_threads = True
-    request_queue_size = 4
-
-    def __init__(self, address: tuple[str, int], handler: type[BaseHTTPRequestHandler]) -> None:
-        self._capacity = threading.BoundedSemaphore(4)
-        super().__init__(address, handler)
-
-    def process_request(
-        self, request: socket.socket | tuple[bytes, socket.socket], client_address: tuple[str, int]
-    ) -> None:
-        if not self._capacity.acquire(blocking=False):
-            self.shutdown_request(request)
-            return
-        try:
-            super().process_request(request, client_address)
-        except BaseException:
-            self._capacity.release()
-            raise
-
-    def process_request_thread(
-        self, request: socket.socket | tuple[bytes, socket.socket], client_address: tuple[str, int]
-    ) -> None:
-        try:
-            super().process_request_thread(request, client_address)
-        finally:
-            self._capacity.release()
-
-    def handle_error(
-        self, request: socket.socket | tuple[bytes, socket.socket], client_address: tuple[str, int]
-    ) -> None:
-        pass  # Broken peers and failed scrapes never print raw server tracebacks.
-
-
 class MetricsListener:
     """One daemon owner; no network work in the application/event loop."""
 
@@ -128,7 +97,7 @@ class MetricsListener:
         self._stop = threading.Event()
         self._close_lock = threading.Lock()
         self._close_deadline: float | None = None
-        self._server: ThreadingHTTPServer | None = None
+        self._server: WSGIServer | None = None
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
@@ -138,37 +107,19 @@ class MetricsListener:
         self._thread.start()
 
     def _run(self) -> None:
-        render = self.metrics.render
-
-        class Handler(BaseHTTPRequestHandler):
-            timeout = 1.0
-
-            def do_GET(self) -> None:
-                if self.path != "/metrics":
-                    self.send_error(404)
-                    return
-                body = render()
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-
-            def log_message(self, format: str, *args: object) -> None:
-                pass
-
         while not self._stop.is_set():
             try:
-                server = _MetricsServer((self.host, self.port), Handler)
+                server, thread = start_http_server(
+                    self.port, addr=self.host, registry=self.metrics.registry
+                )
             except OSError:
                 self._stop.wait(self.retry_seconds)
                 continue
-            server.daemon_threads = True
-            server.timeout = 0.1
             self._server = server
             try:
-                while not self._stop.is_set():
-                    server.handle_request()
+                self._stop.wait()
+                server.shutdown()
+                thread.join()
             finally:
                 server.server_close()
                 self._server = None

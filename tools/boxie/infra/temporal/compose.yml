@@ -14,13 +14,11 @@ services:
     - -ec
     command:
     - set -- $$(getent ahostsv4 temporal-internode); test "$$#" -gt 0; export TEMPORAL_BROADCAST_ADDRESS=$$1;
-      exec /usr/local/bin/temporal-server --config-file /etc/temporal/config.yaml
-      --allow-no-auth start --service=frontend --service=history --service=matching
-      --service=worker
+      exec /usr/local/bin/temporal-server --config-file /etc/temporal/config.yaml --allow-no-auth start
+      --service=frontend --service=history --service=matching --service=worker
     environment:
       TEMPORAL_DB_PASSWORD: ${TEMPORAL_DB_PASSWORD:?provide persistence database password}
-      VISIBILITY_DB_PASSWORD: ${VISIBILITY_DB_PASSWORD:?provide visibility database
-        password}
+      VISIBILITY_DB_PASSWORD: ${VISIBILITY_DB_PASSWORD:?provide visibility database password}
     volumes:
     - ./config.yaml:/etc/temporal/config.yaml:ro
     - ${TEMPORAL_CERTS_DIR:?provide server certificate directory}:/certs:ro
@@ -28,9 +26,6 @@ services:
       control:
         aliases:
         - temporal-internode
-      metrics:
-        aliases:
-        - temporal
     logging:
       driver: journald
       options:
@@ -48,8 +43,7 @@ services:
       SQL_HOST: postgres
       SQL_PORT: '5432'
       TEMPORAL_DB_PASSWORD: ${TEMPORAL_DB_PASSWORD:?provide persistence database password}
-      VISIBILITY_DB_PASSWORD: ${VISIBILITY_DB_PASSWORD:?provide visibility database
-        password}
+      VISIBILITY_DB_PASSWORD: ${VISIBILITY_DB_PASSWORD:?provide visibility database password}
     volumes:
     - ./schema.sh:/scripts/schema.sh:ro
   bootstrap:
@@ -79,9 +73,6 @@ services:
     - ${TEMPORAL_UI_CERTS_DIR:?provide UI certificate directory}:/certs:ro
     networks:
       control: {}
-      operator-origin:
-        aliases:
-        - temporal-ui
     logging:
       driver: journald
       options:
@@ -92,9 +83,3 @@ networks:
   control:
     external: true
     name: ${BOXIE_CONTROL_NETWORK:?provide private control network name}
-  metrics:
-    external: true
-    name: ${OBS_METRICS_NETWORK:?Set private Boxie metrics network}
-  operator-origin:
-    external: true
-    name: ${OBS_TEMPORAL_UI_ORIGIN_NETWORK:?Set private Temporal UI origin network}

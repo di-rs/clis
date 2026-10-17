@@ -400,6 +400,23 @@ direct-origin bypass. Only approved dashboard routes use that ingress; Boxie's
 API remains internal. See [Cloudflare self-hosted Access applications](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/)
 and [VictoriaLogs Grafana integration](https://docs.victoriametrics.com/victorialogs/integrations/grafana/).
 
+Implementation uses committed native configs and optional monitoring network
+overlays, pinned upstream images (including Vector's bundled journalctl), and
+cloudflared's native required Access validation. There are no infrastructure
+Python distributions, configuration compilers, custom metrics HTTP servers or
+observability-only fault workflows. The existing lifecycle CI owns compact native
+validators and a collector-outage/log-search smoke. Storage pressure and real
+Access policy enforcement remain deployment activation checks.
+
+Standard logging/structlog sanitizes and captures context before a bounded
+QueueHandler queue. One daemon writes an unbuffered duplicate of stdout without
+changing fd1/fd2 or their flags; shutdown shares a two-second budget with the
+upstream prometheus-client exporter. CLI parsing precedes logging setup. SQL
+telemetry reads only cached bounded snapshots; scrapes never query the database.
+Alembic is the sole schema authority. Retain provisioning_outcome for deduplicated
+post-commit outcomes and cleanup_pending_since for restart-safe cleanup age; drop
+the unread readiness timestamp with a forward revision for upgrade safety.
+
 ## Pulumi, releases, and CI
 
 Keep the initial Pulumi project under `infra/environments/single-host`, with an

@@ -11,8 +11,6 @@ members = [
     "cli-playground",
     "cli-testing-policy",
     "clis-tools",
-    "ingress-infra",
-    "observability-infra",
     "playground-infra",
 ]
 
@@ -341,9 +339,7 @@ source = { virtual = "." }
 dev = [
     { name = "boxie-test-support" },
     { name = "httpx" },
-    { name = "ingress-infra" },
     { name = "mypy" },
-    { name = "observability-infra" },
     { name = "pulumi" },
     { name = "pulumi-cloudflare" },
     { name = "pulumi-hcloud" },
@@ -360,9 +356,7 @@ dev = [
 dev = [
     { name = "boxie-test-support", editable = "tools/boxie/tests/support" },
     { name = "httpx" },
-    { name = "ingress-infra", editable = "tools/boxie/infra/ingress" },
     { name = "mypy" },
-    { name = "observability-infra", editable = "tools/boxie/infra/observability" },
     { name = "pulumi", specifier = "==3.268.0" },
     { name = "pulumi-cloudflare", specifier = "==6.22.1" },
     { name = "pulumi-hcloud", specifier = "==1.43.1" },
@@ -535,23 +529,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f5/08/8eea9d4b8302028f3abb2c0813953f7aec26d33b7a8960ed760e65ff29fa/idna-3.20.tar.gz", hash = "sha256:a7db850025b95ded1eae8a46181a1a6c56c92c96f0e2b005d9ff8dc0210cab44", size = 216463, upload-time = "2026-09-17T14:11:04.752Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/58/a2/bb081bab032533a855d44de1d56f8e8426114ff1ba5d1f07a438a0a654f8/idna-3.20-py3-none-any.whl", hash = "sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c", size = 69583, upload-time = "2026-09-17T14:11:03.168Z" },
-]
-
-[[package]]
-name = "ingress-infra"
-version = "0.1.0"
-source = { editable = "tools/boxie/infra/ingress" }
-dependencies = [
-    { name = "pulumi" },
-    { name = "pulumi-cloudflare" },
-    { name = "pyyaml" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "pulumi", specifier = "==3.268.0" },
-    { name = "pulumi-cloudflare", specifier = "==6.22.1" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
 ]
 
 [[package]]
@@ -758,17 +735,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/35/d5/cd1ffb202b76ebc1b
 wheels = [
     { url = "https://files.pythonhosted.org/packages/11/52/6327a5f4fda01207205038a106a99848a41c83e933cd23ea2cab3d2ebc6c/nexus_rpc-1.4.0-py3-none-any.whl", hash = "sha256:14c953d3519113f8ccec533a9efdb6b10c28afef75d11cdd6d422640c40b3a49", size = 29645, upload-time = "2026-02-25T22:01:33.122Z" },
 ]
-
-[[package]]
-name = "observability-infra"
-version = "0.1.0"
-source = { editable = "tools/boxie/infra/observability" }
-dependencies = [
-    { name = "pyyaml" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "pyyaml", specifier = ">=6.0.3" }]
 
 [[package]]
 name = "opentelemetry-api"

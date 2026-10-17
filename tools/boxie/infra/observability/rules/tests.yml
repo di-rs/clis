@@ -1,0 +1,169 @@
+rule_files:
+- boxie.yml
+evaluation_interval: 15s
+tests:
+- name: cleanup strict threshold and two minute hold
+  interval: 15s
+  input_series:
+  - series: boxie_snapshot_fresh{job="boxie-api",instance="boxie-api:9101"}
+    values: 1x40
+  - series: boxie_cleanup_oldest_age_seconds{job="boxie-api",instance="boxie-api:9101"}
+    values: 120x3 121x36
+  alert_rule_test:
+  - eval_time: 2m45s
+    alertname: BoxieCleanupDelayed
+    exp_alerts: []
+  - eval_time: 3m
+    alertname: BoxieCleanupDelayed
+    exp_alerts:
+    - exp_labels:
+        job: boxie-api
+        instance: boxie-api:9101
+        severity: warning
+- name: stale snapshot hides cleanup
+  interval: 15s
+  input_series:
+  - series: boxie_snapshot_fresh{job="boxie-api",instance="boxie-api:9101"}
+    values: '0x40'
+  - series: boxie_cleanup_oldest_age_seconds{job="boxie-api",instance="boxie-api:9101"}
+    values: 200x40
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: BoxieCleanupDelayed
+    exp_alerts: []
+- name: capacity five minute hold
+  interval: 15s
+  input_series:
+  - series: boxie_snapshot_fresh{job="boxie-api",instance="boxie-api:9101"}
+    values: 1x40
+  - series: boxie_capacity_reserved{job="boxie-api",instance="boxie-api:9101"}
+    values: 8x40
+  - series: boxie_capacity_limit{job="boxie-api",instance="boxie-api:9101"}
+    values: 8x40
+  alert_rule_test:
+  - eval_time: 4m45s
+    alertname: BoxieCapacityFull
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: BoxieCapacityFull
+    exp_alerts:
+    - exp_labels:
+        job: boxie-api
+        instance: boxie-api:9101
+        severity: warning
+- name: intentional newest loss alerts
+  interval: 15s
+  input_series:
+  - series: vector_buffer_discarded_events_total{job="vector",instance="vector:9598",component_id="storage",buffer_id="storage",buffer_type="disk",stage="1",intentional="true"}
+    values: 0+1x40
+  alert_rule_test:
+  - eval_time: 2m
+    alertname: CollectorDropsIncreasing
+    exp_alerts: []
+  - eval_time: 2m15s
+    alertname: CollectorDropsIncreasing
+    exp_alerts:
+    - exp_labels:
+        job: vector
+        instance: vector:9598
+        component_id: storage
+        severity: warning
+        buffer_type: disk
+        stage: '1'
+        intentional: 'true'
+- name: disk critical threshold and hold
+  interval: 15s
+  input_series:
+  - series: node_filesystem_size_bytes{job="node-exporter",instance="node-exporter:9100",device="/dev/root",mountpoint="/",fstype="ext4",device_error=""}
+    values: 100x40
+  - series: node_filesystem_device_error{job="node-exporter",instance="node-exporter:9100",device="/dev/root",mountpoint="/",fstype="ext4",device_error=""}
+    values: '0x40'
+  - series: node_scrape_collector_success{job="node-exporter",instance="node-exporter:9100",collector="filesystem"}
+    values: 1x40
+  - series: node_filesystem_avail_bytes{job="node-exporter",instance="node-exporter:9100",device="/dev/root",mountpoint="/",fstype="ext4",device_error=""}
+    values: 10x3 9x36
+  alert_rule_test:
+  - eval_time: 2m45s
+    alertname: HostDiskSpaceCritical
+    exp_alerts: []
+  - eval_time: 3m
+    alertname: HostDiskSpaceCritical
+    exp_alerts:
+    - exp_labels:
+        job: node-exporter
+        instance: node-exporter:9100
+        device: /dev/root
+        mountpoint: /
+        fstype: ext4
+        severity: critical
+- name: unknown cleanup age remains visible
+  interval: 15s
+  input_series:
+  - series: boxie_snapshot_fresh{job="boxie-api",instance="boxie-api:9101"}
+    values: 1x40
+  - series: boxie_cleanup_age_unknown{job="boxie-api",instance="boxie-api:9101"}
+    values: 1x40
+  alert_rule_test:
+  - eval_time: 1m45s
+    alertname: BoxieCleanupAgeUnknown
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: BoxieCleanupAgeUnknown
+    exp_alerts:
+    - exp_labels:
+        job: boxie-api
+        instance: boxie-api:9101
+        severity: warning
+- name: missing activity poller hold
+  interval: 15s
+  input_series:
+  - series: boxie_dependency_known{job="boxie-api",instance="boxie-api:9101",dependency="workflow_poller"}
+    values: 1x40
+  - series: boxie_dependency_known{job="boxie-api",instance="boxie-api:9101",dependency="activity_poller"}
+    values: 1x40
+  - series: boxie_dependency_ready{job="boxie-api",instance="boxie-api:9101",dependency="workflow_poller"}
+    values: 1x40
+  - series: boxie_dependency_ready{job="boxie-api",instance="boxie-api:9101",dependency="activity_poller"}
+    values: '0x40'
+  - series: boxie_dependency_known{job="boxie-api",instance="boxie-api:9101",dependency="maintenance_workflow_poller"}
+    values: 1x40
+  - series: boxie_dependency_known{job="boxie-api",instance="boxie-api:9101",dependency="maintenance_activity_poller"}
+    values: 1x40
+  - series: boxie_dependency_ready{job="boxie-api",instance="boxie-api:9101",dependency="maintenance_workflow_poller"}
+    values: 1x40
+  - series: boxie_dependency_ready{job="boxie-api",instance="boxie-api:9101",dependency="maintenance_activity_poller"}
+    values: 1x40
+  alert_rule_test:
+  - eval_time: 1m45s
+    alertname: BoxieWorkerUnavailable
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: BoxieWorkerUnavailable
+    exp_alerts:
+    - exp_labels:
+        job: boxie-api
+        instance: boxie-api:9101
+        dependency: activity_poller
+        severity: warning
+- name: collector production usable capacity threshold and hold
+  interval: 15s
+  input_series:
+  - series: vector_buffer_size_bytes{job="vector",instance="vector:9598",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0"}
+    values: 322122547x3 326149079x36
+  - series: vector_buffer_max_size_bytes{job="vector",instance="vector:9598",component_id="storage",buffer_id="storage",buffer_type="disk",stage="0"}
+    values: 536870912x40
+  alert_rule_test:
+  - eval_time: 5m45s
+    alertname: CollectorBufferHigh
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: CollectorBufferHigh
+    exp_alerts:
+    - exp_labels:
+        job: vector
+        instance: vector:9598
+        component_id: storage
+        buffer_id: storage
+        buffer_type: disk
+        stage: '0'
+        severity: warning

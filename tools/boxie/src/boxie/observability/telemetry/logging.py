@@ -1,25 +1,19 @@
-"""Bounded producers and a sole-owner, atomic pipe writer.
-
-Only bootstrap_logging takes over fd1/fd2. The launcher must exclusively transfer
-its write description (close all unused aliases). Direct terminals/files/sockets
-are unsupported: delivery disables without refusing application startup.
-"""
+"""Sanitize before a bounded stdlib logging queue; one daemon owns stdout delivery."""
 
 import asyncio
 import atexit
-import fcntl
 import logging
 import math
 import os
 import queue
 import re
-import stat
 import sys
 import threading
 import time
 from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from logging.handlers import QueueHandler
 from types import TracebackType
 from typing import Any, cast
 from uuid import uuid4
@@ -141,9 +135,9 @@ class LogRuntime:
         self._sink = sink
         self._limit = limit
         self._state = state
-        self._queue: queue.Queue[bytes] = queue.Queue(maxsize=2047)
+        self._queue: queue.Queue[logging.LogRecord] = queue.Queue(maxsize=2047)
+        self._queue_handler = QueueHandler(self._queue)
         self._lock = threading.Lock()
-        self._wake = threading.Event()
         self._deadline: float | None = None
         self._pending = 0
         self._drops = dict.fromkeys(_DROP_REASONS, 0)
@@ -253,60 +247,58 @@ class LogRuntime:
                 self._drops["disabled"] += 1
             else:
                 try:
-                    self._queue.put_nowait(line)
+                    self._queue_handler.enqueue(
+                        logging.LogRecord("boxie", level, "", 0, line, (), None)
+                    )
                 except queue.Full:
                     self._drops["queue_full"] += 1
-                self._wake.set()
 
     def _write(self) -> None:
         sink = self._sink
         assert sink is not None
-        pending: bytes | None = None
         try:
             while True:
                 with self._lock:
-                    if self._deadline is not None and time.monotonic() >= self._deadline:
+                    if self._deadline is not None and (
+                        self._queue.empty() or time.monotonic() >= self._deadline
+                    ):
                         break
-                    if pending is None:
-                        try:
-                            pending = self._queue.get_nowait()
-                            self._pending = 1
-                        except queue.Empty:
-                            if self._deadline is not None:
-                                break
-                    self._wake.clear()
-                if pending is None:
-                    self._wake.wait(0.01)
-                    continue
                 try:
-                    written = os.write(sink, pending)
-                    if written != len(pending):
-                        raise OSError("atomic pipe contract violated")
-                except BlockingIOError:
-                    self._wake.wait(0.01)
+                    record = self._queue.get(timeout=0.05)
+                except queue.Empty:
                     continue
-                except OSError:
-                    with self._lock:
-                        self._state = "broken"
-                    break
                 with self._lock:
-                    self._delivered += 1
+                    self._pending = 1
+                # Only this daemon may block. No buffered Python stream lock is
+                # held, and stdout/stderr descriptors and flags remain untouched.
+                line = cast(bytes, record.msg)
+                while line:
+                    written = os.write(sink, line)
+                    if written <= 0:
+                        raise OSError("closed log sink")
+                    line = line[written:]
+                with self._lock:
+                    self._delivered += self._pending
                     self._pending = 0
-                pending = None
+        except OSError:
+            with self._lock:
+                self._state = "broken"
         finally:
             os.close(sink)
             with self._lock:
-                reason = "broken_sink" if self._state == "broken" else "shutdown"
-                self._drops[reason] += self._pending
-                self._pending = 0
-                while True:
-                    try:
-                        self._queue.get_nowait()
-                        self._drops[reason] += 1
-                    except queue.Empty:
-                        break
+                self._discard("broken_sink" if self._state == "broken" else "shutdown")
                 if self._state == "enabled":
                     self._state = "closed"
+
+    def _discard(self, reason: str) -> None:
+        self._drops[reason] += self._pending
+        self._pending = 0
+        while True:
+            try:
+                self._queue.get_nowait()
+                self._drops[reason] += 1
+            except queue.Empty:
+                break
 
     def begin_close(self, timeout_seconds: float = 2) -> float:
         """Signal terminal drain without joining; return the one shutdown deadline."""
@@ -315,7 +307,6 @@ class LogRuntime:
             if self._deadline is None:
                 self._deadline = time.monotonic() + timeout
             deadline = self._deadline
-            self._wake.set()
         return deadline
 
     def close(self, timeout_seconds: float = 2) -> None:
@@ -326,6 +317,10 @@ class LogRuntime:
         except RuntimeError:
             if self._thread is not None and threading.current_thread() is not self._thread:
                 self._thread.join(max(0.0, deadline - time.monotonic()))
+            with self._lock:
+                self._discard("shutdown")
+                if self._state == "enabled":
+                    self._state = "closed"
 
 
 class _Handler(logging.Handler):
@@ -363,32 +358,16 @@ def configure_logging(
                 _runtime.configuration_error()
             return _runtime
         sink: int | None = None
-        limit, state = 8192, "not_bootstrapped"
-        if _bootstrap:
-            state = "unsupported"
-            try:
-                if stat.S_ISFIFO(os.fstat(1).st_mode):
-                    limit = min(8192, os.fpathconf(1, "PC_PIPE_BUF"))
-                    # Never allocate the owned sink as stdin/stdout/stderr: those
-                    # slots may be closed and takeover will replace fd1/fd2.
-                    sink = fcntl.fcntl(1, fcntl.F_DUPFD_CLOEXEC, 3)
-                    os.set_inheritable(sink, False)
-                    os.set_blocking(sink, False)
-                    state = "enabled"
-            except OSError:
-                if sink is not None:
-                    os.close(sink)
-                    sink = None
-                state = "unavailable"
-            # Never flush old streams: buffered secrets and exit flushes go to null.
-            null = os.open(os.devnull, os.O_WRONLY)
-            try:
-                os.dup2(null, 1)
-                os.dup2(null, 2)
-            finally:
-                if null not in (1, 2):
-                    os.close(null)
-        _runtime = runtime = LogRuntime(settings, events or {}, routes or {}, sink, limit, state)
+        state = "unavailable"
+        try:
+            sink = os.dup(sys.stdout.fileno())
+            os.set_inheritable(sink, False)
+            state = "enabled"
+        except OSError, ValueError, AttributeError:
+            if sink is not None:
+                os.close(sink)
+                sink = None
+        _runtime = runtime = LogRuntime(settings, events or {}, routes or {}, sink, 8192, state)
         handler = _Handler(runtime)
         root = logging.getLogger()
         root.handlers[:] = [handler]
@@ -439,7 +418,7 @@ def bootstrap_logging(
     events: Mapping[str, str] | None = None,
     routes: Mapping[tuple[str, str], str] | None = None,
 ) -> LogRuntime:
-    """Explicit earliest process boundary. Never call from libraries/app factories."""
+    """Configure process logging after CLI parsing, preserving standard streams."""
     return configure_logging(settings, events=events, routes=routes, _bootstrap=True)
 
 

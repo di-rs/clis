@@ -2,30 +2,44 @@ name: boxie-operator-ingress
 services:
   cloudflared:
     image: docker.io/cloudflare/cloudflared@sha256:9b49eed8f62806d5d45ddf59ecefb5710429598ea6d3fcccd2af938f621b2b07
-    platform: linux/amd64
-    user: '65532:65532'
+    user: 65532:65532
     read_only: true
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
     restart: unless-stopped
     pids_limit: 128
     mem_limit: 134217728
-    command: [tunnel, --no-autoupdate, --config, /etc/cloudflared/config.yml, run]
+    command:
+    - tunnel
+    - --no-autoupdate
+    - --config
+    - /etc/cloudflared/config.yml
+    - run
     volumes:
-      - ${OPERATOR_CONFIG_FILE:?Set rendered nonsecret config}:/etc/cloudflared/config.yml:ro
-      - ${OPERATOR_CREDENTIALS_FILE:?Set private tunnel credentials}:/run/secrets/tunnel.json:ro
-    networks: [grafana-origin, temporal-origin, egress]
+    - ${OPERATOR_CONFIG_FILE:?Set rendered nonsecret config}:/etc/cloudflared/config.yml:ro
+    networks:
+    - grafana-origin
+    - temporal-origin
+    - egress
     logging:
       driver: journald
       options:
         mode: non-blocking
         max-buffer-size: 4m
         tag: operator-cloudflared
+    secrets:
+    - source: tunnel-credentials
+      target: tunnel.json
 networks:
   grafana-origin:
     external: true
-    name: ${OPERATOR_GRAFANA_NETWORK:?Set supplied Grafana origin network}
+    name: ${OBS_GRAFANA_ORIGIN_NETWORK:-boxie-grafana-origin}
   temporal-origin:
     external: true
-    name: ${OPERATOR_TEMPORAL_NETWORK:?Set supplied Temporal origin network}
+    name: ${OBS_TEMPORAL_UI_ORIGIN_NETWORK:-boxie-temporal-ui-origin}
   egress: {}
+secrets:
+  tunnel-credentials:
+    file: ${OPERATOR_CREDENTIALS_FILE:?Set private tunnel credentials}

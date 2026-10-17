@@ -145,7 +145,7 @@ default-branch boundaries.
 
 Boxie has only the PostgreSQL/Temporal lifecycle. Default pytest excludes live
 services; explicit integration selection fails when dependencies are missing.
-Run the isolated infrastructure tier with:
+Run the isolated infrastructure tier (including SQL/Temporal observability, migration and history/privacy checks) with:
 
 ```sh
 uv run --locked python tools/boxie/tests/run_integration.py
@@ -177,19 +177,16 @@ artifact, including same-page reconnection. Local Docker Desktop arm64/runc cann
 satisfy this platform requirement. Local real SQL/Temporal tests and mocked Docker tests remain
 separate evidence; neither establishes production activation readiness.
 
-## Observability failure smoke
+## Observability validation
 
-The separate PR-only [observability workflow](../.github/workflows/boxie-observability.yml)
-builds the final collector in an owned Linux amd64 daemon and exercises nine
-separately bounded real application/journal/storage fault scenarios. See the
-[owner's scope and evidence policy](../tools/boxie/infra/observability/README.md#native-failure-smoke).
-Do not run these privileged faults on a development machine or a reused runner.
-The default root Python checks include portable safety, parser, executable
-entrypoint and Access-classification tests. They do not substitute for native
-systemd/runsc evidence. The Linux-only process-identity test reports its macOS skip.
-The native job's 65-minute limit includes separately bounded installation/setup,
-180 seconds per scenario, final restoration and bounded artifact export.
+The existing lifecycle job also validates pinned native Vector/Prometheus/Cloudflare
+configuration and runs a compact Linux persistent-journal to Grafana datasource
+smoke after a collector outage. To run the validators locally on Docker Desktop:
 
-[Ingress smoke](../tools/boxie/infra/ingress/README.md) consumes an explicitly authorized
-existing environment. Its unconfigured exit 2 is an outstanding activation gate,
-not a passing live test. Benchmark triggers and scope remain PR-only and unchanged.
+```sh
+uv run --locked pytest -m integration tools/boxie/tests/test_observability_native.py -k native_configs
+```
+
+The full native file requires a Linux Docker host with persistent journald and
+real PostgreSQL/Temporal fixtures. Missing prerequisites fail when explicitly
+selected. Storage-pressure and live Cloudflare Access remain activation checks.

@@ -52,19 +52,6 @@ class Sandbox(SQLModel, table=True):
             column("provisioning_outcome").in_(["ready", "failed", "stopped"]),
             name="sandbox_provisioning_outcome",
         ),
-        CheckConstraint(
-            or_(
-                and_(
-                    column("provisioning_outcome").is_not_distinct_from("ready"),
-                    column("provisioning_ready_observed_at").is_not(None),
-                ),
-                and_(
-                    column("provisioning_outcome").is_distinct_from("ready"),
-                    column("provisioning_ready_observed_at").is_(None),
-                ),
-            ),
-            name="provisioning_ready_evidence",
-        ),
         Index(
             "sandbox_cleanup_pending",
             "cleanup_pending_since",
@@ -112,9 +99,6 @@ class Sandbox(SQLModel, table=True):
     cleanup_pending: bool = Field(default=False, sa_column_kwargs={"server_default": false()})
     cleaned_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
     provisioning_outcome: str | None = None
-    provisioning_ready_observed_at: datetime | None = Field(
-        default=None, sa_type=DateTime(timezone=True)
-    )
     cleanup_pending_since: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
 
 

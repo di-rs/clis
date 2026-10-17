@@ -39,7 +39,6 @@ class CommandRunner(Protocol):
 class ProductionStack:
     def __init__(self, root: Path, *, command_runner: CommandRunner | None = None) -> None:
         self._command_runner = command_runner or command
-        self.shared_networks: list[str] = []
         self.root = root
         self.name = "boxie-integration-" + uuid4().hex[:12]
         self.postgres = self.name + "-postgres"
@@ -59,9 +58,6 @@ class ProductionStack:
         )
         self.env.update(
             BOXIE_CONTROL_NETWORK=self.name,
-            OBS_METRICS_NETWORK=self.name + "-metrics",
-            OBS_GRAFANA_ORIGIN_NETWORK=self.name + "-grafana-origin",
-            OBS_TEMPORAL_UI_ORIGIN_NETWORK=self.name + "-temporal-ui-origin",
             TEMPORAL_CERTS_DIR=str(root / "server"),
             TEMPORAL_OPERATOR_CERTS_DIR=str(root / "operator"),
             TEMPORAL_UI_CERTS_DIR=str(root / "ui"),
@@ -233,29 +229,6 @@ class ProductionStack:
         )
         self.compose("postgres", "up", "--detach", "--wait", "--wait-timeout", "90")
         self.pg_port = self.compose("postgres", "port", "postgres", "5432").rsplit(":", 1)[1]
-        for variable in (
-            "OBS_METRICS_NETWORK",
-            "OBS_GRAFANA_ORIGIN_NETWORK",
-            "OBS_TEMPORAL_UI_ORIGIN_NETWORK",
-        ):
-            identifier = self.command(
-                [
-                    "docker",
-                    "network",
-                    "create",
-                    "--internal",
-                    "--label",
-                    f"io.boxie.test.owner={self.name}",
-                    self.env[variable],
-                ]
-            )
-            self.shared_networks.append(identifier)
-            item = json.loads(self.command(["docker", "network", "inspect", identifier]))[0]
-            if (
-                item["Internal"] is not True
-                or item.get("Labels", {}).get("io.boxie.test.owner") != self.name
-            ):
-                raise RuntimeError("fixture network ownership/internal verification failed")
         self.compose("temporal", "run", "--rm", "schema", "setup")
         # Exercise upgrade path independently from first-install setup.
         self.compose("temporal", "run", "--rm", "schema", "update")
@@ -314,26 +287,6 @@ class ProductionStack:
                     self.compose(package, "down", "--volumes", "--remove-orphans")
                 except Exception as error:
                     failures.append(str(error))
-        for identifier in self.shared_networks:
-            try:
-                remaining = self.command(
-                    [
-                        "docker",
-                        "network",
-                        "ls",
-                        "--filter",
-                        f"id={identifier}",
-                        "--format",
-                        "{{.ID}}",
-                    ]
-                )
-                if remaining:
-                    item = json.loads(self.command(["docker", "network", "inspect", identifier]))[0]
-                    if item.get("Labels", {}).get("io.boxie.test.owner") != self.name:
-                        raise RuntimeError("refusing cleanup of foreign fixture network")
-                    self.command(["docker", "network", "rm", identifier])
-            except Exception as error:
-                failures.append(str(error))
         if self.network_id is not None:
             try:
                 item = json.loads(self.command(["docker", "network", "inspect", self.network_id]))[
@@ -366,7 +319,13 @@ def main() -> None:
     selected = (
         ["tools/boxie/tests/integration/test_lifecycle.py"]
         if args.runtime
-        else ["tools/boxie/tests/test_postgres.py", "tools/boxie/tests/test_temporal_deployment.py"]
+        else [
+            "tools/boxie/tests/test_postgres.py",
+            "tools/boxie/tests/test_temporal_deployment.py",
+            "tools/boxie/tests/test_migrations.py",
+            "tools/boxie/tests/test_observability_lifecycle.py",
+            "tools/boxie/tests/test_observability_logging.py",
+        ]
     )
     raise SystemExit(
         subprocess.call(

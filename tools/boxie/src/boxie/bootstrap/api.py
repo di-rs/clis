@@ -62,7 +62,7 @@ def load_configuration(path: Path) -> RuntimeConfig:
     return RuntimeConfig(api=api, orchestrator_credential=orchestrator, **data)
 
 
-def _main(metrics: Metrics) -> None:
+def _main(metrics: Metrics, config_path: Path) -> None:
     import uvicorn
 
     from boxie.api.app import create_app
@@ -77,10 +77,7 @@ def _main(metrics: Metrics) -> None:
     from boxie.temporal.contracts import lifecycle_queue
     from boxie.temporal.dispatcher import CommandDelivery
 
-    parser = argparse.ArgumentParser(description="Boxie private sandbox API")
-    parser.add_argument("--config", type=Path, required=True)
-    args = parser.parse_args()
-    config = load_configuration(args.config)
+    config = load_configuration(config_path)
 
     async def run() -> None:
         install_asyncio_handler(log_runtime())
@@ -143,12 +140,15 @@ def _main(metrics: Metrics) -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Boxie private sandbox api")
+    parser.add_argument("--config", type=Path, required=True)
+    args = parser.parse_args()
     from boxie.observability.logging import process_logging
 
     logs = process_logging("api")
     from boxie.observability.runtime import run_metrics_process
 
-    run_metrics_process(logs, "api", _main)
+    run_metrics_process(logs, "api", lambda metrics: _main(metrics, args.config))
 
 
 if __name__ == "__main__":

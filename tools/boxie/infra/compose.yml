@@ -22,9 +22,6 @@ services:
         aliases:
         - ${BOXIE_API_ALIAS:-boxie-api}
       control: {}
-      metrics:
-        aliases:
-        - boxie-api
     read_only: true
     tmpfs:
     - /tmp
@@ -34,15 +31,14 @@ services:
     - no-new-privileges:true
     init: true
     environment:
-      BOXIE_METRICS_HOST: 0.0.0.0
       BOXIE_RELEASE: ${BOXIE_RELEASE:-unknown}
-      BOXIE_ENVIRONMENT: ${BOXIE_ENVIRONMENT:-unknown}
     logging:
       driver: journald
       options:
         mode: non-blocking
         max-buffer-size: 4m
         tag: boxie-api
+    pids_limit: 256
   orchestrator:
     image: ${BOXIE_RUNTIME_IMAGE:-boxie:local}
     build:
@@ -64,9 +60,6 @@ services:
     - ${BOXIE_ORCHESTRATOR_TEMPORAL_KEY_FILE:?Set dedicated Temporal client key}:/run/secrets/temporal-client.key:ro
     networks:
       control: {}
-      metrics:
-        aliases:
-        - boxie-orchestrator
     read_only: true
     tmpfs:
     - /tmp
@@ -76,15 +69,14 @@ services:
     - no-new-privileges:true
     init: true
     environment:
-      BOXIE_METRICS_HOST: 0.0.0.0
       BOXIE_RELEASE: ${BOXIE_RELEASE:-unknown}
-      BOXIE_ENVIRONMENT: ${BOXIE_ENVIRONMENT:-unknown}
     logging:
       driver: journald
       options:
         mode: non-blocking
         max-buffer-size: 4m
         tag: boxie-orchestrator
+    pids_limit: 256
 networks:
   consumer:
     external: true
@@ -92,6 +84,3 @@ networks:
   control:
     external: true
     name: ${BOXIE_CONTROL_NETWORK:?Set private control network}
-  metrics:
-    external: true
-    name: ${OBS_METRICS_NETWORK:?Set private Boxie metrics network}
