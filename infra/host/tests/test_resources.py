@@ -146,3 +146,22 @@ def test_host_preparation_runs_standalone_with_python312_compatible_syntax() -> 
         timeout=5,
     )
     assert "--plan" in result.stdout
+
+
+def test_explicit_group_reader_mode_survives_restrictive_operator_umask(tmp_path: Path) -> None:
+    a = api()
+    declaration = a.ResourcePlan(
+        INSTALLATION,
+        "/dev/disk/by-id/scsi-0HC_Volume_42",
+        str(tmp_path),
+        (),
+        (),
+        (a.Directory("approved-profiles", os.getuid(), os.getgid(), 0o750),),
+    )
+    previous = os.umask(0o077)
+    try:
+        a.ensure(declaration, run=Docker())
+    finally:
+        os.umask(previous)
+    assert (tmp_path / "approved-profiles").stat().st_mode & 0o777 == 0o750
+    a.ensure(declaration, run=Docker())

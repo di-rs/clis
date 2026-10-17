@@ -26,7 +26,7 @@ class LifecycleStack(ProductionStack):
     ) -> None:
         super().__init__(root, command_runner=command_runner)
         self.runtime_overlay = runtime_overlay
-        self.runtime_services = ("faults", "orchestrator", "api", "playground")
+        self.runtime_services: tuple[str, ...] = ("faults", "orchestrator", "api", "playground")
         self.capture_teardown_logs = True
         self.installation = str(uuid4())
         self.host = self.name
@@ -49,6 +49,7 @@ class LifecycleStack(ProductionStack):
             BOXIE_ORCHESTRATOR_CONFIG=str(root / "orchestrator.json"),
             BOXIE_API_CONFIG=str(root / "api.json"),
             BOXIE_PROFILES_FILE=str(root / "profiles.json"),
+            BOXIE_PROFILES_DIR=str(root / "approved-profiles"),
             BOXIE_ORCHESTRATOR_CREDENTIAL_FILE=str(root / "orchestrator.secret"),
             BOXIE_CONSUMER_CREDENTIAL_FILE=str(root / "consumer.secret"),
             BOXIE_POSTGRES_DSN_FILE=str(root / "postgres-dsn"),
@@ -106,7 +107,7 @@ class LifecycleStack(ProductionStack):
             path.chmod(0o600)
         migrate(self.dsn, ROOT / "tools/boxie/alembic")
         # Compose's nested profiles bind must not create a root-owned directory.
-        (self.root / "data/profiles").mkdir(parents=True, mode=0o700)
+        (Path(self.env["BOXIE_DATA_DIR"]) / "profiles").mkdir(parents=True, mode=0o700)
         (self.root / "faults").mkdir()
         profiles = (
             json.loads((ROOT / "tools/cli-playground/infra/profiles/playground.json").read_text())
@@ -127,6 +128,9 @@ class LifecycleStack(ProductionStack):
         for profile in profiles.values():
             profile["image_digest"] = image
         (self.root / "profiles.json").write_text(json.dumps(profiles))
+        approved = Path(self.env["BOXIE_PROFILES_DIR"])
+        approved.mkdir(exist_ok=True)
+        (approved / "profiles.json").write_text(json.dumps(profiles))
         self.command(
             [
                 "uv",
@@ -138,7 +142,7 @@ class LifecycleStack(ProductionStack):
                 "--output",
                 str(self.root),
                 "--data-dir",
-                str(self.root / "data"),
+                self.env["BOXIE_DATA_DIR"],
                 "--installation-id",
                 self.installation,
                 "--host-id",

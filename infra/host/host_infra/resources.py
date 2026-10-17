@@ -123,6 +123,7 @@ def _directory(root: Path, value: Volume | Directory, *, create: bool) -> None:
         owner = path.stat()
         if (owner.st_uid, owner.st_gid) != (value.uid, value.gid):
             os.chown(path, value.uid, value.gid)
+        os.chmod(path, value.mode if isinstance(value, Directory) else 0o700)
 
 
 def _inspect(kind: str, run: Run) -> dict[str, dict[str, Any]]:

@@ -364,8 +364,9 @@ sys.exit(result.returncode)
 
 
 @pytest.mark.parametrize("signum", [signal.SIGTERM, signal.SIGHUP])
+@pytest.mark.parametrize("stdout_closed", [False, True])
 def test_cancellation_reaps_hook_before_releasing_component_lock(
-    source: Path, docker: tuple[Path, Path], signum: int
+    source: Path, docker: tuple[Path, Path], signum: int, stdout_closed: bool
 ) -> None:
     from deploy_tool.prepare import load_prepared
 
@@ -376,7 +377,8 @@ def test_cancellation_reaps_hook_before_releasing_component_lock(
     marker = source / "child-started"
     mutated = source / "late-mutation"
     (source / "cancel.sh").write_text(
-        f"(sleep 1; echo survived > '{mutated}') &\necho ready > '{marker}'\nwait\n"
+        ("exec 1>/dev/null\n" if stdout_closed else "")
+        + f"(sleep 1; echo survived > '{mutated}') &\necho ready > '{marker}'\nwait\n"
     )
     prepared = prepare_release(source, "cancelled")
     root = source / "host"

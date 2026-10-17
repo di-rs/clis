@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans for inline execution, or superpowers:subagent-driven-development if the user selects delegation. Steps use checkbox (`- [ ]`) syntax for tracking. This document does not start implementation.
 
+**Execution:** The user requested implementation in PR42 on 2026-10-17. Follow the [delivery/evidence record](boxie-delivery/pr4/README.md) for completed changes and pending environment gates.
+
 **Goal:** Complete the still-relevant Phase 4 outcomes without undoing the accepted changes from phases 1–3.
 
 **Architecture:** Preserve the two-process Boxie service and its native supporting-service infrastructure. A small shared host package and thin single-host environment wire owners together; generic application releases and product-owned preview operations remain separate.

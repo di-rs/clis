@@ -18,7 +18,7 @@ services:
       - ${BOXIE_DATA_DIR}:${BOXIE_DATA_DIR}:${BOXIE_TEST_DATA_MODE:-rw}
       - ${BOXIE_DATA_DIR}/profiles:${BOXIE_DATA_DIR}/profiles:rw
       - ${BOXIE_ORCHESTRATOR_CONFIG}:/etc/boxie/orchestrator.json:ro
-      - ${BOXIE_PROFILES_FILE}:/etc/boxie/profiles.json:ro
+      - ${BOXIE_PROFILES_DIR}:/etc/boxie/approved:ro
       - ${BOXIE_ORCHESTRATOR_CREDENTIAL_FILE}:/run/secrets/orchestrator:ro
       - ${BOXIE_TEST_ROOT}/orchestrator-dsn:/run/secrets/postgres-dsn:ro
       - ${BOXIE_TEMPORAL_CA_FILE}:/run/secrets/temporal-ca.pem:ro

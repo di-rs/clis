@@ -96,7 +96,8 @@ networks:
     descriptor: dict[str, Any] = {
         "component": name,
         "compose_file": "compose.yml",
-        "files": ["server.py"],
+        "files": ["server.py", "monitoring.yml"],
+        "optional_compose_files": {"TEST_MONITORING": "monitoring.yml"},
         "services": ["web"],
         "image_variables": {"APP_IMAGE": ["web"]},
         "required_environment": ["HEALTHY"],
@@ -104,6 +105,9 @@ networks:
         "compatibility": {"schema": "fixture-v1"},
         "healthchecks": {"web": {"kind": "docker"}},
     }
+    (directory / "monitoring.yml").write_text(
+        "services:\n  web:\n    labels:\n      fixture.monitoring: enabled\n"
+    )
     (directory / "descriptor.json").write_text(json.dumps(descriptor))
     (directory / "release.json").write_text(
         json.dumps(
@@ -112,7 +116,7 @@ networks:
                 "revision": ("a" if healthy else "b") * 40,
                 "images": {"APP_IMAGE": image},
                 "compatibility": {"schema": "fixture-v1"},
-                "settings": {"HEALTHY": "yes" if healthy else "no"},
+                "settings": {"HEALTHY": "yes" if healthy else "no", "TEST_MONITORING": "true"},
             }
         )
     )
@@ -190,6 +194,10 @@ def test_real_compose_independent_update_and_failed_release_rollback(tmp_path: P
         previous = (root / names[0] / "current").resolve()
         first_id = docker(
             "ps", "-q", "--filter", f"label=com.docker.compose.project=clis-{names[0]}"
+        )
+        assert (
+            json.loads(docker("inspect", first_id))[0]["Config"]["Labels"]["fixture.monitoring"]
+            == "enabled"
         )
         sentinel = "retained-" + uuid.uuid4().hex
         docker(

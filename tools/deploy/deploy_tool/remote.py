@@ -128,7 +128,14 @@ class Activator:
                         if len(output) + len(chunk) > 1_000_000:
                             raise ActivationError("activation command output exceeds limit")
                         output.extend(chunk)
-            process.wait(timeout=max(0, end - time.monotonic()))
+            # A hook may close stdout before it exits. Keep observing cancellation
+            # after EOF instead of blocking in wait until the command deadline.
+            while process.poll() is None:
+                self.check_cancelled()
+                wait = end - time.monotonic()
+                if wait <= 0:
+                    raise ActivationError("activation command deadline exceeded")
+                time.sleep(min(0.05, wait))
             self.check_cancelled()
             if process.returncode != 0:
                 raise ActivationError("activation command failed")

@@ -45,20 +45,27 @@ class Boxie(pulumi.ComponentResource):
         }
         if not monitoring:
             self.settings.pop("metrics_network")
-        prefix = "clis-" + host.installation_id.replace("-", "")
-        specs = [("postgres", 999, 999)]
-        if monitoring:
-            specs += [
-                ("vector", 65532, 65532),
-                ("logs", 65534, 65534),
-                ("prometheus", 65534, 65534),
-                ("grafana", 472, 0),
-            ]
-        self.volumes = tuple(
-            Volume(f"{prefix}-{name}", f"volumes/{name}", uid, gid) for name, uid, gid in specs
-        )
-        self.directories = (
-            Directory("boxie", 10001, 10001),
-            Directory("approved-profiles", 0, 10001, 0o750),
-        )
+        self.volumes, self.directories = storage_requests(host, monitoring)
         self.register_outputs(self.settings)
+
+
+def storage_requests(
+    host: HostHandle, monitoring: bool
+) -> tuple[tuple[Volume, ...], tuple[Directory, ...]]:
+    prefix = "clis-" + host.installation_id.replace("-", "")
+    specs = [("postgres", 999, 999)]
+    if monitoring:
+        specs += [
+            ("vector", 65532, 65532),
+            ("logs", 65534, 65534),
+            ("prometheus", 65534, 65534),
+            ("grafana", 472, 0),
+        ]
+    volumes = tuple(
+        Volume(f"{prefix}-{name}", f"volumes/{name}", uid, gid) for name, uid, gid in specs
+    )
+    directories = (
+        Directory("boxie", 10001, 10001),
+        Directory("approved-profiles", 0, 10001, 0o750),
+    )
+    return volumes, directories

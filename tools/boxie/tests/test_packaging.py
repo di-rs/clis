@@ -197,7 +197,7 @@ def test_real_isolated_installation(
 import importlib, importlib.util, pathlib
 module = importlib.import_module({module!r})
 assert pathlib.Path(module.__file__).is_relative_to({str(python.parent.parent)!r})
-for name in ({forbidden!r}, 'boxie_infra', 'playground_infra', 'boxie_test_support', 'pulumi', 'pytest'):
+for name in ({forbidden!r}, 'boxie_infra', 'playground_infra', 'boxie_test_support', 'pulumi', 'pytest', 'ci'):
     assert importlib.util.find_spec(name) is None, name
 """
     if module == "boxie":
@@ -248,6 +248,39 @@ async def run():
 asyncio.run(run())
 """
     subprocess.run([str(python), "-I", "-c", probe], cwd=tmp_path, env=environment, check=True)
+    if module == "playground":
+        ci_wheels = tmp_path / "ci-wheels"
+        subprocess.run(
+            ["uv", "build", "--package", "clis-ci", "--out-dir", str(ci_wheels)],
+            cwd=ROOT,
+            env=environment,
+            check=True,
+        )
+        subprocess.run(
+            [
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                str(python),
+                "--constraint",
+                str(constraints),
+                "--find-links",
+                str(ci_wheels),
+                str(wheel) + "[ci]",
+            ],
+            env=environment,
+            check=True,
+        )
+        result = subprocess.run(
+            [str(python), "-I", "-m", "playground.preview.cli", "--help"],
+            cwd=tmp_path,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert "{build,publish,lifecycle}" in result.stdout
 
 
 @pytest.mark.integration
@@ -336,9 +369,9 @@ def test_resolved_compose_isolated_topology(
         if name == "orchestrator":
             mount = next(v for v in entry["volumes"] if v["target"] == values["BOXIE_DATA_DIR"])
             assert mount["source"] == mount["target"]
-            assert set(entry["networks"]) == (
-                {"control", "metrics"} if manifest == "compose.production.yml" else {"control"}
-            )
+            assert set(entry["networks"]) == {"control"}
+            approved = next(v for v in entry["volumes"] if v["target"] == "/etc/boxie/approved")
+            assert approved["source"] == values["BOXIE_PROFILES_DIR"] and approved["read_only"]
         if name == "api":
             assert not any(v["target"] == values["BOXIE_DATA_DIR"] for v in entry["volumes"])
         if name == "gateway":
