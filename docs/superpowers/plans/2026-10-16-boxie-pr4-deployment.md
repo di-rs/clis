@@ -1,5 +1,10 @@
 # Boxie deployment implementation plan
 
+> Historical PR42 implementation record. For current requirements and remaining
+> work, use the [Phase 4 reconciliation](../specs/2026-10-17-boxie-phase4-reconciliation-design.md)
+> and [correction plan](2026-10-17-boxie-phase4-corrections.md). The checked items
+> below do not establish compliance with later phase 1–3 ownership decisions.
+
 > **For agentic workers:** Use executing-plans for integration and dispatching-parallel-agents for the independent platform and release-tool tasks. Steps use checkbox syntax for tracking.
 
 **Goal:** Complete phase 4 of the agreed Boxie stack with independent, bounded component releases and an explicit fresh-install path.

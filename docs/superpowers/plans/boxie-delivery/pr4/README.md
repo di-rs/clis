@@ -1,5 +1,18 @@
 # Phase 4 delivery record
 
+## Reconciled review (2026-10-17)
+
+The [requirement audit and amended review](../../../specs/2026-10-17-boxie-phase4-reconciliation-design.md)
+compares this implementation with the accepted revisions from phases 1–3. It adds
+the Boxie ingress/observability ownership finding and the duplicate platform
+PostgreSQL regression, and distinguishes current requirements from superseded
+plans. The [correction plan](../../2026-10-17-boxie-phase4-corrections.md) addresses
+the remaining findings without restoring removed architecture. Both are planning
+artifacts awaiting user review; no corrective implementation is claimed here.
+
+The record below describes the original work and its reported evidence at the
+time. It is not final acceptance of the reconciled scope.
+
 This change implements production composition and application release hardening
 on top of phase 3 (`affa3906c68dc9d3ac4803bdf7b33cf726570831`). It opens the fourth
 stacked PR; it does not merge the stack or activate a production environment.
