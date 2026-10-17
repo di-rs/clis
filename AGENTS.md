@@ -41,3 +41,12 @@ explicitly requested by the contributor. Do not add benchmark runs on pushes or
 merges to `master`. Treat automatic one-sample runs as execution smoke checks;
 report measurements and CI duration without claiming statistically significant
 performance changes from those samples.
+
+## Human-facing documentation
+
+Use `.agents/skills/documentation-pipeline/SKILL.md` when creating or editing
+persistent documentation for human readers about CLIs, tools, products, or
+architecture. It runs `write-docs`, `technical-documentation`, and
+`editorial-pass` in that order. This includes READMEs, guides, references, and
+architecture overviews; ordinary chat replies, agent instructions, and scratch
+notes do not need the pipeline.
