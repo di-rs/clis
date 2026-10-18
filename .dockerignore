@@ -19,3 +19,7 @@ target
 **/*.secret
 **/secrets
 **/Pulumi.*.json
+
+.installation
+**/.aws
+**/.ssh

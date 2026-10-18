@@ -9,17 +9,17 @@ import sys
 from pathlib import Path
 from typing import TypedDict, cast
 
-from cli_check.workspace import discover, load_toml
+from cli_check.workspace import find_root, load_toml, string, table, tables
 from pydantic import BaseModel, ConfigDict, Field
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path.cwd()
 GLOBAL_PATHS = {
     "Cargo.toml",
     "Cargo.lock",
+    "pyproject.toml",
+    "uv.lock",
     "rust-toolchain.toml",
     ".python-version",
-    "tools/cli-bench/bench.py",
-    "tools/cli-bench/select_suites.py",
     ".github/workflows/cli-bench.yml",
 }
 
@@ -42,10 +42,83 @@ class Selection(TypedDict):
     reason: str
 
 
+def _cargo_packages(root: Path) -> list[dict[str, object]]:
+    result = subprocess.run(
+        ["cargo", "metadata", "--locked", "--format-version", "1", "--no-deps"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        raise ValueError("Cargo metadata failed: " + result.stderr.strip())
+    return tables(table(json.loads(result.stdout))["packages"])
+
+
+def _changed_packages(root: Path, paths: list[str], packages: list[dict[str, object]]) -> set[str]:
+    directories = {
+        str(Path(string(package["manifest_path"], "manifest_path")).parent.resolve()): string(
+            package["name"], "package.name"
+        )
+        for package in packages
+    }
+    changed: set[str] = set()
+    for path in paths:
+        owners = [
+            (directory, name)
+            for directory, name in directories.items()
+            if (root / path).is_relative_to(directory)
+        ]
+        if owners:
+            directory, name = max(owners, key=lambda item: len(item[0]))
+            relative = (root / path).relative_to(directory).as_posix()
+            if relative in {"Cargo.toml", "build.rs"} or relative.startswith("src/"):
+                changed.add(name)
+        elif ("/src/" in path and path.endswith(".rs")) or path.endswith(
+            ("/Cargo.toml", "/build.rs")
+        ):
+            changed.update(directories.values())
+    while True:
+        before = set(changed)
+        for package in packages:
+            for dependency in tables(package["dependencies"]):
+                location = dependency.get("path")
+                if (
+                    isinstance(location, str)
+                    and directories.get(str(Path(location).resolve())) in changed
+                ):
+                    changed.add(string(package["name"], "package.name"))
+        if before == changed:
+            return changed
+
+
+def _tool_change(root: Path, paths: list[str]) -> bool:
+    for name in ("cli-bench", "cli-check"):
+        if not (root / "pyproject.toml").is_file():
+            continue
+        result = subprocess.run(
+            ["uv", "workspace", "dir", "--package", name],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode:
+            raise ValueError("Workspace lookup failed: " + result.stderr.strip())
+        directory = Path(result.stdout.strip()).resolve().relative_to(root).as_posix()
+        if any(
+            path.startswith(directory + "/src/") or path == directory + "/pyproject.toml"
+            for path in paths
+        ):
+            return True
+    return False
+
+
 def discover_suites() -> list[Suite]:
     suites: list[Suite] = []
-    for member in discover(ROOT):
-        directory, package = member.directory, member.name
+    for member in _cargo_packages(ROOT):
+        directory = Path(string(member["manifest_path"], "manifest_path")).parent
+        package = string(member["name"], "package.name")
         for path in sorted(directory.glob("benches/*.toml")):
             suite = load_toml(path)
             relative = path.relative_to(ROOT).as_posix()
@@ -101,18 +174,17 @@ def affected_suites(suites: list[Suite], base: str, head: str) -> list[Suite]:
         capture_output=True,
     )
     paths = [os.fsdecode(path) for path in diff.stdout.split(b"\0") if path]
-    for path in paths:
-        if path in GLOBAL_PATHS or path.startswith((".cargo/", "tools/cli-check/src/")):
-            return suites
-        parts = path.split("/")
-        if len(parts) > 2 and parts[0] == "utils" and production_change(path, f"utils/{parts[1]}"):
-            return suites
-    generator_changed = any(production_change(path, "biggie") for path in paths)
+    if any(path in GLOBAL_PATHS or path.startswith(".cargo/") for path in paths) or _tool_change(
+        ROOT, paths
+    ):
+        return suites
+    changed = _changed_packages(ROOT, paths, _cargo_packages(ROOT))
     return [
         suite
         for suite in suites
-        if (generator_changed and (suite.package == "biggie" or suite.generate))
-        or any(path == suite.path or production_change(path, suite.directory) for path in paths)
+        if suite.package in changed
+        or ("biggie" in changed and suite.generate)
+        or suite.path in paths
     ]
 
 
@@ -162,10 +234,13 @@ def select(base: str, head: str, event: dict[str, object]) -> Selection:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path)
     parser.add_argument("--base", required=True)
     parser.add_argument("--head", required=True)
     parser.add_argument("--event", type=Path, required=True)
     args = parser.parse_args()
+    global ROOT
+    ROOT = args.root.resolve() if args.root else find_root(Path.cwd())
     try:
         event: dict[str, object] = json.loads(args.event.read_text())
         selection = select(args.base, args.head, event)

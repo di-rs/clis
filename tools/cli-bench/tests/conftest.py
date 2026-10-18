@@ -16,21 +16,31 @@ from typing import NotRequired, TypedDict, cast
 
 import httpx
 import pytest
+import yaml
+from cli_bench import bench as bench_module
+from cli_bench import select_suites as selector_module
+from cli_bench.select_suites import Selection
 from githubkit import GitHub, TokenAuthStrategy
-from select_suites import Selection
 
 TOOLS = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
 def suite_workflow(tmp_path: Path) -> Path:
-    workflow = (TOOLS.parents[1] / ".github/workflows/cli-bench.yml").read_text()
-    step = workflow.split("      - name: ⏱️ Execute selected benchmark suites\n", 1)[1]
-    code = step.split("<<'PY'\n", 1)[1].split("          PY\n", 1)[0]
+    workflow = yaml.load(
+        (TOOLS.parents[1] / ".github/workflows/cli-bench.yml").read_text(), Loader=yaml.BaseLoader
+    )
+    step = next(
+        step["run"]
+        for step in workflow["jobs"]["suites"]["steps"]
+        if step["name"] == "⏱️ Execute selected benchmark suites"
+    )
+    code = step.split("<<'PY'\n", 1)[1].rsplit("PY", 1)[0]
     script = tmp_path / "run-suites.py"
     script.write_text(textwrap.dedent(code))
-    runner = tmp_path / "tools/cli-bench/bench.py"
+    runner = tmp_path / "cli_bench/bench.py"
     runner.parent.mkdir(parents=True)
+    (runner.parent / "__init__.py").write_text("")
     runner.write_text(
         "import json, os, sys\n"
         "with open('invocations.jsonl', 'a') as trace:\n"
@@ -80,7 +90,9 @@ class Repository:
         return subprocess.run(
             [
                 sys.executable,
-                str(self.root / "tools/cli-bench/select_suites.py"),
+                str(self.root / "tools/cli-bench/src/cli_bench/select_suites.py"),
+                "--root",
+                str(self.root),
                 "--base",
                 self.base,
                 "--head",
@@ -113,9 +125,18 @@ def repo(tmp_path: Path) -> Repository:
         "GIT_CONFIG_NOSYSTEM": "1",
     }
     repository = Repository(tmp_path, env)
-    script = tmp_path / "tools/cli-bench/select_suites.py"
+    repository.write(
+        "pyproject.toml",
+        '[project]\nname = "fixture"\nversion = "0.0.0"\n[tool.uv]\npackage = false\npreview-features = ["workspace-dir"]\n[tool.uv.workspace]\nmembers = ["tools/cli-bench", "tools/cli-check"]\n',
+    )
+    for name in ("cli-bench", "cli-check"):
+        repository.write(
+            f"tools/{name}/pyproject.toml",
+            f'[project]\nname = "{name}"\nversion = "0.0.0"\n[tool.uv]\npackage = false\n',
+        )
+    script = tmp_path / "tools/cli-bench/src/cli_bench/select_suites.py"
     script.parent.mkdir(parents=True)
-    shutil.copyfile(TOOLS / "select_suites.py", script)
+    shutil.copyfile(Path(selector_module.__file__), script)
     repository.write(
         "Cargo.toml",
         '[workspace]\nmembers = ["biggie", "coreutils/*", "utils/*"]\n'
@@ -136,7 +157,7 @@ def repo(tmp_path: Path) -> Repository:
     return repository
 
 
-RUNNER = Path(__file__).resolve().parents[1] / "bench.py"
+RUNNER = Path(bench_module.__file__).resolve()
 
 
 class Event(TypedDict):

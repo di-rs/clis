@@ -8,8 +8,9 @@ from typing import Any
 
 import pytest
 import yaml
+from cli_check.workspace import find_root
 
-WORKFLOWS = Path(__file__).resolve().parents[3] / ".github/workflows"
+WORKFLOWS = find_root(Path(__file__).resolve().parent) / ".github/workflows"
 QUEUE = {"group": "clis-production", "queue": "max", "cancel-in-progress": "false"}
 
 
@@ -39,7 +40,7 @@ def test_deployment_rejects_partial_workflow_retry(
     definition = yaml.load((WORKFLOWS / filename).read_text(), Loader=yaml.BaseLoader)
     source = definition["jobs"]["source"]
     assert source["outputs"]["attempt"] == "${{ steps.revision.outputs.attempt }}"
-    assert "GITHUB_RUN_ATTEMPT" in source["steps"][-1]["run"]
+    assert any("GITHUB_RUN_ATTEMPT" in step.get("run", "") for step in source["steps"])
     guarded = definition["jobs"][job_name]["steps"][0]
     assert guarded["env"]["SOURCE_ATTEMPT"] == "${{ needs.source.outputs.attempt }}"
     result = subprocess.run(
@@ -116,18 +117,21 @@ def test_release_uses_one_queue_current_master_and_direct_ssh(filename: str, app
     assert "PULUMI_" not in str(deployment)
     assert "R2_" not in str(deployment)
     assert "HCLOUD" not in str(deployment)
-    assert not any(
-        path.startswith(("coreutils/", "utils/")) for path in release["on"]["push"]["paths"]
-    )
+    assert "paths" not in release["on"]["push"]
+    assert release["jobs"]["build"]["if"] == "${{ needs.source.outputs.changed == 'true' }}"
 
 
 def test_gateway_release_does_not_build_sandbox() -> None:
     gateway = workflow("release")
     assert "sandbox" not in gateway["jobs"]
-    assert "Sandbox.Dockerfile" not in str(gateway["on"]["push"]["paths"])
+    assert "Sandbox.Dockerfile*" not in str(
+        gateway["jobs"]["source"]["steps"][-1]["env"]["OWNER_INPUTS"]
+    )
     sandbox = workflow("sandbox-release")
-    assert "Sandbox.Dockerfile" in str(sandbox["on"]["push"]["paths"])
-    assert "fixtures" in str(sandbox["on"]["push"]["paths"])
+    assert "Sandbox.Dockerfile*" in str(
+        sandbox["jobs"]["source"]["steps"][-1]["env"]["OWNER_INPUTS"]
+    )
+    assert "fixtures/" in str(sandbox["jobs"]["source"]["steps"][-1]["env"]["OWNER_INPUTS"])
 
 
 def test_only_manual_setup_can_provision_cloud_resources() -> None:

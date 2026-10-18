@@ -3,8 +3,10 @@ services:
   gateway:
     image: ${PLAYGROUND_IMAGE:-cli-playground:local}
     build:
-      context: ../../..
-      dockerfile: tools/cli-playground/infra/Playground.Dockerfile
+      context: ${CLIS_WORKSPACE_ROOT:?Set workspace root}
+      dockerfile: ${PLAYGROUND_DIR:?Set Playground package directory}/infra/Playground.Dockerfile
+      additional_contexts:
+        playground: ${PLAYGROUND_DIR}
     ports: ["127.0.0.1:8000:8000"]
     environment:
       PLAYGROUND_DATA_DIR: /var/lib/cli-playground

@@ -15,7 +15,7 @@ unicode-segmentation = "1.13.3"
 unicode-width = "0.2.2"
 
 log.workspace = true
-cli-log = { path = "../utils/cli-log" }
+cli-log.workspace = true
 
 [dev-dependencies]
 cli-testing.workspace = true

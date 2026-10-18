@@ -18,7 +18,7 @@ csv = ["dep:csv"]
 csv = { workspace = true, optional = true }
 clap = { workspace = true }
 anyhow.workspace = true
-cli-log = { path = "../utils/cli-log" }
+cli-log.workspace = true
 log.workspace = true
 thousands = "0.2.0"
 rand = "0.10.3"

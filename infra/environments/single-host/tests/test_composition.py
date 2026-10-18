@@ -6,9 +6,10 @@ from pathlib import Path
 
 import pulumi
 import pytest
-from host_mocks import HostMocks
+from cli_check.workspace import find_root
+from host_infra.testing import HostMocks
 
-ROOT = Path(__file__).resolve().parents[4]
+ROOT = find_root(Path(__file__).resolve().parent)
 
 
 @pulumi.runtime.test  # type: ignore[untyped-decorator]

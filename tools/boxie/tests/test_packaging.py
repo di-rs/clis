@@ -1,20 +1,35 @@
 """Independent service packaging and operator-owned topology contracts."""
 
 import json
+import subprocess
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from cli_check.workspace import find_root
 
-ROOT = Path(__file__).resolve().parents[3]
+BOXIE_ROOT = Path(
+    subprocess.check_output(
+        ["uv", "workspace", "dir", "--package", "boxie"],
+        cwd=Path(__file__).resolve().parent,
+        text=True,
+    ).strip()
+)
+PLAYGROUND_ROOT = Path(
+    subprocess.check_output(
+        ["uv", "workspace", "dir", "--package", "cli-playground"],
+        cwd=Path(__file__).resolve().parent,
+        text=True,
+    ).strip()
+)
+
+ROOT = find_root(Path(__file__).resolve().parent)
 
 
 def test_operations_manifest_keeps_docker_socket_out_of_operator_jobs() -> None:
     import yaml
 
-    services = yaml.safe_load((ROOT / "tools/boxie/infra/compose.operations.yml").read_text())[
-        "services"
-    ]
+    services = yaml.safe_load((BOXIE_ROOT / "infra/compose.operations.yml").read_text())["services"]
     assert not any(
         "/var/run/docker.sock" in str(service.get("volumes", [])) for service in services.values()
     )
@@ -32,7 +47,11 @@ def test_real_isolated_installation(
     import subprocess
     import sys
 
-    service = ROOT / "tools" / package
+    service = Path(
+        subprocess.check_output(
+            ["uv", "workspace", "dir", "--package", package], cwd=ROOT, text=True
+        ).strip()
+    )
     if package == "cli-playground":
         assert (service / "src/playground/static/index.html").is_file(), (
             "Build the real frontend first"
@@ -155,6 +174,9 @@ def test_resolved_compose_isolated_topology(
     import subprocess
 
     values = {
+        "CLIS_WORKSPACE_ROOT": str(ROOT),
+        "BOXIE_DIR": str(BOXIE_ROOT),
+        "PLAYGROUND_DIR": str(PLAYGROUND_ROOT),
         "BOXIE_RUNTIME_IMAGE": "boxie:test",
         "BOXIE_API_CONFIG": str(tmp_path / "api.json"),
         "BOXIE_POSTGRES_DSN_FILE": str(tmp_path / "postgres-dsn.secret"),
@@ -198,7 +220,15 @@ def test_resolved_compose_isolated_topology(
             "docker",
             "compose",
             "-f",
-            str(ROOT / "tools" / service / "infra" / manifest),
+            str(
+                Path(
+                    subprocess.check_output(
+                        ["uv", "workspace", "dir", "--package", service], cwd=ROOT, text=True
+                    ).strip()
+                )
+                / "infra"
+                / manifest
+            ),
             "config",
             "--format",
             "json",
@@ -305,3 +335,46 @@ def test_orchestrator_configuration_rejects_unsupported_capacity(
     )
     with pytest.raises(ValueError, match="extra_forbidden"):
         OrchestratorConfig.from_file(config)
+
+
+@pytest.mark.integration
+def test_workspace_docker_context_excludes_private_and_generated_inputs(tmp_path: Path) -> None:
+    context = tmp_path / "moved context"
+    context.mkdir()
+    (context / ".dockerignore").write_text((ROOT / ".dockerignore").read_text())
+    (context / "source.txt").write_text("allowed source")
+    private = [
+        ".installation/operator.json",
+        "apps/renamed/secrets/key",
+        "apps/renamed/.env",
+        "apps/renamed/operator.secret",
+        ".aws/credentials",
+        ".ssh/id_ed25519",
+        "apps/renamed/frontend/node_modules/generated.js",
+        "target/release/binary",
+    ]
+    for path in private:
+        value = context / path
+        value.parent.mkdir(parents=True, exist_ok=True)
+        value.write_text("private sentinel")
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text("FROM scratch\nCOPY . /context/\n")
+    exported = tmp_path / "exported"
+    subprocess.run(
+        [
+            "docker",
+            "build",
+            "-f",
+            str(dockerfile),
+            "--output",
+            f"type=local,dest={exported}",
+            str(context),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert (exported / "context/source.txt").read_text() == "allowed source"
+    for path in private:
+        assert not (exported / "context" / path).exists(), path

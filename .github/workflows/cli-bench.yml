@@ -40,7 +40,7 @@ jobs:
       - name: 🐍 Set up uv and Python
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          version: '0.13.0'
+          version: '0.13.1'
           enable-cache: false
       - name: 🔎 Select affected or requested CLI benchmarks
         id: selection
@@ -48,7 +48,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          uv run --locked --no-dev python tools/cli-bench/select_suites.py \
+          uv run --locked --no-dev cli-bench-select \
             --base "$BASE_SHA" --head "$HEAD_SHA" --event "$GITHUB_EVENT_PATH" > selection.json
           uv run --locked --no-dev python - <<'PY'
           import json
@@ -89,7 +89,7 @@ jobs:
       - name: 🐍 Set up uv and Python
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          version: '0.13.0'
+          version: '0.13.1'
           enable-cache: false
       - name: ⏱️ Install Hyperfine benchmark runner
         uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
@@ -133,7 +133,7 @@ jobs:
           failed = []
           for suite in suites:
               result = subprocess.run([
-                  sys.executable, "tools/cli-bench/bench.py", suite,
+                  sys.executable, "-m", "cli_bench.bench", suite,
                   "--warmup", os.environ["WARMUP"], "--runs", os.environ["RUNS"],
                   "--output", "target/benchmarks/" + suite.replace("/", "-"),
               ])

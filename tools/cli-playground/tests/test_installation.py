@@ -5,10 +5,11 @@ from pathlib import Path
 
 import pytest
 from boxie_infra.installation import render, write_environment
+from cli_check.workspace import find_root
 from playground_infra.installation import render as render_product
 from playground_infra.installation import update_profile
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = find_root(Path(__file__).resolve().parent)
 
 
 def test_environment_rejects_shell_injection(tmp_path: Path) -> None:
@@ -133,6 +134,11 @@ def test_boxie_render_does_not_require_product_settings(
         monkeypatch.setenv(name, "setting")
     for name in ("PLAYGROUND_IMAGE", "PLAYGROUND_DOMAIN", "CLOUDFLARE_DNS_API_TOKEN"):
         monkeypatch.delenv(name, raising=False)
-    render(tmp_path, ROOT)
+    owner = tmp_path / "unpacked owner"
+    (owner / "observability").mkdir(parents=True)
+    (owner / "ingress").mkdir()
+    (owner / "observability/prometheus.yml").write_text("installation: ${BOXIE_INSTALLATION_ID}\n")
+    (owner / "ingress/cloudflared.yml").write_text("hostname: ${OPERATOR_GRAFANA_HOSTNAME}\n")
+    render(tmp_path, owner)
     assert (tmp_path / "boxie.env").is_file()
     assert not (tmp_path / "playground.env").exists()

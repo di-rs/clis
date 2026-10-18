@@ -6,7 +6,7 @@ edition = "2024"
 
 [dependencies]
 log.workspace = true
-cli-log = { path = "../../utils/cli-log" }
+cli-log.workspace = true
 chrono = "0.4.45"
 clap = { workspace = true }
 exitcode = { workspace = true }

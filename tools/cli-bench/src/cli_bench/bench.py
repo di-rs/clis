@@ -23,7 +23,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, NotRequired, TypedDict, TypeGuard, cast
 
-ROOT = Path(__file__).resolve().parents[2]
+from cli_check.workspace import find_root
+
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
 
@@ -63,6 +64,7 @@ class Metadata(TypedDict):
 
 class Arguments(argparse.Namespace):
     suite: Path
+    root: Path | None
     candidate: str | None
     baseline: str | None
     reference: str | None
@@ -303,15 +305,20 @@ def validate_report(path: Path, commands: list[str], runs: int, expected: int) -
 
 
 def run(args: Arguments, suite: Suite, cases: list[Case]) -> None:
-    candidate = executable(args.candidate or ROOT / "target/release" / suite["binary"])
+    root = args.root or (
+        find_root(Path.cwd())
+        if not args.candidate or not args.output or (suite.get("generate") and not args.biggie)
+        else Path.cwd()
+    )
+    candidate = executable(args.candidate or root / "target/release" / suite["binary"])
     other = args.baseline or args.reference or suite.get("reference")
     baseline = executable(other) if other else None
     biggie = (
-        executable(args.biggie or ROOT / "target/release/biggie") if suite.get("generate") else None
+        executable(args.biggie or root / "target/release/biggie") if suite.get("generate") else None
     )
     hyperfine = executable(args.hyperfine)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
-    output = (args.output or ROOT / "target/benchmarks" / f"{suite['binary']}-{stamp}").resolve()
+    output = (args.output or root / "target/benchmarks" / f"{suite['binary']}-{stamp}").resolve()
     output.mkdir(parents=True, exist_ok=False)
     metadata: Metadata = {
         "status": "running",
@@ -417,6 +424,7 @@ def run(args: Arguments, suite: Suite, cases: list[Case]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("suite", type=Path)
+    parser.add_argument("--root", type=Path, help="explicit Cargo workspace root")
     parser.add_argument(
         "--candidate", help="candidate executable (default: target/release/<binary>)"
     )

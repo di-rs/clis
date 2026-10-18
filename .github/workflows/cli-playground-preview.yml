@@ -35,8 +35,15 @@ jobs:
       - name: 🐍 Set up uv and Python
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          version: '0.13.0'
+          version: '0.13.1'
           enable-cache: false
+      - name: 📍 Resolve workspace packages
+        id: projects
+        run: |
+          set -euo pipefail
+          boxie=$(uv workspace dir --package boxie)
+          playground=$(uv workspace dir --package cli-playground)
+          printf 'boxie=%s\nplayground=%s\n' "$boxie" "$playground" >> "$GITHUB_OUTPUT"
       - name: 🌐 Publish playground previews and PR links
         env:
           GH_TOKEN: ${{ github.token }}
@@ -44,7 +51,9 @@ jobs:
           RUN_ID: ${{ github.event.workflow_run.id }}
           PLAYGROUND_URL: ${{ vars.PLAYGROUND_URL }}
           PLAYGROUND_DEPLOY_TOKEN: ${{ secrets.PLAYGROUND_DEPLOY_TOKEN }}
-        run: uv run --locked --no-dev python tools/cli-playground/preview_ci.py publish --repo "$REPOSITORY" --run-id "$RUN_ID"
+          BOXIE_DIR: ${{ steps.projects.outputs.boxie }}
+          PLAYGROUND_DIR: ${{ steps.projects.outputs.playground }}
+        run: uv run --locked --no-dev python "${PLAYGROUND_DIR}/preview_ci.py" publish --repo "$REPOSITORY" --run-id "$RUN_ID"
   lifecycle:
     environment: playground-preview
     name: 🧹 Reconcile playground preview lifecycle
@@ -68,8 +77,15 @@ jobs:
       - name: 🐍 Set up uv and Python
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          version: '0.13.0'
+          version: '0.13.1'
           enable-cache: false
+      - name: 📍 Resolve workspace packages
+        id: projects
+        run: |
+          set -euo pipefail
+          boxie=$(uv workspace dir --package boxie)
+          playground=$(uv workspace dir --package cli-playground)
+          printf 'boxie=%s\nplayground=%s\n' "$boxie" "$playground" >> "$GITHUB_OUTPUT"
       - name: 🧹 Reconcile closed and reopened PR previews
         env:
           GH_TOKEN: ${{ github.token }}
@@ -78,6 +94,8 @@ jobs:
           PR_ACTION: ${{ github.event.action }}
           PLAYGROUND_URL: ${{ vars.PLAYGROUND_URL }}
           PLAYGROUND_DEPLOY_TOKEN: ${{ secrets.PLAYGROUND_DEPLOY_TOKEN }}
+          BOXIE_DIR: ${{ steps.projects.outputs.boxie }}
+          PLAYGROUND_DIR: ${{ steps.projects.outputs.playground }}
         run: |
-          uv run --locked --no-dev python tools/cli-playground/preview_ci.py lifecycle \
+          uv run --locked --no-dev python "${PLAYGROUND_DIR}/preview_ci.py" lifecycle \
             --repo "$REPOSITORY" --pr "$PR_NUMBER" --action "$PR_ACTION"

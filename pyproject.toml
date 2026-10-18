@@ -2,7 +2,7 @@
 name = "clis-tools"
 version = "0.1.0"
 requires-python = ">=3.15"
-dependencies = ["cli-check", "githubkit>=0.16.1,<0.17", "httpx", "anyio"]
+dependencies = ["cli-bench", "cli-playground", "cli-check", "githubkit>=0.16.1,<0.17", "httpx", "anyio"]
 
 [dependency-groups]
 dev = [
@@ -20,7 +20,8 @@ dev = [
 
 [tool.uv]
 package = false
-required-version = ">=0.13.0"
+required-version = ">=0.13.1"
+preview-features = ["workspace-dir"]
 
 [tool.uv.workspace]
 members = ["infra/host", "tools/boxie", "tools/boxie/tests/support", "tools/cli-playground", "tools/boxie/infra", "tools/cli-playground/infra", "tools/cli-bench", "tools/cli-check"]
@@ -35,19 +36,20 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
 [tool.mypy]
 python_version = "3.15"
 plugins = ["pydantic.mypy"]
-files = ["tools", "infra"]
-mypy_path = ["tools", "infra/host/tests"]
+files = ["."]
+mypy_path = ["."]
 strict = true
 # Pulumi entry points share this filename; their implementation modules are checked.
 exclude = ["infra/environments/single-host/__main__.py"]
 
 [tool.pytest]
-testpaths = ["infra/host/tests", "infra/environments/single-host/tests", "tools/boxie/tests", "tools/cli-bench/tests", "tools/cli-playground/tests", "tools/cli-check/tests"]
-pythonpath = ["tools", "tools/cli-bench", "infra/host/tests"]
+testpaths = ["."]
+pythonpath = ["."]
 addopts = ["--strict-config", "--strict-markers", "-p", "boxie_test_support.dependencies", "-m", "not integration"]
 markers = ["integration: real isolated builds/installations and external-tool checks; prerequisites required"]
 
 [tool.uv.sources]
+cli-bench = { workspace = true }
 cli-check = { workspace = true }
 boxie = { workspace = true }
 boxie-test-support = { workspace = true }

@@ -11,6 +11,7 @@ readme = "README.md"
 include = ["README.md", "LICENSE", "build.rs", "Cargo.toml", "src/**/*.rs"]
 
 [workspace.dependencies]
+cli-log = { path = "utils/cli-log" }
 cli-testing = { path = "utils/cli-testing" }
 csv = "1.4.0"
 log = { version = "0.4", features = ["std", "kv"] }

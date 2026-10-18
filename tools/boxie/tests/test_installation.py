@@ -5,9 +5,18 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from cli_check.workspace import find_root
 
-ROOT = Path(__file__).resolve().parents[3]
-SCRIPT = ROOT / "tools/boxie/infra/credentials.sh"
+BOXIE_ROOT = Path(
+    subprocess.check_output(
+        ["uv", "workspace", "dir", "--package", "boxie"],
+        cwd=Path(__file__).resolve().parent,
+        text=True,
+    ).strip()
+)
+
+ROOT = find_root(Path(__file__).resolve().parent)
+SCRIPT = BOXIE_ROOT / "infra/credentials.sh"
 
 
 def credentials(directory: Path) -> subprocess.CompletedProcess[str]:
@@ -75,7 +84,7 @@ def test_failed_certificate_generation_leaves_no_final_directory(tmp_path: Path)
     openssl = fake_bin / "openssl"
     openssl.write_text("#!/bin/sh\nexit 17\n")
     openssl.chmod(0o755)
-    script = ROOT / "tools/boxie/infra/certificates.sh"
+    script = BOXIE_ROOT / "infra/certificates.sh"
     failed = subprocess.run(
         ["bash", str(script), str(root), str(os.getuid()), str(os.getgid())],
         env={**os.environ, "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"]},
@@ -98,7 +107,7 @@ def test_certificates_have_separate_identities_and_private_ca(tmp_path: Path) ->
     result = subprocess.run(
         [
             "bash",
-            str(ROOT / "tools/boxie/infra/certificates.sh"),
+            str(BOXIE_ROOT / "infra/certificates.sh"),
             str(tmp_path / "tls"),
             str(os.getuid()),
             str(os.getgid()),
@@ -140,7 +149,7 @@ def test_temporal_schema_setup_can_resume_one_database(tmp_path: Path) -> None:
     command.chmod(0o755)
     log = tmp_path / "calls"
     result = subprocess.run(
-        ["sh", str(ROOT / "tools/boxie/infra/temporal/schema.sh"), "setup", "visibility"],
+        ["sh", str(BOXIE_ROOT / "infra/temporal/schema.sh"), "setup", "visibility"],
         env={
             **os.environ,
             "PATH": str(tmp_path) + ":" + os.environ["PATH"],

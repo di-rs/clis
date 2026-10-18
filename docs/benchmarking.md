@@ -9,8 +9,7 @@ records a reason in its manifest's `package.metadata.cli-check.benchmark-exempti
 see [cli-check](../tools/cli-check/README.md#record-a-benchmark-exemption).
 [Biggie](../biggie/README.md) generates inputs once; [hyperfine 2](https://github.com/sharkdp/hyperfine/releases/tag/v2.0.0)
 measures the executables directly, including warmups, timing and peak RSS.
-The [runner](../tools/cli-bench/bench.py) requires Python 3.15+ and uses only the
-standard library. The root [uv workspace](testing.md#python-tooling) manages its
+The [runner](../tools/cli-bench/src/cli_bench/bench.py) requires Python 3.15+ and is installed from the root workspace. The root [uv workspace](testing.md#python-tooling) manages its
 interpreter and development checks.
 
 ## Run a suite
@@ -19,8 +18,12 @@ From the workspace root, with `uv` and `hyperfine` on PATH:
 
 ```sh
 cargo build --locked --release --workspace --bins
-uv run --locked python tools/cli-bench/bench.py coreutils/tailr/benches/cli-bench.toml
+uv run --locked cli-bench coreutils/tailr/benches/cli-bench.toml
 ```
+
+Use `--root /path/to/checkout` when invoking the installed command outside its
+checkout. Suite arguments are filesystem paths; package names select Cargo
+builds.
 
 This compares `target/release/tailr` with the suite's system `tail`.
 Use `--reference /usr/bin/tail` to choose the macOS BSD executable explicitly,
@@ -28,8 +31,8 @@ or `--reference /path/to/gtail` to select another implementation. System tools
 on Linux are usually GNU; a system comparison is not a general parity claim.
 
 ```sh
-uv run --locked python tools/cli-bench/bench.py coreutils/tailr/benches/cli-bench.toml --list
-uv run --locked python tools/cli-bench/bench.py coreutils/tailr/benches/cli-bench.toml \
+uv run --locked cli-bench coreutils/tailr/benches/cli-bench.toml --list
+uv run --locked cli-bench coreutils/tailr/benches/cli-bench.toml \
   --case file-lines --warmup 1 --runs 3 --output /tmp/tail-smoke
 ```
 
@@ -60,7 +63,7 @@ do not already exist. Replace `HEAD~1` with the desired tag or commit:
 git worktree add --detach /tmp/clis-before HEAD~1
 cargo build --locked --release --manifest-path /tmp/clis-before/Cargo.toml \
   --target-dir /tmp/clis-before-target -p tailr
-uv run --locked python tools/cli-bench/bench.py coreutils/tailr/benches/cli-bench.toml \
+uv run --locked cli-bench coreutils/tailr/benches/cli-bench.toml \
   --baseline /tmp/clis-before-target/release/tailr
 git worktree remove /tmp/clis-before
 ```
@@ -146,10 +149,10 @@ An empty selection skips both benchmark jobs.
 | CLI source, manifest, or build script | That package's suites. |
 | Suite TOML | That suite. |
 | Biggie implementation | Biggie and suites using generated input. |
-| Shared Rust implementations, including CLI logging | All suites, conservatively. |
+| Shared Rust implementations, including CLI logging | Suites of their transitive local dependents, conservatively including optional, build and target dependencies. |
 | Root Cargo manifest/lockfile, Rust toolchain, or `.cargo/` configuration | All suites, conservatively. |
-| Benchmark runner, selector, benchmark workflow, or Python version pin | All suites. |
-| Documentation, correctness tests, or Python development-tool configuration | No native benchmarks. Ordinary CI checks still run. |
+| Benchmark runner, selector, root Python manifest/lockfile, benchmark workflow, or Python version pin | All suites. |
+| Documentation, correctness tests, or standalone Python development-tool configuration | No native benchmarks. Ordinary CI checks still run. |
 
 Global Rust changes deliberately over-select: a dev-only lockfile edit can run
 all suites. This keeps selection simple without pretending that unchanged CLI

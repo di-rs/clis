@@ -9,8 +9,8 @@ for file in settings.env tunnel.json boxie-image.env playground-image.env; do
     install -m 0600 "$source/$file" "/etc/clis/$file"
 done
 install -d -m 0755 /opt/clis/boxie /opt/clis/playground
-cp -a "$source/tools/boxie/infra/." /opt/clis/boxie/
-cp -a "$source/tools/cli-playground/infra/." /opt/clis/playground/
+cp -a "$source/boxie/." /opt/clis/boxie/
+cp -a "$source/playground/." /opt/clis/playground/
 set -a
 # shellcheck disable=SC1091
 source /etc/clis/settings.env

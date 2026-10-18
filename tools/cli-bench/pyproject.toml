@@ -2,7 +2,13 @@
 name = "cli-bench"
 version = "0.1.0"
 requires-python = ">=3.15"
-dependencies = ["pydantic>=2,<3"]
+dependencies = ["cli-check", "pydantic>=2,<3", "githubkit>=0.16.1,<0.17", "httpx", "anyio"]
 
-[tool.uv]
-package = false
+[project.scripts]
+cli-bench = "cli_bench.bench:main"
+cli-bench-select = "cli_bench.select_suites:main"
+cli-bench-report = "cli_bench.report:main"
+
+[build-system]
+requires = ["uv_build==0.13.0"]
+build-backend = "uv_build"

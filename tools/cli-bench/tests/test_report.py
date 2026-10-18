@@ -4,7 +4,7 @@ import struct
 from typing import cast
 
 import pytest
-import report
+from cli_bench import report
 from conftest import BASE, REPO, FakeGitHub, archive, benchmark, suite_files
 
 

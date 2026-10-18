@@ -7,6 +7,14 @@ from pathlib import Path
 
 import pytest
 
+BOXIE_ROOT = Path(
+    subprocess.check_output(
+        ["uv", "workspace", "dir", "--package", "boxie"],
+        cwd=Path(__file__).resolve().parent,
+        text=True,
+    ).strip()
+)
+
 PRELUDE = """
 import asyncio, json, logging, os, sys, threading, time
 from pathlib import Path
@@ -31,11 +39,7 @@ def records(result: subprocess.CompletedProcess[str]) -> list[dict[str, object]]
     lines = result.stdout.splitlines()
     assert lines
     events = [json.loads(line) for line in lines]
-    schema = json.loads(
-        (
-            Path(__file__).parents[3] / "tools/boxie/infra/observability/event.schema.json"
-        ).read_text()
-    )
+    schema = json.loads((BOXIE_ROOT / "infra/observability/event.schema.json").read_text())
     for event in events:
         assert set(schema["required"]) <= event.keys() <= schema["properties"].keys()
         assert event["schema_version"] == 1

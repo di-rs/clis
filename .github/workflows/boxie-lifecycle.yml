@@ -4,18 +4,6 @@ on:
   pull_request:
     branches: [master]
     types: [opened, synchronize, reopened, ready_for_review, labeled]
-    paths:
-      - '.github/workflows/boxie-lifecycle.yml'
-      - 'tools/cli-playground/**'
-      - 'tools/boxie/**'
-      - 'coreutils/echor/**'
-      - 'utils/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'rust-toolchain.toml'
-      - 'pyproject.toml'
-      - 'uv.lock'
-      - '.python-version'
   workflow_dispatch:
 
 permissions:
@@ -27,7 +15,7 @@ concurrency:
 
 jobs:
   sandbox:
-    if: ${{ !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci') }}
+    if: ${{ (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci')) && needs.select.outputs.changed == 'true' }}
     name: 🧪 Verify PostgreSQL and Temporal lifecycle
     runs-on: ubuntu-24.04
     timeout-minutes: 35
@@ -41,8 +29,15 @@ jobs:
       - name: 🐍 Set up uv and Python
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          version: '0.13.0'
+          version: '0.13.1'
           enable-cache: false
+      - name: 📍 Resolve workspace packages
+        id: projects
+        run: |
+          set -euo pipefail
+          boxie=$(uv workspace dir --package boxie)
+          playground=$(uv workspace dir --package cli-playground)
+          printf 'boxie=%s\nplayground=%s\n' "$boxie" "$playground" >> "$GITHUB_OUTPUT"
       - name: 🛡️ Install signed gVisor and configure sandbox runtime
         if: github.event_name == 'workflow_dispatch'
         run: |
@@ -60,20 +55,29 @@ jobs:
       - name: 🏗️ Build shared sandbox and native CLI
         if: github.event_name == 'workflow_dispatch'
         run: |
-          docker build -f tools/cli-playground/Sandbox.Dockerfile -t clis-playground-sandbox:lifecycle .
+          docker build --build-context "playground=$PLAYGROUND_DIR" -f "${PLAYGROUND_DIR}/Sandbox.Dockerfile" -t clis-playground-sandbox:lifecycle .
           cargo build --locked --release --package echor
+        env:
+          BOXIE_DIR: ${{ steps.projects.outputs.boxie }}
+          PLAYGROUND_DIR: ${{ steps.projects.outputs.playground }}
       - name: 🐳 Build Boxie runtime image
         run: |
-          docker build -f tools/boxie/infra/Runtime.Dockerfile -t boxie:lifecycle .
+          docker build -f "${BOXIE_DIR}/infra/Runtime.Dockerfile" -t boxie:lifecycle .
+        env:
+          BOXIE_DIR: ${{ steps.projects.outputs.boxie }}
+          PLAYGROUND_DIR: ${{ steps.projects.outputs.playground }}
       - name: 🐳 Build playground runtime image
         if: github.event_name == 'workflow_dispatch'
         run: |
-          docker build -f tools/cli-playground/infra/Playground.Dockerfile -t cli-playground:lifecycle .
+          docker build --build-context "playground=$PLAYGROUND_DIR" -f "${PLAYGROUND_DIR}/infra/Playground.Dockerfile" -t cli-playground:lifecycle .
+        env:
+          BOXIE_DIR: ${{ steps.projects.outputs.boxie }}
+          PLAYGROUND_DIR: ${{ steps.projects.outputs.playground }}
       - name: 🟢 Set up Node.js and frontend tooling
         uses: voidzero-dev/setup-vp@68f39c78aaf39be468cabd2afb09c162574c84af # v1.21.2
         if: github.event_name == 'workflow_dispatch'
         with:
-          working-directory: tools/cli-playground/frontend
+          working-directory: ${{ steps.projects.outputs.playground }}/frontend
           node-version-file: .node-version
           version-file: package.json
           run-install: false
@@ -84,15 +88,18 @@ jobs:
       - name: 🌐 Install frontend and Chromium dependencies
         if: github.event_name == 'workflow_dispatch'
         run: |
-          pnpm --dir tools/cli-playground/frontend install --frozen-lockfile
-          pnpm --dir tools/cli-playground/frontend exec playwright install --with-deps chromium
+          pnpm --dir "${PLAYGROUND_DIR}/frontend" install --frozen-lockfile
+          pnpm --dir "${PLAYGROUND_DIR}/frontend" exec playwright install --with-deps chromium
+        env:
+          BOXIE_DIR: ${{ steps.projects.outputs.boxie }}
+          PLAYGROUND_DIR: ${{ steps.projects.outputs.playground }}
       - name: ⏳ Verify Python imports and pinned Temporal test server
         timeout-minutes: 3
         run: |
           uv run --locked python -c 'import temporalio.bridge.temporal_sdk_bridge; import boxie.bootstrap.runtime'
           uv run --locked python - <<'PYTHON'
           import hashlib, io, json, os, pathlib, tarfile, urllib.request
-          pins = json.loads(pathlib.Path("tools/boxie/tests/test-server-pins.json").read_text())
+          pins = json.loads((pathlib.Path(os.environ["BOXIE_DIR"]) / "tests/test-server-pins.json").read_text())
           pin = next(p for p in pins["artifacts"] if p["variant"] == "linux_amd64")
           with urllib.request.urlopen(pin["url"], timeout=60) as source:
               archive = source.read()
@@ -109,7 +116,10 @@ jobs:
               output.write(f"BOXIE_TEST_SERVER={path}\n")
           PYTHON
           export BOXIE_TEST_SERVER="$RUNNER_TEMP/boxie-test-server"
-          uv run --locked pytest -m integration tools/boxie/tests/test_temporal_lifecycle.py -vv --durations=10
+          uv run --locked pytest -m integration "${BOXIE_DIR}/tests/test_temporal_lifecycle.py" -vv --durations=10
+        env:
+          BOXIE_DIR: ${{ steps.projects.outputs.boxie }}
+          PLAYGROUND_DIR: ${{ steps.projects.outputs.playground }}
       - name: 🗂️ Enable persistent journal for the collector smoke
         run: |
           sudo mkdir -p /var/log/journal
@@ -118,18 +128,88 @@ jobs:
       - name: 🧪 Test PostgreSQL and Temporal cancellation, replay and diagnostics
         timeout-minutes: 9
         run: |
-          uv run --locked pytest -m integration tools/boxie/tests/test_temporal_deployment.py tools/boxie/tests/test_outbox.py tools/boxie/tests/integration/test_artifact_commit.py tools/boxie/tests/test_migrations.py tools/boxie/tests/test_observability_lifecycle.py tools/boxie/tests/test_observability_logging.py tools/boxie/tests/test_observability_native.py -vv --durations=10
+          uv run --locked pytest -m integration "${BOXIE_DIR}/tests/test_temporal_deployment.py" "${BOXIE_DIR}/tests/test_outbox.py" "${BOXIE_DIR}/tests/integration/test_artifact_commit.py" "${BOXIE_DIR}/tests/test_migrations.py" "${BOXIE_DIR}/tests/test_observability_lifecycle.py" "${BOXIE_DIR}/tests/test_observability_logging.py" "${BOXIE_DIR}/tests/test_observability_native.py" -vv --durations=10
+        env:
+          BOXIE_DIR: ${{ steps.projects.outputs.boxie }}
+          PLAYGROUND_DIR: ${{ steps.projects.outputs.playground }}
       - name: 🔐 Test native credential permissions and endpoint restarts
         timeout-minutes: 3
         run: |
-          uv run --locked pytest -m integration tools/boxie/tests/test_native_permissions.py tools/boxie/tests/test_native_scenarios.py -vv --durations=10
+          uv run --locked pytest -m integration "${BOXIE_DIR}/tests/test_native_permissions.py" "${BOXIE_DIR}/tests/test_native_scenarios.py" -vv --durations=10
+        env:
+          BOXIE_DIR: ${{ steps.projects.outputs.boxie }}
+          PLAYGROUND_DIR: ${{ steps.projects.outputs.playground }}
       - name: 🗃️ Test PostgreSQL restart journal recovery
         timeout-minutes: 3
         run: |
-          uv run --locked pytest -m integration tools/boxie/tests/test_postgres.py -k failed_restart_journal -vv --durations=10
+          uv run --locked pytest -m integration "${BOXIE_DIR}/tests/test_postgres.py" -k failed_restart_journal -vv --durations=10
       # Optional until the native suite's hang is resolved; never blocks a PR.
+        env:
+          BOXIE_DIR: ${{ steps.projects.outputs.boxie }}
+          PLAYGROUND_DIR: ${{ steps.projects.outputs.playground }}
       - name: 🎭 Run optional native lifecycle and browser tests
         if: github.event_name == 'workflow_dispatch'
         timeout-minutes: 20
         run: |
-          uv run --locked python tools/boxie/tests/run_integration.py --runtime runsc --browser -- -vv --durations=10 -o faulthandler_timeout=120
+          uv run --locked python "${BOXIE_DIR}/tests/run_integration.py" --runtime runsc --browser -- -vv --durations=10 -o faulthandler_timeout=120
+        env:
+          BOXIE_DIR: ${{ steps.projects.outputs.boxie }}
+          PLAYGROUND_DIR: ${{ steps.projects.outputs.playground }}
+    needs: select
+  select:
+    name: 🔎 Select affected lifecycle checks
+    if: ${{ !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      changed: ${{ steps.selection.outputs.changed }}
+    steps:
+      - name: 📥 Check out source history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 🐍 Set up uv and Python
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: 0.13.1
+          enable-cache: false
+      - name: 📍 Resolve workspace packages
+        id: projects
+        run: |
+          set -euo pipefail
+          boxie=$(uv workspace dir --package boxie)
+          playground=$(uv workspace dir --package cli-playground)
+          printf 'boxie=%s\nplayground=%s\n' "$boxie" "$playground" >> "$GITHUB_OUTPUT"
+      - name: 🔎 Check changed inputs
+        id: selection
+        run: |
+          set -euo pipefail
+          python3 - <<'PYSELECT'
+          import json
+          import os
+          import pathlib
+          import subprocess
+
+          with open(os.environ["GITHUB_EVENT_PATH"]) as source:
+              event = json.load(source)
+          base = event.get("pull_request", {}).get("base", {}).get("sha") or event.get("before")
+          head = os.environ.get("SELECTED_SHA") or os.environ["GITHUB_SHA"]
+          changed = True
+          if base and set(base) != {"0"}:
+              comparison = f"{base}...{head}" if "pull_request" in event else f"{base}..{head}"
+              result = subprocess.run(["git", "diff", "--name-only", "--no-renames", "-z", comparison], check=True, capture_output=True)
+              paths = [os.fsdecode(value) for value in result.stdout.split(b"\0") if value]
+              root = pathlib.Path.cwd().resolve()
+              packages = [pathlib.Path(os.environ[name]).resolve().relative_to(root).as_posix() for name in ("BOXIE_DIR", "PLAYGROUND_DIR")]
+              owner = os.environ.get("OWNER_PACKAGE")
+              if owner:
+                  packages = packages[:1] if owner == "boxie" else packages[1:]
+              global_inputs = {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "pyproject.toml", "uv.lock", ".python-version", ".dockerignore"}
+              changed = any(path in global_inputs or path.startswith(".github/workflows/") or (not owner and path.endswith(".rs")) or any(path.startswith(directory + "/") and not path.endswith(".md") for directory in packages) for path in paths)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              print(f"changed={str(changed).lower()}", file=output)
+          PYSELECT
+        env:
+          BOXIE_DIR: ${{ steps.projects.outputs.boxie }}
+          PLAYGROUND_DIR: ${{ steps.projects.outputs.playground }}

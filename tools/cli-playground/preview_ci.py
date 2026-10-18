@@ -22,12 +22,10 @@ import anyio
 import httpx
 from cli_check.checks.layout import check as check_layout
 from cli_check.workspace import discover as discover_workspace
+from cli_check.workspace import find_root, string, tables
+from cli_check.workspace import table as toml_table
 from githubkit import BaseAuthStrategy, GitHub, TokenAuthStrategy
 from githubkit.exception import GitHubException
-
-# Keep direct script invocation usable from any working directory.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 from playground.artifacts import CLI_PATTERN, MAX_ARCHIVE, MAX_CLIS, binary_archive  # noqa: E402
 
 MAX_JSON = 2 * 1024 * 1024
@@ -156,7 +154,7 @@ def github_pages[A: BaseAuthStrategy](
     raise PaginationLimit("GitHub pagination limit exceeded")
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = find_root(Path(__file__).resolve().parent)
 WORKFLOW = ".github/workflows/cli-playground.yml"
 TIMEOUT = 60
 ARTIFACT_NAME = "cli-playground-binaries"
@@ -169,19 +167,97 @@ def positive(value: object, maximum: int = 10**18) -> int:
     return value
 
 
+def _cargo_packages(root: Path) -> list[dict[str, object]]:
+    result = subprocess.run(
+        ["cargo", "metadata", "--locked", "--format-version", "1", "--no-deps"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        raise ValueError("Cargo metadata failed: " + result.stderr.strip())
+    return tables(toml_table(json.loads(result.stdout))["packages"])
+
+
+def _changed_packages(root: Path, paths: list[str], packages: list[dict[str, object]]) -> set[str]:
+    directories = {
+        str(Path(string(package["manifest_path"], "manifest_path")).parent.resolve()): string(
+            package["name"], "package.name"
+        )
+        for package in packages
+    }
+    changed: set[str] = set()
+    for path in paths:
+        owners = [
+            (directory, name)
+            for directory, name in directories.items()
+            if (root / path).is_relative_to(directory)
+        ]
+        if owners:
+            directory, name = max(owners, key=lambda item: len(item[0]))
+            relative = (root / path).relative_to(directory).as_posix()
+            if relative in {"Cargo.toml", "build.rs"} or relative.startswith("src/"):
+                changed.add(name)
+        elif ("/src/" in path and path.endswith(".rs")) or path.endswith(
+            ("/Cargo.toml", "/build.rs")
+        ):
+            changed.update(directories.values())
+    while True:
+        before = set(changed)
+        for package in packages:
+            for dependency in tables(package["dependencies"]):
+                location = dependency.get("path")
+                if (
+                    isinstance(location, str)
+                    and directories.get(str(Path(location).resolve())) in changed
+                ):
+                    changed.add(string(package["name"], "package.name"))
+        if before == changed:
+            return changed
+
+
+def _tool_change(root: Path, paths: list[str]) -> bool:
+    for name in ("cli-bench", "cli-check"):
+        if not (root / "pyproject.toml").is_file():
+            continue
+        result = subprocess.run(
+            ["uv", "workspace", "dir", "--package", name],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode:
+            raise ValueError("Workspace lookup failed: " + result.stderr.strip())
+        directory = Path(result.stdout.strip()).resolve().relative_to(root).as_posix()
+        if any(
+            path.startswith(directory + "/src/") or path == directory + "/pyproject.toml"
+            for path in paths
+        ):
+            return True
+    return False
+
+
 def discover(root: Path = ROOT) -> dict[str, str]:
     root = root.resolve()
     members = discover_workspace(root)
     if errors := check_layout(root, members):
         raise ValueError("\n".join(map(str, errors)))
     packages: dict[str, str] = {}
-    for package in members:
-        if not package.is_cli:
+    for package in _cargo_packages(root):
+        if not any(
+            "bin" in cast(list[str], target["kind"]) for target in tables(package["targets"])
+        ):
             continue
-        name = package.name
+        name = string(package["name"], "package.name")
         if not re.fullmatch(CLI_PATTERN, name) or name in packages:
             raise ValueError("CLI package must define exactly its matching binary")
-        packages[name] = package.directory.relative_to(root).as_posix()
+        packages[name] = (
+            Path(string(package["manifest_path"], "manifest_path"))
+            .parent.relative_to(root)
+            .as_posix()
+        )
     if not packages or len(packages) > MAX_CLIS:
         raise ValueError("unexpected CLI package count")
     return packages
@@ -195,36 +271,28 @@ def production(path: str, directory: str) -> bool:
     return relative in {"Cargo.toml", "build.rs"} or relative.startswith("src/")
 
 
-def select(packages: dict[str, str], paths: list[str]) -> list[str]:
-    paths = [
-        path
-        for path in paths
-        if not path.endswith(".md") and not {"tests", "docs"}.intersection(Path(path).parts)
-    ]
-    global_paths = {
-        "Cargo.toml",
-        "Cargo.lock",
-        "rust-toolchain.toml",
-        "tools/cli-playground/Build.Dockerfile",
-        "tools/cli-playground/Build.Dockerfile.dockerignore",
-        "tools/cli-playground/preview_ci.py",
-        WORKFLOW,
-    }
-    if any(
-        path in global_paths
-        or path.startswith(".cargo/")
-        or path.startswith("utils/")
-        and "/src/" in path
-        or path.startswith("utils/")
-        and path.endswith(("/Cargo.toml", "/build.rs"))
-        for path in paths
+def select(packages: dict[str, str], paths: list[str], *, root: Path | None = None) -> list[str]:
+    root = (root or ROOT).resolve()
+    global_paths = {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml", WORKFLOW}
+    owner = Path(__file__).resolve().parent
+    if owner.is_relative_to(root):
+        prefix = owner.relative_to(root).as_posix()
+        global_paths.update(
+            prefix + "/" + name
+            for name in ("Build.Dockerfile", "Build.Dockerfile.dockerignore", "preview_ci.py")
+        )
+    if any(path in global_paths or path.startswith(".cargo/") for path in paths) or _tool_change(
+        root, paths
     ):
         return sorted(packages)
-    return sorted(
+    changed = _changed_packages(root, paths, _cargo_packages(root))
+    # Callers may supply a bounded package selection from another workspace.
+    changed.update(
         name
         for name, directory in packages.items()
         if any(production(path, directory) for path in paths)
     )
+    return sorted(set(packages).intersection(changed))
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):

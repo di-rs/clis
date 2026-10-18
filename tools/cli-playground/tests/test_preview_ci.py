@@ -870,6 +870,7 @@ def test_build_command_invokes_cargo_once_for_the_selected_batch(
     commands = Mock(return_value=subprocess.CompletedProcess([], 0, "\0".join(paths).encode()))
     monkeypatch.setattr(subprocess, "run", commands)
     monkeypatch.setattr(preview_ci, "ROOT", tmp_path)
+    monkeypatch.setattr(preview_ci, "_cargo_packages", lambda root: [])
     monkeypatch.setattr(
         preview_ci, "discover", lambda: {name: f"coreutils/{name}" for name in [*names, "unused"]}
     )
@@ -913,3 +914,23 @@ def test_build_command_invokes_cargo_once_for_the_selected_batch(
     for name in names:
         assert (output / name).read_bytes() == elf_binary(name.encode())
         assert (output / name).stat().st_mode & 0o111
+
+
+@pytest.mark.parametrize(
+    "table", ["dependencies", "build-dependencies", "target.'cfg(windows)'.dependencies"]
+)
+def test_moved_shared_dependency_selects_native_dependents(tmp_path: Path, table: str) -> None:
+    workspace(tmp_path)
+    moved = tmp_path / "tests/libraries/shared"
+    moved.parent.mkdir(parents=True)
+    (tmp_path / "utils/shared").rename(moved)
+    (tmp_path / "Cargo.toml").write_text(
+        '[workspace]\nmembers = ["coreutils/*", "tests/libraries/shared"]\n'
+    )
+    (tmp_path / "coreutils/echor/Cargo.toml").write_text(
+        f'[package]\nname = "echor"\n[{table}]\nshared = {{ path = "../../tests/libraries/shared", optional = true }}\n'
+    )
+    packages = preview_ci.discover(tmp_path)
+    assert preview_ci.select(packages, ["tests/libraries/shared/src/lib.rs"], root=tmp_path) == [
+        "echor"
+    ]

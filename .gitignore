@@ -6,18 +6,18 @@ __pycache__/
 /.pytest_cache/
 /docs/superpowers/plans/
 node_modules/
-/tools/cli-playground/frontend/dist/
-/tools/cli-playground/frontend/test-results/
-/tools/cli-playground/frontend/playwright-report/
+**/frontend/dist/
+**/frontend/test-results/
+**/frontend/playwright-report/
 
 /tests/consumers/target/
 /utils/comp_macro/wip/
 .env
 *.env
-!/tools/cli-playground/infra/*.env.example
-/tools/cli-playground/infra/Pulumi.*.yaml
-!/tools/cli-playground/infra/Pulumi.example.yaml
-!/tools/cli-playground/infra/Pulumi.production.yaml
+!**/infra/*.env.example
+**/infra/Pulumi.*.yaml
+!**/infra/Pulumi.example.yaml
+!**/infra/Pulumi.production.yaml
 
-/tools/cli-playground/src/playground/static/
-!/tools/boxie/infra/config.example.env
+**/src/playground/static/
+!**/infra/config.example.env

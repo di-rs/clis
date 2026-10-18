@@ -1,6 +1,7 @@
 """Focused fixture regressions; Docker transport is not a native runsc proof."""
 
 import socket
+import subprocess
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -13,7 +14,15 @@ from uuid import uuid4
 import httpx
 import pytest
 import yaml
-from run_integration import ROOT, ProductionStack, command
+from run_integration import ProductionStack, command
+
+BOXIE_ROOT = Path(
+    subprocess.check_output(
+        ["uv", "workspace", "dir", "--package", "boxie"],
+        cwd=Path(__file__).resolve().parent,
+        text=True,
+    ).strip()
+)
 
 
 def test_collection_observer_reaches_actual_orchestrator_bootstrap(
@@ -58,7 +67,7 @@ def test_collection_observer_reaches_actual_orchestrator_bootstrap(
     )
     with pytest.raises(ReachedStore):
         runpy.run_path(
-            str(ROOT / "tools/boxie/tests/integration/orchestrator_fixture.py"), run_name="__main__"
+            str(BOXIE_ROOT / "tests/integration/orchestrator_fixture.py"), run_name="__main__"
         )
     assert observed == ["ObservedArtifacts"]
 
@@ -102,7 +111,7 @@ def test_native_published_endpoint_survives_process_restart(
 ) -> None:
     # Exercise the actual native fixture's publish specification against Docker.
     config = yaml.safe_load(
-        (ROOT / "tools/boxie/infra/compose.test.yml").read_text().replace("!override", "")
+        (BOXIE_ROOT / "infra/compose.test.yml").read_text().replace("!override", "")
     )
     with socket.socket() as reservation:
         reservation.bind(("127.0.0.1", 0))

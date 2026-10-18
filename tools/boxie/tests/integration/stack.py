@@ -4,6 +4,7 @@ import json
 import os
 import secrets
 import socket
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,21 @@ from boxie.persistence.database import database
 from boxie.persistence.migrate import migrate
 from run_integration import ROOT, CommandRunner, ProductionStack
 from sqlalchemy.sql import Select
+
+BOXIE_ROOT = Path(
+    subprocess.check_output(
+        ["uv", "workspace", "dir", "--package", "boxie"],
+        cwd=Path(__file__).resolve().parent,
+        text=True,
+    ).strip()
+)
+PLAYGROUND_ROOT = Path(
+    subprocess.check_output(
+        ["uv", "workspace", "dir", "--package", "cli-playground"],
+        cwd=Path(__file__).resolve().parent,
+        text=True,
+    ).strip()
+)
 
 
 class LifecycleStack(ProductionStack):
@@ -70,7 +86,7 @@ class LifecycleStack(ProductionStack):
                 "--project-name",
                 self.runtime,
                 "--file",
-                str(ROOT / "tools/boxie/infra/compose.test.yml"),
+                str(BOXIE_ROOT / "infra/compose.test.yml"),
                 *(
                     ["--file", str(self.runtime_overlay)]
                     if self.runtime_overlay is not None
@@ -104,16 +120,16 @@ class LifecycleStack(ProductionStack):
                 f"host={host} dbname=boxie user=boxie password={self.env['BOXIE_DB_PASSWORD']} sslmode=disable"
             )
             path.chmod(0o600)
-        migrate(self.dsn, ROOT / "tools/boxie/alembic")
+        migrate(self.dsn, BOXIE_ROOT / "alembic")
         # Compose's nested profiles bind must not create a root-owned directory.
         (self.root / "data/profiles").mkdir(parents=True, mode=0o700)
         (self.root / "faults").mkdir()
         profiles = (
-            json.loads((ROOT / "tools/cli-playground/infra/profiles/playground.json").read_text())
+            json.loads((PLAYGROUND_ROOT / "infra/profiles/playground.json").read_text())
             if "playground" in self.runtime_services
             else {}
         )
-        profiles.update(json.loads((ROOT / "tools/boxie/infra/profiles.example.json").read_text()))
+        profiles.update(json.loads((BOXIE_ROOT / "infra/profiles.example.json").read_text()))
         image = self.command(
             [
                 "docker",

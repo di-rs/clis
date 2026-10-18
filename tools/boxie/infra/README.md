@@ -28,7 +28,10 @@ Run from the repository root:
 
 ```sh
 uv sync --locked --all-packages
-docker build -f tools/boxie/infra/Runtime.Dockerfile -t boxie:local .
+export CLIS_WORKSPACE_ROOT=$(uv workspace dir)
+export BOXIE_DIR=$(uv workspace dir --package boxie)
+export PLAYGROUND_DIR=$(uv workspace dir --package cli-playground)
+docker build -f "$BOXIE_DIR/infra/Runtime.Dockerfile" -t boxie:local .
 docker network create --internal boxie-consumers
 docker network create --internal boxie-control
 ```
@@ -82,7 +85,7 @@ uv run --locked python -m boxie_infra.config \
   --host-id local-linux --consumer-id playground
 
 docker compose --env-file /etc/boxie/local.env \
-  -f tools/boxie/infra/compose.yml up --build -d
+  -f "$BOXIE_DIR/infra/compose.yml" up --build -d
 ```
 
 The configuration generator contains no secret values. `--data-dir` must equal
@@ -100,9 +103,9 @@ Default tests require no Docker or frontend build. Integration checks require
 Docker Compose, uv and real built frontend assets; missing tools/assets fail.
 
 ```sh
-uv run --locked pytest tools/boxie/tests/test_packaging.py
-pnpm --dir tools/cli-playground/frontend build
-uv run --locked pytest tools/boxie/tests/test_packaging.py -m integration
+uv run --locked pytest "$BOXIE_DIR/tests/test_packaging.py"
+pnpm --dir "$PLAYGROUND_DIR/frontend" build
+uv run --locked pytest "$BOXIE_DIR/tests/test_packaging.py" -m integration
 ```
 
 The optional native Linux [sandbox check](../../../.github/workflows/boxie-lifecycle.yml)
@@ -125,7 +128,7 @@ credentials, immutable secret mounts, writable data/profiles and rejected unsafe
 credentials. Run it with the freshly built runtime image:
 
 ```sh
-uv run --locked pytest -m integration tools/boxie/tests/test_native_permissions.py
+uv run --locked pytest -m integration "$BOXIE_DIR/tests/test_native_permissions.py"
 ```
 
 This probe can verify Linux ownership on an arm64 Docker host, but only the native
@@ -154,4 +157,5 @@ network. The minimal collector image supplies the journalctl version required fo
 cross-boot collection; there are no infrastructure Python renderers.
 
 Runtime images install only their application package. The root lockfile lists
-workspace member manifests, whose metadata is copied for dependency resolution.
+workspace member manifests. Builders receive the ignored workspace context for
+dependency resolution; final images contain only the selected service environment.

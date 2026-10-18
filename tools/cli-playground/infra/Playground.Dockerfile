@@ -1,25 +1,19 @@
 FROM ghcr.io/voidzero-dev/vite-plus:1.2.0 AS frontend
 WORKDIR /frontend
-COPY --chown=vp:vp tools/cli-playground/frontend/package.json tools/cli-playground/frontend/pnpm-lock.yaml tools/cli-playground/frontend/pnpm-workspace.yaml tools/cli-playground/frontend/.node-version ./
+COPY --from=playground --chown=vp:vp frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml frontend/.node-version ./
 RUN vp install --frozen-lockfile
-COPY --chown=vp:vp tools/cli-playground/frontend/ ./
+COPY --from=playground --chown=vp:vp frontend/ ./
 RUN vp build --outDir /frontend/dist
 
-FROM ghcr.io/astral-sh/uv:0.13.0 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.1 AS uv
 FROM python:3.15-slim AS build
 COPY --from=uv /uv /usr/local/bin/uv
 WORKDIR /app
-COPY pyproject.toml uv.lock .python-version ./
-COPY infra/host/pyproject.toml infra/host/pyproject.toml
-COPY tools/boxie/pyproject.toml tools/boxie/pyproject.toml
-COPY tools/boxie/tests/support/pyproject.toml tools/boxie/tests/support/pyproject.toml
-COPY tools/boxie/infra/pyproject.toml tools/boxie/infra/pyproject.toml
-COPY tools/cli-playground/pyproject.toml tools/cli-playground/pyproject.toml
-COPY tools/cli-playground/infra/pyproject.toml tools/cli-playground/infra/pyproject.toml
-COPY tools/cli-bench/pyproject.toml tools/cli-bench/pyproject.toml
-COPY tools/cli-check/pyproject.toml tools/cli-check/pyproject.toml
-COPY tools/cli-playground/src/playground tools/cli-playground/src/playground
-COPY --from=frontend /frontend/dist/ tools/cli-playground/src/playground/static/
+COPY . .
+COPY --from=frontend /frontend/dist/ /tmp/frontend-assets/
+RUN project=$(uv workspace dir --package cli-playground) \
+    && mkdir -p "$project/src/playground/static" \
+    && cp -a /tmp/frontend-assets/. "$project/src/playground/static/"
 RUN uv sync --locked --package cli-playground --no-dev --no-editable --no-python-downloads
 FROM python:3.15-slim
 WORKDIR /app

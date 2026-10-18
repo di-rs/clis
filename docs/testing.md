@@ -69,7 +69,7 @@ platform checks are specified in the workflow rather than duplicated here.
 
 ## Python tooling
 
-Use uv 0.13 or newer and the root workspace. Shared Ruff, strict mypy and pytest
+Use uv 0.13.1 or newer and the root workspace. Shared Ruff, strict mypy and pytest
 settings live in [pyproject.toml](../pyproject.toml); dependencies are pinned in
 [uv.lock](../uv.lock).
 
@@ -81,10 +81,45 @@ uv run --locked mypy
 uv run --locked pytest
 ```
 
-Keep tests beside their tool under `tools/NAME/tests/`. Register new tools in the
-root uv workspace and pytest test paths; run `uv lock` after dependency changes.
+Keep tests beside their owning package. Register new Python packages in the
+root uv workspace; pytest and mypy discover them recursively. Run `uv lock` after
+dependency changes.
 Use pytest functions and shared fixtures in `conftest.py`; prefer `tmp_path` and
 `monkeypatch` for temporary files and environment changes.
+
+## Move a project
+
+Select projects by package name: `cargo check --locked -p echor` and
+`uv run --locked --package boxie ...`. Resolve asset directories with
+`uv workspace dir --package boxie`; Cargo metadata supplies Rust package locations
+and local dependency relationships to selectors. The native uv directory command
+uses the `workspace-dir` preview enabled at the root.
+
+1. Move the package while keeping its name and required Rust leaf-directory name.
+2. Update membership and shared dependency locations in root `Cargo.toml` and
+   `pyproject.toml`. Dependencies inherit workspace locations.
+3. Refresh affected lockfiles intentionally. For moved Python members, run
+   `uv lock --upgrade-package NAME` for each moved package, including nested
+   infrastructure/test-support members; this discards stale editable locations
+   while retaining other locked versions. Review the diff.
+4. Update explicit dependencies in the independent `tests/consumers/Cargo.toml`
+   when affected, and repair ordinary documentation links.
+5. Run root Python checks, affected Rust checks and selectors, then packaging/image
+   checks for moved services. The integration-marked relocation regression under
+   [cli-check](../tools/cli-check/tests/test_workspace_relocation.py) rehearses
+   moving Boxie, benchmark tooling, a CLI and shared logging in a disposable copy.
+
+Local Compose callers export `CLIS_WORKSPACE_ROOT=$(uv workspace dir)`,
+`BOXIE_DIR=$(uv workspace dir --package boxie)` and
+`PLAYGROUND_DIR=$(uv workspace dir --package cli-playground)` for native build
+contexts. Build Playground images with named context
+`--build-context "playground=$PLAYGROUND_DIR"`. Setup archives normalize source
+inputs as `boxie/`, `playground/` and `environment/`; installed host paths remain
+operator configuration.
+
+Use `--locked` in CI, releases, hooks and verification, except when intentionally
+updating a lockfile. Ordinary local development may omit it; selecting a workspace
+package does not require it.
 
 ## CLI repository standards
 
@@ -111,12 +146,13 @@ and pnpm versions for frontend development and builds; production serves static
 assets from Python. Run from the repository root:
 
 ```sh
-pnpm --dir tools/cli-playground/frontend install --frozen-lockfile
-pnpm --dir tools/cli-playground/frontend check
-pnpm --dir tools/cli-playground/frontend test
-pnpm --dir tools/cli-playground/frontend build
-pnpm --dir tools/cli-playground/frontend exec playwright install chromium
-pnpm --dir tools/cli-playground/frontend test:browser
+PLAYGROUND_DIR=$(uv workspace dir --package cli-playground)
+pnpm --dir "$PLAYGROUND_DIR/frontend" install --frozen-lockfile
+pnpm --dir "$PLAYGROUND_DIR/frontend" check
+pnpm --dir "$PLAYGROUND_DIR/frontend" test
+pnpm --dir "$PLAYGROUND_DIR/frontend" build
+pnpm --dir "$PLAYGROUND_DIR/frontend" exec playwright install chromium
+pnpm --dir "$PLAYGROUND_DIR/frontend" test:browser
 ```
 
 Playground product tests, Boxie service tests and both infrastructure packages run
@@ -146,8 +182,10 @@ Ordinary pytest excludes the `integration` marker and requires no built frontend
 or Docker. After a real frontend build, explicitly run:
 
 ```sh
-pnpm --dir tools/cli-playground/frontend build
-uv run --locked pytest tools/boxie/tests/test_packaging.py -m integration
+PLAYGROUND_DIR=$(uv workspace dir --package cli-playground)
+BOXIE_DIR=$(uv workspace dir --package boxie)
+pnpm --dir "$PLAYGROUND_DIR/frontend" build
+uv run --locked pytest "$BOXIE_DIR/tests/test_packaging.py" -m integration
 ```
 
 These checks build each service sdist/wheel, install it with only locked runtime
@@ -166,7 +204,8 @@ services; explicit integration selection fails when dependencies are missing.
 Run the isolated infrastructure tier (including SQL/Temporal observability, migration and history/privacy checks) with:
 
 ```sh
-uv run --locked python tools/boxie/tests/run_integration.py
+BOXIE_DIR=$(uv workspace dir --package boxie)
+uv run --locked python "$BOXIE_DIR/tests/run_integration.py"
 ```
 
 The [Linux lifecycle workflow](../.github/workflows/boxie-lifecycle.yml) runs real
@@ -176,7 +215,8 @@ temporarily manual-only while their hang is investigated. Use `workflow_dispatch
 to build the native images and `echor` and run all six cases, or run locally:
 
 ```sh
-uv run --locked python tools/boxie/tests/run_integration.py --runtime runsc --browser -- -vv --durations=10
+BOXIE_DIR=$(uv workspace dir --package boxie)
+uv run --locked python "$BOXIE_DIR/tests/run_integration.py" --runtime runsc --browser -- -vv --durations=10
 ```
 
 Each CI tier has its own timeout and reports individual tests and slow durations.
@@ -202,7 +242,8 @@ configuration and runs a compact Linux persistent-journal to Grafana datasource
 smoke after a collector outage. To run the validators locally on Docker Desktop:
 
 ```sh
-uv run --locked pytest -m integration tools/boxie/tests/test_observability_native.py -k native_configs
+BOXIE_DIR=$(uv workspace dir --package boxie)
+uv run --locked pytest -m integration "$BOXIE_DIR/tests/test_observability_native.py" -k native_configs
 ```
 
 The full native file requires a Linux Docker host with persistent journald and

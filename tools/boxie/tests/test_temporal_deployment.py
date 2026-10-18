@@ -3,6 +3,7 @@
 import asyncio
 import json
 import re
+import subprocess
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ import httpx
 import psycopg
 import pytest
 import yaml
+from cli_check.workspace import find_root
 from google.protobuf.duration_pb2 import Duration
 from run_integration import ProductionStack, command
 from temporal_support import tls
@@ -22,7 +24,15 @@ from temporalio.client import Client
 from temporalio.service import TLSConfig
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
-ROOT = Path(__file__).parents[3]
+BOXIE_ROOT = Path(
+    subprocess.check_output(
+        ["uv", "workspace", "dir", "--package", "boxie"],
+        cwd=Path(__file__).resolve().parent,
+        text=True,
+    ).strip()
+)
+
+ROOT = find_root(Path(__file__).resolve().parent)
 
 
 @pytest.mark.integration
@@ -57,11 +67,11 @@ def test_postgres_preserves_operator_owned_control_network(tmp_path: Path) -> No
 
 
 def test_private_production_deployment_has_explicit_jobs_and_trust() -> None:
-    postgres_path = ROOT / "tools/boxie/infra/postgres/compose.yml"
+    postgres_path = BOXIE_ROOT / "infra/postgres/compose.yml"
     assert postgres_path.exists(), "Boxie PostgreSQL deployment missing"
     postgres = yaml.safe_load(postgres_path.read_text())
-    temporal = yaml.safe_load((ROOT / "tools/boxie/infra/temporal/compose.yml").read_text())
-    versions = json.loads((ROOT / "tools/boxie/infra/temporal/versions.json").read_text())
+    temporal = yaml.safe_load((BOXIE_ROOT / "infra/temporal/compose.yml").read_text())
+    versions = json.loads((BOXIE_ROOT / "infra/temporal/versions.json").read_text())
     for package in (postgres, temporal):
         for name, service in package["services"].items():
             assert not service.get("ports"), "production ports must remain private"
@@ -78,9 +88,7 @@ def test_private_production_deployment_has_explicit_jobs_and_trust() -> None:
     assert temporal["services"]["schema"]["image"] == versions["admin_tools"]["image"]
     assert temporal["services"]["bootstrap"]["profiles"] == ["operations"]
     config = yaml.safe_load(
-        re.sub(
-            r"{{.*?}}", "test-value", (ROOT / "tools/boxie/infra/temporal/config.yaml").read_text()
-        )
+        re.sub(r"{{.*?}}", "test-value", (BOXIE_ROOT / "infra/temporal/config.yaml").read_text())
     )
     tls = config["global"]["tls"]
     for plane in ("frontend", "internode"):

@@ -7,8 +7,17 @@ import sys
 from pathlib import Path
 
 import pytest
+from cli_check.workspace import find_root
 
-ROOT = Path(__file__).resolve().parents[3]
+PLAYGROUND_ROOT = Path(
+    subprocess.check_output(
+        ["uv", "workspace", "dir", "--package", "cli-playground"],
+        cwd=Path(__file__).resolve().parent,
+        text=True,
+    ).strip()
+)
+
+ROOT = find_root(Path(__file__).resolve().parent)
 
 
 def test_gateway_release_targets_only_gateway(tmp_path: Path) -> None:
@@ -26,7 +35,7 @@ def test_gateway_release_targets_only_gateway(tmp_path: Path) -> None:
     owner = tmp_path / "owner"
     owner.mkdir()
     result = subprocess.run(
-        ["bash", str(ROOT / "tools/cli-playground/infra/deploy.sh")],
+        ["bash", str(PLAYGROUND_ROOT / "infra/deploy.sh")],
         env={
             **os.environ,
             "PATH": str(tmp_path) + ":" + os.environ["PATH"],
@@ -63,7 +72,7 @@ def test_sandbox_update_preserves_boxie_image_and_custom_profile(tmp_path: Path)
     (owner / "profiles").mkdir(parents=True)
     (owner / "playground_infra").mkdir()
     shutil.copy(
-        ROOT / "tools/cli-playground/infra/playground_infra/installation.py",
+        PLAYGROUND_ROOT / "infra/playground_infra/installation.py",
         owner / "playground_infra/installation.py",
     )
     (owner / "profiles/playground.json").write_text(json.dumps(profile))
@@ -75,7 +84,7 @@ def test_sandbox_update_preserves_boxie_image_and_custom_profile(tmp_path: Path)
     log = tmp_path / "calls"
     digest = "ghcr.io/test/sandbox@sha256:" + "c" * 64
     result = subprocess.run(
-        ["bash", str(ROOT / "tools/cli-playground/infra/sandbox-release.sh"), digest],
+        ["bash", str(PLAYGROUND_ROOT / "infra/sandbox-release.sh"), digest],
         env={
             **os.environ,
             "PATH": str(tmp_path) + ":" + os.environ["PATH"],
@@ -108,7 +117,7 @@ def test_sandbox_update_preserves_boxie_image_and_custom_profile(tmp_path: Path)
 
 def sandbox_readiness_script() -> str:
     return (
-        (ROOT / "tools/cli-playground/infra/sandbox-release.sh")
+        (PLAYGROUND_ROOT / "infra/sandbox-release.sh")
         .read_text()
         .split("<<'PY'\n")[1]
         .split("\nPY")[0]
@@ -159,7 +168,7 @@ def test_sandbox_readiness_exhaustion_fails(
 
 
 def test_sandbox_release_fails_when_api_readiness_check_fails() -> None:
-    script = (ROOT / "tools/cli-playground/infra/sandbox-release.sh").read_text()
+    script = (PLAYGROUND_ROOT / "infra/sandbox-release.sh").read_text()
     release_commands = script[script.index("compose stop --timeout 60 orchestrator") :]
     result = subprocess.run(
         [
@@ -189,12 +198,7 @@ def test_readiness_waits_for_public_tls(monkeypatch: pytest.MonkeyPatch, tmp_pat
     request = MagicMock(side_effect=[response, URLError("certificate pending"), response, response])
     monkeypatch.setattr("urllib.request.urlopen", request)
     monkeypatch.setattr("time.sleep", lambda _: None)
-    script = (
-        (ROOT / "tools/cli-playground/infra/deploy.sh")
-        .read_text()
-        .split("<<'PY'\n")[1]
-        .split("\nPY")[0]
-    )
+    script = (PLAYGROUND_ROOT / "infra/deploy.sh").read_text().split("<<'PY'\n")[1].split("\nPY")[0]
     exec(script, {})
     assert request.call_count == 4
 
@@ -216,11 +220,6 @@ def test_readiness_deadline_reports_public_https(
         "urllib.request.urlopen", MagicMock(side_effect=[response, URLError("certificate pending")])
     )
     monkeypatch.setattr("time.monotonic", MagicMock(side_effect=[0, 301]))
-    script = (
-        (ROOT / "tools/cli-playground/infra/deploy.sh")
-        .read_text()
-        .split("<<'PY'\n")[1]
-        .split("\nPY")[0]
-    )
+    script = (PLAYGROUND_ROOT / "infra/deploy.sh").read_text().split("<<'PY'\n")[1].split("\nPY")[0]
     with pytest.raises(SystemExit, match="public HTTPS readiness failed after 300 seconds"):
         exec(script, {})

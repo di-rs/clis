@@ -19,8 +19,24 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 import yaml
+from cli_check.workspace import find_root
 
-ROOT = Path(__file__).parents[3]
+BOXIE_ROOT = Path(
+    subprocess.check_output(
+        ["uv", "workspace", "dir", "--package", "boxie"],
+        cwd=Path(__file__).resolve().parent,
+        text=True,
+    ).strip()
+)
+PLAYGROUND_ROOT = Path(
+    subprocess.check_output(
+        ["uv", "workspace", "dir", "--package", "cli-playground"],
+        cwd=Path(__file__).resolve().parent,
+        text=True,
+    ).strip()
+)
+
+ROOT = find_root(Path(__file__).resolve().parent)
 
 
 def command(args: list[str], *, env: dict[str, str] | None = None) -> str:
@@ -45,6 +61,11 @@ class ProductionStack:
         self.temporal = self.name + "-temporal"
         self.network_id: str | None = None
         self.env = dict(os.environ)
+        self.env.update(
+            CLIS_WORKSPACE_ROOT=str(ROOT),
+            BOXIE_DIR=str(BOXIE_ROOT),
+            PLAYGROUND_DIR=str(PLAYGROUND_ROOT),
+        )
         self.env.update(
             {
                 key: secrets.token_hex(24)
@@ -76,9 +97,9 @@ class ProductionStack:
 
     def compose(self, package: str, *args: str) -> str:
         directory = (
-            ROOT / "tools/boxie/infra/temporal"
+            BOXIE_ROOT / "infra/temporal"
             if package == "temporal"
-            else ROOT / "tools/boxie/infra/postgres"
+            else BOXIE_ROOT / "infra/postgres"
         )
         return self.command(
             [
@@ -256,7 +277,7 @@ class ProductionStack:
                 ["docker", "version", "--format", "{{.Server.Version}} {{.Server.Arch}}"]
             ),
             "bootstrap_sdk": version("temporalio"),
-            "images": json.loads((ROOT / "tools/boxie/infra/temporal/versions.json").read_text()),
+            "images": json.loads((BOXIE_ROOT / "infra/temporal/versions.json").read_text()),
             "schema": "fresh setup and explicit update succeeded for distinct databases",
             "namespace": "bootstrap succeeded and checked seven-day retention",
         }
@@ -317,14 +338,14 @@ def main() -> None:
     if args.browser:
         os.environ["BOXIE_BROWSER"] = "1"
     selected = (
-        ["tools/boxie/tests/integration/test_lifecycle.py"]
+        [str(BOXIE_ROOT / "tests/integration/test_lifecycle.py")]
         if args.runtime
         else [
-            "tools/boxie/tests/test_postgres.py",
-            "tools/boxie/tests/test_temporal_deployment.py",
-            "tools/boxie/tests/test_migrations.py",
-            "tools/boxie/tests/test_observability_lifecycle.py",
-            "tools/boxie/tests/test_observability_logging.py",
+            str(BOXIE_ROOT / "tests/test_postgres.py"),
+            str(BOXIE_ROOT / "tests/test_temporal_deployment.py"),
+            str(BOXIE_ROOT / "tests/test_migrations.py"),
+            str(BOXIE_ROOT / "tests/test_observability_lifecycle.py"),
+            str(BOXIE_ROOT / "tests/test_observability_logging.py"),
         ]
     )
     raise SystemExit(

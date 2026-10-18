@@ -4,8 +4,9 @@ import runpy
 from pathlib import Path
 
 import pytest
+from cli_check.workspace import find_root
 
-ROOT = Path(__file__).resolve().parents[4]
+ROOT = find_root(Path(__file__).resolve().parent)
 
 
 def test_render_inputs_writes_private_settings_and_tunnel_without_stdout(

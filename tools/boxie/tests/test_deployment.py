@@ -7,8 +7,17 @@ import sys
 from pathlib import Path
 
 import pytest
+from cli_check.workspace import find_root
 
-ROOT = Path(__file__).resolve().parents[3]
+BOXIE_ROOT = Path(
+    subprocess.check_output(
+        ["uv", "workspace", "dir", "--package", "boxie"],
+        cwd=Path(__file__).resolve().parent,
+        text=True,
+    ).strip()
+)
+
+ROOT = find_root(Path(__file__).resolve().parent)
 
 
 @pytest.mark.parametrize("failure", ["pull", "migrate", "stop_running", "capacity_full", ""])
@@ -41,7 +50,7 @@ def test_boxie_release_pulls_before_stopping_and_keeps_dependencies_running(
     os.link(owner / "api.json", mounted)
     log = tmp_path / "calls"
     result = subprocess.run(
-        ["bash", str(ROOT / "tools/boxie/infra/deploy.sh"), "a" * 40],
+        ["bash", str(BOXIE_ROOT / "infra/deploy.sh"), "a" * 40],
         env={
             **os.environ,
             "PATH": str(tmp_path) + ":" + os.environ["PATH"],

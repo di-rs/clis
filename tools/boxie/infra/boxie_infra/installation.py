@@ -67,12 +67,12 @@ def render(root: Path, source: Path) -> None:
     ):
         values[variable] = secret(name)
     write_environment(root / "boxie.env", values)
-    prometheus = (source / "tools/boxie/infra/observability/prometheus.yml").read_text()
+    prometheus = (source / "observability/prometheus.yml").read_text()
     for key in ("BOXIE_INSTALLATION_ID", "BOXIE_HOST_ID", "BOXIE_TEMPORAL_NAMESPACE"):
         prometheus = prometheus.replace("${" + key + "}", values[key])
     (root / "prometheus.yml").write_text(prometheus)
     (root / "prometheus.yml").chmod(0o644)
-    ingress = (source / "tools/boxie/infra/ingress/cloudflared.yml").read_text()
+    ingress = (source / "ingress/cloudflared.yml").read_text()
     for key in (
         "OPERATOR_TUNNEL_ID",
         "OPERATOR_TEAM_NAME",

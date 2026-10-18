@@ -31,6 +31,14 @@ from temporalio.worker import Replayer
 
 from integration.stack import LifecycleStack
 
+PLAYGROUND_ROOT = Path(
+    subprocess.check_output(
+        ["uv", "workspace", "dir", "--package", "cli-playground"],
+        cwd=Path(__file__).resolve().parent,
+        text=True,
+    ).strip()
+)
+
 pytestmark = pytest.mark.integration
 
 
@@ -434,7 +442,7 @@ def test_native_generic_product_and_browser(lifecycle_stack: LifecycleStack) -> 
     if os.environ.get("BOXIE_BROWSER") == "1":
         subprocess.run(
             ["pnpm", "exec", "playwright", "test", "--config", "playwright.native.config.ts"],
-            cwd=Path(__file__).parents[4] / "tools/cli-playground/frontend",
+            cwd=PLAYGROUND_ROOT / "frontend",
             env={
                 **os.environ,
                 "BOXIE_NATIVE_ORIGIN": stack.product_url,

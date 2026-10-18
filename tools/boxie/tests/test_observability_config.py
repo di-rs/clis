@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 import yaml
+from cli_check.workspace import find_root
 
 INFRA = Path(__file__).parents[1] / "infra"
 
@@ -46,6 +47,7 @@ def compose(*files: Path) -> dict[str, Any]:
         for key, value in os.environ.items()
         if not key.startswith(("OBS_", "OPERATOR_", "COMPOSE_"))
     }
+    env.update(CLIS_WORKSPACE_ROOT=str(find_root(INFRA)), BOXIE_DIR=str(INFRA.parent))
     env.update(
         {
             key: "/tmp/boxie-test"

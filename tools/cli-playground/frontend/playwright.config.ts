@@ -1,11 +1,12 @@
+import { execFileSync } from "node:child_process";
+import { join } from "node:path";
 import { mkdirSync, writeFileSync, chmodSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig, devices } from "@playwright/test";
 
-const credentialFile = fileURLToPath(
-  new URL("../../../target/playground-browser.secret", import.meta.url),
-);
-mkdirSync(fileURLToPath(new URL("../../../target", import.meta.url)), { recursive: true });
+const root = execFileSync("uv", ["workspace", "dir"], { encoding: "utf8" }).trim();
+const credentialFile = join(root, "target/playground-browser.secret");
+mkdirSync(join(root, "target"), { recursive: true });
 writeFileSync(credentialFile, "unused-browser-boxie-secret", { mode: 0o600 });
 chmodSync(credentialFile, 0o600);
 
@@ -29,9 +30,7 @@ export default defineConfig({
     command: "uv run --locked --package cli-playground python -m tests.browser_server",
     cwd: fileURLToPath(new URL("../", import.meta.url)),
     env: {
-      PLAYGROUND_DATA_DIR: fileURLToPath(
-        new URL("../../../target/playground-browser-data/", import.meta.url),
-      ),
+      PLAYGROUND_DATA_DIR: join(root, "target/playground-browser-data"),
       PLAYGROUND_PUBLIC_URL: origin,
       PLAYGROUND_DEPLOY_TOKEN: "local-browser-test",
       PLAYGROUND_BOXIE_URL: "http://127.0.0.1:1",

@@ -9,7 +9,7 @@ from threading import Thread
 import anyio
 import httpx
 import pytest
-import report as publisher
+from cli_bench import report as publisher
 from githubkit import GitHub
 
 

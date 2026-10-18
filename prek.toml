@@ -54,7 +54,7 @@ hooks = [
     name = "CLI repository standards",
     language = "system",
     entry = "uv run --locked cli-check",
-    files = '\.rs$|(^|/)(Cargo\.toml|README\.md|mk-outs\.nu|mk-outputs\.nu)$|(^|/)(tests|benches)/|^tools/cli-check/|^(pyproject\.toml|uv\.lock|prek\.toml)$',
+    files = '\.rs$|(^|/)(Cargo\.toml|README\.md|mk-outs\.nu|mk-outputs\.nu)$|(^|/)(tests|benches)/|\.py$|^(pyproject\.toml|uv\.lock|prek\.toml)$',
     pass_filenames = false,
   },
   {

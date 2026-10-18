@@ -5,11 +5,12 @@ import subprocess
 from pathlib import Path
 
 import pulumi
-from host_mocks import HostMocks
+from cli_check.workspace import find_root
+from host_infra.testing import HostMocks
 from pulumi.runtime.settings import get_root_resource
 from pulumi.runtime.stack import Stack
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = find_root(Path(__file__).resolve().parent)
 
 
 @pulumi.runtime.test  # type: ignore[untyped-decorator]

@@ -15,13 +15,26 @@ multiple `[[bin]]` targets. For example, `true` and `false` are separate package
 in `coreutils/true/` and `coreutils/false/`.
 
 A CLI package may also expose a library for its implementation or consumers.
-Shared library packages under `utils/` may have no CLI. Test, example, and
+Shared library packages may have no CLI. Test, example, and
 benchmark targets do not count as CLI binaries. Share reusable implementation
 through libraries rather than combining commands into one package.
 
 Keep each CLI's tests, documentation, and benchmark suites in its own package.
 Suite `binary` values must match the owning package name. When splitting or
 moving a CLI, update its documentation links, workspace lockfiles, and checks.
+
+## Native workspace operations
+
+Keep package locations in the root Cargo and uv workspace declarations. Select
+Rust packages with `cargo ... -p NAME` and Python packages with
+`uv run --package NAME ...`. For package-owned assets, use
+`uv workspace dir --package NAME`; use Cargo metadata for Rust package locations
+and local dependency relationships. Keep paths relative to their owning package
+where possible. Do not add a parallel project map or task runner.
+
+After a move, update native declarations, affected lockfiles, the independent
+`tests/consumers` manifest when relevant, and documentation links. Root Python
+checks discover projects recursively. See [moving projects](docs/testing.md#move-a-project).
 
 ## Verification and tooling
 
@@ -35,6 +48,12 @@ Follow [Testing](docs/testing.md) for Rust and Python checks and
 [Benchmarking](docs/benchmarking.md) for TOML suites and hyperfine runs.
 Use the root uv workspace and committed lockfile for Python tooling; keep shared
 Ruff and strict mypy configuration at the root.
+
+Use `--locked` in CI, release builds, hooks, and verification commands that
+support it, except when the command's purpose is to update a lockfile.
+Ordinary local development commands may omit it; workspace package selection
+does not require it. Refresh affected lockfiles intentionally when changing
+dependencies or workspace membership, and review the diff before committing.
 
 Run checks directly with `prek run --all-files` before committing. For focused
 checks, use `prek run HOOK_ID --files PATH...`. Use `prek install` to install

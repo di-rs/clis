@@ -23,9 +23,6 @@ from githubkit import BaseAuthStrategy, GitHub, TokenAuthStrategy
 from githubkit.exception import GitHubException
 from pydantic import BaseModel, ConfigDict, Field
 
-# Keep direct script invocation usable from any working directory.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
 MAX_JSON = 2 * 1024 * 1024
 MAX_PAGES = 20
 

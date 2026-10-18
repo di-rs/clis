@@ -2,23 +2,6 @@ name: 🚀 Boxie runtime release
 'on':
   push:
     branches: [master]
-    paths:
-      - tools/boxie/src/**
-      - tools/boxie/alembic/**
-      - tools/boxie/pyproject.toml
-      - tools/boxie/infra/Runtime.Dockerfile*
-      - tools/boxie/infra/compose.production.yml
-      - tools/boxie/infra/compose.operations.yml
-      - tools/boxie/infra/compose.observability.yml
-      - tools/boxie/infra/deploy.sh
-      - tools/boxie/infra/boxie_infra/smoke.py
-      - tools/boxie/infra/boxie_infra/terminal.py
-      - .github/workflows/boxie-release.yml
-      - .github/workflows/build-runtime-image.yml
-      - pyproject.toml
-      - uv.lock
-      - .python-version
-      - .dockerignore
   workflow_dispatch: {}
 permissions: {}
 concurrency:
@@ -36,17 +19,67 @@ jobs:
     outputs:
       sha: ${{ steps.revision.outputs.sha }}
       attempt: ${{ steps.revision.outputs.attempt }}
+      changed: ${{ steps.selection.outputs.changed }}
     steps:
       - name: 📥 Check out current master
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: master
           persist-credentials: false
+          fetch-depth: 0
       - name: 🔎 Record the source commit
         id: revision
         run: |
           printf 'sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           printf 'attempt=%s\n' "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+      - name: 🐍 Set up uv and Python
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: 0.13.1
+          enable-cache: false
+      - name: 📍 Resolve workspace packages
+        id: projects
+        run: |
+          set -euo pipefail
+          boxie=$(uv workspace dir --package boxie)
+          playground=$(uv workspace dir --package cli-playground)
+          printf 'boxie=%s\nplayground=%s\n' "$boxie" "$playground" >> "$GITHUB_OUTPUT"
+      - name: 🔎 Select affected runtime component
+        id: selection
+        env:
+          OWNER_PACKAGE: boxie
+          SELECTED_SHA: ${{ steps.revision.outputs.sha }}
+          BOXIE_DIR: ${{ steps.projects.outputs.boxie }}
+          PLAYGROUND_DIR: ${{ steps.projects.outputs.playground }}
+          OWNER_INPUTS: '["src/**", "alembic/**", "pyproject.toml", "infra/Runtime.Dockerfile*", "infra/compose.production.yml", "infra/compose.operations.yml", "infra/compose.observability.yml", "infra/deploy.sh", "infra/boxie_infra/smoke.py", "infra/boxie_infra/terminal.py"]'
+        run: |
+          set -euo pipefail
+          python3 - <<'PYSELECT'
+          import json
+          import fnmatch
+          import os
+          import pathlib
+          import subprocess
+
+          with open(os.environ["GITHUB_EVENT_PATH"]) as source:
+              event = json.load(source)
+          base = event.get("pull_request", {}).get("base", {}).get("sha") or event.get("before")
+          head = os.environ.get("SELECTED_SHA") or os.environ["GITHUB_SHA"]
+          changed = True
+          if base and set(base) != {"0"}:
+              comparison = f"{base}...{head}" if "pull_request" in event else f"{base}..{head}"
+              result = subprocess.run(["git", "diff", "--name-only", "--no-renames", "-z", comparison], check=True, capture_output=True)
+              paths = [os.fsdecode(value) for value in result.stdout.split(b"\0") if value]
+              root = pathlib.Path.cwd().resolve()
+              packages = [pathlib.Path(os.environ[name]).resolve().relative_to(root).as_posix() for name in ("BOXIE_DIR", "PLAYGROUND_DIR")]
+              owner = os.environ.get("OWNER_PACKAGE")
+              if owner:
+                  packages = packages[:1] if owner == "boxie" else packages[1:]
+              global_inputs = {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "pyproject.toml", "uv.lock", ".python-version", ".dockerignore"}
+              changed = any(path in global_inputs or path.startswith(".github/workflows/") or (not owner and path.endswith(".rs")) or any(path.startswith(directory + "/") and not path.endswith(".md") and (not owner or any(fnmatch.fnmatchcase(path[len(directory) + 1:], pattern) for pattern in json.loads(os.environ["OWNER_INPUTS"]))) for directory in packages) for path in paths)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              print(f"changed={str(changed).lower()}", file=output)
+          PYSELECT
   build:
     needs: source
     uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
@@ -56,6 +89,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+    if: ${{ needs.source.outputs.changed == 'true' }}
   deploy:
     name: 🚀 Update Boxie with Compose
     needs: [source, build]
@@ -80,6 +114,18 @@ jobs:
         with:
           ref: ${{ needs.source.outputs.sha }}
           persist-credentials: false
+      - name: 🐍 Set up uv and Python
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: 0.13.1
+          enable-cache: false
+      - name: 📍 Resolve workspace packages
+        id: projects
+        run: |
+          set -euo pipefail
+          boxie=$(uv workspace dir --package boxie)
+          playground=$(uv workspace dir --package cli-playground)
+          printf 'boxie=%s\nplayground=%s\n' "$boxie" "$playground" >> "$GITHUB_OUTPUT"
       - name: 🚀 Copy Boxie files and run Compose
         env:
           SOURCE_SHA: ${{ needs.source.outputs.sha }}
@@ -89,6 +135,8 @@ jobs:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           GHCR_TOKEN: ${{ github.token }}
+          BOXIE_DIR: ${{ steps.projects.outputs.boxie }}
+          PLAYGROUND_DIR: ${{ steps.projects.outputs.playground }}
         run: |
           set -euo pipefail
           umask 077
@@ -114,7 +162,7 @@ jobs:
           SSH
           remote="/run/clis-boxie-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           ssh -F "$private/config" deployment "install -d -m 0700 /opt/clis/boxie $remote"
-          scp -F "$private/config" -r tools/boxie/infra/. deployment:/opt/clis/boxie/
+          scp -F "$private/config" -r "${BOXIE_DIR}/infra/." deployment:/opt/clis/boxie/
           collector=$(ssh -F "$private/config" deployment "sed -n 's/^OBS_COLLECTOR_IMAGE=//p' /etc/clis/boxie-image.env")
           [[ $collector =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
           printf 'BOXIE_RUNTIME_IMAGE=%s\nOBS_COLLECTOR_IMAGE=%s\n' "$RUNTIME_IMAGE" "$collector" > "$private/image.env"

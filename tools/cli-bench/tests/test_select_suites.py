@@ -1,8 +1,10 @@
 """Selection regressions against real, temporary Git workspaces."""
 
+from pathlib import Path
+
 import pytest
+from cli_bench.select_suites import Suite
 from conftest import Repository
-from select_suites import Suite
 
 ALL_SUITES = [
     "biggie/benches/cli-bench.toml",
@@ -15,6 +17,34 @@ ALL_SUITES = [
 def test_suite_record_rejects_empty_path() -> None:
     with pytest.raises(ValueError):
         Suite(path="", package="tailr", directory="coreutils/tailr", generate=False)
+
+
+def test_moved_shared_library_selects_dependents(repo: Repository) -> None:
+    repo.git("mv", "utils/cli-log", "shared-log")
+    repo.write(
+        "Cargo.toml",
+        '[workspace]\nmembers = ["biggie", "coreutils/*", "shared-log"]\nexclude = ["coreutils/excluded"]\n',
+    )
+    repo.write(
+        "coreutils/echor/Cargo.toml",
+        '[package]\nname = "echor"\n[dependencies]\ncli-log = { path = "../../shared-log" }\n',
+    )
+    repo.base = repo.commit()
+    repo.write("shared-log/src/lib.rs", "pub fn log() {}\n")
+    repo.commit()
+    assert repo.selection()["binaries"] == ["echor"]
+
+
+def test_moved_generator_selects_generated_suites(repo: Repository) -> None:
+    repo.git("mv", "biggie", "generator")
+    repo.write(
+        "Cargo.toml",
+        '[workspace]\nmembers = ["generator", "coreutils/*", "utils/*"]\nexclude = ["coreutils/excluded"]\n',
+    )
+    repo.base = repo.commit()
+    repo.write("generator/src/main.rs", 'fn main() { println!("changed"); }\n')
+    repo.commit()
+    assert repo.selection()["binaries"] == ["biggie", "tailr"]
 
 
 def test_whole_pr_uses_merge_base_and_includes_earlier_commits(repo: Repository) -> None:
@@ -38,7 +68,9 @@ def test_whole_pr_uses_merge_base_and_includes_earlier_commits(repo: Repository)
 
 
 def test_deleted_source_still_selects_owner(repo: Repository) -> None:
-    (repo.root / "coreutils/echor/src/main.rs").unlink()
+    repo.write("coreutils/echor/src/extra.rs", "// extra source\n")
+    repo.base = repo.commit()
+    (repo.root / "coreutils/echor/src/extra.rs").unlink()
     repo.commit()
     assert repo.selection()["packages"] == ["echor"]
 
@@ -85,8 +117,6 @@ def test_deleted_suite_is_not_scheduled(repo: Repository) -> None:
         "tools/cli-bench/tests/test_bench.py",
         "tools/cli-bench/tests/test_select_suites.py",
         "tools/cli-bench/tests/conftest.py",
-        "uv.lock",
-        "pyproject.toml",
         "ruff.toml",
         "mypy.ini",
     ],
@@ -108,8 +138,8 @@ def test_docs_tests_and_python_tool_configuration_skip_native_suites(
         "Cargo.lock",
         "rust-toolchain.toml",
         ".cargo/config.toml",
-        "tools/cli-bench/bench.py",
-        "tools/cli-bench/select_suites.py",
+        "tools/cli-bench/src/cli_bench/bench.py",
+        "tools/cli-bench/src/cli_bench/select_suites.py",
         "tools/cli-check/src/cli_check/workspace.py",
         ".github/workflows/cli-bench.yml",
         ".python-version",
@@ -119,7 +149,11 @@ def test_global_build_and_runner_changes_select_all_workspace_suites(
     repo: Repository, path: str
 ) -> None:
     target = repo.root / path
-    previous = target.read_text() if target.exists() else ""
+    previous = (
+        target.read_text()
+        if target.exists()
+        else (Path("rust-toolchain.toml").read_text() if path == "rust-toolchain.toml" else "")
+    )
     repo.write(path, previous + "\n# changed\n")
     repo.commit()
     assert repo.selection()["suites"] == ALL_SUITES
@@ -161,6 +195,14 @@ def test_shared_logger_and_other_utility_production_changes_select_all(
     repo: Repository, path: str, content: str
 ) -> None:
     repo.write("utils/shared/Cargo.toml", '[package]\nname = "shared"\n')
+    repo.write("utils/shared/src/lib.rs", "// shared library\n")
+    for name in ("biggie", "echor", "tailr", "wcr"):
+        directory = "biggie" if name == "biggie" else f"coreutils/{name}"
+        prefix = "../" if name == "biggie" else "../../"
+        repo.write(
+            f"{directory}/Cargo.toml",
+            f'[package]\nname = "{name}"\n[dependencies]\nshared = {{path = "{prefix}utils/shared"}}\ncli-log = {{path = "{prefix}utils/cli-log"}}\n',
+        )
     repo.base = repo.commit()
     repo.write(path, content)
     repo.commit()
@@ -267,3 +309,55 @@ def test_suite_binary_must_match_owning_package_even_when_unselected(repo: Repos
     assert result.stdout == ""
     assert "other-binary" in result.stderr
     assert "echor" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "table", ["dependencies", "build-dependencies", "target.'cfg(windows)'.dependencies"]
+)
+@pytest.mark.parametrize("optional", [False, True])
+def test_selection_follows_transitive_local_dependency_kinds(
+    repo: Repository, table: str, optional: bool
+) -> None:
+    repo.write("shared/base/Cargo.toml", '[package]\nname = "base"\n')
+    repo.write("shared/base/src/lib.rs", "pub fn base() {}\n")
+    repo.write(
+        "shared/middle/Cargo.toml",
+        '[package]\nname = "middle"\n[dependencies]\nbase = { path = "../base" }\n',
+    )
+    repo.write("shared/middle/src/lib.rs", "pub fn middle() {}\n")
+    repo.write(
+        "Cargo.toml",
+        '[workspace]\nmembers = ["biggie", "coreutils/*", "utils/*", "shared/*"]\n'
+        'exclude = ["coreutils/excluded"]\n',
+    )
+    repo.write(
+        "coreutils/echor/Cargo.toml",
+        f'[package]\nname = "echor"\n[{table}]\nmiddle = {{ path = "../../shared/middle"'
+        + (", optional = true" if optional else "")
+        + " }\n",
+    )
+    repo.base = repo.commit()
+    repo.write("shared/base/src/lib.rs", "pub fn base() { } // changed\n")
+    repo.commit()
+    assert repo.selection()["binaries"] == ["echor"]
+
+
+def test_parent_named_docs_does_not_hide_moved_cli_source(repo: Repository) -> None:
+    (repo.root / "docs/commands").mkdir(parents=True)
+    repo.git("mv", "coreutils/echor", "docs/commands/echor")
+    repo.write(
+        "Cargo.toml",
+        '[workspace]\nmembers = ["biggie", "coreutils/*", "utils/*", "docs/commands/echor"]\nexclude = ["coreutils/excluded"]\n',
+    )
+    repo.base = repo.commit()
+    repo.write("docs/commands/echor/src/main.rs", "fn main() {} // changed\n")
+    repo.commit()
+    assert repo.selection()["binaries"] == ["echor"]
+
+
+def test_unowned_removed_rust_source_selects_conservatively(repo: Repository) -> None:
+    repo.write("retired/src/old.rs", "// retired source\n")
+    repo.base = repo.commit()
+    (repo.root / "retired/src/old.rs").unlink()
+    repo.commit()
+    assert repo.selection()["suites"] == ALL_SUITES

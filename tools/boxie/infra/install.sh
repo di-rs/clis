@@ -11,7 +11,7 @@ python3 "$owner/boxie_infra/config.py" --output /etc/clis/boxie --data-dir /srv/
     --installation-id "$(cat /etc/clis/boxie/installation-id)" --host-id "$(cat /etc/clis/boxie/host-id)" --consumer-id playground
 export OBS_JOURNAL_GROUP_GID
 OBS_JOURNAL_GROUP_GID=$(getent group systemd-journal | cut -d: -f3)
-python3 "$owner/boxie_infra/installation.py" "$source"
+python3 "$owner/boxie_infra/installation.py" "$owner"
 install -o 472 -g 0 -m 0600 /etc/clis/boxie/grafana-admin /etc/clis/grafana-admin
 chown 65532:65532 /etc/clis/tunnel.json
 chmod 0600 /etc/clis/tunnel.json

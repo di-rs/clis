@@ -28,8 +28,9 @@ but does not provide the required sandbox runtime.
 
 ```sh
 uv sync --locked --all-packages
-pnpm --dir tools/cli-playground/frontend install --frozen-lockfile
-pnpm --dir tools/cli-playground/frontend build
+PLAYGROUND_DIR=$(uv workspace dir --package cli-playground)
+pnpm --dir "$PLAYGROUND_DIR/frontend" install --frozen-lockfile
+pnpm --dir "$PLAYGROUND_DIR/frontend" build
 ```
 
 The Python package lives in `src/playground/`. The frontend build places real assets

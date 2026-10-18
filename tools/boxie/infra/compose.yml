@@ -3,8 +3,8 @@ services:
   api:
     image: ${BOXIE_RUNTIME_IMAGE:-boxie:local}
     build:
-      context: ../../..
-      dockerfile: tools/boxie/infra/Runtime.Dockerfile
+      context: ${CLIS_WORKSPACE_ROOT:?Set workspace root}
+      dockerfile: ${BOXIE_DIR:?Set Boxie package directory}/infra/Runtime.Dockerfile
     command:
     - boxie-api
     - --config
@@ -42,8 +42,8 @@ services:
   orchestrator:
     image: ${BOXIE_RUNTIME_IMAGE:-boxie:local}
     build:
-      context: ../../..
-      dockerfile: tools/boxie/infra/Runtime.Dockerfile
+      context: ${CLIS_WORKSPACE_ROOT:?Set workspace root}
+      dockerfile: ${BOXIE_DIR:?Set Boxie package directory}/infra/Runtime.Dockerfile
     command:
     - boxie-orchestrator
     - --config

@@ -76,7 +76,7 @@ jobs:
       - name: 🐍 Set up uv and Python
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          version: '0.13.0'
+          version: '0.13.1'
           enable-cache: false
       - name: 🛠️ Install repository hooks
         uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
@@ -106,47 +106,61 @@ jobs:
     name: 🎨 Frontend checks, builds and browser tests
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: tools/cli-playground/frontend
     steps:
       - name: 📥 Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: 🐍 Set up uv and Python
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: '0.13.1'
+          enable-cache: false
+      - name: 📍 Resolve workspace packages
+        id: projects
+        run: |
+          set -euo pipefail
+          boxie=$(uv workspace dir --package boxie)
+          playground=$(uv workspace dir --package cli-playground)
+          printf 'boxie=%s\nplayground=%s\n' "$boxie" "$playground" >> "$GITHUB_OUTPUT"
       - name: 🟢 Set up Node.js and frontend tooling
         uses: voidzero-dev/setup-vp@68f39c78aaf39be468cabd2afb09c162574c84af # v1.21.2
         with:
-          working-directory: tools/cli-playground/frontend
+          working-directory: ${{ steps.projects.outputs.playground }}/frontend
           node-version-file: .node-version
           version-file: package.json
           run-install: false
           cache: false
-      - name: 🐍 Set up uv and Python
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
-        with:
-          version: '0.13.0'
-          enable-cache: false
       - name: 📦 Install locked frontend dependencies
         run: pnpm install --frozen-lockfile
+        working-directory: ${{ steps.projects.outputs.playground }}/frontend
       - name: 🔎 Check Svelte and TypeScript
         run: pnpm check
+        working-directory: ${{ steps.projects.outputs.playground }}/frontend
       - name: 🧪 Run frontend unit tests
         run: pnpm test
+        working-directory: ${{ steps.projects.outputs.playground }}/frontend
       - name: 🏗️ Build production frontend assets
         run: pnpm build
+        working-directory: ${{ steps.projects.outputs.playground }}/frontend
       - name: 📦 Verify isolated service packages and Compose topology
         working-directory: .
         run: |
           uv sync --locked --all-packages
-          uv run --locked pytest tools/boxie/tests/test_packaging.py -m integration
+          uv run --locked pytest "${BOXIE_DIR}/tests/test_packaging.py" -m integration
+        env:
+          BOXIE_DIR: ${{ steps.projects.outputs.boxie }}
+          PLAYGROUND_DIR: ${{ steps.projects.outputs.playground }}
       - name: 🌐 Install Chromium and browser dependencies
         run: pnpm exec playwright install --with-deps chromium
+        working-directory: ${{ steps.projects.outputs.playground }}/frontend
       - name: 🎭 Run browser end-to-end tests
         run: pnpm test:browser
+        working-directory: ${{ steps.projects.outputs.playground }}/frontend
       - name: 🧹 Verify checks leave the checkout unchanged
         run: git diff --exit-code
 
+        working-directory: ${{ steps.projects.outputs.playground }}/frontend
   tests:
     if: >-
       ${{
