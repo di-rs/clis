@@ -370,8 +370,8 @@ class Orchestrator:
                     deliver(
                         self.diagnostics,
                         Transition(
-                            "cleanup.failed",
-                            record.id,
+                            event="cleanup.failed",
+                            sandbox_id=record.id,
                             outcome="pending",
                             reason="delete_unconfirmed",
                             duration_seconds=max(0, self.monotonic() - started),
@@ -413,7 +413,7 @@ class Orchestrator:
             self.runtimes[ref.id].timers.disconnect = None
             self._changed(record)
             epoch = record.attachment_epoch
-        deliver(self.diagnostics, Transition("terminal.attached", record.id))
+        deliver(self.diagnostics, Transition(event="terminal.attached", sandbox_id=record.id))
         await self.publish(ref)
         return epoch
 
@@ -444,7 +444,7 @@ class Orchestrator:
                 self._changed(record)
                 detached = True
         if detached:
-            deliver(self.diagnostics, Transition("terminal.detached", record.id))
+            deliver(self.diagnostics, Transition(event="terminal.detached", sandbox_id=record.id))
         await self.publish(ref)
 
     async def write(
@@ -505,8 +505,8 @@ class Orchestrator:
             deliver(
                 self.diagnostics,
                 Transition(
-                    "reconciliation.completed",
-                    record.id,
+                    event="reconciliation.completed",
+                    sandbox_id=record.id,
                     outcome="confirmed" if record.removal_confirmed else "pending",
                 ),
             )

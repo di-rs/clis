@@ -2,7 +2,7 @@
 name = "cli-check"
 version = "0.1.0"
 requires-python = ">=3.15"
-dependencies = ["markdown-it-py>=4,<5"]
+dependencies = ["markdown-it-py>=4,<5", "pydantic>=2,<3"]
 
 [project.scripts]
 cli-check = "cli_check.command:main"

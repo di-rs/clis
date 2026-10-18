@@ -3,10 +3,10 @@
 import threading
 import time
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
 
 from prometheus_client import Counter, Histogram
 from prometheus_client.core import GaugeMetricFamily, Metric
+from pydantic import BaseModel, ConfigDict, Field
 
 from boxie.domain.models import SandboxState
 from boxie.observability.events import Transition, emit
@@ -37,15 +37,16 @@ ROUTES = (
 )
 
 
-@dataclass(frozen=True)
-class OperationalSnapshot:
-    timestamp: float
+class OperationalSnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
+
+    timestamp: float = Field(allow_inf_nan=False)
     states: tuple[int, ...]
-    reserved: int
-    limit: int
-    cleanup_pending: int
-    cleanup_age: float
-    cleanup_unknown: int
+    reserved: int = Field(ge=0)
+    limit: int = Field(ge=0)
+    cleanup_pending: int = Field(ge=0)
+    cleanup_age: float = Field(ge=0, allow_inf_nan=False)
+    cleanup_unknown: int = Field(ge=0)
     outbox: tuple[tuple[int, float], ...]
 
 

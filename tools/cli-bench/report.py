@@ -11,7 +11,7 @@ import sys
 import tomllib
 import zipfile
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import datetime
 from itertools import groupby
 from pathlib import Path, PurePosixPath
@@ -21,6 +21,7 @@ import anyio
 import httpx
 from githubkit import BaseAuthStrategy, GitHub, TokenAuthStrategy
 from githubkit.exception import GitHubException
+from pydantic import BaseModel, ConfigDict, Field
 
 # Keep direct script invocation usable from any working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -197,18 +198,20 @@ def read_zip(data: bytes) -> dict[str, bytes]:
         return files
 
 
-@dataclass(frozen=True)
-class Measurement:
+class ReportRecord(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
+
+
+class Measurement(ReportRecord):
     system: str
     binary: str
     case: str
-    candidate: float
-    comparison: float | None
+    candidate: float = Field(gt=0, allow_inf_nan=False)
+    comparison: float | None = Field(allow_inf_nan=False)
     kind: str
 
 
-@dataclass(frozen=True)
-class Suite:
+class Suite(ReportRecord):
     binary: str
     status: str
     runs: int
@@ -265,10 +268,15 @@ def read_suites(data: bytes, system: str) -> list[Suite]:
             comparison = mean(results[0], runs) if len(results) == 2 else None
             rows.append(
                 Measurement(
-                    system, binary, case, mean(results[-1], runs), comparison, str(names[0])
+                    system=system,
+                    binary=binary,
+                    case=case,
+                    candidate=mean(results[-1], runs),
+                    comparison=comparison,
+                    kind=str(names[0]),
                 )
             )
-        suites.append(Suite(binary, str(status), runs, rows))
+        suites.append(Suite(binary=binary, status=str(status), runs=runs, rows=rows))
     return suites
 
 

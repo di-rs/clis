@@ -26,6 +26,7 @@ from sqlalchemy import and_, func
 from sqlmodel import col, select
 from temporal_support import tls
 from temporalio.client import Client
+from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.worker import Replayer
 
 from integration.stack import LifecycleStack
@@ -156,7 +157,10 @@ def test_process_loss_failed_delete_and_history_replay(lifecycle_stack: Lifecycl
     async def exercise() -> None:
         stack = lifecycle_stack
         temporal = await Client.connect(
-            stack.address, namespace="boxie", tls=tls(stack, "operator")
+            stack.address,
+            namespace="boxie",
+            tls=tls(stack, "operator"),
+            data_converter=pydantic_data_converter,
         )
         async with httpx.AsyncClient(
             base_url=stack.api_url,
@@ -200,7 +204,9 @@ def test_process_loss_failed_delete_and_history_replay(lifecycle_stack: Lifecycl
                 await asyncio.wait_for(handle.result(), 60)
                 history = await handle.fetch_history()
                 (stack.root / f"history-{service}.json").write_text(history.to_json())
-                await Replayer(workflows=[SandboxLifecycle]).replay_workflow(history)
+                await Replayer(
+                    workflows=[SandboxLifecycle], data_converter=pydantic_data_converter
+                ).replay_workflow(history)
                 await asyncio.to_thread(stack.wait_ready)
             await client.delete(f"/v1/artifacts/{artifact}")
 

@@ -1,7 +1,6 @@
 """Controlled external activity decisions for workflow and cancellation tests."""
 
 import asyncio
-from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -25,11 +24,11 @@ class Decisions:
         self.entered = asyncio.Event()
         self.release = asyncio.Event()
         if mode == "cancel_expire":
-            self.facts = replace(self.facts, absolute_deadline=0)
+            self.facts = self.facts.model_copy(update={"absolute_deadline": 0})
         if mode in {"idle", "detached", "absolute"}:
             seconds = {"idle": 600, "detached": 120, "absolute": 3600}[mode]
-            self.facts = replace(
-                self.facts, next_deadline=self.facts.absolute_deadline - 3600 + seconds
+            self.facts = self.facts.model_copy(
+                update={"next_deadline": self.facts.absolute_deadline - 3600 + seconds}
             )
 
     @activity.defn(name="load_request")
@@ -54,7 +53,7 @@ class Decisions:
             return
         if self.mode == "provision_failure":
             raise ApplicationError("safe failure", type="DependencyUnavailable")
-        self.facts = replace(self.facts, desired_stop=True)
+        self.facts = self.facts.model_copy(update={"desired_stop": True})
 
     @activity.defn(name="inspect_and_renew")
     async def inspect(self, sandbox_id: str) -> Any:
@@ -69,7 +68,7 @@ class Decisions:
         if self.mode == "cancel_expire":
             self.entered.set()
             await self.release.wait()
-        self.facts = replace(self.facts, desired_stop=True)
+        self.facts = self.facts.model_copy(update={"desired_stop": True})
         return self.facts
 
     @activity.defn(name="request_stop")
@@ -81,7 +80,7 @@ class Decisions:
         if self.mode.startswith("terminal_stop_") and self.stops == 1:
             self.cleanup_fault()
         self.stop_committed = True
-        self.facts = replace(self.facts, desired_stop=True)
+        self.facts = self.facts.model_copy(update={"desired_stop": True})
 
     @activity.defn(name="remove_sandbox")
     async def remove(self, sandbox_id: str) -> None:
@@ -95,7 +94,7 @@ class Decisions:
             await self.release.wait()
         if self.mode == "native_retry" and self.removals <= 100:
             raise ApplicationError("pending", type="CleanupPending")
-        self.facts = replace(self.facts, cleaned=True)
+        self.facts = self.facts.model_copy(update={"cleaned": True})
 
     def cleanup_fault(self) -> None:
         from boxie.domain.errors import BoxieError

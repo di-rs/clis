@@ -9,6 +9,7 @@ dependencies = [
     "fastapi>=0.128",
     "httpx>=0.28",
     "pydantic>=2.14,<3",
+    "pydantic-settings>=2,<3",
     "psycopg[binary]==3.3.6",
     "prometheus-client==0.26.0",
     "sqlalchemy[asyncio]>=2.0,<2.1",

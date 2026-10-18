@@ -5,6 +5,26 @@ import sys
 from pathlib import Path
 
 import pytest
+from cli_check.workspace import Binary, Package, discover
+
+
+def test_workspace_records_validate_discovered_targets(tmp_path: Path) -> None:
+    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["coreutils/*"]\n')
+    add_cli(tmp_path)
+    packages = discover(tmp_path)
+    assert [package.name for package in packages] == ["echo"]
+    assert [binary.name for binary in packages[0].binaries] == ["echo"]
+    assert packages[0].directory == (tmp_path / "coreutils/echo").resolve()
+    with pytest.raises(ValueError):
+        Binary(name=123, source=tmp_path / "src/main.rs")
+    with pytest.raises(ValueError):
+        Package(
+            name="echo",
+            directory=tmp_path,
+            manifest={},
+            binaries=("invalid",),
+            library=False,
+        )
 
 
 def write(root: Path, path: str, content: str) -> None:

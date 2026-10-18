@@ -1,7 +1,6 @@
 """Bounded exposition, cache freshness and private exporter behavior."""
 
 import importlib.util
-from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -21,7 +20,16 @@ def test_authoritative_snapshot_is_atomic_stale_and_restartable() -> None:
     now = [10.0]
     metrics = Metrics("api", clock=lambda: now[0])
     assert b"boxie_capacity_reserved " not in metrics.render()
-    sample = Snapshot(1000, (1, 0, 0, 1, 0, 0), 2, 8, 1, 120.0, 0, ((2, 5.0), (1, 2.0)))
+    sample = Snapshot(
+        timestamp=1000,
+        states=(1, 0, 0, 1, 0, 0),
+        reserved=2,
+        limit=8,
+        cleanup_pending=1,
+        cleanup_age=120.0,
+        cleanup_unknown=0,
+        outbox=((2, 5.0), (1, 2.0)),
+    )
     metrics.refresh(sample)
     body = metrics.render()
     assert b"boxie_capacity_reserved 2.0" in body
@@ -36,7 +44,7 @@ def test_authoritative_snapshot_is_atomic_stale_and_restartable() -> None:
     restarted.refresh(sample)
     assert b"boxie_capacity_reserved 2.0" in restarted.render()
     assert b'boxie_provisioning_total{outcome="ready"} 0.0' in restarted.render()
-    restarted.refresh(replace(sample, cleanup_unknown=1))
+    restarted.refresh(sample.model_copy(update={"cleanup_unknown": 1}))
     assert b"boxie_cleanup_oldest_age_seconds " not in restarted.render()
     assert b"boxie_capacity_reserved " not in Metrics("orchestrator").render()
 

@@ -61,7 +61,7 @@ class SandboxLifecycle:
         # retries keep one history command per operation, regardless of outage length.
         await workflow.execute_activity_method(
             LifecycleActivities.request_stop,
-            StopRequest(sandbox_id, reason),
+            StopRequest(sandbox_id=sandbox_id, reason=reason),
             start_to_close_timeout=timedelta(seconds=20),
             retry_policy=CLEANUP_RETRY,
             cancellation_type=workflow.ActivityCancellationType.ABANDON,
@@ -122,7 +122,7 @@ class SandboxLifecycle:
                     try:
                         await workflow.execute_activity_method(
                             LifecycleActivities.request_stop,
-                            StopRequest(sandbox_id, "expired"),
+                            StopRequest(sandbox_id=sandbox_id, reason="expired"),
                             start_to_close_timeout=timedelta(seconds=20),
                             retry_policy=CLEANUP_RETRY,
                         )

@@ -21,6 +21,7 @@ from sqlalchemy import func, insert, update
 from sqlmodel import col
 from temporal_support import lifecycle_stack, tls
 from temporalio.client import Client
+from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.worker import Replayer
 
 pytestmark = pytest.mark.integration
@@ -36,7 +37,10 @@ def test_committed_command_recovers_without_api_delivery(
 ) -> None:
     async def exercise() -> None:
         client = await Client.connect(
-            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-orchestrator")
+            temporal_stack.address,
+            namespace="boxie",
+            tls=tls(temporal_stack, "boxie-orchestrator"),
+            data_converter=pydantic_data_converter,
         )
         async with lifecycle_stack(postgres_dsn, tmp_path, client) as stack:
             spec = await upload(stack.artifacts)
@@ -85,7 +89,9 @@ def test_committed_command_recovers_without_api_delivery(
                 assert (await counts(stack.sessions))[1:3] == (0, 0)
                 history = await handle.fetch_history()
                 assert all(b"SECRET-" not in event.SerializeToString() for event in history.events)
-                await Replayer(workflows=[SandboxLifecycle]).replay_workflow(history)
+                await Replayer(
+                    workflows=[SandboxLifecycle], data_converter=pydantic_data_converter
+                ).replay_workflow(history)
                 await check_schedules(client, stack.orchestrator.config.identity)
                 for identifier in schedule_definitions(stack.orchestrator.config.identity):
                     await client.get_schedule_handle(identifier).delete()
@@ -98,7 +104,10 @@ def test_cancelled_activity_retains_late_create_and_accounting(
 ) -> None:
     async def exercise() -> None:
         client = await Client.connect(
-            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-orchestrator")
+            temporal_stack.address,
+            namespace="boxie",
+            tls=tls(temporal_stack, "boxie-orchestrator"),
+            data_converter=pydantic_data_converter,
         )
         async with lifecycle_stack(postgres_dsn, tmp_path, client) as stack:
             stack.daemon.create_gate = asyncio.Event()
@@ -120,9 +129,9 @@ def test_cancelled_activity_retains_late_create_and_accounting(
                 assert (await asyncio.wait_for(handle.result(), 40)).cleaned
                 assert not stack.daemon.started and not stack.daemon.resources
                 assert (await counts(stack.sessions))[1:3] == (0, 0)
-                await Replayer(workflows=[SandboxLifecycle]).replay_workflow(
-                    await handle.fetch_history()
-                )
+                await Replayer(
+                    workflows=[SandboxLifecycle], data_converter=pydantic_data_converter
+                ).replay_workflow(await handle.fetch_history())
                 for schedule in schedule_definitions(stack.orchestrator.config.identity):
                     await client.get_schedule_handle(schedule).delete()
 
@@ -137,7 +146,10 @@ def test_cleanup_preserves_first_termination_cause(
 ) -> None:
     async def exercise() -> None:
         client = await Client.connect(
-            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-orchestrator")
+            temporal_stack.address,
+            namespace="boxie",
+            tls=tls(temporal_stack, "boxie-orchestrator"),
+            data_converter=pydantic_data_converter,
         )
         async with lifecycle_stack(postgres_dsn, tmp_path, client) as stack:
             view = await stack.life.submit(OWNER, "first-cause", await upload(stack.artifacts))
@@ -189,7 +201,10 @@ def test_production_cancel_during_concurrent_inspection(
         from workflow_support import Decisions
 
         client = await Client.connect(
-            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-orchestrator")
+            temporal_stack.address,
+            namespace="boxie",
+            tls=tls(temporal_stack, "boxie-orchestrator"),
+            data_converter=pydantic_data_converter,
         )
         decisions = Decisions(mode)
         queue = "production-cancel-" + uuid4().hex
@@ -209,7 +224,9 @@ def test_production_cancel_during_concurrent_inspection(
                 assert (await asyncio.wait_for(handle.result(), 20)).cleaned
                 history = await handle.fetch_history()
                 (tmp_path / "production-cancellation.json").write_text(history.to_json())
-                await Replayer(workflows=[SandboxLifecycle]).replay_workflow(history)
+                await Replayer(
+                    workflows=[SandboxLifecycle], data_converter=pydantic_data_converter
+                ).replay_workflow(history)
             finally:
                 decisions.release.set()
                 history = await handle.fetch_history()
@@ -285,7 +302,10 @@ def test_actual_api_process_accepts_status_and_stop_during_temporal_outage(
 
     async def exercise() -> None:
         client = await Client.connect(
-            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-orchestrator")
+            temporal_stack.address,
+            namespace="boxie",
+            tls=tls(temporal_stack, "boxie-orchestrator"),
+            data_converter=pydantic_data_converter,
         )
         async with lifecycle_stack(postgres_dsn, tmp_path, client) as stack:
             view = await stack.life.submit(OWNER, "api-outage", await upload(stack.artifacts))
@@ -369,7 +389,10 @@ def test_busy_maintenance_preserves_terminal_and_lease_and_cleanup_history(
 
     async def exercise() -> None:
         client = await Client.connect(
-            temporal_stack.address, namespace="boxie", tls=tls(temporal_stack, "boxie-orchestrator")
+            temporal_stack.address,
+            namespace="boxie",
+            tls=tls(temporal_stack, "boxie-orchestrator"),
+            data_converter=pydantic_data_converter,
         )
         async with lifecycle_stack(postgres_dsn, tmp_path, client) as stack:
             gate, saturated = asyncio.Event(), asyncio.Event()

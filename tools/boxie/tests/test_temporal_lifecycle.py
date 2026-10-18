@@ -7,6 +7,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 from workflow_support import Decisions as Decisions
@@ -21,7 +22,8 @@ def test_lifecycle_cleanup_and_replay(mode: str, tmp_path: Path) -> None:
         from temporal_test_server import test_server_path
 
         async with await WorkflowEnvironment.start_time_skipping(
-            test_server_existing_path=str(test_server_path())
+            test_server_existing_path=str(test_server_path()),
+            data_converter=pydantic_data_converter,
         ) as env:
             decisions = Decisions(mode)
             queue = "lifecycle-" + uuid4().hex
@@ -45,9 +47,10 @@ def test_lifecycle_cleanup_and_replay(mode: str, tmp_path: Path) -> None:
                 )
                 history = await handle.fetch_history()
                 (tmp_path / f"{mode}.json").write_text(history.to_json())
-                await Replayer(workflows=[workflow_module.SandboxLifecycle]).replay_workflow(
-                    history
-                )
+                await Replayer(
+                    workflows=[workflow_module.SandboxLifecycle],
+                    data_converter=pydantic_data_converter,
+                ).replay_workflow(history)
 
     asyncio.run(exercise())
 
@@ -61,7 +64,8 @@ def test_earliest_workflow_deadline(mode: str, seconds: int) -> None:
         from temporal_test_server import test_server_path
 
         async with await WorkflowEnvironment.start_time_skipping(
-            test_server_existing_path=str(test_server_path())
+            test_server_existing_path=str(test_server_path()),
+            data_converter=pydantic_data_converter,
         ) as env:
             decisions = Decisions(mode)
             started = await env.get_current_time()
@@ -109,7 +113,8 @@ def test_cancellation_privacy_and_run_boundary(
         from temporalio.client import WorkflowHistory
 
         async with await WorkflowEnvironment.start_time_skipping(
-            test_server_existing_path=str(test_server_path())
+            test_server_existing_path=str(test_server_path()),
+            data_converter=pydantic_data_converter,
         ) as env:
             decisions = Decisions(mode)
             async with Worker(
@@ -162,9 +167,9 @@ def test_cancellation_privacy_and_run_boundary(
                     (tmp_path / f"{mode}-{run_id}.json").write_text(serialized)
                     for event in history.events:
                         assert b"SECRET-" not in event.SerializeToString()
-                    await Replayer(workflows=[SandboxLifecycle]).replay_workflow(
-                        WorkflowHistory.from_json(handle.id, serialized)
-                    )
+                    await Replayer(
+                        workflows=[SandboxLifecycle], data_converter=pydantic_data_converter
+                    ).replay_workflow(WorkflowHistory.from_json(handle.id, serialized))
                     runs.append(run_id)
                     last = history.events[-1]
                     run_id = (

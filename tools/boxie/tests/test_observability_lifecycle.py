@@ -237,12 +237,16 @@ def test_real_sql_http_worker_history_replay_does_not_emit(
     from boxie_test_support.api import artifact, create, ready
     from temporal_support import lifecycle_stack, tls
     from temporalio.client import Client
+    from temporalio.contrib.pydantic import pydantic_data_converter
     from temporalio.worker import Replayer
 
     async def exercise() -> None:
         fixture = cast(Any, temporal_stack)
         client = await Client.connect(
-            fixture.address, namespace="boxie", tls=tls(fixture, "boxie-orchestrator")
+            fixture.address,
+            namespace="boxie",
+            tls=tls(fixture, "boxie-orchestrator"),
+            data_converter=pydantic_data_converter,
         )
         async with lifecycle_stack(postgres_dsn, tmp_path, client) as stack:
             metrics = Metrics("api")
@@ -267,7 +271,9 @@ def test_real_sql_http_worker_history_replay_does_not_emit(
                 assert not (await stack.life.get(OWNER, UUID(identifier))).cleanup_pending
                 history = await handle.fetch_history()
                 before = [(e.event, e.outcome) for e in events]
-                await Replayer(workflows=[SandboxLifecycle]).replay_workflow(history)
+                await Replayer(
+                    workflows=[SandboxLifecycle], data_converter=pydantic_data_converter
+                ).replay_workflow(history)
                 assert [(e.event, e.outcome) for e in events] == before
                 assert metrics.provisioning.labels("ready")._value.get() == 1
                 assert sum(e.event == "cleanup.completed" for e in events) == 1

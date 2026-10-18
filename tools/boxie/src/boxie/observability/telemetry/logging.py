@@ -19,6 +19,8 @@ from types import TracebackType
 from typing import Any, cast
 from uuid import uuid4
 
+from pydantic import BaseModel, ConfigDict
+
 from boxie.observability.telemetry.context import current_context, validated
 
 # Finite categories, no URLs, headers, exception messages, notes, source or locals.
@@ -50,8 +52,9 @@ _BASE_EVENTS = {
 _LEVELS = {10: "DEBUG", 20: "INFO", 30: "WARNING", 40: "ERROR", 50: "CRITICAL"}
 
 
-@dataclass(frozen=True)
-class LogSettings:
+class LogSettings(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
+
     service: str
     role: str
     release: str = "unknown"

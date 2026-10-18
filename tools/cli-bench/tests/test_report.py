@@ -8,6 +8,20 @@ import report
 from conftest import BASE, REPO, FakeGitHub, archive, benchmark, suite_files
 
 
+def test_report_records_reject_invalid_measurements_and_rows() -> None:
+    with pytest.raises(ValueError):
+        report.Measurement(
+            system="ubuntu-24.04",
+            binary="tailr",
+            case="sample",
+            candidate=0,
+            comparison=None,
+            kind="candidate",
+        )
+    with pytest.raises(ValueError):
+        report.Suite(binary="tailr", status="complete", runs=1, rows=["bad"])
+
+
 def test_missing_token_has_actionable_error_without_traceback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -36,11 +50,18 @@ def test_renders_real_means_ratio_smoke_and_parallel_runner_timing(github: FakeG
 def test_groups_both_platforms_by_cli_and_sorts_cases(github: FakeGitHub) -> None:
     suites = [
         report.Suite(
-            binary,
-            "complete",
-            1,
-            [
-                report.Measurement(system, binary, case, 0.002, 0.004, "reference")
+            binary=binary,
+            status="complete",
+            runs=1,
+            rows=[
+                report.Measurement(
+                    system=system,
+                    binary=binary,
+                    case=case,
+                    candidate=0.002,
+                    comparison=0.004,
+                    kind="reference",
+                )
                 for case in ("z-last", "a-first")
                 for system in ("macos-15", "ubuntu-24.04")
             ],
@@ -57,7 +78,12 @@ def test_groups_both_platforms_by_cli_and_sorts_cases(github: FakeGitHub) -> Non
         assert section.index("| `a-first` | Linux") < section.index("| `a-first` | macOS")
         assert section.index("| `a-first` | macOS") < section.index("| `z-last` | Linux")
     reversed_suites = [
-        report.Suite(suite.binary, suite.status, suite.runs, list(reversed(suite.rows)))
+        report.Suite(
+            binary=suite.binary,
+            status=suite.status,
+            runs=suite.runs,
+            rows=list(reversed(suite.rows)),
+        )
         for suite in reversed(suites)
     ]
     assert report.render(REPO, github.run, github.jobs, reversed_suites, {}, []) == result
@@ -76,8 +102,17 @@ def test_groups_both_platforms_by_cli_and_sorts_cases(github: FakeGitHub) -> Non
 def test_labels_comparison_source_and_omits_empty_columns(
     github: FakeGitHub, kind: str, comparison: float | None, header: str
 ) -> None:
-    rows = [report.Measurement("ubuntu-24.04", "tailr", "sample", 0.002, comparison, kind)]
-    suites = [report.Suite("tailr", "complete", 1, rows)]
+    rows = [
+        report.Measurement(
+            system="ubuntu-24.04",
+            binary="tailr",
+            case="sample",
+            candidate=0.002,
+            comparison=comparison,
+            kind=kind,
+        )
+    ]
+    suites = [report.Suite(binary="tailr", status="complete", runs=1, rows=rows)]
     result = report.render(REPO, github.run, github.jobs, suites, {}, [])
     section = result.split("<details>")[1]
     assert header + "\n" in section
@@ -93,12 +128,17 @@ def test_labels_comparison_source_and_omits_empty_columns(
 def test_grouped_results_keep_global_200_measurement_limit(github: FakeGitHub) -> None:
     suites = [
         report.Suite(
-            binary,
-            "complete",
-            1,
-            [
+            binary=binary,
+            status="complete",
+            runs=1,
+            rows=[
                 report.Measurement(
-                    "ubuntu-24.04", binary, f"case-{case:03}", 0.002, None, "candidate"
+                    system="ubuntu-24.04",
+                    binary=binary,
+                    case=f"case-{case:03}",
+                    candidate=0.002,
+                    comparison=None,
+                    kind="candidate",
                 )
                 for case in range(102)
             ],

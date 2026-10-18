@@ -6,11 +6,11 @@ import json
 import os
 import subprocess
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict, cast
 
 from cli_check.workspace import discover, load_toml
+from pydantic import BaseModel, ConfigDict, Field
 
 ROOT = Path(__file__).resolve().parents[2]
 GLOBAL_PATHS = {
@@ -24,11 +24,12 @@ GLOBAL_PATHS = {
 }
 
 
-@dataclass(frozen=True)
-class Suite:
-    path: str
-    package: str
-    directory: str
+class Suite(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
+
+    path: str = Field(min_length=1)
+    package: str = Field(min_length=1)
+    directory: str = Field(min_length=1)
     generate: bool
 
 
@@ -55,10 +56,10 @@ def discover_suites() -> list[Suite]:
                 )
             suites.append(
                 Suite(
-                    relative,
-                    package,
-                    directory.relative_to(ROOT).as_posix(),
-                    bool(suite.get("generate")),
+                    path=relative,
+                    package=package,
+                    directory=directory.relative_to(ROOT).as_posix(),
+                    generate=bool(suite.get("generate")),
                 )
             )
     return sorted(suites, key=lambda suite: suite.path)

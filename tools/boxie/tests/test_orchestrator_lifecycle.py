@@ -163,7 +163,9 @@ def test_foreign_name_collision_is_never_attached_started_or_deleted(tmp_path: P
 
         foreign_id = str(uuid4())
         name = orchestrator.records[request.ref.id].name
-        daemon.resources[name] = ContainerInfo(foreign_id, {"boxie.installation": "foreign"}, False)
+        daemon.resources[name] = ContainerInfo(
+            id=foreign_id, labels={"boxie.installation": "foreign"}, running=False
+        )
         observation = await settled(orchestrator, request.ref, SandboxState.TERMINATING)
         assert observation.cleanup_pending and not observation.removal_confirmed
         assert not daemon.started and not daemon.streams and daemon.creates == 0

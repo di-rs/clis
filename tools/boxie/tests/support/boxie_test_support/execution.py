@@ -33,7 +33,9 @@ class Daemon:
         self.create_entered.set()
         if self.create_gate:
             await self.create_gate.wait()  # Materialize only AFTER a prior absence check.
-        self.resources[name] = ContainerInfo(str(uuid4()), config["Labels"], False)
+        self.resources[name] = ContainerInfo(
+            id=str(uuid4()), labels=config["Labels"], running=False
+        )
         if self.lost_ack:
             raise OSError("lost acknowledgement")
 

@@ -278,7 +278,7 @@ def test_boxie_configuration_cli_is_product_independent(tmp_path: Path) -> None:
     assert "max_sandboxes" not in generated
     generated["max_sandboxes"] = 4
     (tmp_path / "orchestrator.json").write_text(json.dumps(generated))
-    with pytest.raises(TypeError, match="max_sandboxes"):
+    with pytest.raises(ValueError, match="extra_forbidden"):
         OrchestratorConfig.from_file(tmp_path / "orchestrator.json")
     assert api.orchestrator_url == "http://orchestrator:8091"
     assert "playground" not in (tmp_path / "api.json").read_text().lower()
@@ -303,5 +303,5 @@ def test_orchestrator_configuration_rejects_unsupported_capacity(
             }
         )
     )
-    with pytest.raises(TypeError, match="max_sandboxes"):
+    with pytest.raises(ValueError, match="extra_forbidden"):
         OrchestratorConfig.from_file(config)

@@ -3,21 +3,23 @@
 import asyncio
 import os
 import struct
-from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from boxie.domain.errors import BoxieError
 
 MAX_DIRECTORY_BYTES = 4 * 1024 * 1024
 
 
-@dataclass(frozen=True)
-class Directory:
-    entries: int
-    size: int
-    offset: int
-    end: int
+class Directory(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
+
+    entries: int = Field(ge=0)
+    size: int = Field(ge=0)
+    offset: int = Field(ge=0)
+    end: int = Field(ge=0)
 
 
 def _directory(source: BinaryIO) -> Directory:
@@ -67,7 +69,7 @@ def _directory(source: BinaryIO) -> Directory:
             end = record_offset
     if disk != 0 or central_disk != 0 or disk_entries != entries:
         raise BoxieError(422, "split ZIP archives are not supported")
-    return Directory(entries, size, offset, end)
+    return Directory(entries=entries, size=size, offset=offset, end=end)
 
 
 async def validate_directory(path: Path, max_entries: int) -> None:

@@ -56,14 +56,16 @@ async def operational_snapshot(sessions: SessionFactory) -> OperationalSnapshot:
         return max(0, (now - value).total_seconds()) if value is not None else 0
 
     return OperationalSnapshot(
-        now.timestamp(),
-        tuple(int(n) for n in row[1:offset]),
-        int(reserved),
-        int(limit),
-        int(pending),
-        age(oldest),
-        int(unknown),
-        tuple((int(count), age(created)) for count, created in zip(counts, times, strict=True)),
+        timestamp=now.timestamp(),
+        states=tuple(int(n) for n in row[1:offset]),
+        reserved=int(reserved),
+        limit=int(limit),
+        cleanup_pending=int(pending),
+        cleanup_age=age(oldest),
+        cleanup_unknown=int(unknown),
+        outbox=tuple(
+            (int(count), age(created)) for count, created in zip(counts, times, strict=True)
+        ),
     )
 
 

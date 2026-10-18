@@ -53,6 +53,52 @@ def test_api_configuration_rejects_reused_or_public_secret_files(tmp_path: Path)
         load_configuration(path)
 
 
+def test_api_file_errors_hide_credentials_and_copy_consumers(tmp_path: Path) -> None:
+    from boxie.api.app import ApiConfig
+    from boxie.bootstrap.api import load_configuration
+
+    config = configuration(tmp_path)
+    consumer = tmp_path / "consumer.secret"
+    consumer.write_text("consumer-one-secret")
+    consumer.chmod(0o600)
+    values = {
+        "orchestrator_url": "http://127.0.0.1:8091",
+        "orchestrator_credential_file": str(config.credential_file),
+        "consumer_credential_files": {"one": str(consumer)},
+        "release": "process-release",
+        "lifecycle": {
+            "postgres_dsn_file": str(tmp_path / "db"),
+            "temporal_address": "temporal:7233",
+            "temporal_server_name": "temporal",
+            "temporal_ca_file": str(tmp_path / "ca"),
+            "temporal_cert_file": str(tmp_path / "cert"),
+            "temporal_key_file": str(tmp_path / "key"),
+        },
+        "identity": {
+            "installation_id": str(config.identity.installation_id),
+            "host_id": config.identity.host_id,
+        },
+    }
+    path = tmp_path / "api.json"
+    path.write_text(json.dumps({**values, "consumer-one-secret": "consumer-one-secret"}))
+    with pytest.raises(ValueError) as raised:
+        load_configuration(path)
+    assert "consumer-one-secret" not in str(raised.value)
+    assert "consumer-one-secret" not in repr(raised.value.args)
+    assert config.credential_file.read_text().strip() not in str(raised.value)
+    assert config.credential_file.read_text().strip() not in repr(raised.value.args)
+    assert raised.value.__context__ is None
+    assert "<unknown field>: extra_forbidden" in str(raised.value)
+
+    path.write_text(json.dumps(values))
+    loaded = load_configuration(path)
+    assert loaded.api.consumers["one"] == b"consumer-one-secret"
+    original = {"one": b"consumer-one-secret"}
+    api = ApiConfig(release="process-release", consumers=original)
+    original["one"] = b"changed"
+    assert api.consumers["one"] == b"consumer-one-secret"
+
+
 @pytest.mark.parametrize(
     "frame",
     [

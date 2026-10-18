@@ -1,8 +1,8 @@
 """Transactional command handoff; duplicate deliveries are safe."""
 
-from dataclasses import dataclass
 from uuid import UUID
 
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func
 from sqlmodel import col, select
 
@@ -11,8 +11,9 @@ from boxie.persistence.database import SessionFactory
 from boxie.persistence.models import CapacitySlot, Outbox, Sandbox, SandboxArtifactRef
 
 
-@dataclass(frozen=True)
-class OutboxEvent:
+class OutboxEvent(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
+
     id: UUID
     sandbox_id: UUID
 
@@ -36,7 +37,7 @@ class PostgresOutbox:
             rows = (
                 await session.exec(query.order_by(col(Outbox.created_at), col(Outbox.id)).limit(32))
             ).all()
-            return [OutboxEvent(row.id, row.sandbox_id) for row in rows]
+            return [OutboxEvent(id=row.id, sandbox_id=row.sandbox_id) for row in rows]
 
     async def acknowledge(self, event: OutboxEvent) -> bool:
         async with self.sessions() as session, session.begin():

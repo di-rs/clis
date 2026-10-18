@@ -24,7 +24,10 @@ async def stack(dsn: str, root: Path) -> AsyncIterator[tuple[httpx.AsyncClient, 
             "http://127.0.0.1:1", b"orchestrator-test-secret"
         ) as terminal:
             app = create_app(
-                ApiConfig("test", {"one": b"consumer-one-secret", "two": b"consumer-two-secret"}),
+                ApiConfig(
+                    release="test",
+                    consumers={"one": b"consumer-one-secret", "two": b"consumer-two-secret"},
+                ),
                 life,
                 artifacts,
                 terminal,
