@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Self
 from uuid import UUID
 
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 from boxie.domain.models import LifetimePolicy, OrchestratorIdentity
@@ -112,7 +112,7 @@ class LifecycleConfig(BaseModel):
     remains the sole Docker and artifact filesystem owner.
     """
 
-    model_config = SettingsConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
 
     postgres_dsn_file: Path
     temporal_address: str = Field(min_length=1)
