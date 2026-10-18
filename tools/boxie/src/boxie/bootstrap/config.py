@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import os
 import stat
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 from boxie.domain.models import LifetimePolicy, OrchestratorIdentity
 from boxie.domain.policy import validate_policy
@@ -31,69 +33,94 @@ def read_credential(path: Path, *, allow_spaces: bool = False) -> bytes:
         os.close(descriptor)
 
 
-@dataclass(frozen=True)
-class OrchestratorConfig:
+def validate_file_model[T: BaseModel](model: type[T], values: dict[str, Any]) -> T:
+    """Keep Pydantic's raw input out of errors crossing the file boundary."""
+    try:
+        return model.model_validate(values)
+    except ValidationError as error:
+        # hide_input_in_errors only affects formatted text; errors() and json()
+        # retain inputs, including secrets already read from credential files.
+        locations = []
+        for issue in error.errors(include_input=False, include_context=False):
+            path = (
+                ".".join(
+                    segment
+                    if isinstance(segment, str) and segment in model.model_fields
+                    else "<unknown field>"
+                    for segment in issue["loc"]
+                )
+                or "<model>"
+            )
+            locations.append(f"{path}: {issue['type']}")
+        details = ", ".join(locations)
+    raise ValueError(f"invalid configuration: {details}")
+
+
+class FileOwnedSettings(BaseSettings):
+    model_config = SettingsConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return (init_settings,)
+
+
+class OrchestratorConfig(FileOwnedSettings):
     data_dir: Path
     profiles_file: Path
     credential_file: Path
     identity: OrchestratorIdentity
-    policy_maximum: LifetimePolicy = field(default_factory=LifetimePolicy)
-    docker_timeout: float = 20
-    sweep_seconds: float = 1
+    policy_maximum: LifetimePolicy = Field(default_factory=LifetimePolicy)
+    docker_timeout: float = Field(default=20, gt=0, le=60, allow_inf_nan=False)
+    sweep_seconds: float = Field(default=1, gt=0, le=10, allow_inf_nan=False)
     bind_host: str = "127.0.0.1"
     bind_port: int = 8091
     postgres_dsn_file: Path | None = None
     lifecycle: LifecycleConfig | None = None
 
-    def __post_init__(self) -> None:
-        if not 0 < self.docker_timeout <= 60 or not 0 < self.sweep_seconds <= 10:
-            raise ValueError("invalid orchestrator intervals")
+    @model_validator(mode="after")
+    def valid_domain_values(self) -> Self:
         validate_policy(self.policy_maximum)
         if not self.identity.host_id or len(self.identity.host_id) > 128:
             raise ValueError("host ID required")
+        return self
 
     @classmethod
     def from_file(cls, path: Path) -> OrchestratorConfig:
         data = json.loads(path.read_text())
-        for key in ("data_dir", "profiles_file", "credential_file"):
-            data[key] = Path(data[key])
-        if "postgres_dsn_file" in data:
-            data["postgres_dsn_file"] = Path(data["postgres_dsn_file"])
         if "lifecycle" in data:
-            converted: dict[str, Any] = {
-                key: Path(value) if key.endswith("_file") else value
-                for key, value in data["lifecycle"].items()
-            }
-            data["lifecycle"] = LifecycleConfig(**converted)
+            data["lifecycle"] = validate_file_model(LifecycleConfig, data["lifecycle"])
         identity = data.pop("identity")
         data["identity"] = OrchestratorIdentity(
             UUID(identity["installation_id"]), identity["host_id"]
         )
         if "policy_maximum" in data:
             data["policy_maximum"] = LifetimePolicy(**data["policy_maximum"])
-        return cls(**data)
+        return validate_file_model(cls, data)
 
 
-@dataclass(frozen=True)
-class LifecycleConfig:
+class LifecycleConfig(BaseModel):
     """Explicit inputs for the coordinated lifecycle composition; no migration hook.
 
     API and orchestrator use separate Temporal client identities. The orchestrator
     remains the sole Docker and artifact filesystem owner.
     """
 
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
+
     postgres_dsn_file: Path
-    temporal_address: str
-    temporal_server_name: str
+    temporal_address: str = Field(min_length=1)
+    temporal_server_name: str = Field(min_length=1)
     temporal_ca_file: Path
     temporal_cert_file: Path
     temporal_key_file: Path
-    temporal_namespace: str = "boxie"
+    temporal_namespace: str = Field(default="boxie", min_length=1)
 
-    def __post_init__(self) -> None:
-        if (
-            not self.temporal_address
-            or not self.temporal_server_name
-            or not self.temporal_namespace
-        ):
-            raise ValueError("Temporal address, verified server name and namespace are required")
+
+OrchestratorConfig.model_rebuild()

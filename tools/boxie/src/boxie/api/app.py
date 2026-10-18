@@ -1,13 +1,13 @@
 """Construct an unprivileged private API from injected application ports."""
 
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, field
 from types import MappingProxyType
 from uuid import UUID
 
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.middleware.base import RequestResponseEndpoint
 
 from boxie.api.auth import ConsumerAuth
@@ -18,15 +18,16 @@ from boxie.domain.errors import BoxieError
 from boxie.observability.logging import RequestLogging
 
 
-@dataclass(frozen=True)
-class ApiConfig:
-    release: str
-    consumers: Mapping[str, bytes] = field(repr=False)
+class ApiConfig(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
 
-    def __post_init__(self) -> None:
-        if not self.release or not self.consumers:
-            raise ValueError("release and consumer credentials required")
-        object.__setattr__(self, "consumers", MappingProxyType(dict(self.consumers)))
+    release: str = Field(min_length=1)
+    consumers: Mapping[str, bytes] = Field(min_length=1, repr=False)
+
+    @field_validator("consumers")
+    @classmethod
+    def copy_credentials(cls, value: Mapping[str, bytes]) -> Mapping[str, bytes]:
+        return MappingProxyType(dict(value))
 
 
 def create_app(

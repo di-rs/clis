@@ -190,7 +190,7 @@ class PostgresLifecycle:
                 slot.sandbox_id = identifier
                 session.add(SandboxArtifactRef(sandbox_id=identifier, artifact_id=spec.artifact_id))
                 await self._enqueue(session, identifier, "start")
-            deliver(self.diagnostics, Transition("sandbox.accepted", identifier))
+            deliver(self.diagnostics, Transition(event="sandbox.accepted", sandbox_id=identifier))
             return view(row)
         except TimeoutError:
             raise BoxieError(503, "admission dependency timeout") from None
@@ -247,7 +247,8 @@ class PostgresLifecycle:
                 )
             await self._enqueue(session, sandbox_id, "stop")
         deliver(
-            self.diagnostics, Transition("termination.requested", sandbox_id, reason=row.reason)
+            self.diagnostics,
+            Transition(event="termination.requested", sandbox_id=sandbox_id, reason=row.reason),
         )
         return view(row)
 
@@ -388,14 +389,14 @@ class PostgresLifecycle:
                         duration = max(0, (now - row.accepted_at).total_seconds())
                     events.append(
                         Transition(
-                            "provisioning.completed",
-                            item.sandbox_id,
+                            event="provisioning.completed",
+                            sandbox_id=item.sandbox_id,
                             outcome=outcome,
                             duration_seconds=duration,
                         )
                     )
                     if outcome == "ready":
-                        events.append(Transition("sandbox.ready", item.sandbox_id))
+                        events.append(Transition(event="sandbox.ready", sandbox_id=item.sandbox_id))
             if item.removal_confirmed:
                 slot = (
                     await session.exec(
@@ -407,7 +408,7 @@ class PostgresLifecycle:
                 reference = await session.get(SandboxArtifactRef, item.sandbox_id)
                 if reference is not None:
                     await session.delete(reference)
-                events.append(Transition("cleanup.completed", item.sandbox_id))
+                events.append(Transition(event="cleanup.completed", sandbox_id=item.sandbox_id))
         deliver(self.diagnostics, *events)
         return True
 

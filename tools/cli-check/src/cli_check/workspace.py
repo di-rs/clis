@@ -5,9 +5,14 @@ Repository packages must be declared in the root workspace's member patterns.
 """
 
 import tomllib
-from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
+
+from pydantic import BaseModel, ConfigDict
+
+
+class WorkspaceRecord(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
 
 
 def table(value: object) -> dict[str, object]:
@@ -42,14 +47,12 @@ def load_toml(path: Path) -> dict[str, object]:
         raise ValueError(f"Cannot read {path}: {error}") from error
 
 
-@dataclass(frozen=True)
-class Binary:
+class Binary(WorkspaceRecord):
     name: str
     source: Path
 
 
-@dataclass(frozen=True)
-class Package:
+class Package(WorkspaceRecord):
     name: str
     directory: Path
     manifest: dict[str, object]
@@ -65,10 +68,13 @@ class Package:
 def binary_targets(directory: Path, manifest: dict[str, object]) -> tuple[Binary, ...]:
     package = table(manifest["package"])
     name = string(package.get("name"), "package.name")
-    candidates = [Binary(name, directory / "src/main.rs")]
-    candidates.extend(Binary(path.stem, path) for path in sorted(directory.glob("src/bin/*.rs")))
+    candidates = [Binary(name=name, source=directory / "src/main.rs")]
     candidates.extend(
-        Binary(path.parent.name, path) for path in sorted(directory.glob("src/bin/*/main.rs"))
+        Binary(name=path.stem, source=path) for path in sorted(directory.glob("src/bin/*.rs"))
+    )
+    candidates.extend(
+        Binary(name=path.parent.name, source=path)
+        for path in sorted(directory.glob("src/bin/*/main.rs"))
     )
     explicit: list[Binary] = []
     for target in tables(manifest.get("bin", [])):
@@ -83,15 +89,17 @@ def binary_targets(directory: Path, manifest: dict[str, object]) -> tuple[Binary
                 ),
                 str(directory / f"src/bin/{target_name}.rs"),
             )
-            explicit.append(Binary(target_name, Path(source).resolve()))
+            explicit.append(Binary(name=target_name, source=Path(source).resolve()))
         else:
-            explicit.append(Binary(target_name, (directory / string(source, "bin.path")).resolve()))
+            explicit.append(
+                Binary(name=target_name, source=(directory / string(source, "bin.path")).resolve())
+            )
     if package.get("autobins") is False:
         return tuple(explicit)
     names = {target.name for target in explicit}
     paths = {target.source for target in explicit}
     return tuple(explicit) + tuple(
-        Binary(item.name, item.source.resolve())
+        Binary(name=item.name, source=item.source.resolve())
         for item in candidates
         if item.source.is_file() and item.name not in names and item.source.resolve() not in paths
     )
@@ -121,7 +129,15 @@ def discover(root: Path) -> list[Package]:
         library = "lib" in data or (
             package.get("autolib") is not False and (directory / "src/lib.rs").is_file()
         )
-        result.append(Package(name, directory, data, binary_targets(directory, data), library))
+        result.append(
+            Package(
+                name=name,
+                directory=directory,
+                manifest=data,
+                binaries=binary_targets(directory, data),
+                library=library,
+            )
+        )
     return result
 
 

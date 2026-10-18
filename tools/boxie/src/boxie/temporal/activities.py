@@ -59,7 +59,9 @@ class SafeActivityInbound(ActivityInboundInterceptor):
                 # even malformed or temporarily missing dependency state.
                 if activity.info().activity_type in {"request_stop", "remove_sandbox"}:
                     non_retryable = False
-                deliver(emit, Transition("activity.failed", reason=category, outcome="failed"))
+                deliver(
+                    emit, Transition(event="activity.failed", reason=category, outcome="failed")
+                )
                 # Sanitize before SDK logging, including nested context and details.
                 raise ApplicationError(
                     "lifecycle operation pending"
@@ -112,9 +114,10 @@ class LifecycleActivities:
                 await session.exec(select(Sandbox).where(Sandbox.id == request.sandbox_id))
             ).one()
         return LifecycleFacts(
-            request.absolute_deadline.timestamp(),
-            request.desired_stop or row.state in ("terminating", "terminated", "failed"),
-            row.cleaned_at is not None,
+            absolute_deadline=request.absolute_deadline.timestamp(),
+            desired_stop=request.desired_stop
+            or row.state in ("terminating", "terminated", "failed"),
+            cleaned=row.cleaned_at is not None,
         )
 
     @activity.defn

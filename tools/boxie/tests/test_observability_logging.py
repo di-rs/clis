@@ -284,7 +284,7 @@ from boxie_test_support.api import serve
 class Ports:
     async def ready(self): return True
 ports = Ports()
-app = create_app(ApiConfig("test", {{"one":b"consumer-one-secret"}}), ports, ports, ports)
+app = create_app(ApiConfig(release="test", consumers={{"one":b"consumer-one-secret"}}), ports, ports, ports)
 async def run():
     async with serve(app) as origin:
         for _ in range(12000): runtime.emit("request.completed")

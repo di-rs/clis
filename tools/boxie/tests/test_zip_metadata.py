@@ -13,8 +13,15 @@ import pytest
 from boxie.domain.errors import BoxieError
 from boxie.domain.models import Principal
 from boxie.persistence.artifacts import ArtifactLimits
+from boxie.persistence.zip_metadata import Directory
 from boxie_test_support.archive import Archive, chunks
 from boxie_test_support.orchestrator import bundle
+from pydantic import ValidationError
+
+
+def test_directory_model_rejects_invalid_values() -> None:
+    with pytest.raises(ValidationError):
+        Directory(entries=-1, size=0, offset=0, end=0)
 
 
 @pytest.mark.parametrize(

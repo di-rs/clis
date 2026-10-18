@@ -83,7 +83,9 @@ def test_retry_after_cancelled_start_reuses_terminal_and_observed_container(
             await original_start(identifier)
             for name, info in daemon.resources.items():
                 if info.id == identifier:
-                    daemon.resources[name] = ContainerInfo(info.id, info.labels, True)
+                    daemon.resources[name] = ContainerInfo(
+                        id=info.id, labels=info.labels, running=True
+                    )
             started.set()
             await release.wait()
 

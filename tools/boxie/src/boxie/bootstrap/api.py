@@ -6,22 +6,23 @@ import argparse
 import asyncio
 import hmac
 import json
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pydantic import Field
+
+from boxie.api.app import ApiConfig
+from boxie.bootstrap.config import FileOwnedSettings, LifecycleConfig, validate_file_model
+from boxie.domain.models import OrchestratorIdentity
+
 if TYPE_CHECKING:
-    from boxie.api.app import ApiConfig
-    from boxie.bootstrap.config import LifecycleConfig
-    from boxie.domain.models import OrchestratorIdentity
     from boxie.observability.metrics import Metrics
 
 
-@dataclass(frozen=True)
-class RuntimeConfig:
+class RuntimeConfig(FileOwnedSettings):
     api: ApiConfig
     orchestrator_url: str
-    orchestrator_credential: bytes = field(repr=False)
+    orchestrator_credential: bytes = Field(repr=False)
     lifecycle: LifecycleConfig
     identity: OrchestratorIdentity
     bind_host: str = "127.0.0.1"
@@ -32,7 +33,6 @@ class RuntimeConfig:
 def load_configuration(path: Path) -> RuntimeConfig:
     from pydantic import TypeAdapter, ValidationError
 
-    from boxie.api.app import ApiConfig
     from boxie.bootstrap.config import read_credential
     from boxie.bootstrap.dependencies import lifecycle_config, orchestrator_identity
     from boxie.contracts.common import ConsumerId
@@ -54,12 +54,14 @@ def load_configuration(path: Path) -> RuntimeConfig:
             TypeAdapter(ConsumerId).validate_python(consumer)
         except ValidationError:
             raise ValueError("invalid consumer ID") from None
-    api = ApiConfig(data.pop("release"), consumers)
+    api = validate_file_model(ApiConfig, {"release": data.pop("release"), "consumers": consumers})
     if "lifecycle" not in data or "identity" not in data:
         raise ValueError("lifecycle configuration and orchestrator identity required")
     data["lifecycle"] = lifecycle_config(data.pop("lifecycle"))
     data["identity"] = orchestrator_identity(data.pop("identity"))
-    return RuntimeConfig(api=api, orchestrator_credential=orchestrator, **data)
+    return validate_file_model(
+        RuntimeConfig, {"api": api, "orchestrator_credential": orchestrator, **data}
+    )
 
 
 def _main(metrics: Metrics, config_path: Path) -> None:

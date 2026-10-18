@@ -61,7 +61,7 @@ async def lifecycle_stack(dsn: str, root: Path, client: Client) -> AsyncIterator
                 PostgresOutbox(sessions), client, lifecycle_queue(config.identity)
             )
             api = create_app(
-                ApiConfig("test", {"one": b"consumer-one-secret"}),
+                ApiConfig(release="test", consumers={"one": b"consumer-one-secret"}),
                 life,
                 control,
                 control,

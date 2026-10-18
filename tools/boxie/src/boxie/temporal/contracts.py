@@ -1,28 +1,30 @@
 """Nonsecret workflow payloads. Never add admission specs or terminal data here."""
 
-from dataclasses import dataclass
 from urllib.parse import quote
+
+from pydantic import BaseModel, ConfigDict
 
 from boxie.domain.models import OrchestratorIdentity
 
 TASK_QUEUE = "boxie-lifecycle"
 
 
-@dataclass(frozen=True)
-class LifecycleFacts:
+class WorkflowPayload(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
+
+
+class LifecycleFacts(WorkflowPayload):
     absolute_deadline: float
     desired_stop: bool
     cleaned: bool
     next_deadline: float | None = None
 
 
-@dataclass(frozen=True)
-class LifecycleResult:
+class LifecycleResult(WorkflowPayload):
     cleaned: bool
 
 
-@dataclass(frozen=True)
-class StopRequest:
+class StopRequest(WorkflowPayload):
     sandbox_id: str
     reason: str
 

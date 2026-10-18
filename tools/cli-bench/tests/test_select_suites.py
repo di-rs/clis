@@ -2,6 +2,7 @@
 
 import pytest
 from conftest import Repository
+from select_suites import Suite
 
 ALL_SUITES = [
     "biggie/benches/cli-bench.toml",
@@ -9,6 +10,11 @@ ALL_SUITES = [
     "coreutils/tailr/benches/cli-bench.toml",
     "coreutils/wcr/benches/cli-bench.toml",
 ]
+
+
+def test_suite_record_rejects_empty_path() -> None:
+    with pytest.raises(ValueError):
+        Suite(path="", package="tailr", directory="coreutils/tailr", generate=False)
 
 
 def test_whole_pr_uses_merge_base_and_includes_earlier_commits(repo: Repository) -> None:

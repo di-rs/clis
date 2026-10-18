@@ -138,7 +138,8 @@ async def network(
         async with OrchestratorClient(origin, b"orchestrator-test-secret", timeout=1) as client:
             api = create_app(
                 ApiConfig(
-                    "terminal-test", {"one": b"consumer-one-secret", "two": b"consumer-two-secret"}
+                    release="terminal-test",
+                    consumers={"one": b"consumer-one-secret", "two": b"consumer-two-secret"},
                 ),
                 Admission(orchestrator, artifacts),
                 artifacts,

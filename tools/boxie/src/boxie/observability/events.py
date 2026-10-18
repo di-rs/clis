@@ -1,8 +1,9 @@
 """Bounded lifecycle diagnostics, invoked only after acknowledged durable writes."""
 
 from collections.abc import Callable
-from dataclasses import dataclass
 from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from boxie.observability.telemetry.logging import configured_runtime
 
@@ -20,9 +21,10 @@ EVENTS = {
 }
 
 
-@dataclass(frozen=True)
-class Transition:
-    event: str
+class Transition(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
+
+    event: str = Field(min_length=1)
     sandbox_id: UUID | None = None
     outcome: str | None = None
     reason: str | None = None

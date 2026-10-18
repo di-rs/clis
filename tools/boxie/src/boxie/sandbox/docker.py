@@ -1,7 +1,6 @@
 """The only production adapter allowed to open the Docker socket."""
 
 import asyncio
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -10,6 +9,7 @@ from aiodocker.containers import DockerContainer
 from aiodocker.exceptions import DockerError
 from aiodocker.stream import Stream
 from aiohttp import ClientTimeout
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from boxie.domain.models import ProfileSnapshot
 
@@ -25,11 +25,12 @@ class TerminalPort(Protocol):
     async def close(self) -> None: ...
 
 
-@dataclass(frozen=True)
-class ContainerInfo:
-    id: str
+class ContainerInfo(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
+
+    id: str = Field(min_length=1)
     labels: dict[str, str]
-    running: bool
+    running: StrictBool
 
 
 class ExecutionDocker(Protocol):
@@ -100,7 +101,7 @@ class DockerBackend:
                 return None
             raise
         labels: dict[str, str] = data["Config"]["Labels"] or {}
-        return ContainerInfo(data["Id"], labels, data["State"]["Running"])
+        return ContainerInfo(id=data["Id"], labels=labels, running=data["State"]["Running"])
 
     async def delete(self, name: str) -> None:
         async with asyncio.timeout(self.timeout):

@@ -3,6 +3,7 @@
 import asyncio
 
 import pytest
+from pydantic import ValidationError
 
 
 def test_docker_adapter_confirms_auto_removal_and_bounds_daemon_wait() -> None:
@@ -32,6 +33,29 @@ def test_docker_adapter_confirms_auto_removal_and_bounds_daemon_wait() -> None:
             await backend.delete("owned")
         await backend.close()
         assert client.close.await_count == 1
+
+    asyncio.run(exercise())
+
+
+def test_docker_inspect_rejects_malformed_fields() -> None:
+    from unittest.mock import MagicMock
+
+    from aiodocker import Docker
+    from aiodocker.containers import DockerContainer, DockerContainers
+    from boxie.sandbox.docker import DockerBackend
+
+    async def exercise() -> None:
+        client = MagicMock(spec=Docker)
+        client.containers = MagicMock(spec=DockerContainers)
+        container = MagicMock(spec=DockerContainer)
+        client.containers.container.return_value = container
+        container.show.return_value = {
+            "Id": "owned",
+            "Config": {"Labels": {"owner": 7}},
+            "State": {"Running": "yes"},
+        }
+        with pytest.raises(ValidationError):
+            await DockerBackend(client=client).inspect("owned")
 
     asyncio.run(exercise())
 

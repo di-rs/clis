@@ -11,7 +11,7 @@ from temporalio.client import Client
 
 def test_failed_delivery_stays_pending_while_other_commands_complete() -> None:
     async def exercise() -> None:
-        pending = [OutboxEvent(uuid4(), uuid4()) for _ in range(10)]
+        pending = [OutboxEvent(id=uuid4(), sandbox_id=uuid4()) for _ in range(10)]
         failed = pending[0]
         unavailable = True
 
