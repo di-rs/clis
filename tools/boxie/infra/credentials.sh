@@ -10,7 +10,9 @@ if [[ -d $directory && -n $(ls -A "$directory") ]]; then
         [[ -f $directory/$name && ! -L $directory/$name && -s $directory/$name ]] || {
             echo 'Partial credential set; restore the complete original set before retrying.' >&2; exit 1;
         }
-        [[ $(find "$directory/$name" -perm -0077 -print) == '' ]] || { echo 'Credentials must be private.' >&2; exit 1; }
+        python3 -c 'import os,sys; sys.exit(bool(os.stat(sys.argv[1]).st_mode & 0o077))' "$directory/$name" || {
+            echo 'Credentials must be private.' >&2; exit 1;
+        }
     done
     exit 0
 fi

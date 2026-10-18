@@ -65,11 +65,55 @@ class HostConfig(BaseModel):
         return value
 
 
-def cloud_init(host_private_key: str, host_public_key: str, volume_id: str) -> str:
+def cloud_init(
+    host_private_key: str,
+    host_public_key: str,
+    volume_id: str,
+    admin_public_key: str | None = None,
+) -> str:
     """Install a pinned SSH host identity; no provider or application tokens are used."""
     source = Path(__file__).resolve().parent.parent
     if not (source / "bootstrap.sh").is_file():
         raise RuntimeError("Provisioning requires the infrastructure source checkout")
+    write_files = [
+        {
+            "path": "/etc/clis/storage-device",
+            "permissions": "0600",
+            "content": f"/dev/disk/by-id/scsi-0HC_Volume_{volume_id}\n",
+        },
+        {
+            "path": "/usr/local/sbin/clis-storage-guard",
+            "permissions": "0700",
+            "content": (source / "storage-guard.sh").read_text(),
+        },
+        {
+            "path": "/usr/local/sbin/clis-bootstrap",
+            "permissions": "0700",
+            "content": (source / "bootstrap.sh").read_text(),
+        },
+        {
+            "path": "/etc/ssh/sshd_config.d/00-clis.conf",
+            "permissions": "0644",
+            "content": "PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin prohibit-password\n",
+        },
+    ]
+    runcmd = []
+    if admin_public_key:
+        write_files.append(
+            {
+                "path": "/etc/clis/admin-ssh-key",
+                "permissions": "0600",
+                "content": admin_public_key + "\n",
+            }
+        )
+        runcmd.extend(
+            [
+                ["install", "-d", "-m", "0700", "/root/.ssh"],
+                ["bash", "-c", "cat /etc/clis/admin-ssh-key >> /root/.ssh/authorized_keys"],
+                ["chmod", "0600", "/root/.ssh/authorized_keys"],
+            ]
+        )
+    runcmd.append(["bash", "/usr/local/sbin/clis-bootstrap"])
     return "#cloud-config\n" + json.dumps(
         {
             "ssh_pwauth": False,
@@ -78,31 +122,8 @@ def cloud_init(host_private_key: str, host_public_key: str, volume_id: str) -> s
                 "ed25519_private": host_private_key,
                 "ed25519_public": host_public_key,
             },
-            "write_files": [
-                {
-                    "path": "/etc/clis/storage-device",
-                    "permissions": "0600",
-                    "content": f"/dev/disk/by-id/scsi-0HC_Volume_{volume_id}\n",
-                },
-                {
-                    "path": "/usr/local/sbin/clis-storage-guard",
-                    "permissions": "0700",
-                    "content": (source / "storage-guard.sh").read_text(),
-                },
-                {
-                    "path": "/usr/local/sbin/clis-bootstrap",
-                    "permissions": "0700",
-                    "content": (
-                        Path(__file__).resolve().parent.parent / "bootstrap.sh"
-                    ).read_text(),
-                },
-                {
-                    "path": "/etc/ssh/sshd_config.d/00-clis.conf",
-                    "permissions": "0644",
-                    "content": "PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin prohibit-password\n",
-                },
-            ],
-            "runcmd": [["bash", "/usr/local/sbin/clis-bootstrap"]],
+            "write_files": write_files,
+            "runcmd": runcmd,
         }
     )
 
@@ -123,12 +144,16 @@ def provision_resources(config: HostConfig) -> HostResources:
     deployment_key = tls.PrivateKey(
         "deployment-key",
         algorithm="ED25519",
-        opts=pulumi.ResourceOptions(additional_secret_outputs=private_outputs),
+        opts=pulumi.ResourceOptions(
+            protect=config.protect, additional_secret_outputs=private_outputs
+        ),
     )
     host_key = tls.PrivateKey(
         "host-key",
         algorithm="ED25519",
-        opts=pulumi.ResourceOptions(additional_secret_outputs=private_outputs),
+        opts=pulumi.ResourceOptions(
+            protect=config.protect, additional_secret_outputs=private_outputs
+        ),
     )
     host_public_key = host_key.public_key_openssh.apply(str.strip)
     deployment = hcloud.SshKey(
@@ -136,12 +161,6 @@ def provision_resources(config: HostConfig) -> HostResources:
         public_key=deployment_key.public_key_openssh.apply(str.strip),
         labels=labels,
     )
-    ssh_keys = [deployment.id]
-    if config.ssh_public_key:
-        # Keep the existing resource name for stacks that already have admin access.
-        admin = hcloud.SshKey("admin", public_key=config.ssh_public_key, labels=labels)
-        ssh_keys.append(admin.id)
-
     rules = [
         hcloud.FirewallRuleArgs(
             direction="in", protocol="tcp", port=port, source_ips=["0.0.0.0/0", "::/0"]
@@ -182,7 +201,7 @@ def provision_resources(config: HostConfig) -> HostResources:
     )
     user_data: pulumi.Output[str] = pulumi.Output.secret(
         pulumi.Output.all(host_key.private_key_openssh, host_public_key, volume.id).apply(
-            lambda keys: cloud_init(keys[0], keys[1], keys[2])
+            lambda keys: cloud_init(keys[0], keys[1], keys[2], config.ssh_public_key)
         )
     )
     server = hcloud.Server(
@@ -194,7 +213,7 @@ def provision_resources(config: HostConfig) -> HostResources:
         delete_protection=config.protect,
         rebuild_protection=config.protect,
         shutdown_before_deletion=True,
-        ssh_keys=ssh_keys,
+        ssh_keys=[deployment.id],
         # Attach the firewall before the first boot, not in a later attachment.
         firewall_ids=[firewall.id.apply(int)],
         public_nets=[
@@ -204,7 +223,12 @@ def provision_resources(config: HostConfig) -> HostResources:
         ],
         user_data=user_data,
         labels=labels,
-        opts=pulumi.ResourceOptions(protect=config.protect, additional_secret_outputs=["userData"]),
+        opts=pulumi.ResourceOptions(
+            protect=config.protect,
+            additional_secret_outputs=["userData"],
+            # These inputs are used only when the server is created.
+            ignore_changes=["userData", "sshKeys"],
+        ),
     )
     attachment = hcloud.VolumeAttachment(
         "clis-data", volume_id=volume.id.apply(int), server_id=server.id.apply(int), automount=False

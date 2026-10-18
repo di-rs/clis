@@ -9,6 +9,17 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 
 
+def test_operations_manifest_keeps_docker_socket_out_of_operator_jobs() -> None:
+    import yaml
+
+    services = yaml.safe_load((ROOT / "tools/boxie/infra/compose.operations.yml").read_text())[
+        "services"
+    ]
+    assert not any(
+        "/var/run/docker.sock" in str(service.get("volumes", [])) for service in services.values()
+    )
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize(
     "package,module,forbidden",

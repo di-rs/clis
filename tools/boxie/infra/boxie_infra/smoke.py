@@ -5,7 +5,6 @@ import asyncio
 import hashlib
 import io
 import json
-import os
 import subprocess
 import zipfile
 from pathlib import Path
@@ -19,19 +18,6 @@ from boxie_infra.terminal import Session
 
 
 def containers(sandbox_id: str) -> list[str]:
-    if socket := os.environ.get("BOXIE_SMOKE_DOCKER_SOCKET"):
-        with httpx.Client(
-            transport=httpx.HTTPTransport(uds=socket), base_url="http://docker"
-        ) as client:
-            response = client.get(
-                "/containers/json",
-                params={
-                    "all": "true",
-                    "filters": json.dumps({"label": [f"boxie.sandbox={sandbox_id}"]}),
-                },
-            )
-            response.raise_for_status()
-            return [item["Id"] for item in response.json()]
     return subprocess.check_output(
         ["docker", "ps", "-aq", "--filter", f"label=boxie.sandbox={sandbox_id}"], text=True
     ).split()
@@ -41,15 +27,7 @@ def inspect_sandbox(sandbox_id: str) -> None:
     ids = containers(sandbox_id)
     if len(ids) != 1:
         raise RuntimeError("Expected exactly one owned sandbox container")
-    if socket := os.environ.get("BOXIE_SMOKE_DOCKER_SOCKET"):
-        with httpx.Client(
-            transport=httpx.HTTPTransport(uds=socket), base_url="http://docker"
-        ) as client:
-            response = client.get(f"/containers/{ids[0]}/json")
-            response.raise_for_status()
-            data = response.json()
-    else:
-        data = json.loads(subprocess.check_output(["docker", "inspect", ids[0]], text=True))[0]
+    data = json.loads(subprocess.check_output(["docker", "inspect", ids[0]], text=True))[0]
     host = data["HostConfig"]
     expected = {
         "Runtime": "runsc",

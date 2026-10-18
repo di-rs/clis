@@ -13,20 +13,23 @@ if [[ -d $root ]]; then
     done
     exit 0
 fi
-install -d -m 0700 "$root" "$root/ca"
-for directory in server api orchestrator ui operator; do install -d -m 0755 "$root/$directory"; done
+install -d -m 0700 "$(dirname "$root")"
+staging=$(mktemp -d "${root}.new.XXXXXX")
+trap 'rm -rf "$staging"' EXIT
+install -d -m 0700 "$staging/ca"
+for directory in server api orchestrator ui operator; do install -d -m 0755 "$staging/$directory"; done
 for name in frontend internode client; do
     openssl req -x509 -newkey rsa:3072 -nodes -days 365 -subj "/CN=Boxie $name CA" \
-        -keyout "$root/ca/$name.key" -out "$root/ca/$name.pem" >/dev/null 2>&1
+        -keyout "$staging/ca/$name.key" -out "$staging/ca/$name.pem" >/dev/null 2>&1
 done
 while read -r directory name issuer san usage; do
-    openssl req -newkey rsa:2048 -nodes -subj "/CN=$name" -keyout "$root/$directory/$name.key" -out "$root/ca/$name.csr" >/dev/null 2>&1
-    printf 'subjectAltName=DNS:%s\nextendedKeyUsage=%s\nbasicConstraints=CA:FALSE\n' "$san" "$usage" > "$root/ca/$name.ext"
-    openssl x509 -req -in "$root/ca/$name.csr" -CA "$root/ca/$issuer.pem" -CAkey "$root/ca/$issuer.key" \
-        -CAcreateserial -days 90 -extfile "$root/ca/$name.ext" -out "$root/$directory/$name.pem" >/dev/null 2>&1
+    openssl req -newkey rsa:2048 -nodes -subj "/CN=$name" -keyout "$staging/$directory/$name.key" -out "$staging/ca/$name.csr" >/dev/null 2>&1
+    printf 'subjectAltName=DNS:%s\nextendedKeyUsage=%s\nbasicConstraints=CA:FALSE\n' "$san" "$usage" > "$staging/ca/$name.ext"
+    openssl x509 -req -in "$staging/ca/$name.csr" -CA "$staging/ca/$issuer.pem" -CAkey "$staging/ca/$issuer.key" \
+        -CAcreateserial -days 90 -extfile "$staging/ca/$name.ext" -out "$staging/$directory/$name.pem" >/dev/null 2>&1
     uid=0; gid=0
     case $directory in server|ui|operator) uid=1000; gid=1000 ;; esac
-    chown "${2:-$uid}:${3:-$gid}" "$root/$directory/$name.key"
+    chown "${2:-$uid}:${3:-$gid}" "$staging/$directory/$name.key"
 done <<'EOF'
 server frontend frontend temporal serverAuth
 server internode internode temporal-internode serverAuth,clientAuth
@@ -36,10 +39,11 @@ ui ui-client client ui clientAuth
 operator operator client operator clientAuth
 EOF
 for directory in server api orchestrator ui operator; do
-    cp "$root/ca/frontend.pem" "$root/$directory/frontend-ca.pem"
+    cp "$staging/ca/frontend.pem" "$staging/$directory/frontend-ca.pem"
 done
-for name in internode client; do cp "$root/ca/$name.pem" "$root/server/$name-ca.pem"; done
-find "$root" -name '*.pem' -exec chmod 0644 {} +
+for name in internode client; do cp "$staging/ca/$name.pem" "$staging/server/$name-ca.pem"; done
+find "$staging" -name '*.pem' -exec chmod 0644 {} +
 # The enclosing directory is traversable for the numeric readers; CA directory is private.
-chmod 0755 "$root"
-touch "$root/complete"
+chmod 0755 "$staging"
+touch "$staging/complete"
+mv "$staging" "$root"

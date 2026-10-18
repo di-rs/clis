@@ -1,21 +1,17 @@
 """Temporary Git commits must never inherit the checkout's hook context."""
 
-import os
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from .helpers import git_commit
+from .helpers import clean_git_env, git_commit
 
 
 def test_fixture_commit_preserves_outer_repository(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    clean = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")} | {
-        "GIT_CONFIG_GLOBAL": os.devnull,
-        "GIT_CONFIG_NOSYSTEM": "1",
-    }
+    clean = clean_git_env()
     outer = tmp_path / "outer.git"
     inner = tmp_path / "inner"
     subprocess.run(["git", "init", "--bare", "-q", str(outer)], env=clean, check=True)

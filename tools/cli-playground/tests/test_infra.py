@@ -129,9 +129,9 @@ async def test_resource_graph_limits_public_exposure_and_protects_host() -> None
 
 
 @pulumi.runtime.test  # type: ignore[untyped-decorator]  # Pulumi's test runner is untyped.
-async def test_optional_administrator_access_preserves_key_resource() -> None:
+async def test_optional_administrator_access_uses_first_boot_without_server_key_drift() -> None:
     mocks = HostMocks()
-    provision(
+    server = provision(
         HostConfig(
             domain="play.example.com",
             cloudflare_zone_id=ZONE_ID,
@@ -144,8 +144,15 @@ async def test_optional_administrator_access_preserves_key_resource() -> None:
     ssh_rules = [rule for rule in firewall["rules"] if rule.get("port") == "22"]
     assert len(ssh_rules) == 1
     assert ssh_rules[0]["sourceIps"] == ["203.0.113.4/32"]
-    assert mocks.inputs["hcloud:index/sshKey:SshKey", "admin"]["publicKey"] == "ssh-ed25519 YWJj"
-    assert len(mocks.inputs["hcloud:index/server:Server", "clis"]["sshKeys"]) == 2
+    assert ("hcloud:index/sshKey:SshKey", "admin") not in mocks.inputs
+    assert len(mocks.inputs["hcloud:index/server:Server", "clis"]["sshKeys"]) == 1
+    user_data = await server.user_data.future()
+    assert user_data is not None
+    config = json.loads(user_data.removeprefix("#cloud-config\n"))
+    assert any(
+        entry["path"] == "/etc/clis/admin-ssh-key" and entry["content"] == "ssh-ed25519 YWJj\n"
+        for entry in config["write_files"]
+    )
 
 
 @pulumi.runtime.test  # type: ignore[untyped-decorator]  # Pulumi's test runner is untyped.

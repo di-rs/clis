@@ -62,7 +62,13 @@ Temporal, starts Boxie and its monitoring and tunnel, then starts Playground and
 its proxy. A rerun keeps existing credentials and data. Partial credentials cause
 setup to fail for inspection. PostgreSQL and Temporal server/schema upgrades stay
 separate from application releases. Cloud-init handles first boot; later edits to
-host bootstrap code do not reinstall an existing server.
+host bootstrap code do not reinstall an existing server. On a new host,
+`sshPublicKey` is added to root's authorized keys during cloud-init. Changing it
+later does not change an existing server; rotate that key on the host. The
+generated deployment and host keys are protected with the server. Replacing either
+key resource alone would make Pulumi's SSH outputs disagree with the live host.
+Rotate them as part of a planned host replacement, then repeat the GitHub SSH
+credential handoff below.
 
 A successful setup run does not establish production readiness by itself. Verify
 DNS, ACME, Access rules, native runsc lifecycle, host capacity and an off-host

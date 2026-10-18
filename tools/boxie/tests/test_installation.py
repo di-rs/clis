@@ -4,6 +4,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "tools/boxie/infra/credentials.sh"
 
@@ -52,6 +54,44 @@ def test_credentials_refuse_symlink_directory(tmp_path: Path) -> None:
     result = credentials(link)
     assert result.returncode == 1
     assert not list(target.iterdir())
+
+
+@pytest.mark.parametrize("mode", [0o644, 0o640])
+def test_credentials_reject_group_or_world_readable_files(tmp_path: Path, mode: int) -> None:
+    directory = tmp_path / "boxie"
+    assert credentials(directory).returncode == 0
+    secret = directory / "consumer.secret"
+    secret.chmod(mode)
+    result = credentials(directory)
+    assert result.returncode == 1
+    assert "private" in result.stderr.lower()
+    assert secret.stat().st_mode & 0o777 == mode
+
+
+def test_failed_certificate_generation_leaves_no_final_directory(tmp_path: Path) -> None:
+    root = tmp_path / "tls"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    openssl = fake_bin / "openssl"
+    openssl.write_text("#!/bin/sh\nexit 17\n")
+    openssl.chmod(0o755)
+    script = ROOT / "tools/boxie/infra/certificates.sh"
+    failed = subprocess.run(
+        ["bash", str(script), str(root), str(os.getuid()), str(os.getgid())],
+        env={**os.environ, "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"]},
+        capture_output=True,
+        text=True,
+    )
+    assert failed.returncode == 17
+    assert not root.exists()
+    assert not list(tmp_path.glob("tls.new.*"))
+    retry = subprocess.run(
+        ["bash", str(script), str(root), str(os.getuid()), str(os.getgid())],
+        capture_output=True,
+        text=True,
+    )
+    assert retry.returncode == 0, retry.stderr
+    assert (root / "complete").is_file()
 
 
 def test_certificates_have_separate_identities_and_private_ca(tmp_path: Path) -> None:

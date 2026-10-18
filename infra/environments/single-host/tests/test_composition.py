@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pulumi
 import pytest
-from test_host import HostMocks
+from host_mocks import HostMocks
 
 ROOT = Path(__file__).resolve().parents[4]
 
