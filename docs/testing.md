@@ -112,7 +112,7 @@ uses the `workspace-dir` preview enabled at the root.
 Local Compose callers export `CLIS_WORKSPACE_ROOT=$(uv workspace dir)`,
 `BOXIE_DIR=$(uv workspace dir --package boxie)` and
 `PLAYGROUND_DIR=$(uv workspace dir --package cli-playground)` for native build
-contexts. Build Playground images with named context
+contexts. Build the sandbox image with named context
 `--build-context "playground=$PLAYGROUND_DIR"`. Setup archives normalize source
 inputs as `boxie/`, `playground/` and `environment/`; installed host paths remain
 operator configuration.

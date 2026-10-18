@@ -13,7 +13,9 @@ from cli_check.workspace import find_root
 
 
 def test_root_checks_follow_projects_after_move(tmp_path: Path) -> None:
-    config = tomllib.loads((find_root(Path.cwd()) / "pyproject.toml").read_text())
+    config = tomllib.loads(
+        (find_root(Path(__file__).resolve().parent) / "pyproject.toml").read_text()
+    )
     baseline = tmp_path / "tools/cli-check/tests"
     baseline.mkdir(parents=True)
     (baseline / "test_baseline.py").write_text("def test_baseline() -> None: pass\n")
@@ -52,7 +54,7 @@ def test_root_checks_follow_projects_after_move(tmp_path: Path) -> None:
 
 @pytest.mark.integration
 def test_real_workspace_survives_directory_moves(tmp_path: Path) -> None:
-    root = find_root(Path.cwd())
+    root = find_root(Path(__file__).resolve().parent)
     relocated = tmp_path / "renamed checkout"
     relocated.mkdir()
     paths = subprocess.check_output(["git", "ls-files", "-z"], cwd=root).decode().split("\0")
@@ -117,3 +119,23 @@ def test_real_workspace_survives_directory_moves(tmp_path: Path) -> None:
     run("uv", "run", "--locked", "mypy")
     run("uv", "run", "--locked", "pytest", "--collect-only", "-q")
     run("uv", "run", "--locked", "cli-bench-select", "--help")
+    run("uv", "run", "--locked", "pytest", "dev/bench/cli-bench/tests/test_workflow.py", "-q")
+
+
+def test_checkout_owned_checks_run_from_an_unrelated_directory(tmp_path: Path) -> None:
+    source = Path(__file__).resolve()
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            str(source.with_name("test_native_workflows.py")),
+            f"{source}::test_root_checks_follow_projects_after_move",
+            "-q",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

@@ -69,7 +69,7 @@ jobs:
       - name: 🐳 Build playground runtime image
         if: github.event_name == 'workflow_dispatch'
         run: |
-          docker build --build-context "playground=$PLAYGROUND_DIR" -f "${PLAYGROUND_DIR}/infra/Playground.Dockerfile" -t cli-playground:lifecycle .
+          docker build -f "${PLAYGROUND_DIR}/infra/Playground.Dockerfile" -t cli-playground:lifecycle .
         env:
           BOXIE_DIR: ${{ steps.projects.outputs.boxie }}
           PLAYGROUND_DIR: ${{ steps.projects.outputs.playground }}

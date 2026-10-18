@@ -378,3 +378,55 @@ def test_workspace_docker_context_excludes_private_and_generated_inputs(tmp_path
     assert (exported / "context/source.txt").read_text() == "allowed source"
     for path in private:
         assert not (exported / "context" / path).exists(), path
+
+
+@pytest.mark.integration
+def test_frontend_copy_boundary_excludes_local_dependencies_and_dotenv(tmp_path: Path) -> None:
+    context = tmp_path / "workspace"
+    project = context / "apps/renamed"
+    frontend = project / "frontend"
+    frontend.mkdir(parents=True)
+    (context / ".dockerignore").write_text((ROOT / ".dockerignore").read_text())
+    for name in ("package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", ".node-version"):
+        (frontend / name).write_text("fixture")
+    (frontend / "source.ts").write_text("export const source = true;")
+    sentinels = [".env", ".env.local", ".env.production", "node_modules/native.bin"]
+    for name in sentinels:
+        path = frontend / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("private sentinel")
+    # Exercise the production frontend COPY boundary without installing dependencies.
+    stage = (
+        (PLAYGROUND_ROOT / "infra/Playground.Dockerfile")
+        .read_text()
+        .split(" AS frontend\n", 1)[1]
+        .split("\nFROM ", 1)[0]
+    )
+    copies = [
+        line.replace("--chown=vp:vp", "--chown=0:0")
+        for line in stage.splitlines()
+        if line.startswith("COPY ") and "--from=uv " not in line
+    ]
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text("FROM scratch\nWORKDIR /context\n" + "\n".join(copies) + "\n")
+    exported = tmp_path / "exported"
+    subprocess.run(
+        [
+            "docker",
+            "build",
+            "--build-context",
+            f"playground={project}",
+            "-f",
+            str(dockerfile),
+            "--output",
+            f"type=local,dest={exported}",
+            str(context),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert list(exported.rglob("source.ts"))
+    for name in sentinels:
+        assert not list(exported.rglob(Path(name).name)), name

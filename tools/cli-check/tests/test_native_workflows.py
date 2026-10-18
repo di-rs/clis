@@ -10,7 +10,9 @@ from cli_check.workspace import find_root
 
 def test_frontend_workflow_resolves_moved_packages(tmp_path: Path) -> None:
     workflow = yaml.load(
-        (find_root(Path.cwd()) / ".github/workflows/pull-request-check.yml").read_text(),
+        (
+            find_root(Path(__file__).resolve().parent) / ".github/workflows/pull-request-check.yml"
+        ).read_text(),
         Loader=yaml.BaseLoader,
     )
     script = next(
@@ -44,7 +46,9 @@ def test_frontend_workflow_resolves_moved_packages(tmp_path: Path) -> None:
 
 def test_lifecycle_allocation_requires_both_draft_policy_and_changed_inputs() -> None:
     workflow = yaml.load(
-        (find_root(Path.cwd()) / ".github/workflows/boxie-lifecycle.yml").read_text(),
+        (
+            find_root(Path(__file__).resolve().parent) / ".github/workflows/boxie-lifecycle.yml"
+        ).read_text(),
         Loader=yaml.BaseLoader,
     )
     job = workflow["jobs"]["sandbox"]

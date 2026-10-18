@@ -20,6 +20,7 @@ import yaml
 from cli_bench import bench as bench_module
 from cli_bench import select_suites as selector_module
 from cli_bench.select_suites import Selection
+from cli_check.workspace import find_root
 from githubkit import GitHub, TokenAuthStrategy
 
 TOOLS = Path(__file__).resolve().parents[1]
@@ -28,7 +29,7 @@ TOOLS = Path(__file__).resolve().parents[1]
 @pytest.fixture
 def suite_workflow(tmp_path: Path) -> Path:
     workflow = yaml.load(
-        (TOOLS.parents[1] / ".github/workflows/cli-bench.yml").read_text(), Loader=yaml.BaseLoader
+        (find_root(TOOLS) / ".github/workflows/cli-bench.yml").read_text(), Loader=yaml.BaseLoader
     )
     step = next(
         step["run"]

@@ -91,6 +91,7 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
         with:
           context: ${{ steps.image.outputs.context }}
+          build-contexts: playground=${{ steps.projects.outputs.playground }}
           file: ${{ steps.image.outputs.file }}
           platforms: linux/amd64
           push: 'true'
@@ -98,7 +99,6 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ steps.source.outputs.sha }}
-          build-contexts: playground=${{ steps.projects.outputs.playground }}
       - name: Record immutable image
         env:
           IMAGE: ${{ steps.image.outputs.name }}@${{ steps.publish.outputs.digest }}

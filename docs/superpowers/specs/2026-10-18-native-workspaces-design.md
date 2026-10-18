@@ -121,8 +121,10 @@ workspace-manifest copies. Final images still contain only the installed service
 environment. Consolidate the service-specific Docker ignore files into one
 root policy before broadening the builder copy.
 
-Use a BuildKit named `playground` context for frontend and sandbox assets.
-Provide it from the directory uv resolves. Copy built frontend assets into the
+Use a BuildKit named `playground` context for sandbox fixtures and its shell entry
+point. Provide it from the directory uv resolves. Frontend builds use the filtered
+default workspace context and resolve their package directory inside the builder,
+so root Docker exclusions apply to local dependencies and dotenv files. Copy built frontend assets into the
 installed package's source location resolved inside the builder, without
 encoding its checkout location. Compose receives explicit workspace/project
 context paths from its caller; production image-only Compose units keep their

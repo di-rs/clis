@@ -1,16 +1,18 @@
-FROM ghcr.io/voidzero-dev/vite-plus:1.2.0 AS frontend
-WORKDIR /frontend
-COPY --from=playground --chown=vp:vp frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml frontend/.node-version ./
-RUN vp install --frozen-lockfile
-COPY --from=playground --chown=vp:vp frontend/ ./
-RUN vp build --outDir /frontend/dist
-
 FROM ghcr.io/astral-sh/uv:0.13.1 AS uv
+FROM ghcr.io/voidzero-dev/vite-plus:1.2.0 AS frontend
+COPY --from=uv /uv /usr/local/bin/uv
+WORKDIR /workspace
+COPY --chown=vp:vp . .
+RUN project=$(uv workspace dir --package cli-playground) \
+    && cd "$project/frontend" \
+    && vp install --frozen-lockfile \
+    && vp build --outDir /tmp/frontend-dist
+
 FROM python:3.15-slim AS build
 COPY --from=uv /uv /usr/local/bin/uv
 WORKDIR /app
 COPY . .
-COPY --from=frontend /frontend/dist/ /tmp/frontend-assets/
+COPY --from=frontend /tmp/frontend-dist/ /tmp/frontend-assets/
 RUN project=$(uv workspace dir --package cli-playground) \
     && mkdir -p "$project/src/playground/static" \
     && cp -a /tmp/frontend-assets/. "$project/src/playground/static/"

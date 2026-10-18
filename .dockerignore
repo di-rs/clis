@@ -12,6 +12,7 @@ target
 **/test-results
 **/playwright-report
 **/.env
+**/.env.*
 **/*.env
 **/Pulumi.*.yaml
 
