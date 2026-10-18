@@ -30,7 +30,10 @@ jobs:
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: '0.13.1'
-          enable-cache: false
+          enable-cache: true
+          cache-dependency-glob: |
+            uv.lock
+            **/pyproject.toml
       - name: 📍 Resolve workspace packages
         id: projects
         run: |
@@ -81,7 +84,8 @@ jobs:
           node-version-file: .node-version
           version-file: package.json
           run-install: false
-          cache: false
+          cache: true
+          cache-dependency-path: ${{ steps.projects.outputs.playground }}/frontend/pnpm-lock.yaml
       - name: 📦 Install locked Python workspace dependencies
         run: |
           uv sync --locked --all-packages
@@ -173,7 +177,10 @@ jobs:
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
         with:
           version: 0.13.1
-          enable-cache: false
+          enable-cache: true
+          cache-dependency-glob: |
+            uv.lock
+            **/pyproject.toml
       - name: 📍 Resolve workspace packages
         id: projects
         run: |

@@ -14,12 +14,17 @@ def test_runs_every_suite_before_reporting_failures(
     suite_workflow: Path, failed: list[str]
 ) -> None:
     suites = ["one/suite.toml", "two/suite.toml", "three/suite.toml"]
+    # Rust-cache can restore empty directories left after removing generated files.
+    for suite in suites:
+        (suite_workflow.parent / "target/benchmarks" / suite.replace("/", "-")).mkdir(parents=True)
+    runner_temp = suite_workflow.parent / "runner-temp"
     result = subprocess.run(
         [sys.executable, str(suite_workflow)],
         cwd=suite_workflow.parent,
         env=os.environ
         | {
             "SUITES": json.dumps(suites),
+            "RUNNER_TEMP": str(runner_temp),
             "RUNS": "20",
             "WARMUP": "3",
             "FAILED_SUITES": json.dumps(failed),
@@ -40,7 +45,7 @@ def test_runs_every_suite_before_reporting_failures(
         "--runs",
         "20",
         "--output",
-        "target/benchmarks/one-suite.toml",
+        str(runner_temp / "benchmarks/one-suite.toml"),
     ]
     assert result.returncode == (1 if failed else 0), result.stderr
     if failed:

@@ -48,6 +48,31 @@ The Gitmoji job keeps its required `git-policy` check name so existing branch
 protection and other open PRs continue to work. Its workflow and steps have
 descriptive emoji names.
 
+## CI dependency caches
+
+Ordinary validation jobs cache Python downloads with setup-uv, frontend dependencies
+with setup-vp, and compatible Cargo dependencies with
+[Swatinem/rust-cache](https://github.com/Swatinem/rust-cache/blob/f0d9c3887740aee45f6153b24b3a6b815192ec16/README.md).
+Python keys include root `uv.lock` and project manifests; frontend keys use the
+lockfile beneath the resolved Playground package. Locked installs and every check
+still run after a hit or miss. Privileged publication and deployment jobs keep
+these caches disabled.
+
+Rust caches retain the action's OS, architecture, compiler, manifest, lockfile and
+environment hashing, including `RUSTFLAGS`. Separate `rust-check-v1`,
+`rust-test-v1`, `rust-packages-v1` and `rust-release-v1` families isolate job types;
+Cargo's fingerprints distinguish feature/profile artifacts within a family.
+Workspace crates are excluded, so selected candidate compilation and benchmarks
+execute on each revision. Benchmark and preview outputs live under the runner
+temporary directory, outside cached Cargo targets, and are uploaded as artifacts.
+
+To assess cache effectiveness, compare two runs of the same workflow and revision.
+Record cache hit/miss and dependency setup, Rust build and total job durations for
+each platform. Rerun the whole workflow for a warm comparison; do not compare
+partial retries with complete runs. A new lockfile invalidates the exact key;
+the cache action may restore compatible dependencies through a fallback key.
+Treat timings as operational observations rather than CLI performance evidence.
+
 ## Choose checks by changed area
 
 Replace `PACKAGE` below with the affected Cargo package name.

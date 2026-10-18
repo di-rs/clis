@@ -203,7 +203,8 @@ repeat compilation for each sample.
 
 Kara is interactive and has no finite CLI benchmark here. Suites without a
 portable system-output match use previous-version comparisons. There is no custom
-statistics engine, build cache, history database, or replay format.
+statistics engine, history database, or replay format. CI dependency caches are
+described in [Testing](testing.md#ci-dependency-caches).
 
 The runner follows hyperfine's [manual](https://github.com/sharkdp/hyperfine/blob/v2.0.0/doc/hyperfine.1)
 for direct commands, preparation, input and exports. See [Testing](testing.md)

@@ -44,8 +44,10 @@ def suite_workflow(tmp_path: Path) -> Path:
     (runner.parent / "__init__.py").write_text("")
     runner.write_text(
         "import json, os, sys\n"
+        "from pathlib import Path\n"
         "with open('invocations.jsonl', 'a') as trace:\n"
         "    trace.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        "Path(sys.argv[sys.argv.index('--output') + 1]).mkdir(parents=True, exist_ok=False)\n"
         "sys.exit(1 if sys.argv[1] in json.loads(os.environ['FAILED_SUITES']) else 0)\n"
     )
     return script

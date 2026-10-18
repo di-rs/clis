@@ -45,6 +45,13 @@ jobs:
         with:
           tool: prek@0.5.5
           fallback: none
+      - name: ♻️ Restore compatible Rust dependencies
+        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16
+        with:
+          shared-key: rust-check-v1
+          cache-workspace-crates: false
+          add-rust-environment-hash-key: true
+          cache-bin: false
       - name: 📦 Fetch locked Rust dependencies
         run: cargo fetch --locked
       - name: 🎨 Check Rust formatting
@@ -77,7 +84,10 @@ jobs:
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: '0.13.1'
-          enable-cache: false
+          enable-cache: true
+          cache-dependency-glob: |
+            uv.lock
+            **/pyproject.toml
       - name: 🛠️ Install repository hooks
         uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
@@ -115,7 +125,10 @@ jobs:
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: '0.13.1'
-          enable-cache: false
+          enable-cache: true
+          cache-dependency-glob: |
+            uv.lock
+            **/pyproject.toml
       - name: 📍 Resolve workspace packages
         id: projects
         run: |
@@ -130,7 +143,8 @@ jobs:
           node-version-file: .node-version
           version-file: package.json
           run-install: false
-          cache: false
+          cache: true
+          cache-dependency-path: ${{ steps.projects.outputs.playground }}/frontend/pnpm-lock.yaml
       - name: 📦 Install locked frontend dependencies
         run: pnpm install --frozen-lockfile
         working-directory: ${{ steps.projects.outputs.playground }}/frontend
@@ -195,6 +209,13 @@ jobs:
         with:
           tool: prek@0.5.5,cargo-nextest@0.9.146
           fallback: none
+      - name: ♻️ Restore compatible Rust dependencies
+        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16
+        with:
+          shared-key: rust-test-v1
+          cache-workspace-crates: false
+          add-rust-environment-hash-key: true
+          cache-bin: false
       - name: 📦 Fetch locked Rust dependencies
         run: cargo fetch --locked
       - name: 🧪 Run Rust workspace tests
@@ -234,6 +255,13 @@ jobs:
           fallback: none
       - name: 🦀 Record Rust compiler version
         run: rustc -Vv
+      - name: ♻️ Restore compatible Rust dependencies
+        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16
+        with:
+          shared-key: rust-packages-v1
+          cache-workspace-crates: false
+          add-rust-environment-hash-key: true
+          cache-bin: false
       - name: 📦 Check every Rust package and target
         run: cargo hack check --locked --workspace --all-targets
       - name: 🧩 Check Rust feature combinations
