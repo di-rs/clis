@@ -64,5 +64,6 @@ if [[ ! -d /etc/clis/grafana-plugins ]]; then
     chmod -R a+rX /etc/clis/grafana-plugins
 fi
 timeout 180 docker compose --env-file /etc/clis/boxie.env -f "$owner/observability/compose.yml" up -d --no-build --wait --wait-timeout 150
+timeout 180 docker compose --env-file /etc/clis/boxie.env -f "$owner/observability/compose.yml" up -d --no-build --no-deps --force-recreate --wait --wait-timeout 150 prometheus
 timeout 180 docker compose --env-file /etc/clis/boxie.env -f "$owner/ingress/compose.yml" run --rm cloudflared tunnel --config /etc/cloudflared/config.yml ingress validate
 timeout 180 docker compose --env-file /etc/clis/boxie.env -f "$owner/ingress/compose.yml" up -d --no-build --force-recreate cloudflared

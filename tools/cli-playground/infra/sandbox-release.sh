@@ -14,3 +14,24 @@ compose() {
 }
 compose stop --timeout 60 orchestrator
 compose up -d --no-build --pull never --no-deps --force-recreate --wait --wait-timeout 150 orchestrator
+compose exec -T api python - <<'PY'
+import json
+import time
+import urllib.request
+from pathlib import Path
+
+request = urllib.request.Request('http://127.0.0.1:8090/readyz', headers={
+    'Authorization': 'Bearer ' + Path('/run/secrets/consumer').read_text().strip(),
+})
+for attempt in range(30):
+    try:
+        with urllib.request.urlopen(request, timeout=3) as response:
+            data = json.load(response)
+        if response.status == 200 and data['dependencies']['orchestration'] is True:
+            break
+    except (OSError, ValueError, KeyError):
+        pass
+    time.sleep(2)
+else:
+    raise SystemExit('Boxie orchestration did not become ready')
+PY

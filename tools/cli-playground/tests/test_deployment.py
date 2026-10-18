@@ -100,8 +100,79 @@ def test_sandbox_update_preserves_boxie_image_and_custom_profile(tmp_path: Path)
     assert len(updates) == 1
     assert updates[0][-1] == "orchestrator"
     assert "--force-recreate" in updates[0]
-    assert not any("gateway" in call or "api" in call for call in calls)
+    assert not any("gateway" in call for call in calls)
+    assert [call[-5:] for call in calls if "exec" in call] == [["exec", "-T", "api", "python", "-"]]
+    assert not any("api" in call for call in calls if "stop" in call or "up" in call)
     assert (config / "boxie-image.env").read_text() == "BOXIE_RUNTIME_IMAGE=" + boxie_image + "\n"
+
+
+def sandbox_readiness_script() -> str:
+    return (
+        (ROOT / "tools/cli-playground/infra/sandbox-release.sh")
+        .read_text()
+        .split("<<'PY'\n")[1]
+        .split("\nPY")[0]
+    )
+
+
+def test_sandbox_readiness_retries_until_orchestration_is_ready(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from email.message import Message
+    from unittest.mock import MagicMock
+    from urllib.error import HTTPError
+
+    credential = tmp_path / "consumer"
+    credential.write_text("token")
+    unready = MagicMock()
+    unready.__enter__.return_value.status = 200
+    unready.__enter__.return_value.read.return_value = b'{"dependencies":{"orchestration":false}}'
+    ready = MagicMock()
+    ready.__enter__.return_value.status = 200
+    ready.__enter__.return_value.read.return_value = b'{"dependencies":{"orchestration":true}}'
+    request = MagicMock(
+        side_effect=[HTTPError("http://boxie", 503, "unready", Message(), None), unready, ready]
+    )
+    monkeypatch.setattr("urllib.request.urlopen", request)
+    monkeypatch.setattr("time.sleep", lambda _: None)
+    exec(sandbox_readiness_script().replace("/run/secrets/consumer", str(credential)), {})
+    assert request.call_count == 3
+    assert request.call_args.kwargs["timeout"] == 3
+    assert request.call_args.args[0].get_header("Authorization") == "Bearer token"
+
+
+def test_sandbox_readiness_exhaustion_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from email.message import Message
+    from unittest.mock import MagicMock
+    from urllib.error import HTTPError
+
+    credential = tmp_path / "consumer"
+    credential.write_text("token")
+    request = MagicMock(side_effect=HTTPError("http://boxie", 503, "unready", Message(), None))
+    monkeypatch.setattr("urllib.request.urlopen", request)
+    monkeypatch.setattr("time.sleep", lambda _: None)
+    with pytest.raises(SystemExit, match="Boxie orchestration did not become ready"):
+        exec(sandbox_readiness_script().replace("/run/secrets/consumer", str(credential)), {})
+    assert request.call_count == 30
+
+
+def test_sandbox_release_fails_when_api_readiness_check_fails() -> None:
+    script = (ROOT / "tools/cli-playground/infra/sandbox-release.sh").read_text()
+    release_commands = script[script.index("compose stop --timeout 60 orchestrator") :]
+    result = subprocess.run(
+        [
+            "bash",
+            "-euo",
+            "pipefail",
+            "-c",
+            "compose() { [[ $1 != exec ]]; };\n" + release_commands,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1, result.stderr
 
 
 def test_readiness_waits_for_public_tls(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

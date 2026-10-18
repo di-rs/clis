@@ -129,13 +129,17 @@ Shared build settings may cause extra application releases.
 
 Setup and release workflows share one `clis-production` queue. Each run selects
 current `master` after entering the queue, then builds and deploys that checkout.
+If a run fails, choose **Re-run all jobs** or start a new workflow run. Re-running
+only failed jobs keeps the earlier source selection and is rejected before
+deployment or provisioning starts.
+
 Builds can run before production activation; deployments still require
 `DEPLOYMENT_ACCEPTANCE_PASSED` and `BOXIE_BACKUP_RESTORE_VERIFIED`. Push-triggered
 releases also require `BOXIE_AUTO_DEPLOY` or `PLAYGROUND_AUTO_DEPLOY` for their
 respective application.
 
 An unsuccessful SSH or Compose command fails the Actions run. On the host, inspect
-services and recent logs before rerunning the job:
+services and recent logs before rerunning the workflow:
 
 ```sh
 docker compose --env-file /etc/clis/boxie.env --env-file /etc/clis/boxie-image.env \

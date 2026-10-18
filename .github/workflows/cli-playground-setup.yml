@@ -16,6 +16,7 @@ jobs:
       contents: read
     outputs:
       sha: ${{ steps.revision.outputs.sha }}
+      attempt: ${{ steps.revision.outputs.attempt }}
     steps:
       - name: 📥 Check out current master
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -24,7 +25,9 @@ jobs:
           persist-credentials: false
       - name: 🔎 Record the source commit
         id: revision
-        run: printf 'sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          printf 'sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          printf 'attempt=%s\n' "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
   boxie:
     needs: source
     uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
@@ -83,6 +86,14 @@ jobs:
       SINGLE_HOST_CONFIG: ${{ vars.SINGLE_HOST_CONFIG }}
       CLOUDFLARE_DNS_API_TOKEN: ${{ secrets.CLOUDFLARE_DNS_API_TOKEN }}
     steps:
+    - name: 🔎 Require a complete workflow retry
+      env:
+        SOURCE_ATTEMPT: ${{ needs.source.outputs.attempt }}
+      run: |
+        if [[ -z $SOURCE_ATTEMPT || $SOURCE_ATTEMPT != "$GITHUB_RUN_ATTEMPT" ]]; then
+          echo 'Use Re-run all jobs or start a new workflow run to select current master.' >&2
+          exit 1
+        fi
     - name: 📥 Check out reviewed infrastructure source
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:

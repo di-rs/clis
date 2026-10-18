@@ -20,6 +20,39 @@ def workflow(name: str) -> dict[str, Any]:
     return result
 
 
+@pytest.mark.parametrize(
+    "filename,job_name",
+    [
+        ("boxie-release.yml", "deploy"),
+        ("cli-playground-release.yml", "deploy"),
+        ("cli-playground-sandbox-release.yml", "deploy"),
+        ("cli-playground-setup.yml", "provision"),
+    ],
+)
+@pytest.mark.parametrize(
+    "source_attempt,current_attempt,allowed",
+    [("2", "2", True), ("1", "2", False), ("", "2", False)],
+)
+def test_deployment_rejects_partial_workflow_retry(
+    filename: str, job_name: str, source_attempt: str, current_attempt: str, allowed: bool
+) -> None:
+    definition = yaml.load((WORKFLOWS / filename).read_text(), Loader=yaml.BaseLoader)
+    source = definition["jobs"]["source"]
+    assert source["outputs"]["attempt"] == "${{ steps.revision.outputs.attempt }}"
+    assert "GITHUB_RUN_ATTEMPT" in source["steps"][-1]["run"]
+    guarded = definition["jobs"][job_name]["steps"][0]
+    assert guarded["env"]["SOURCE_ATTEMPT"] == "${{ needs.source.outputs.attempt }}"
+    result = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", guarded["run"]],
+        env={**os.environ, "SOURCE_ATTEMPT": source_attempt, "GITHUB_RUN_ATTEMPT": current_attempt},
+        text=True,
+        capture_output=True,
+    )
+    assert (result.returncode == 0) == allowed
+    if not allowed:
+        assert "Re-run all jobs" in result.stderr
+
+
 def test_setup_queues_before_selecting_master_and_builds_all_images() -> None:
     setup = workflow("setup")
     assert setup["on"]["workflow_dispatch"] == {}
