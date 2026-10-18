@@ -7,13 +7,16 @@ Playground uses its own project identity, so either unit can perform orphan clea
 without owning the other unit's containers. Keep project names distinct, and avoid
 a shared `COMPOSE_PROJECT_NAME` or shared `--project-name` override.
 
-The consumer API has no host port. Only the orchestrator mounts the Docker socket; it joins a separate control network. Playground is an
-optional consumer and is not required to configure or start Boxie.
+The consumer API has no host port. The orchestrator is the only Compose service
+that mounts the Docker socket; it joins a separate control network. Playground
+is an optional consumer and is not required to configure or start Boxie.
 
-Production activation is unavailable during PR1–PR3. The independently targetable
-`compose.production.yml` describes the private topology for validation; PR4 will
-supply split-service release and activation tooling. No command here provisions
-cloud resources.
+For production setup, releases and failure inspection, use the
+[shared-host guide](../../../infra/environments/single-host/README.md). The
+`deploy.sh` script pulls Boxie, migrates and restarts API and orchestrator through
+Compose. Database, Temporal and monitoring projects remain separate maintenance.
+Native host acceptance and the off-host backup/restore gate must pass before
+automatic releases are enabled.
 
 ## Configure a disposable native Linux host
 
@@ -50,9 +53,9 @@ wrong owner. The pinned Temporal server, operator and UI images use UID 1000;
 their private keys must be owned by that reader with mode `0600` as well.
 Do not compensate with group/world access or additional DAC capabilities.
 
-PR4 provisioning must enforce these per-service UID, private-file and writable
-directory contracts, including consumer credential delivery and key rotation.
-The configuration generator writes paths only; it does not provision ownership.
+The shared-host installer provisions reader ownership and consumer credentials.
+Key rotation remains operator maintenance. The configuration generator writes
+paths only; it does not provision ownership.
 
 Copy [profiles.example.json](profiles.example.json) to the configured profiles
 file, replacing its placeholder digest with the immutable Docker image ID or
@@ -132,10 +135,12 @@ unchanged UID-1000 images and host-side test readers; this is a fixture limitati
 not the production provisioning policy. API/orchestrator and host-only client fixture
 keys are mode `0600`.
 
-A consumer-network operator can run `python -m boxie_infra.smoke --boxie-url
-http://boxie-api:8090 --credential-file /private/consumer.secret` with the `smoke`
-profile approved. The inspection portion also requires operator Docker access;
-that access belongs to the test runner, never the Playground service.
+The native lifecycle fixture publishes the API on the test runner's loopback
+interface. Its operator process runs `boxie_infra.smoke` there with Docker CLI
+access to inspect sandbox security and deletion. Run the linked lifecycle
+workflow with `workflow_dispatch` for this check. Production does not publish an
+API host port, so the fixture's smoke command does not target a deployed host.
+Playground never receives Docker access.
 
 ## Observability and operator access
 

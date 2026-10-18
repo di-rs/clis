@@ -1,0 +1,14 @@
+config:
+  clis:domain: play.example.com
+  clis:cloudflareZoneId: replace-with-zone-id
+  clis:cloudflareAccountId: replace-with-account-id
+  clis:operatorTeamName: operators
+  clis:grafanaHostname: grafana.example.com
+  clis:temporalHostname: temporal.example.com
+  clis:operatorEmails: [operator@example.com]
+  clis:sshPublicKey: ssh-ed25519 REPLACE_WITH_ADMIN_KEY
+  clis:sshCidrs: [203.0.113.1/32]
+  clis:location: nbg1
+  clis:serverType: cx33
+  clis:diskSize: 80
+  clis:protect: true

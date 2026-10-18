@@ -12,6 +12,34 @@ import yaml
 INFRA = Path(__file__).parents[1] / "infra"
 
 
+def test_setup_recreates_only_prometheus_after_starting_observability(tmp_path: Path) -> None:
+    installer = (INFRA / "install.sh").read_text()
+    observability_commands = "\n".join(
+        line for line in installer.splitlines() if '"$owner/observability/compose.yml" up' in line
+    )
+    timeout = tmp_path / "timeout"
+    calls = tmp_path / "calls"
+    timeout.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$*\" >> {str(calls)!r}\n")
+    timeout.chmod(0o755)
+    result = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", observability_commands],
+        env={
+            **os.environ,
+            "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"],
+            "owner": "/host",
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    commands = calls.read_text().splitlines()
+    assert len(commands) == 2
+    assert commands[0].endswith("up -d --no-build --wait --wait-timeout 150")
+    assert commands[1].endswith(
+        "up -d --no-build --no-deps --force-recreate --wait --wait-timeout 150 prometheus"
+    )
+
+
 def compose(*files: Path) -> dict[str, Any]:
     env = {
         key: value

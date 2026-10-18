@@ -75,7 +75,7 @@ class HostMocks(pulumi.runtime.Mocks):
                 "publicKeyFingerprintMd5": f"{args.name}-md5",
                 "publicKeyFingerprintSha256": f"{args.name}-sha256",
             }
-        return "123", {**args.inputs, "ipAddress": "203.0.113.12"}
+        return "123", {**args.inputs, "ipAddress": "203.0.113.12", "ipv4Address": "203.0.113.12"}
 
     def call(self, args: pulumi.runtime.MockCallArgs) -> Never:
         raise AssertionError(f"Unexpected cloud lookup: {args.token}")
@@ -90,23 +90,23 @@ async def test_resource_graph_limits_public_exposure_and_protects_host() -> None
     mocks = HostMocks()
     server = provision(HostConfig(domain="play.example.com", cloudflare_zone_id=ZONE_ID))
     await mocks.finish()
-    host = mocks.inputs["hcloud:index/server:Server", "playground"]
+    host = mocks.inputs["hcloud:index/server:Server", "clis"]
     assert host["firewallIds"] == [123]
     assert host["deleteProtection"] is True
     assert host["rebuildProtection"] is True
     assert host["publicNets"] == [{"ipv4": 123, "ipv4Enabled": True, "ipv6Enabled": False}]
-    firewall = mocks.inputs["hcloud:index/firewall:Firewall", "playground"]
+    firewall = mocks.inputs["hcloud:index/firewall:Firewall", "clis"]
     tcp_rules = {
         rule["port"]: rule["sourceIps"] for rule in firewall["rules"] if rule["protocol"] == "tcp"
     }
     assert set(tcp_rules) == {"22", "80", "443"}
     assert tcp_rules["22"] == ["0.0.0.0/0"]
     assert ("hcloud:index/sshKey:SshKey", "admin") not in mocks.inputs
-    ip = mocks.inputs["hcloud:index/primaryIp:PrimaryIp", "playground-ipv4"]
+    ip = mocks.inputs["hcloud:index/primaryIp:PrimaryIp", "clis-ipv4"]
     assert ip["autoDelete"] is False
     assert ip["deleteProtection"] is True
-    assert mocks.registrations["hcloud:index/primaryIp:PrimaryIp", "playground-ipv4"].opts.protect
-    assert mocks.registrations["hcloud:index/server:Server", "playground"].opts.protect
+    assert mocks.registrations["hcloud:index/primaryIp:PrimaryIp", "clis-ipv4"].opts.protect
+    assert mocks.registrations["hcloud:index/server:Server", "clis"].opts.protect
 
     records = {
         value["name"]: value
@@ -129,9 +129,9 @@ async def test_resource_graph_limits_public_exposure_and_protects_host() -> None
 
 
 @pulumi.runtime.test  # type: ignore[untyped-decorator]  # Pulumi's test runner is untyped.
-async def test_optional_administrator_access_preserves_key_resource() -> None:
+async def test_optional_administrator_access_uses_first_boot_without_server_key_drift() -> None:
     mocks = HostMocks()
-    provision(
+    server = provision(
         HostConfig(
             domain="play.example.com",
             cloudflare_zone_id=ZONE_ID,
@@ -140,12 +140,19 @@ async def test_optional_administrator_access_preserves_key_resource() -> None:
         )
     )
     await mocks.finish()
-    firewall = mocks.inputs["hcloud:index/firewall:Firewall", "playground"]
+    firewall = mocks.inputs["hcloud:index/firewall:Firewall", "clis"]
     ssh_rules = [rule for rule in firewall["rules"] if rule.get("port") == "22"]
     assert len(ssh_rules) == 1
     assert ssh_rules[0]["sourceIps"] == ["203.0.113.4/32"]
-    assert mocks.inputs["hcloud:index/sshKey:SshKey", "admin"]["publicKey"] == "ssh-ed25519 YWJj"
-    assert len(mocks.inputs["hcloud:index/server:Server", "playground"]["sshKeys"]) == 2
+    assert ("hcloud:index/sshKey:SshKey", "admin") not in mocks.inputs
+    assert len(mocks.inputs["hcloud:index/server:Server", "clis"]["sshKeys"]) == 1
+    user_data = await server.user_data.future()
+    assert user_data is not None
+    config = json.loads(user_data.removeprefix("#cloud-config\n"))
+    assert any(
+        entry["path"] == "/etc/clis/admin-ssh-key" and entry["content"] == "ssh-ed25519 YWJj\n"
+        for entry in config["write_files"]
+    )
 
 
 @pulumi.runtime.test  # type: ignore[untyped-decorator]  # Pulumi's test runner is untyped.
@@ -188,14 +195,14 @@ async def test_generated_ssh_identity_and_host_key_keep_private_material_secret(
     sshd_config = next(
         entry["content"]
         for entry in config["write_files"]
-        if entry["path"] == "/etc/ssh/sshd_config.d/00-cli-playground.conf"
+        if entry["path"] == "/etc/ssh/sshd_config.d/00-clis.conf"
     )
     assert sshd_config.splitlines() == [
         "PasswordAuthentication no",
         "KbdInteractiveAuthentication no",
         "PermitRootLogin prohibit-password",
     ]
-    assert config["runcmd"] == [["bash", "/usr/local/sbin/cli-playground-bootstrap.sh"]]
+    assert config["runcmd"] == [["bash", "/usr/local/sbin/clis-bootstrap"]]
     assert "deployment-key-private" not in user_data
     assert "HCLOUD_TOKEN" not in user_data
     assert "CLOUDFLARE_API_TOKEN" not in user_data

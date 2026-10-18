@@ -1,6 +1,7 @@
 """Small binary and HTTP helpers shared by playground tests."""
 
 import io
+import os
 import struct
 import subprocess
 import time
@@ -64,6 +65,14 @@ def protected(path: Path, data: bytes) -> Path:
     return path
 
 
+def clean_git_env() -> dict[str, str]:
+    """Exclude repository-local Git state and user configuration from child Git commands."""
+    return {key: value for key, value in os.environ.items() if not key.startswith("GIT_")} | {
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+    }
+
+
 def git_commit(root: Path) -> None:
     """Commit staged fixture files without depending on the user's Git identity."""
     subprocess.run(
@@ -81,6 +90,7 @@ def git_commit(root: Path) -> None:
             "-qm",
             "fixture",
         ],
+        env=clean_git_env(),
         check=True,
     )
 
