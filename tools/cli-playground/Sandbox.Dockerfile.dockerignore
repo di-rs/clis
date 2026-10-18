@@ -1,5 +1,1 @@
 **
-!tools/
-!tools/cli-playground/
-!tools/cli-playground/fixtures/**
-!tools/cli-playground/shell.sh
