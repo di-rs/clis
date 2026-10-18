@@ -31,6 +31,8 @@ compose config --quiet
 compose pull api orchestrator migrate
 compose stop --timeout 60 api
 compose stop --timeout 60 orchestrator
+running=$(compose ps --status running --status restarting --status paused -q api orchestrator)
+[[ -z $running ]] || { echo 'Boxie services did not stop; inspect before retry.' >&2; exit 1; }
 installation=$(cat "$config/boxie/installation-id")
 host=$(cat "$config/boxie/host-id")
 remaining=$(docker ps -aq --filter "label=boxie.installation=$installation" --filter "label=boxie.host=$host")

@@ -11,7 +11,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 
 
-@pytest.mark.parametrize("failure", ["pull", "migrate", "capacity_full", ""])
+@pytest.mark.parametrize("failure", ["pull", "migrate", "stop_running", "capacity_full", ""])
 def test_boxie_release_pulls_before_stopping_and_keeps_dependencies_running(
     tmp_path: Path, failure: str
 ) -> None:
@@ -21,6 +21,7 @@ def test_boxie_release_pulls_before_stopping_and_keeps_dependencies_running(
         "with open(os.environ['CALLS'], 'a') as output: output.write(json.dumps(sys.argv[1:]) + '\\n')\n"
         "if os.environ['FAILURE'] == 'pull' and 'pull' in sys.argv: sys.exit(17)\n"
         "if os.environ['FAILURE'] == 'migrate' and 'run' in sys.argv and 'migrate' in sys.argv: sys.exit(17)\n"
+        "if os.environ['FAILURE'] == 'stop_running' and 'compose' in sys.argv and 'ps' in sys.argv and 'running' in sys.argv: print('still-running')\n"
         "if os.environ['FAILURE'] == 'capacity_full' and 'run' in sys.argv and 'smoke' in sys.argv: sys.exit(17)\n"
     )
     docker.chmod(0o755)
@@ -54,7 +55,10 @@ def test_boxie_release_pulls_before_stopping_and_keeps_dependencies_running(
         text=True,
     )
     calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
-    assert result.returncode == (17 if failure in ("pull", "migrate") else 0), result.stderr
+    expected_status = (
+        17 if failure in ("pull", "migrate") else 1 if failure == "stop_running" else 0
+    )
+    assert result.returncode == expected_status, result.stderr
     assert json.loads(mounted.read_text())["release"] == "old"
     pulls = [i for i, call in enumerate(calls) if "pull" in call]
     stops = [i for i, call in enumerate(calls) if "stop" in call]
@@ -64,11 +68,15 @@ def test_boxie_release_pulls_before_stopping_and_keeps_dependencies_running(
     if stops:
         assert pulls[0] < stops[0]
         assert [call[-1] for call in calls if "stop" in call] == ["api", "orchestrator"]
-    assert bool(starts) == (failure not in ("pull", "migrate"))
+    assert bool(starts) == (failure not in ("pull", "migrate", "stop_running"))
     if starts:
         assert [call[-1] for call in starts] == ["orchestrator", "api"]
         assert all("compose.observability.yml" in " ".join(call) for call in starts)
     assert not any("down" in call or "postgres" in call or "temporal" in call for call in calls)
     assert not any("smoke" in call for call in calls)
+    if failure == "stop_running":
+        assert "Boxie services did not stop" in result.stderr
+        assert not any("run" in call and "migrate" in call for call in calls)
+        assert stops[-1] < next(i for i, call in enumerate(calls) if "ps" in call)
     if failure not in ("pull", "migrate"):
         assert json.loads((owner / "api.json").read_text())["release"] == "a" * 40
