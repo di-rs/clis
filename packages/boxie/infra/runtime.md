@@ -77,20 +77,7 @@ Startup verifies installation/host-specific Temporal Schedules before serving:
 Schedules skip overlapping runs and catch up at most one minute. Each operation
 has its own schedule, with maintenance activity capacity separate from lifecycle
 capacity. One failure must not suppress unrelated maintenance or lease renewal.
-Missing, paused or incompatible schedules close new admission. Runtime startup
-upgrades the original 5-second command and 30-second cleanup intervals to the
-cadence above, only when the action, policy and remaining schedule configuration
-match the original definitions. Paused or otherwise modified schedules are
-rejected. Already upgraded schedules are left unchanged. Namespace/schema
-operations remain explicit infrastructure jobs.
-
-These intervals produce about 7,776 scheduled runs per day per host, down from
-25,920. Artifact cleanup and SQL retention may wait up to five minutes; sandbox
-expiry and lifecycle renewal keep their existing timing.
-
-Successful HTTP health and readiness requests omit request logs and HTTPX response
-diagnostics. Request metrics still include these probes. Failed responses,
-exceptions, warnings and ordinary request logs remain visible.
+Missing, paused or incompatible schedules close new admission.
 
 New admission also rejects an oldest pending command over 30 seconds or a backlog
 of 100. Readiness verifies SQL, orchestrator health, schedule configuration and
