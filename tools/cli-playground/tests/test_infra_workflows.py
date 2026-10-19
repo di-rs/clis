@@ -1,5 +1,6 @@
 """Workflow contracts for privileged setup and ordinary Compose releases."""
 
+import json
 import os
 import subprocess
 import sys
@@ -9,6 +10,8 @@ from typing import Any
 import pytest
 import yaml
 from cli_check.workspace import find_root
+
+from .helpers import clean_git_env, git_commit
 
 WORKFLOWS = find_root(Path(__file__).resolve().parent) / ".github/workflows"
 QUEUE = {"group": "clis-production", "queue": "max", "cancel-in-progress": "false"}
@@ -132,6 +135,71 @@ def test_gateway_release_does_not_build_sandbox() -> None:
         sandbox["jobs"]["source"]["steps"][-1]["env"]["OWNER_INPUTS"]
     )
     assert "fixtures/" in str(sandbox["jobs"]["source"]["steps"][-1]["env"]["OWNER_INPUTS"])
+
+
+@pytest.mark.parametrize(
+    "filename,relative_path,changed",
+    [
+        ("boxie-release.yml", "src/boxie/help.md", True),
+        ("boxie-release.yml", "README.md", False),
+        ("cli-playground-release.yml", "frontend/src/help.md", True),
+        ("cli-playground-release.yml", "README.md", False),
+        ("cli-playground-sandbox-release.yml", "fixtures/help.md", True),
+        ("cli-playground-sandbox-release.yml", "README.md", False),
+        ("cli-playground-sandbox-release.yml", "frontend/src/help.md", False),
+        ("boxie-lifecycle.yml", "fixtures/help.md", True),
+    ],
+)
+def test_runtime_selection_follows_component_inputs(
+    tmp_path: Path, filename: str, relative_path: str, changed: bool
+) -> None:
+    """Packaged Markdown triggers runtime checks and releases after package relocation."""
+    definition = yaml.load((WORKFLOWS / filename).read_text(), Loader=yaml.BaseLoader)
+    job = "select" if filename == "boxie-lifecycle.yml" else "source"
+    selection = next(
+        step for step in definition["jobs"][job]["steps"] if step.get("id") == "selection"
+    )
+    env = clean_git_env()
+
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", *args], cwd=tmp_path, env=env, text=True).strip()
+
+    git("init", "-q")
+    (tmp_path / "README.md").write_text("workspace\n")
+    git("add", ".")
+    git_commit(tmp_path)
+    base = git("rev-parse", "HEAD")
+    boxie, playground = tmp_path / "services/boxie", tmp_path / "apps/playground"
+    boxie.mkdir(parents=True)
+    playground.mkdir(parents=True)
+    owner = boxie if filename == "boxie-release.yml" else playground
+    path = owner / relative_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("packaged content\n")
+    git("add", ".")
+    git_commit(tmp_path)
+    head = git("rev-parse", "HEAD")
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"before": base}))
+    output = tmp_path / "output"
+    result = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", selection["run"]],
+        cwd=tmp_path,
+        env=env
+        | selection["env"]
+        | {
+            "BOXIE_DIR": str(boxie),
+            "PLAYGROUND_DIR": str(playground),
+            "SELECTED_SHA": head,
+            "GITHUB_SHA": head,
+            "GITHUB_EVENT_PATH": str(event),
+            "GITHUB_OUTPUT": str(output),
+        },
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert output.read_text() == f"changed={str(changed).lower()}\n"
 
 
 def test_only_manual_setup_can_provision_cloud_resources() -> None:

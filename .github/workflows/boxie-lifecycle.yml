@@ -206,7 +206,7 @@ jobs:
               if owner:
                   packages = packages[:1] if owner == "boxie" else packages[1:]
               global_inputs = {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "pyproject.toml", "uv.lock", ".python-version", ".dockerignore"}
-              changed = any(path in global_inputs or path.startswith(".github/workflows/") or (not owner and path.endswith(".rs")) or any(path.startswith(directory + "/") and not path.endswith(".md") for directory in packages) for path in paths)
+              changed = any(path in global_inputs or path.startswith(".github/workflows/") or (not owner and path.endswith(".rs")) or any(path.startswith(directory + "/") for directory in packages) for path in paths)
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
               print(f"changed={str(changed).lower()}", file=output)
           PYSELECT

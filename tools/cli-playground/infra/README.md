@@ -15,11 +15,16 @@ profile must use the immutable product sandbox image, command
 artifact mount `/opt/artifact`. The declaration is in
 [profiles/playground.json](profiles/playground.json); replace the placeholder digest
 and merge it into the **operator-owned Boxie profiles file**. The product cannot
-upload or change its profile. Build the product sandbox separately:
+upload or change its profile. From the repository root, resolve the workspace
+paths and build the product images:
 
 ```sh
-docker build -f tools/cli-playground/Sandbox.Dockerfile -t clis-playground-sandbox:local .
-docker build -f tools/cli-playground/infra/Playground.Dockerfile -t cli-playground:local .
+export CLIS_WORKSPACE_ROOT="$(uv workspace dir)"
+export PLAYGROUND_DIR="$(uv workspace dir --package cli-playground)"
+docker build --build-context "playground=$PLAYGROUND_DIR" \
+  -f "$PLAYGROUND_DIR/Sandbox.Dockerfile" -t clis-playground-sandbox:local "$CLIS_WORKSPACE_ROOT"
+docker build -f "$PLAYGROUND_DIR/infra/Playground.Dockerfile" \
+  -t cli-playground:local "$CLIS_WORKSPACE_ROOT"
 ```
 
 From the repository root, create an external product-data volume and set the
@@ -35,7 +40,7 @@ export PLAYGROUND_BOXIE_URL=http://boxie-api:8090
 export PLAYGROUND_BOXIE_CREDENTIAL_FILE=/private/path/consumer.secret
 export PLAYGROUND_DEPLOY_TOKEN=local-deploy-token
 export PLAYGROUND_PUBLIC_URL=http://localhost:8000
-docker compose -f tools/cli-playground/infra/compose.yml up --build -d
+docker compose -f "$PLAYGROUND_DIR/infra/compose.yml" up --build -d
 ```
 
 Both local and production manifests default to project `cli-playground`. Override
