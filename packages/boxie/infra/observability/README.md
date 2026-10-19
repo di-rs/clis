@@ -105,6 +105,13 @@ Raw `print`/fd writes are not telemetry APIs; application and dependency logging
 must go through the configured handlers for sanitization. During collection loss,
 Boxie continues provisioning and terminal work. Logs/counters are best effort.
 
+Successful `/healthz` and `/readyz` requests emit no request logs. HTTPX uses a
+WARNING threshold, so routine probe responses do not become dependency events.
+Failed probes and ordinary application requests remain visible, and every request
+still updates HTTP metrics. Empty command-recovery and cleanup passes emit no
+per-run log events; the [runtime guide](../runtime.md#native-maintenance) describes
+their cadence and recovery behavior.
+
 The supported `prometheus-client` HTTP server serves cached process/SQL gauges
 on private unpublished ports. Its request threads are upstream-owned and bounded
 by the process/container PID and memory limits, rather than a second custom HTTP

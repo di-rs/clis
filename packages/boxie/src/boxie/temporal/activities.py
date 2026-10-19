@@ -113,6 +113,11 @@ class LifecycleActivities:
             row = (
                 await session.exec(select(Sandbox).where(Sandbox.id == request.sandbox_id))
             ).one()
+        if row.cleaned_at is not None and request.sandbox_id in self.orchestrator.records:
+            # Every workflow completion path reads facts; retries retain late session ownership.
+            await self.orchestrator.compact()
+            if request.sandbox_id in self.orchestrator.records:
+                raise ApplicationError("journal cleanup pending", type="CleanupPending")
         return LifecycleFacts(
             absolute_deadline=request.absolute_deadline.timestamp(),
             desired_stop=request.desired_stop

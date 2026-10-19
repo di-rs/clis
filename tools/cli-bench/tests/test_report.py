@@ -275,7 +275,9 @@ def test_build_failure_still_reports_selection_and_timing(github: FakeGitHub) ->
     assert "No completed benchmark measurements" in result
 
 
-def test_post_updates_only_own_comment_and_is_idempotent(github: FakeGitHub) -> None:
+@pytest.mark.parametrize("name", ["⏱️ CLI benchmark execution", "⏱️ CLI benchmarks for PR #7"])
+def test_post_updates_only_own_comment_and_is_idempotent(github: FakeGitHub, name: str) -> None:
+    github.run["name"] = name
     body = report.generate(github, REPO, 500)
     github.comments.append({"id": 1, "body": body, "user": {"login": "someone-else"}})
     report.generate(github, REPO, 500, author="bot")

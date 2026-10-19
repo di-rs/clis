@@ -1,4 +1,4 @@
-"""Bounded maintenance operations scheduled by Temporal, with no process polling."""
+"""Twice-daily cleanup, retaining handlers for previously started maintenance runs."""
 
 from datetime import timedelta
 
@@ -28,12 +28,19 @@ class MaintenanceActivities:
         if kind == "commands":
             await self.delivery.recover_once()
         elif kind == "artifacts":
-            await self.artifacts.collect()
-            await self.artifacts.collect_orphans()
+            while await self.artifacts.collect() > 0:
+                pass
+            while True:
+                await self.artifacts.collect_orphans()
+                if self.artifacts._scan is None:
+                    break
         elif kind == "journal":
             await self.orchestrator.compact()
         elif kind == "retention":
-            await self.repository.purge_retained()
+            # Retry compaction of legacy completed runs if startup storage was unavailable.
+            await self.orchestrator.compact()
+            while await self.repository.purge_retained() == 1000:
+                pass
         else:
             raise ValueError("unknown maintenance operation")
 

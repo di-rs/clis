@@ -71,6 +71,45 @@ def test_final_record_requires_receipt_and_settled_sessions(tmp_path: Path) -> N
     asyncio.run(exercise())
 
 
+def test_concurrent_compaction_skips_records_already_forgotten(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dataclasses import replace
+
+    async def exercise() -> None:
+        orchestrator, first, _, _, guard = await setup(tmp_path)
+        second = replace(first, ref=SandboxRef(uuid4(), 1))
+        await settled(orchestrator, first.ref, SandboxState.READY)
+        await orchestrator.ensure_ready(second)
+        await orchestrator.remove(first.ref, TerminationReason.REQUESTED)
+        await orchestrator.remove(second.ref, TerminationReason.REQUESTED)
+        guard.receipt = True
+        receipt = guard.terminal_receipt
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def delayed(request: Any) -> bool:
+            if not entered.is_set():
+                entered.set()
+                await release.wait()
+            return await receipt(request)
+
+        monkeypatch.setattr(guard, "terminal_receipt", delayed)
+        slow = asyncio.create_task(orchestrator.compact())
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            await orchestrator.compact()
+            assert not orchestrator.records and not orchestrator.runtimes
+            release.set()
+            await slow
+            assert json.loads(orchestrator.journal.path.read_bytes())["records"] == []
+        finally:
+            release.set()
+            await asyncio.gather(slow, return_exceptions=True)
+            await orchestrator.close()
+
+    asyncio.run(exercise())
+
+
 @pytest.mark.parametrize("after_replace", [False, True])
 def test_compaction_failure_preserves_barrier_and_readiness(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, after_replace: bool

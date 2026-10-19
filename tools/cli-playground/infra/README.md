@@ -57,10 +57,67 @@ Operator modules are installed separately from runtime images. Run
 `uv sync --locked --all-packages` for local infrastructure checks. Application
 release jobs use native OpenSSH and do not read Pulumi state.
 
-The preview controller keeps its existing HTTP publication API, stable PR URLs,
-current-head checks and close/reopen handling. Its URL and token belong in the
-`playground-preview` GitHub environment. PR builds receive neither that token nor
-host deployment credentials.
+## Enable PR comments and live previews
+
+Benchmark comments need no custom secret. The
+[reporting workflow](../../../.github/workflows/cli-bench-report.yml) uses GitHub's
+automatic `GITHUB_TOKEN` with `contents: read`, `actions: read` and
+`pull-requests: write`. It reports completed benchmark jobs for the PR's current
+commit. A run with no selected suites leaves the existing comment unchanged.
+
+For a live playground link, first deploy the gateway and its Boxie sandbox using
+the [shared-host setup guide](../../../infra/environments/single-host/README.md).
+The gateway must be reachable from Actions over HTTPS, with working preview DNS
+and certificates. In repository **Settings → Environments**, create
+`playground-preview` and allow deployments from `master`. Add these settings to
+that environment:
+
+| Kind | Name | Value |
+| --- | --- | --- |
+| Variable | `PLAYGROUND_URL` | The gateway's public HTTPS origin, for example `https://play.example.com`, without a path, query or trailing slash. Use the same origin as the gateway's `PLAYGROUND_PUBLIC_URL`. |
+| Secret | `PLAYGROUND_DEPLOY_TOKEN` | The exact token configured as `PLAYGROUND_DEPLOY_TOKEN` on the gateway. Shared-host setup stores it at `/etc/sanctuary/boxie/preview-token`. |
+
+Use the shared-host guide's
+[credential handoff](../../../infra/environments/single-host/README.md#give-application-workflows-their-ssh-credentials)
+to retrieve the existing token over pinned SSH and copy it into GitHub. Creating
+an unrelated token in GitHub will cause authentication to fail. Settings placed
+only in the `playground` release environment are unavailable to preview jobs.
+
+If you already have the token in a private local file, set the two values with an
+authenticated `gh` session that can manage repository environment settings:
+
+```sh
+gh variable set PLAYGROUND_URL --repo di-rs/sanctuary --env playground-preview \
+  --body 'https://play.example.com'
+gh secret set PLAYGROUND_DEPLOY_TOKEN --repo di-rs/sanctuary --env playground-preview \
+  < /private/path/preview-token
+```
+
+Replace the example origin and file path. The
+[preview workflow](../../../.github/workflows/cli-playground-preview.yml) also
+uses the automatic GitHub token with `contents: read`, `actions: read`,
+`pull-requests: write` and `deployments: write`; no personal access token is needed
+by either publisher. PR builds receive neither the preview token nor host SSH
+credentials. If the environment requires approval, publication waits for it.
+
+### Verify publication
+
+Merge publisher changes into `master` before triggering new builds: publication
+runs trusted default-branch code. Push a CLI change to a ready PR, or add `run-ci`
+to a draft as described in [Testing](../../../docs/testing.md#draft-pull-requests).
+An ordinary PR description edit does not trigger playground builds.
+
+After the benchmark and playground build workflows complete, check their separate
+**CLI benchmark reporting** and **Playground PR previews** runs in Actions. The PR
+should have a benchmark results comment and a playground comment with a working
+preview link. Open the preview and run the changed CLI to verify the sandbox.
+
+If either playground setting is absent, the publisher posts **Configuration
+needed** with build artifact links instead of a live preview. A green build alone
+does not prove publication succeeded. Check publisher logs for skipped stale
+commits, and check the `playground-preview` environment for pending approval or
+missing settings. After configuring the environment, rerun the playground binary
+build for the current PR commit to trigger publication again.
 
 ## Validation
 

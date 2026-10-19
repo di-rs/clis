@@ -1,5 +1,6 @@
 """SDK workers embedded in the orchestrator, with isolated maintenance capacity."""
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import timedelta
@@ -73,6 +74,12 @@ async def embedded_workers(
             ),
         ):
             await ensure_schedules(client, identity)
-            yield
+            await orchestrator.compact()
+            async with asyncio.TaskGroup() as recovery:
+                relay = recovery.create_task(delivery.run())
+                try:
+                    yield
+                finally:
+                    relay.cancel()
     finally:
         orchestrator.observer = None
