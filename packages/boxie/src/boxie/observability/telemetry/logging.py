@@ -19,6 +19,7 @@ from types import TracebackType
 from typing import Any, cast
 from uuid import uuid4
 
+from httpx import URL
 from pydantic import BaseModel, ConfigDict
 
 from boxie.observability.telemetry.context import current_context, validated
@@ -277,6 +278,25 @@ class _Handler(logging.Handler):
         self.runtime = runtime
 
     def emit(self, record: logging.LogRecord) -> None:
+        # HTTPX emits this fixed record after receiving response headers.
+        args = record.args
+        if (
+            type(record.name) is str
+            and record.name == "httpx"
+            and record.levelno == logging.INFO
+            and record.exc_info is None
+            and type(record.msg) is str
+            and record.msg == 'HTTP Request: %s %s "%s %d %s"'
+            and type(args) is tuple
+            and len(args) == 5
+            and type(args[0]) is str
+            and args[0] in ("GET", "HEAD")
+            and type(args[1]) is URL
+            and args[1].path in ("/healthz", "/readyz")
+            and type(args[3]) is int
+            and 200 <= args[3] < 300
+        ):
+            return
         event = "foreign_log"
         if type(record.msg) is str and len(record.msg) <= 256 and type(record.name) is str:
             event = self.runtime._routes.get((record.name, record.msg), event)

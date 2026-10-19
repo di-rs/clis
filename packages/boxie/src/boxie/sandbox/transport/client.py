@@ -1,6 +1,7 @@
 """Bounded authenticated private-orchestrator network adapter; no Docker or disk access."""
 
 import asyncio
+import logging
 from collections.abc import AsyncIterable, AsyncIterator
 from contextlib import asynccontextmanager
 from types import TracebackType
@@ -116,9 +117,12 @@ class OrchestratorClient:
         try:
             _status, body = await self._request("GET", "/readyz")
             readiness = ReadyWire.model_validate_json(body)
-            return bool(readiness.dependencies) and all(readiness.dependencies.values())
+            ready = bool(readiness.dependencies) and all(readiness.dependencies.values())
         except BoxieError, ValidationError:
-            return False
+            ready = False
+        if not ready:
+            logging.getLogger(__name__).warning("Orchestrator readiness probe failed")
+        return ready
 
     async def put(
         self, principal: Principal, artifact_id: UUID, sha256: str, chunks: AsyncIterable[bytes]

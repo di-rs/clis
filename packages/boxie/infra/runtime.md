@@ -69,17 +69,28 @@ Startup verifies installation/host-specific Temporal Schedules before serving:
 
 | Operation | Interval | Bounds |
 | --- | --- | --- |
-| Pending start/stop delivery | 5 seconds | 32 commands, eight concurrent deliveries, 20-second activity deadline |
-| Artifact collection | 30 seconds | Bounded existing file/SQL collection batches |
-| Journal compaction | 30 seconds | Settled runtime, no live sessions, authoritative SQL receipt |
-| SQL retention | 30 seconds | Existing retention and ownership constraints |
+| Pending start/stop delivery | 15 seconds | 32 commands, eight concurrent deliveries, 20-second activity deadline |
+| Artifact collection | 5 minutes | Bounded existing file/SQL collection batches |
+| Journal compaction | 1 minute | Settled runtime, no live sessions, authoritative SQL receipt |
+| SQL retention | 5 minutes | Existing retention and ownership constraints |
 
 Schedules skip overlapping runs and catch up at most one minute. Each operation
 has its own schedule, with maintenance activity capacity separate from lifecycle
 capacity. One failure must not suppress unrelated maintenance or lease renewal.
 Missing, paused or incompatible schedules close new admission. Runtime startup
-does not silently overwrite incompatible schedule definitions. Namespace/schema
+upgrades the original 5-second command and 30-second cleanup intervals to the
+cadence above, only when the action, policy and remaining schedule configuration
+match the original definitions. Paused or otherwise modified schedules are
+rejected. Already upgraded schedules are left unchanged. Namespace/schema
 operations remain explicit infrastructure jobs.
+
+These intervals produce about 7,776 scheduled runs per day per host, down from
+25,920. Artifact cleanup and SQL retention may wait up to five minutes; sandbox
+expiry and lifecycle renewal keep their existing timing.
+
+Successful HTTP health and readiness requests omit request logs and HTTPX response
+diagnostics. Request metrics still include these probes. Failed responses,
+exceptions, warnings and ordinary request logs remain visible.
 
 New admission also rejects an oldest pending command over 30 seconds or a backlog
 of 100. Readiness verifies SQL, orchestrator health, schedule configuration and
