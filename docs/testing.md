@@ -48,6 +48,29 @@ The Gitmoji job keeps its required `git-policy` check name so existing branch
 protection and other open PRs continue to work. Its workflow and steps have
 descriptive emoji names.
 
+## Local hooks and full CI checks
+
+Install the Git hooks with `prek install`. On commit, prek selects staged files;
+`prek run` uses the same selection. To check specific working-tree files, use
+`prek run --files PATH...`.
+
+Local Ruff and workflow checks receive the selected filenames. Cargo formatting
+runs for their owning packages; Clippy and nextest also include transitive workspace
+dependents. Python types and tests run for affected areas. Service and infrastructure
+areas run together because they share test code; changes to `cli-check` also check
+`cli-bench`. Shared test support, shared configuration and files without a known
+owner trigger full checks. CLI repository standards always check the whole workspace.
+
+The selection helper is [tools/check_changed.py](../tools/check_changed.py) and
+requires Python 3.11 or newer. Keep its Python area relationships up to date when
+adding cross-package imports. Cargo relationships come from `cargo metadata`.
+
+CI keeps `prek run --all-files` and the full workspace commands. The helper also
+forces full commands when `CI=true`. To run all checks locally, use
+`prek run --all-files`; the selected root configuration triggers full checks.
+See prek's [file filtering and filename passing reference](https://prek.j178.dev/0.5.5/reference/configuration/)
+for the underlying hook behavior.
+
 ## Choose checks by changed area
 
 Replace `PACKAGE` below with the affected Cargo package name.
