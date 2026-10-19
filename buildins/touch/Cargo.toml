@@ -10,7 +10,6 @@ include.workspace = true
 
 [dependencies]
 cli-log.workspace = true
-chrono = "0.4.45"
 clap = { workspace = true }
 color-eyre = { workspace = true }
 rustix = { version = "1", features = ["fs"] }

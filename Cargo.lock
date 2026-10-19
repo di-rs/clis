@@ -1800,7 +1800,6 @@ name = "touch"
 version = "0.1.0"
 dependencies = [
  "assert_fs",
- "chrono",
  "clap",
  "cli-log",
  "cli-testing",

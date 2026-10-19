@@ -1,9 +1,9 @@
 use color_eyre::Result;
 use rustix::fs::Timestamps;
-use touch::{Options, date_times, legacy_timestamp, reference_times};
+use touch::{Options, reference_times};
 
 mod cli;
-use cli::Cli;
+use cli::{Cli, date_times, legacy_timestamp};
 
 fn main() -> std::process::ExitCode {
     cli_log::run("touch", |cli| match run(cli) {

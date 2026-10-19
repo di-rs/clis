@@ -29,14 +29,17 @@ fn assert_modified(path: &Path, seconds: u64) -> Result<()> {
 
 #[test]
 fn usage() {
-    {
-        cargo_bin_cmd!()
-            .arg("--help")
-            .assert()
-            .success()
-            .stdout(predicate::str::contains("Usage"))
-            .stderr("");
-    }
+    cargo_bin_cmd!()
+        .arg("--help")
+        .assert()
+        .code(0)
+        .stdout(
+            predicate::str::contains("Usage")
+                .and(predicate::str::contains("2000-01-01 12:00:00"))
+                .and(predicate::str::contains("1 hour"))
+                .and(predicate::str::contains("@946684800")),
+        )
+        .stderr("");
 }
 
 #[test]
@@ -81,6 +84,7 @@ fn sets_supported_numeric_timestamps_on_multiple_files() -> Result<()> {
     for (timestamp, seconds) in [
         ("200001010000", 946_684_800),
         ("200001010000.07", 946_684_807),
+        ("200001010000.60", 946_684_860),
     ] {
         dir.child("existing").write_str("preserve me")?;
         let new = dir.child(format!("new-{timestamp}"));
@@ -436,28 +440,35 @@ fn last_explicit_timestamp_overrides_previous_source() -> Result<()> {
 )]
 fn fractional_and_pre_epoch_dates() -> Result<()> {
     let dir = TempDir::new()?;
-    command(&dir)
-        .args(["-d", "2000-01-01T00:00:07,123456789Z", "new"])
-        .assert()
-        .code(0)
-        .stdout("")
-        .stderr("");
-    assert_eq!(
-        fs::metadata(dir.child("new").path())?.modified()?,
-        UNIX_EPOCH + Duration::new(946_684_807, 123_456_789)
-    );
-    command(&dir)
-        .args(["-d", "@-0.5", "new"])
-        .assert()
-        .code(0)
-        .stdout("")
-        .stderr("");
-    assert_eq!(
-        fs::metadata(dir.child("new").path())?.modified()?,
-        UNIX_EPOCH
-            .checked_sub(Duration::from_millis(500))
-            .ok_or("time underflow")?
-    );
+    for date in [
+        "2000-01-01T00:00:07,123456789Z",
+        "2000-01-01T00:00:07.1234567891",
+    ] {
+        command(&dir)
+            .args(["-d", date, "new"])
+            .assert()
+            .code(0)
+            .stdout("")
+            .stderr("");
+        assert_eq!(
+            fs::metadata(dir.child("new").path())?.modified()?,
+            UNIX_EPOCH + Duration::new(946_684_807, 123_456_789)
+        );
+    }
+    for date in ["@-0.5", "1969-12-31T23:59:59.5"] {
+        command(&dir)
+            .args(["-d", date, "new"])
+            .assert()
+            .code(0)
+            .stdout("")
+            .stderr("");
+        assert_eq!(
+            fs::metadata(dir.child("new").path())?.modified()?,
+            UNIX_EPOCH
+                .checked_sub(Duration::from_millis(500))
+                .ok_or("time underflow")?
+        );
+    }
     Ok(())
 }
 
@@ -469,6 +480,7 @@ fn rejects_invalid_dates_adjustments_and_missing_references_before_changes() -> 
         (vec!["-d", "2024-02-30T00:00:00Z"], 1),
         (vec!["-d", "2024-03-10T02:30:00"], 1),
         (vec!["-d", "2024-03-10 02:30:00 "], 1),
+        (vec!["-d", "2024-03-10T02:30:00.1234567891"], 1),
         (vec!["-d", "2024-01-01T00:00:60"], 1),
         (vec!["-t", "202403100230"], 2),
         (vec!["-A", "xx"], 2),
@@ -619,4 +631,21 @@ fn no_dereference_copies_reference_symlink_times() -> Result<()> {
         .stderr("");
     assert_times(dir.child("destination").path(), 300, 400)?;
     assert_times(dir.child("existing").path(), 100, 200)
+}
+
+#[test]
+fn ambiguous_local_timestamp_uses_first_occurrence() -> Result<()> {
+    let dir = TempDir::new()?;
+    for flags in [["-t", "202411030130"], ["-d", "2024-11-03 01:30:00"]] {
+        command(&dir)
+            .env("TZ", "America/New_York")
+            .args(flags)
+            .arg("new")
+            .assert()
+            .code(0)
+            .stdout("")
+            .stderr("");
+        assert_times(dir.child("new").path(), 1_730_611_800, 1_730_611_800)?;
+    }
+    Ok(())
 }
