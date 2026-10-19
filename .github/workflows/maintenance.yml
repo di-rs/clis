@@ -34,10 +34,8 @@ jobs:
           fallback: none
       - name: 🛡️ Refresh vulnerability, license and dependency checks
         run: |
-          for manifest in Cargo.toml tests/consumers/Cargo.toml; do
-            cargo audit --db "$RUNNER_TEMP/advisory-db" --file "${manifest%Cargo.toml}Cargo.lock" --deny yanked
-            cargo deny --locked --manifest-path "$manifest" --config "$PWD/deny.toml" check licenses sources bans
-          done
+          cargo audit --db "$RUNNER_TEMP/advisory-db" --file Cargo.lock --deny yanked
+          cargo deny --locked check licenses sources bans
           cargo machete --with-metadata
 
   remote-links:
@@ -122,6 +120,12 @@ jobs:
         with:
           tool: cargo-nextest@0.9.146
           fallback: none
+      - name: ♻️ Cache Rust dependencies and build artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: false
+        env:
+          RUSTUP_TOOLCHAIN: ${{ matrix.toolchain }}
       - name: 🏗️ Check workspace builds on selected toolchain
         env:
           RUSTUP_TOOLCHAIN: ${{ matrix.toolchain }}
@@ -150,6 +154,10 @@ jobs:
         with:
           tool: cargo-nextest@0.9.146
           fallback: none
+      - name: ♻️ Cache Rust dependencies and build artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: false
       - name: ⚡ Run optimized Rust workspace tests
         run: cargo nextest run --locked --workspace --release --profile ci
       - name: 📚 Run optimized Rust documentation examples

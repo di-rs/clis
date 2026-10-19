@@ -3,16 +3,16 @@ name: 🚀 Boxie runtime release
   push:
     branches: [master]
     paths:
-      - tools/boxie/src/**
-      - tools/boxie/alembic/**
-      - tools/boxie/pyproject.toml
-      - tools/boxie/infra/Runtime.Dockerfile*
-      - tools/boxie/infra/compose.production.yml
-      - tools/boxie/infra/compose.operations.yml
-      - tools/boxie/infra/compose.observability.yml
-      - tools/boxie/infra/deploy.sh
-      - tools/boxie/infra/boxie_infra/smoke.py
-      - tools/boxie/infra/boxie_infra/terminal.py
+      - packages/boxie/src/**
+      - packages/boxie/alembic/**
+      - packages/boxie/pyproject.toml
+      - packages/boxie/infra/Runtime.Dockerfile*
+      - packages/boxie/infra/compose.production.yml
+      - packages/boxie/infra/compose.operations.yml
+      - packages/boxie/infra/compose.observability.yml
+      - packages/boxie/infra/deploy.sh
+      - packages/boxie/infra/boxie_infra/smoke.py
+      - packages/boxie/infra/boxie_infra/terminal.py
       - .github/workflows/boxie-release.yml
       - .github/workflows/build-runtime-image.yml
       - pyproject.toml
@@ -22,7 +22,7 @@ name: 🚀 Boxie runtime release
   workflow_dispatch: {}
 permissions: {}
 concurrency:
-  group: clis-production
+  group: sanctuary-production
   queue: max
   cancel-in-progress: false
 jobs:
@@ -112,14 +112,14 @@ jobs:
             BatchMode yes
             ConnectTimeout 15
           SSH
-          remote="/run/clis-boxie-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          ssh -F "$private/config" deployment "install -d -m 0700 /opt/clis/boxie $remote"
-          scp -F "$private/config" -r tools/boxie/infra/. deployment:/opt/clis/boxie/
-          collector=$(ssh -F "$private/config" deployment "sed -n 's/^OBS_COLLECTOR_IMAGE=//p' /etc/clis/boxie-image.env")
+          remote="/run/sanctuary-boxie-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          ssh -F "$private/config" deployment "install -d -m 0700 /opt/sanctuary/boxie $remote"
+          scp -F "$private/config" -r packages/boxie/infra/. deployment:/opt/sanctuary/boxie/
+          collector=$(ssh -F "$private/config" deployment "sed -n 's/^OBS_COLLECTOR_IMAGE=//p' /etc/sanctuary/boxie-image.env")
           [[ $collector =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
           printf 'BOXIE_RUNTIME_IMAGE=%s\nOBS_COLLECTOR_IMAGE=%s\n' "$RUNTIME_IMAGE" "$collector" > "$private/image.env"
           mkdir "$private/registry"
           printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$(printf '%s:%s' "$GITHUB_ACTOR" "$GHCR_TOKEN" | base64 -w0)" > "$private/registry/config.json"
           scp -F "$private/config" "$private/image.env" deployment:"$remote/image.env"
           scp -F "$private/config" -r "$private/registry" deployment:"$remote/registry"
-          ssh -F "$private/config" deployment "set -e; trap 'rm -rf $remote' EXIT; install -m 0600 $remote/image.env /etc/clis/boxie-image.env; DOCKER_CONFIG=$remote/registry bash /opt/clis/boxie/deploy.sh $SOURCE_SHA"
+          ssh -F "$private/config" deployment "set -e; trap 'rm -rf $remote' EXIT; install -m 0600 $remote/image.env /etc/sanctuary/boxie-image.env; DOCKER_CONFIG=$remote/registry bash /opt/sanctuary/boxie/deploy.sh $SOURCE_SHA"

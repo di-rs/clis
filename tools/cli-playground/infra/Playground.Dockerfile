@@ -11,9 +11,9 @@ COPY --from=uv /uv /usr/local/bin/uv
 WORKDIR /app
 COPY pyproject.toml uv.lock .python-version ./
 COPY infra/host/pyproject.toml infra/host/pyproject.toml
-COPY tools/boxie/pyproject.toml tools/boxie/pyproject.toml
-COPY tools/boxie/tests/support/pyproject.toml tools/boxie/tests/support/pyproject.toml
-COPY tools/boxie/infra/pyproject.toml tools/boxie/infra/pyproject.toml
+COPY packages/boxie/pyproject.toml packages/boxie/pyproject.toml
+COPY packages/boxie/tests/support/pyproject.toml packages/boxie/tests/support/pyproject.toml
+COPY packages/boxie/infra/pyproject.toml packages/boxie/infra/pyproject.toml
 COPY tools/cli-playground/pyproject.toml tools/cli-playground/pyproject.toml
 COPY tools/cli-playground/infra/pyproject.toml tools/cli-playground/infra/pyproject.toml
 COPY tools/cli-bench/pyproject.toml tools/cli-bench/pyproject.toml

@@ -118,11 +118,11 @@ def repo(tmp_path: Path) -> Repository:
     shutil.copyfile(TOOLS / "select_suites.py", script)
     repository.write(
         "Cargo.toml",
-        '[workspace]\nmembers = ["biggie", "coreutils/*", "utils/*"]\n'
-        'exclude = ["coreutils/excluded"]\n',
+        '[workspace]\nmembers = ["packages/biggie", "buildins/*", "utils/*"]\n'
+        'exclude = ["buildins/excluded"]\n',
     )
     for name in ("biggie", "echor", "tailr", "wcr", "excluded"):
-        directory = "biggie" if name == "biggie" else f"coreutils/{name}"
+        directory = "packages/biggie" if name == "biggie" else f"buildins/{name}"
         repository.write(f"{directory}/Cargo.toml", f'[package]\nname = "{name}"\n')
         repository.write(f"{directory}/src/main.rs", "fn main() {}\n")
         repository.write_suite(directory, name, generate=name == "tailr")
@@ -230,7 +230,7 @@ import pathlib
 pathlib.Path(sys.argv[1]).write_text(sys.argv[2])
 with open(os.environ['TRACE'], 'a') as trace:
     trace.write(json.dumps({'generate': sys.argv[1:], 'cwd': os.getcwd(),
-        'logging': [os.environ.get('CLIS_LOG_LEVEL'), os.environ.get('CLIS_LOG_STDERR')]}) + '\\n')
+        'logging': [os.environ.get('SANCTUARY_LOG_LEVEL'), os.environ.get('SANCTUARY_LOG_STDERR')]}) + '\\n')
 """,
         ),
         hyperfine=fixture_executable(
@@ -241,7 +241,7 @@ import pathlib
 args = sys.argv[1:]
 with open(os.environ['TRACE'], 'a') as trace:
     trace.write(json.dumps({'hyperfine': args, 'cwd': os.getcwd(),
-        'logging': [os.environ.get('CLIS_LOG_LEVEL'), os.environ.get('CLIS_LOG_STDERR')]}) + '\\n')
+        'logging': [os.environ.get('SANCTUARY_LOG_LEVEL'), os.environ.get('SANCTUARY_LOG_STDERR')]}) + '\\n')
 def option(name):
     return args[args.index(name) + 1]
 commands = args[args.index('--') + 1:]
@@ -284,7 +284,7 @@ child.wait()
                 pass
 
 
-REPO = "di-rs/clis"
+REPO = "di-rs/sanctuary"
 SHA = "a" * 40
 BASE = f"repos/{REPO}"
 

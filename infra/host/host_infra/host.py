@@ -77,22 +77,22 @@ def cloud_init(
         raise RuntimeError("Provisioning requires the infrastructure source checkout")
     write_files = [
         {
-            "path": "/etc/clis/storage-device",
+            "path": "/etc/sanctuary/storage-device",
             "permissions": "0600",
             "content": f"/dev/disk/by-id/scsi-0HC_Volume_{volume_id}\n",
         },
         {
-            "path": "/usr/local/sbin/clis-storage-guard",
+            "path": "/usr/local/sbin/sanctuary-storage-guard",
             "permissions": "0700",
             "content": (source / "storage-guard.sh").read_text(),
         },
         {
-            "path": "/usr/local/sbin/clis-bootstrap",
+            "path": "/usr/local/sbin/sanctuary-bootstrap",
             "permissions": "0700",
             "content": (source / "bootstrap.sh").read_text(),
         },
         {
-            "path": "/etc/ssh/sshd_config.d/00-clis.conf",
+            "path": "/etc/ssh/sshd_config.d/00-sanctuary.conf",
             "permissions": "0644",
             "content": "PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin prohibit-password\n",
         },
@@ -101,7 +101,7 @@ def cloud_init(
     if admin_public_key:
         write_files.append(
             {
-                "path": "/etc/clis/admin-ssh-key",
+                "path": "/etc/sanctuary/admin-ssh-key",
                 "permissions": "0600",
                 "content": admin_public_key + "\n",
             }
@@ -109,11 +109,11 @@ def cloud_init(
         runcmd.extend(
             [
                 ["install", "-d", "-m", "0700", "/root/.ssh"],
-                ["bash", "-c", "cat /etc/clis/admin-ssh-key >> /root/.ssh/authorized_keys"],
+                ["bash", "-c", "cat /etc/sanctuary/admin-ssh-key >> /root/.ssh/authorized_keys"],
                 ["chmod", "0600", "/root/.ssh/authorized_keys"],
             ]
         )
-    runcmd.append(["bash", "/usr/local/sbin/clis-bootstrap"])
+    runcmd.append(["bash", "/usr/local/sbin/sanctuary-bootstrap"])
     return "#cloud-config\n" + json.dumps(
         {
             "ssh_pwauth": False,
@@ -139,7 +139,7 @@ def provision(config: HostConfig) -> hcloud.Server:
 
 
 def provision_resources(config: HostConfig) -> HostResources:
-    labels = {"service": "clis", "managed-by": "pulumi"}
+    labels = {"service": "sanctuary", "managed-by": "pulumi"}
     private_outputs = ["privateKeyOpenssh", "privateKeyPem", "privateKeyPemPkcs8"]
     deployment_key = tls.PrivateKey(
         "deployment-key",
@@ -177,12 +177,12 @@ def provision_resources(config: HostConfig) -> HostResources:
         ),
     )
     firewall = hcloud.Firewall(
-        "clis",
+        "sanctuary",
         labels=labels,
         rules=rules,
     )
     ipv4 = hcloud.PrimaryIp(
-        "clis-ipv4",
+        "sanctuary-ipv4",
         type="ipv4",
         assignee_type="server",
         location=config.location,
@@ -192,7 +192,7 @@ def provision_resources(config: HostConfig) -> HostResources:
         opts=pulumi.ResourceOptions(protect=config.protect),
     )
     volume = hcloud.Volume(
-        "clis-data",
+        "sanctuary-data",
         size=config.disk_size,
         location=config.location,
         delete_protection=config.protect,
@@ -205,7 +205,7 @@ def provision_resources(config: HostConfig) -> HostResources:
         )
     )
     server = hcloud.Server(
-        "clis",
+        "sanctuary",
         server_type=config.server_type,
         location=config.location,
         image="ubuntu-24.04",
@@ -231,7 +231,10 @@ def provision_resources(config: HostConfig) -> HostResources:
         ),
     )
     attachment = hcloud.VolumeAttachment(
-        "clis-data", volume_id=volume.id.apply(int), server_id=server.id.apply(int), automount=False
+        "sanctuary-data",
+        volume_id=volume.id.apply(int),
+        server_id=server.id.apply(int),
+        automount=False,
     )
     pulumi.export("ipv4", ipv4.ip_address)
     pulumi.export("sshPrivateKey", pulumi.Output.secret(deployment_key.private_key_openssh))

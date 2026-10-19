@@ -2,8 +2,8 @@
 # Update the gateway without recreating the public proxy.
 set -euo pipefail
 [[ $# == 0 ]] || exit 2
-config=${CLIS_CONFIG_DIR:-/etc/clis}
-owner=${CLIS_PLAYGROUND_DIR:-/opt/clis/playground}
+config=${SANCTUARY_CONFIG_DIR:-/etc/sanctuary}
+owner=${SANCTUARY_PLAYGROUND_DIR:-/opt/sanctuary/playground}
 compose() {
     docker compose --env-file "$config/playground.env" --env-file "$config/playground-image.env" \
         -f "$owner/compose.production.yml" "$@"

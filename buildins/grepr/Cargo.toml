@@ -1,0 +1,36 @@
+[package]
+name = "grepr"
+version = "0.1.0"
+description = "A tool to search files"
+homepage = "https://github.com/di-rs/sanctuary/grep"
+keywords = ["cli", "search", "demo"]
+categories = ["command-line-utilities"]
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+include.workspace = true
+
+[dependencies]
+cli-log.workspace = true
+clap = { workspace = true }
+regex = "1.10.3"
+walkdir = "2.4.0"
+thiserror = "2.0.20"
+clap-verbosity-flag = "3.0.4"
+exitcode = "1.1.2"
+ctrlc = "3.5.2"
+human-panic = "2.0.8"
+log = "0.4.33"
+line_prefixer = "0.1.0"
+
+[dev-dependencies]
+cli-testing.workspace = true
+predicates = "3.0.4"
+pretty_assertions = "1.4.0"
+assert_fs = "1.1.4"
+
+
+[lints]
+workspace = true

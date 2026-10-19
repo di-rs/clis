@@ -33,7 +33,7 @@ fn copies_stdin() -> std::io::Result<()> {
 | `read_input(name)` / `read_expected(name)` | Fallible byte reads under `inputs/` / `expected/`; names must be relative. |
 
 Command defaults: package cwd, `LC_ALL=C`, `TZ=UTC`, `NO_COLOR=1`, `TERM=dumb`,
-disabled `CLIS_LOG_*` logging and a 30-second `assert_cmd` timeout. Override child
+disabled `SANCTUARY_LOG_*` logging and a 30-second `assert_cmd` timeout. Override child
 settings through its builder. Other environment variables are inherited; no
 filesystem sandbox is created. The timeout does not bound descendants or a
 blocked stdin writer; retain nextest's outer CI timeout.

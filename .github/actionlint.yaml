@@ -1,5 +1,5 @@
 # actionlint 1.7.12 predates GitHub's documented concurrency.queue property.
-# The deployment workflow tests require queue: max for every clis-production job.
+# The deployment workflow tests require queue: max for every sanctuary-production job.
 paths:
   .github/workflows/*.yml:
     ignore:

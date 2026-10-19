@@ -23,7 +23,7 @@ from playground import artifacts
 from .helpers import elf_binary
 
 SHA = "a" * 40
-REPO = "di-rs/clis"
+REPO = "di-rs/sanctuary"
 RUN = f"repos/{REPO}/actions/runs/500"
 PR = f"repos/{REPO}/pulls/7"
 
@@ -69,8 +69,8 @@ def archive(
 
 
 def workspace(root: Path) -> dict[str, str]:
-    (root / "Cargo.toml").write_text('[workspace]\nmembers = ["coreutils/*", "utils/*"]\n')
-    for name, directory in (("echor", "coreutils/echor"), ("catr", "coreutils/catr")):
+    (root / "Cargo.toml").write_text('[workspace]\nmembers = ["buildins/*", "utils/*"]\n')
+    for name, directory in (("echor", "buildins/echor"), ("catr", "buildins/catr")):
         target = root / directory
         (target / "src").mkdir(parents=True)
         (target / "Cargo.toml").write_text(f'[package]\nname = "{name}"\n')
@@ -80,22 +80,21 @@ def workspace(root: Path) -> dict[str, str]:
     (library / "Cargo.toml").write_text('[package]\nname = "shared"\n')
     (library / "src").mkdir()
     (library / "src/lib.rs").write_text("pub fn shared() {}\n")
-    return {"catr": "coreutils/catr", "echor": "coreutils/echor"}
+    return {"catr": "buildins/catr", "echor": "buildins/echor"}
 
 
 def test_discovery_excludes_libraries_and_selection_uses_owning_packages(tmp_path: Path) -> None:
     packages = workspace(tmp_path)
     assert preview_ci.discover(tmp_path) == packages
-    assert preview_ci.select(packages, ["coreutils/echor/src/main.rs"]) == ["echor"]
+    assert preview_ci.select(packages, ["buildins/echor/src/main.rs"]) == ["echor"]
     assert (
-        preview_ci.select(packages, ["coreutils/echor/README.md", "coreutils/catr/tests/a.rs"])
-        == []
+        preview_ci.select(packages, ["buildins/echor/README.md", "buildins/catr/tests/a.rs"]) == []
     )
 
 
 @pytest.mark.parametrize("path", ["Cargo.lock", "utils/shared/src/lib.rs"])
 def test_shared_changes_select_all_packages(path: str) -> None:
-    assert preview_ci.select({"echor": "coreutils/echor", "catr": "coreutils/catr"}, [path]) == [
+    assert preview_ci.select({"echor": "buildins/echor", "catr": "buildins/catr"}, [path]) == [
         "catr",
         "echor",
     ]
@@ -103,7 +102,7 @@ def test_shared_changes_select_all_packages(path: str) -> None:
 
 def test_discovery_rejects_an_additional_binary(tmp_path: Path) -> None:
     workspace(tmp_path)
-    extra = tmp_path / "coreutils/echor/src/bin"
+    extra = tmp_path / "buildins/echor/src/bin"
     extra.mkdir()
     (extra / "other.rs").write_text("fn main() {}")
     with pytest.raises(ValueError):
@@ -120,7 +119,7 @@ def test_discovery_includes_root_package(tmp_path: Path) -> None:
 
 def test_discovery_rejects_explicit_binary_outside_main(tmp_path: Path) -> None:
     workspace(tmp_path)
-    package = tmp_path / "coreutils/echor"
+    package = tmp_path / "buildins/echor"
     (package / "src/main.rs").unlink()
     (package / "Cargo.toml").write_text(
         '[package]\nname = "echor"\n[[bin]]\nname = "echor"\npath = "app.rs"\n'
@@ -220,7 +219,7 @@ def test_unconfigured_publish_reports_artifact_links_without_fake_live_url() -> 
     body = preview_ci.publish(github, REPO, 500, "", "")
     assert body is not None
     assert "Configuration needed" in body
-    assert "https://github.com/di-rs/clis/actions/runs/500/artifacts/81" in body
+    assert "https://github.com/di-rs/sanctuary/actions/runs/500/artifacts/81" in body
     assert "/p/" not in body
     assert len(github.writes) == 1
 
@@ -809,7 +808,7 @@ def test_gateway_stalled_response_times_out(monkeypatch: pytest.MonkeyPatch) -> 
 def test_frontend_changes_do_not_build_rust_binaries() -> None:
     assert (
         preview_ci.select(
-            {"echor": "coreutils/echor"}, ["tools/cli-playground/frontend/src/App.svelte"]
+            {"echor": "buildins/echor"}, ["tools/cli-playground/frontend/src/App.svelte"]
         )
         == []
     )
@@ -865,13 +864,13 @@ def test_build_command_invokes_cargo_once_for_the_selected_batch(
         executable.parent.mkdir(parents=True, exist_ok=True)
         executable.write_bytes(elf_binary(name.encode()))
         executable.chmod(0o755)
-    paths = [f"coreutils/{name}/src/main.rs" for name in reversed(names)]
-    paths += ["coreutils/unused/README.md"]
+    paths = [f"buildins/{name}/src/main.rs" for name in reversed(names)]
+    paths += ["buildins/unused/README.md"]
     commands = Mock(return_value=subprocess.CompletedProcess([], 0, "\0".join(paths).encode()))
     monkeypatch.setattr(subprocess, "run", commands)
     monkeypatch.setattr(preview_ci, "ROOT", tmp_path)
     monkeypatch.setattr(
-        preview_ci, "discover", lambda: {name: f"coreutils/{name}" for name in [*names, "unused"]}
+        preview_ci, "discover", lambda: {name: f"buildins/{name}" for name in [*names, "unused"]}
     )
     output = tmp_path / "artifact"
     summary = tmp_path / "summary.md"

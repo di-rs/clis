@@ -1,4 +1,4 @@
-name: clis
+name: sanctuary
 runtime:
   name: python
   options:

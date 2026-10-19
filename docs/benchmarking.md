@@ -7,7 +7,7 @@ Run `uv run --locked cli-check benches` to check suite presence, ownership and
 case structure without executing benchmarks. A CLI without a finite benchmark
 records a reason in its manifest's `package.metadata.cli-check.benchmark-exemption`;
 see [cli-check](../tools/cli-check/README.md#record-a-benchmark-exemption).
-[Biggie](../biggie/README.md) generates inputs once; [hyperfine 2](https://github.com/sharkdp/hyperfine/releases/tag/v2.0.0)
+[Biggie](../packages/biggie/README.md) generates inputs once; [hyperfine 2](https://github.com/sharkdp/hyperfine/releases/tag/v2.0.0)
 measures the executables directly, including warmups, timing and peak RSS.
 The [runner](../tools/cli-bench/bench.py) requires Python 3.15+ and uses only the
 standard library. The root [uv workspace](testing.md#python-tooling) manages its
@@ -19,7 +19,7 @@ From the workspace root, with `uv` and `hyperfine` on PATH:
 
 ```sh
 cargo build --locked --release --workspace --bins
-uv run --locked python tools/cli-bench/bench.py coreutils/tailr/benches/cli-bench.toml
+uv run --locked python tools/cli-bench/bench.py buildins/tailr/benches/cli-bench.toml
 ```
 
 This compares `target/release/tailr` with the suite's system `tail`.
@@ -28,8 +28,8 @@ or `--reference /path/to/gtail` to select another implementation. System tools
 on Linux are usually GNU; a system comparison is not a general parity claim.
 
 ```sh
-uv run --locked python tools/cli-bench/bench.py coreutils/tailr/benches/cli-bench.toml --list
-uv run --locked python tools/cli-bench/bench.py coreutils/tailr/benches/cli-bench.toml \
+uv run --locked python tools/cli-bench/bench.py buildins/tailr/benches/cli-bench.toml --list
+uv run --locked python tools/cli-bench/bench.py buildins/tailr/benches/cli-bench.toml \
   --case file-lines --warmup 1 --runs 3 --output /tmp/tail-smoke
 ```
 
@@ -57,12 +57,12 @@ For example, build an earlier revision in a separate checkout, using paths that
 do not already exist. Replace `HEAD~1` with the desired tag or commit:
 
 ```sh
-git worktree add --detach /tmp/clis-before HEAD~1
-cargo build --locked --release --manifest-path /tmp/clis-before/Cargo.toml \
-  --target-dir /tmp/clis-before-target -p tailr
-uv run --locked python tools/cli-bench/bench.py coreutils/tailr/benches/cli-bench.toml \
-  --baseline /tmp/clis-before-target/release/tailr
-git worktree remove /tmp/clis-before
+git worktree add --detach /tmp/sanctuary-before HEAD~1
+cargo build --locked --release --manifest-path /tmp/sanctuary-before/Cargo.toml \
+  --target-dir /tmp/sanctuary-before-target -p tailr
+uv run --locked python tools/cli-bench/bench.py buildins/tailr/benches/cli-bench.toml \
+  --baseline /tmp/sanctuary-before-target/release/tailr
+git worktree remove /tmp/sanctuary-before
 ```
 
 Build both versions with comparable toolchains, features and flags. An older
@@ -122,8 +122,8 @@ the suite's `check` must assert the behavior that matters.
 Arguments are quoted for direct execution with `--shell=none`; shell expansion
 and pipelines do not occur in `args`. Output is drained with `--output=pipe` so
 programs cannot skip work merely because stdout is `/dev/null`. The default
-environment sets `LC_ALL=C`, `TZ=UTC`, `CLIS_LOG_LEVEL=off` and
-`CLIS_LOG_STDERR=off`; an optional suite
+environment sets `LC_ALL=C`, `TZ=UTC`, `SANCTUARY_LOG_LEVEL=off` and
+`SANCTUARY_LOG_STDERR=off`; an optional suite
 `env` table can override these values.
 
 ## Verification and scope
@@ -185,7 +185,7 @@ performance conclusions, inspect variance, and repeat meaningful differences.
 
 ## CI runtime
 
-Before selective builds, a [full smoke run](https://github.com/di-rs/clis/actions/runs/38452689584)
+Before selective builds, a [full smoke run](https://github.com/di-rs/sanctuary/actions/runs/38452689584)
 of all 19 suites took 72 seconds on Linux and 88 seconds on macOS. Release builds
 accounted for 57/63 seconds; suite execution took 5/8 seconds. The jobs overlapped,
 so elapsed time was about 90 seconds plus queueing, while their summed runner

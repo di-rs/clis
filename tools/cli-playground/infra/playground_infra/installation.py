@@ -71,7 +71,7 @@ def main() -> None:
     parser.add_argument("source", type=Path)
     parser.add_argument("--profile-only", action="store_true")
     args = parser.parse_args()
-    root = Path(os.environ.get("CLIS_CONFIG_DIR", "/etc/clis"))
+    root = Path(os.environ.get("SANCTUARY_CONFIG_DIR", "/etc/sanctuary"))
     if args.profile_only:
         update_profile(root, args.source)
     else:

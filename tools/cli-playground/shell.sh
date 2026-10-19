@@ -9,8 +9,8 @@ export HOME=/workspace
 export PATH=/opt/artifact:/usr/local/bin:/usr/bin:/bin
 export PS1='\[\e[1m\]\w\[\e[0m\] $ '
 export HISTFILE=/workspace/.bash_history
-export CLIS_LOG_LEVEL=off
-export CLIS_LOG_STDERR=off
+export SANCTUARY_LOG_LEVEL=off
+export SANCTUARY_LOG_STDERR=off
 # Otherwise Bash would silently execute its own true/false instead of Rust.
 for cli in $PLAYGROUND_CLIS; do
     case "$cli" in true|false) enable -n "$cli" ;; esac

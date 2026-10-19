@@ -107,7 +107,12 @@ def affected_suites(suites: list[Suite], base: str, head: str) -> list[Suite]:
         parts = path.split("/")
         if len(parts) > 2 and parts[0] == "utils" and production_change(path, f"utils/{parts[1]}"):
             return suites
-    generator_changed = any(production_change(path, "biggie") for path in paths)
+    generator_changed = any(
+        production_change(path, suite.directory)
+        for suite in suites
+        if suite.package == "biggie"
+        for path in paths
+    )
     return [
         suite
         for suite in suites

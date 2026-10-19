@@ -36,7 +36,7 @@ def test_renders_real_means_ratio_smoke_and_parallel_runner_timing(github: FakeG
     result = report.generate(github, REPO, 500)
     assert result is not None
     assert "`aaaaaaaaaaaa`" in result
-    assert "https://github.com/di-rs/clis/actions/runs/500" in result
+    assert "https://github.com/di-rs/sanctuary/actions/runs/500" in result
     assert "tailr" in result
     assert "2.000 ms | 4.000 ms | 0.50×" in result
     assert "**Smoke check:** 1 measured run" in result

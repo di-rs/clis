@@ -15,14 +15,14 @@ fn command(root: &Path) -> Result<Command> {
     command
         .args(["--exact", "driver", "--nocapture"])
         .current_dir(root)
-        .env("CLIS_CONFIG_TEST", "1")
-        .env("CLIS_LOG_LEVEL", "info")
-        .env("CLIS_LOG_STDERR", "off")
+        .env("SANCTUARY_CONFIG_TEST", "1")
+        .env("SANCTUARY_LOG_LEVEL", "info")
+        .env("SANCTUARY_LOG_STDERR", "off")
         .env("HOME", root.join("home"))
         .env("LOCALAPPDATA", root.join("local"))
-        .env_remove("CLIS_LOG_DIR")
+        .env_remove("SANCTUARY_LOG_DIR")
         .env_remove("XDG_STATE_HOME")
-        .env_remove("CLIS_LOG_SESSION");
+        .env_remove("SANCTUARY_LOG_SESSION");
     Ok(command)
 }
 
@@ -60,20 +60,20 @@ fn has_message(records: &[Value], message: &str) -> bool {
 #[cfg(not(windows))]
 fn default_root(root: &Path) -> PathBuf {
     if cfg!(target_os = "macos") {
-        root.join("home/Library/Logs/clis")
+        root.join("home/Library/Logs/sanctuary")
     } else {
-        root.join("home/.local/state/clis/logs")
+        root.join("home/.local/state/sanctuary/logs")
     }
 }
 
 #[cfg(windows)]
 fn default_root(root: &Path) -> PathBuf {
-    root.join("local/clis/logs")
+    root.join("local/sanctuary/logs")
 }
 
 #[test]
 fn driver() {
-    if std::env::var_os("CLIS_CONFIG_TEST").is_none() {
+    if std::env::var_os("SANCTUARY_CONFIG_TEST").is_none() {
         return;
     }
     let session = cli_log::init("config-test");
@@ -88,7 +88,7 @@ fn directory_override_takes_precedence_over_platform_defaults() -> Result<()> {
     let root = assert_fs::TempDir::new()?;
     let selected = root.path().join("selected");
     let output = run(command(root.path())?
-        .env("CLIS_LOG_DIR", &selected)
+        .env("SANCTUARY_LOG_DIR", &selected)
         .env("XDG_STATE_HOME", root.path().join("xdg")))?;
     assert_eq!(output.stderr, b"");
     assert!(has_message(&records(&selected)?, "info-message"));
@@ -105,7 +105,7 @@ fn absolute_xdg_state_home_selects_persistent_state_directory() -> Result<()> {
     let output = run(command(root.path())?.env("XDG_STATE_HOME", &selected))?;
     assert_eq!(output.stderr, b"");
     assert!(has_message(
-        &records(&selected.join("clis/logs"))?,
+        &records(&selected.join("sanctuary/logs"))?,
         "info-message"
     ));
     assert!(!default_root(root.path()).exists());
@@ -148,11 +148,11 @@ fn unavailable_home_warns_once_and_preserves_command_success() -> Result<()> {
 fn invalid_file_level_warns_once_and_falls_back_to_info() -> Result<()> {
     let root = assert_fs::TempDir::new()?;
     let output = run(command(root.path())?
-        .env("CLIS_LOG_DIR", root.path())
-        .env("CLIS_LOG_LEVEL", "invalid"))?;
+        .env("SANCTUARY_LOG_DIR", root.path())
+        .env("SANCTUARY_LOG_LEVEL", "invalid"))?;
     let stderr = String::from_utf8(output.stderr)?;
     assert_eq!(stderr.matches("logging warning").count(), 1);
-    assert!(stderr.contains("CLIS_LOG_LEVEL"));
+    assert!(stderr.contains("SANCTUARY_LOG_LEVEL"));
     let events = records(root.path())?;
     assert!(has_message(&events, "info-message"));
     assert!(!has_message(&events, "debug-message"));
@@ -164,9 +164,9 @@ fn console_threshold_is_independent_of_file_threshold() -> Result<()> {
     for level in ["off", "error"] {
         let root = assert_fs::TempDir::new()?;
         let output = run(command(root.path())?
-            .env("CLIS_LOG_DIR", root.path())
-            .env("CLIS_LOG_LEVEL", level)
-            .env("CLIS_LOG_STDERR", "info"))?;
+            .env("SANCTUARY_LOG_DIR", root.path())
+            .env("SANCTUARY_LOG_LEVEL", level)
+            .env("SANCTUARY_LOG_STDERR", "info"))?;
         let stderr = String::from_utf8(output.stderr)?;
         assert!(stderr.contains("info-message"));
         assert!(stderr.contains("error-message"));
@@ -190,7 +190,7 @@ fn newly_created_log_directories_are_private() -> Result<()> {
     let root = assert_fs::TempDir::new()?;
     let parent = root.path().join("private");
     let logs = parent.join("logs");
-    let output = run(command(root.path())?.env("CLIS_LOG_DIR", &logs))?;
+    let output = run(command(root.path())?.env("SANCTUARY_LOG_DIR", &logs))?;
     assert_eq!(output.stderr, b"");
     for path in [&parent, &logs] {
         assert_eq!(std::fs::metadata(path)?.permissions().mode() & 0o777, 0o700);
@@ -208,7 +208,7 @@ fn existing_log_directory_permissions_are_preserved() -> Result<()> {
     let logs = root.path().join("existing");
     std::fs::create_dir(&logs)?;
     std::fs::set_permissions(&logs, std::fs::Permissions::from_mode(0o750))?;
-    let output = run(command(root.path())?.env("CLIS_LOG_DIR", &logs))?;
+    let output = run(command(root.path())?.env("SANCTUARY_LOG_DIR", &logs))?;
     assert_eq!(output.stderr, b"");
     assert_eq!(
         std::fs::metadata(&logs)?.permissions().mode() & 0o777,

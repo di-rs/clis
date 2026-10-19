@@ -12,7 +12,7 @@ on:
 
 permissions: {}
 concurrency:
-  group: clis-production
+  group: sanctuary-production
   queue: max
   cancel-in-progress: false
 

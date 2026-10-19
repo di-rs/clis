@@ -10,7 +10,6 @@ node_modules/
 /tools/cli-playground/frontend/test-results/
 /tools/cli-playground/frontend/playwright-report/
 
-/tests/consumers/target/
 /utils/comp_macro/wip/
 .env
 *.env
@@ -20,4 +19,4 @@ node_modules/
 !/tools/cli-playground/infra/Pulumi.production.yaml
 
 /tools/cli-playground/src/playground/static/
-!/tools/boxie/infra/config.example.env
+!/packages/boxie/infra/config.example.env

@@ -35,12 +35,12 @@ def test_generation_stdin_literal_arguments_and_old_binary_comparison(bench: Ben
     body = """
 with open(os.environ['TRACE'], 'a') as trace:
     trace.write(json.dumps({'argv': sys.argv[1:], 'cwd': os.getcwd(), 'locale': os.environ['LC_ALL'],
-        'logging': [os.environ.get('CLIS_LOG_LEVEL'), os.environ.get('CLIS_LOG_STDERR')]}) + '\\n')
+        'logging': [os.environ.get('SANCTUARY_LOG_LEVEL'), os.environ.get('SANCTUARY_LOG_STDERR')]}) + '\\n')
 sys.stdout.buffer.write(sys.stdin.buffer.read())
 """
     bench.candidate = bench.executable("candidate 'quoted'", body)
     bench.baseline = bench.executable("baseline", body)
-    bench.env.update(CLIS_LOG_LEVEL="debug", CLIS_LOG_STDERR="trace")
+    bench.env.update(SANCTUARY_LOG_LEVEL="debug", SANCTUARY_LOG_STDERR="trace")
     bench.write_suite(
         'name = "sample"\nargs = ["space \' $HOME *"]\n'
         'reference_args = ["different BSD arguments"]\nstdin = "input file.txt"',

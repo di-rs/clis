@@ -16,12 +16,12 @@ fn command(root: &Path, case: &str, level: &str) -> Result<Command> {
     let mut command = Command::new(std::env::current_exe()?);
     command
         .args(["--exact", "driver", "--nocapture"])
-        .env("CLIS_TEST_CASE", case)
-        .env("CLIS_LOG_DIR", root)
-        .env("CLIS_LOG_LEVEL", level)
-        .env("CLIS_LOG_STDERR", "off")
-        .env_remove("CLIS_RUN_COUNT")
-        .env_remove("CLIS_LOG_SESSION");
+        .env("SANCTUARY_TEST_CASE", case)
+        .env("SANCTUARY_LOG_DIR", root)
+        .env("SANCTUARY_LOG_LEVEL", level)
+        .env("SANCTUARY_LOG_STDERR", "off")
+        .env_remove("SANCTUARY_RUN_COUNT")
+        .env_remove("SANCTUARY_LOG_SESSION");
     Ok(command)
 }
 fn child(root: &Path, case: &str, level: &str) -> Result<Output> {
@@ -55,13 +55,13 @@ struct RunnerCli {
     #[arg(long = "nocapture")]
     _nocapture: bool,
     _test_name: String,
-    #[arg(long, env = "CLIS_RUN_COUNT")]
+    #[arg(long, env = "SANCTUARY_RUN_COUNT")]
     count: usize,
 }
 
 #[test]
 fn driver() -> Result<()> {
-    let Ok(case) = std::env::var("CLIS_TEST_CASE") else {
+    let Ok(case) = std::env::var("SANCTUARY_TEST_CASE") else {
         return Ok(());
     };
     if case.starts_with("run_") {
@@ -157,7 +157,7 @@ fn runners_preserve_results_and_finish_once_including_parse_errors() -> Result<(
     ] {
         let root = assert_fs::TempDir::new()?;
         let output = command(root.path(), case, "info")?
-            .env("CLIS_RUN_COUNT", argument)
+            .env("SANCTUARY_RUN_COUNT", argument)
             .output()?;
         assert!(output.status.success(), "{output:?}");
         let records = records(root.path())?;
@@ -199,7 +199,7 @@ fn runners_preserve_results_and_finish_once_including_parse_errors() -> Result<(
 fn backend_json_preserves_fields_and_invocation_context() -> Result<()> {
     let root = assert_fs::TempDir::new()?;
     let output = command(root.path(), "events", "info")?
-        .env("CLIS_LOG_SESSION", "shell-123")
+        .env("SANCTUARY_LOG_SESSION", "shell-123")
         .output()?;
     assert!(output.status.success());
     assert_eq!(output.stderr, b"");
@@ -269,7 +269,7 @@ fn required_errors_print_once_and_nonzero_status_is_preserved() -> Result<()> {
     for level in ["off", "error", "trace"] {
         let root = assert_fs::TempDir::new()?;
         let output = command(root.path(), "failure", level)?
-            .env("CLIS_LOG_STDERR", "trace")
+            .env("SANCTUARY_LOG_STDERR", "trace")
             .output()?;
         assert!(output.status.success());
         assert_eq!(
@@ -352,7 +352,7 @@ fn setup_warnings_do_not_panic_when_stderr_is_closed() -> Result<()> {
         let (reader, writer) = std::io::pipe()?;
         drop(reader);
         let output = command(&path, case, level)?
-            .env("CLIS_LOG_STDERR", console)
+            .env("SANCTUARY_LOG_STDERR", console)
             .stderr(writer)
             .output()?;
         assert!(

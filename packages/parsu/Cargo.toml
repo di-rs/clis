@@ -1,0 +1,18 @@
+[package]
+license.workspace = true
+name = "parsu"
+version = "0.1.0"
+description = "Simple XML parser with combinators"
+edition = "2024"
+
+[dependencies]
+cli-log.workspace = true
+clap = { workspace = true }
+color-eyre = { workspace = true }
+
+[dev-dependencies]
+cli-testing.workspace = true
+predicates = "3.1.4"
+
+[lints]
+workspace = true

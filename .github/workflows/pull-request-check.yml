@@ -38,6 +38,10 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: ♻️ Cache Rust dependencies and build artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: false
       - name: 🦀 Record Rust compiler version
         run: rustc -Vv
       - name: 🛠️ Install repository hooks
@@ -77,7 +81,9 @@ jobs:
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: '0.13.0'
-          enable-cache: false
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: ${{ github.job }}
       - name: 🛠️ Install repository hooks
         uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
@@ -89,6 +95,13 @@ jobs:
         run: prek run ruff --all-files --show-diff-on-failure
       - name: 🎨 Check Python formatting
         run: prek run ruff-format --all-files --show-diff-on-failure
+      - name: ♻️ Cache incremental Python type analysis
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: .mypy_cache
+          key: mypy-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', '**/pyproject.toml', '.python-version') }}-${{ hashFiles('packages/**/*.py', 'tools/**/*.py', 'infra/**/*.py', 'packages/**/*.pyi', 'tools/**/*.pyi', 'infra/**/*.pyi') }}
+          restore-keys: |
+            mypy-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', '**/pyproject.toml', '.python-version') }}-
       - name: 🔎 Check Python types with mypy
         run: prek run mypy --all-files --show-diff-on-failure
       - name: 🧪 Run Python regression tests
@@ -121,12 +134,14 @@ jobs:
           node-version-file: .node-version
           version-file: package.json
           run-install: false
-          cache: false
+          cache: true
       - name: 🐍 Set up uv and Python
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: '0.13.0'
-          enable-cache: false
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: ${{ github.job }}
       - name: 📦 Install locked frontend dependencies
         run: pnpm install --frozen-lockfile
       - name: 🔎 Check Svelte and TypeScript
@@ -139,7 +154,7 @@ jobs:
         working-directory: .
         run: |
           uv sync --locked --all-packages
-          uv run --locked pytest tools/boxie/tests/test_packaging.py -m integration
+          uv run --locked pytest packages/boxie/tests/test_packaging.py -m integration
       - name: 🌐 Install Chromium and browser dependencies
         run: pnpm exec playwright install --with-deps chromium
       - name: 🎭 Run browser end-to-end tests
@@ -170,6 +185,10 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: ♻️ Cache Rust dependencies and build artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: false
       - name: 📝 Record compiler, platform and revision
         run: |
           mkdir -p target/ci
@@ -220,6 +239,10 @@ jobs:
           fallback: none
       - name: 🦀 Record Rust compiler version
         run: rustc -Vv
+      - name: ♻️ Cache Rust dependencies and build artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: false
       - name: 📦 Check every Rust package and target
         run: cargo hack check --locked --workspace --all-targets
       - name: 🧩 Check Rust feature combinations
@@ -228,8 +251,6 @@ jobs:
         run: cargo nextest run --locked --workspace --all-features --profile ci
       - name: 📚 Test documentation with all features
         run: cargo test --locked --workspace --all-features --doc
-      - name: 🔌 Verify external Rust API consumers
-        run: cargo run --locked --manifest-path tests/consumers/Cargo.toml
       - name: 🧹 Verify checks leave the checkout unchanged
         run: git diff --exit-code
 
@@ -286,10 +307,8 @@ jobs:
           fallback: none
       - name: 🛡️ Audit vulnerabilities, licenses and dependency usage
         run: |
-          for manifest in Cargo.toml tests/consumers/Cargo.toml; do
-            cargo audit --db "$RUNNER_TEMP/advisory-db" --file "${manifest%Cargo.toml}Cargo.lock" --deny yanked
-            cargo deny --locked --manifest-path "$manifest" --config "$PWD/deny.toml" check licenses sources bans
-          done
+          cargo audit --db "$RUNNER_TEMP/advisory-db" --file Cargo.lock --deny yanked
+          cargo deny --locked check licenses sources bans
           cargo machete --with-metadata
 
   workflows:
