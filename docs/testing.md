@@ -53,7 +53,8 @@ descriptive emoji names.
 Install the Git hooks with `prek install`. On commit, prek checks staged files;
 `prek run` uses the same selection. To check specific working-tree files, use
 `prek run --files PATH...`. CI keeps `prek run --all-files` to check every tracked
-file. Use that command locally when you want the full checks.
+file. Do not run `--all-files` locally unless explicitly requested; use focused
+file selection for local checks.
 
 Ruff, workflow linting, Markdown links and spelling receive matching filenames
 from prek. Separate configuration hooks run full lint checks when their settings
@@ -75,8 +76,8 @@ Replace `PACKAGE` below with the affected Cargo package name.
 | Shared Rust APIs | Run library doctests and the affected packages’ CLI tests. |
 | CLI tests or fixtures | Follow the [CLI testing skill](../.agents/skills/cli-testing/SKILL.md). |
 | Python tools | Run the [Python checks](#python-tooling). |
-| Markdown | `prek run lychee --all-files --show-diff-on-failure` and `prek run typos --all-files --show-diff-on-failure` |
-| Workflows | `prek run actionlint --all-files --show-diff-on-failure`; consult CI for security checks. |
+| Markdown | `prek run lychee --files PATH... --show-diff-on-failure` and `prek run typos --files PATH... --show-diff-on-failure` |
+| Workflows | `prek run actionlint --files PATH... --show-diff-on-failure`; consult CI for security checks. |
 | Benchmark suites | Follow [Benchmarking](benchmarking.md). |
 
 For workspace-wide Rust changes, use the all-feature nextest and doctest commands
