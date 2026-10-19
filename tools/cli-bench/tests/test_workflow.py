@@ -7,6 +7,48 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
+from conftest import TOOLS, Repository
+
+
+@pytest.mark.parametrize("job", ["select", "suites"])
+def test_checkout_matches_pr_dependency_graph_when_base_adds_a_package(
+    repo: Repository, job: str
+) -> None:
+    repo.git("checkout", "-b", "feature")
+    repo.write("buildins/tailr/src/main.rs", "// changed\n")
+    head = repo.commit()
+    repo.git("checkout", "main")
+    repo.write("buildins/newcli/Cargo.toml", '[package]\nname = "newcli"\n')
+    repo.write("buildins/newcli/src/main.rs", "fn main() {}\n")
+    repo.lock({name: [] for name in ("biggie", "echor", "tailr", "wcr", "newcli")})
+    repo.base = repo.commit()
+    repo.git("merge", "--no-edit", "feature")
+    merge = repo.git("rev-parse", "HEAD")
+    workflow = yaml.safe_load((TOOLS.parents[1] / ".github/workflows/cli-bench.yml").read_text())
+    checkout = workflow["jobs"][job]["steps"][0]["with"]
+    revisions = {"${{ github.sha }}": merge, "${{ github.event.pull_request.head.sha }}": head}
+    repo.git("checkout", "--detach", revisions[checkout.get("ref", "${{ github.sha }}")])
+    event = repo.root / "event.json"
+    event.write_text('{"pull_request": {"body": "Benchmark-CLIs: auto"}}')
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(repo.root / "tools/cli-bench/select_suites.py"),
+            "--base",
+            repo.base,
+            "--head",
+            head,
+            "--event",
+            str(event),
+        ],
+        cwd=repo.root,
+        env=repo.env,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["binaries"] == ["tailr"]
 
 
 @pytest.mark.parametrize("failed", [[], ["one/suite.toml"], ["one/suite.toml", "three/suite.toml"]])

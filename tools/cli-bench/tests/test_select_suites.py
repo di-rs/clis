@@ -105,7 +105,6 @@ def test_docs_tests_and_python_tool_configuration_skip_native_suites(
     "path",
     [
         "Cargo.toml",
-        "Cargo.lock",
         "rust-toolchain.toml",
         ".cargo/config.toml",
         "tools/cli-bench/bench.py",
@@ -157,14 +156,75 @@ def test_biggie_production_changes_select_biggie_and_generated_suites(
         ("utils/shared/Cargo.toml", '[package]\nname = "shared"\nversion = "0.1.1"\n'),
     ],
 )
-def test_shared_logger_and_other_utility_production_changes_select_all(
+def test_shared_library_production_changes_select_only_consumers(
     repo: Repository, path: str, content: str
 ) -> None:
     repo.write("utils/shared/Cargo.toml", '[package]\nname = "shared"\n')
+    repo.write("utils/shared/src/lib.rs", "// original helper\n")
+    repo.lock(
+        {
+            "echor": ["shared"],
+            "tailr": [],
+            "wcr": [],
+            "biggie": [],
+            "shared": ["cli-log"],
+            "cli-log": [],
+        }
+    )
     repo.base = repo.commit()
     repo.write(path, content)
     repo.commit()
-    assert repo.selection()["suites"] == ALL_SUITES
+    assert repo.selection()["binaries"] == ["echor"]
+
+
+def test_lockfile_addition_and_dependency_disambiguation_select_only_consumer(
+    repo: Repository,
+) -> None:
+    repo.lock({"echor": ["shared"], "tailr": [], "wcr": [], "biggie": [], "shared": []})
+    repo.write(
+        "Cargo.lock",
+        (repo.root / "Cargo.lock")
+        .read_text()
+        .replace(
+            'name = "shared"\nversion = "0.1.0"',
+            'name = "shared"\nversion = "0.1.0"\nsource = "registry+https://example.invalid/index"',
+        ),
+    )
+    repo.base = repo.commit()
+    before = (repo.root / "Cargo.lock").read_text()
+    repo.write(
+        "Cargo.lock",
+        before.replace('["shared"]', '["shared 0.1.0"]').replace(
+            'name = "tailr"\nversion = "0.1.0"\ndependencies = []',
+            'name = "tailr"\nversion = "0.1.0"\ndependencies = ["shared 0.2.0"]',
+        )
+        + '\n[[package]]\nname = "shared"\nversion = "0.2.0"\nsource = "registry+https://example.invalid/index"\n',
+    )
+    repo.commit()
+    assert repo.selection()["binaries"] == ["tailr"]
+
+
+def test_lockfile_transitive_update_selects_consumers_and_generated_suites(
+    repo: Repository,
+) -> None:
+    repo.lock(
+        {"echor": [], "tailr": [], "wcr": [], "biggie": ["helper"], "helper": ["leaf"], "leaf": []}
+    )
+    repo.base = repo.commit()
+    repo.write(
+        "Cargo.lock",
+        (repo.root / "Cargo.lock")
+        .read_text()
+        .replace('name = "leaf"\nversion = "0.1.0"', 'name = "leaf"\nversion = "0.2.0"'),
+    )
+    repo.commit()
+    assert repo.selection()["binaries"] == ["biggie", "tailr"]
+
+
+def test_lockfile_comments_do_not_select_any_cli(repo: Repository) -> None:
+    repo.write("Cargo.lock", (repo.root / "Cargo.lock").read_text() + "\n# comment\n")
+    repo.commit()
+    assert repo.selection()["binaries"] == []
 
 
 @pytest.mark.parametrize(

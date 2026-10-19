@@ -2,6 +2,8 @@
 
 import io
 import json
+import os
+import shutil
 import subprocess
 import sys
 import time
@@ -20,7 +22,7 @@ import pytest
 from githubkit import GitHub, TokenAuthStrategy
 from playground import artifacts
 
-from .helpers import elf_binary
+from .helpers import clean_git_env, elf_binary, git_commit
 
 SHA = "a" * 40
 REPO = "di-rs/sanctuary"
@@ -86,18 +88,104 @@ def workspace(root: Path) -> dict[str, str]:
 def test_discovery_excludes_libraries_and_selection_uses_owning_packages(tmp_path: Path) -> None:
     packages = workspace(tmp_path)
     assert preview_ci.discover(tmp_path) == packages
-    assert preview_ci.select(packages, ["buildins/echor/src/main.rs"]) == ["echor"]
     assert (
-        preview_ci.select(packages, ["buildins/echor/README.md", "buildins/catr/tests/a.rs"]) == []
+        preview_ci.select(
+            packages,
+            ["buildins/echor/README.md", "buildins/catr/tests/a.rs"],
+            "HEAD",
+            "HEAD",
+            root=tmp_path,
+        )
+        == []
     )
 
 
-@pytest.mark.parametrize("path", ["Cargo.lock", "utils/shared/src/lib.rs"])
-def test_shared_changes_select_all_packages(path: str) -> None:
-    assert preview_ci.select({"echor": "buildins/echor", "catr": "buildins/catr"}, [path]) == [
+@pytest.mark.parametrize(
+    "path",
+    ["rust-toolchain.toml", ".cargo/config.toml", "tools/cli-check/src/cli_check/affected.py"],
+)
+def test_global_build_changes_select_all_packages(path: str) -> None:
+    assert preview_ci.select(
+        {"echor": "buildins/echor", "catr": "buildins/catr"}, [path], "HEAD", "HEAD"
+    ) == [
         "catr",
         "echor",
     ]
+
+
+@pytest.mark.parametrize("change", ["source", "library", "lock", "rename", "comment"])
+def test_build_packages_only_affected_clis(tmp_path: Path, change: str) -> None:
+    workspace(tmp_path)
+    lock = (
+        'version = 4\n[[package]]\nname = "echor"\nversion = "0.1.0"\n'
+        'dependencies = ["shared"]\n[[package]]\nname = "catr"\nversion = "0.1.0"\n'
+        '[[package]]\nname = "shared"\nversion = "0.1.0"\n'
+    )
+    (tmp_path / "Cargo.lock").write_text(lock)
+    env = clean_git_env()
+    subprocess.run(["git", "init", "-q", str(tmp_path)], env=env, check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], env=env, check=True)
+    git_commit(tmp_path)
+    base = subprocess.check_output(
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], env=env, text=True
+    ).strip()
+    expected = ["echor"]
+    if change in {"source", "library"}:
+        path = "buildins/echor/src/main.rs" if change == "source" else "utils/shared/src/lib.rs"
+        (tmp_path / path).write_text("// changed\n")
+    elif change == "lock":
+        (tmp_path / "Cargo.lock").write_text(
+            lock.replace('name = "shared"\nversion = "0.1.0"', 'name = "shared"\nversion = "0.2.0"')
+        )
+    elif change == "rename":
+        (tmp_path / "buildins/echor").rename(tmp_path / "buildins/touch")
+        (tmp_path / "buildins/touch/Cargo.toml").write_text('[package]\nname = "touch"\n')
+        (tmp_path / "Cargo.lock").write_text(lock.replace('name = "echor"', 'name = "touch"'))
+        expected = ["touch"]
+    else:
+        (tmp_path / "Cargo.lock").write_text(lock + "\n# comment\n")
+        expected = []
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], env=env, check=True)
+    git_commit(tmp_path)
+    script = tmp_path / "tools/cli-playground/preview_ci.py"
+    script.parent.mkdir(parents=True)
+    shutil.copyfile(preview_ci.__file__, script)
+    commands = tmp_path / "commands"
+    commands.mkdir()
+    cargo = commands / "cargo"
+    cargo.write_text(
+        f"#!{sys.executable}\n" + "import sys\nfrom pathlib import Path\n"
+        "target = Path('target/release')\ntarget.mkdir(parents=True)\n"
+        "for index, arg in enumerate(sys.argv):\n"
+        "    if arg == '--package':\n"
+        "        (target / sys.argv[index + 1]).write_text('binary')\n"
+    )
+    cargo.chmod(0o755)
+    output = tmp_path / "artifact"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "build",
+            "--base",
+            base,
+            "--head",
+            "HEAD",
+            "--output",
+            str(output),
+        ],
+        cwd=tmp_path,
+        env=env | {"PATH": str(commands) + os.pathsep + env["PATH"]},
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "CLI playground builds: " + (", ".join(expected) or "none") + "\n"
+    assert (
+        sorted(path.name for path in output.iterdir()) == expected
+        if expected
+        else not output.exists()
+    )
 
 
 def test_discovery_rejects_an_additional_binary(tmp_path: Path) -> None:
@@ -817,7 +905,10 @@ def test_gateway_stalled_response_times_out(monkeypatch: pytest.MonkeyPatch) -> 
 def test_frontend_changes_do_not_build_rust_binaries() -> None:
     assert (
         preview_ci.select(
-            {"echor": "buildins/echor"}, ["tools/cli-playground/frontend/src/App.svelte"]
+            {"echor": "buildins/echor"},
+            ["tools/cli-playground/frontend/src/App.svelte"],
+            "HEAD",
+            "HEAD",
         )
         == []
     )
@@ -875,9 +966,10 @@ def test_build_command_invokes_cargo_once_for_the_selected_batch(
         executable.chmod(0o755)
     paths = [f"buildins/{name}/src/main.rs" for name in reversed(names)]
     paths += ["buildins/unused/README.md"]
-    commands = Mock(return_value=subprocess.CompletedProcess([], 0, "\0".join(paths).encode()))
+    commands = Mock(return_value=subprocess.CompletedProcess([], 0, "\0".join(paths) + "\0"))
     monkeypatch.setattr(subprocess, "run", commands)
     monkeypatch.setattr(preview_ci, "ROOT", tmp_path)
+    monkeypatch.setattr(preview_ci, "affected_packages", lambda root, base, head, paths: set(names))
     monkeypatch.setattr(
         preview_ci, "discover", lambda: {name: f"buildins/{name}" for name in [*names, "unused"]}
     )

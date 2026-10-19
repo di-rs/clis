@@ -11,6 +11,12 @@ Building, failed and cancelled builds can retain an explicitly labeled last
 successful build. A revision with no affected CLIs opens a status page instead
 of a new terminal. The page checks for updates every ten seconds.
 
+PR builds select CLIs with source changes, changed resolved dependencies, or a
+changed shared library in their dependency graph. Lockfile edits for another CLI
+do not select unrelated binaries. Global build settings, including the root
+Cargo manifest and Rust toolchain, still select all CLIs. Dependency analysis uses
+the same [lockfile rules as benchmarks](../../docs/benchmarking.md#verification-and-scope).
+
 Architecture: Svelte + strict TypeScript + Vite+ static SPA, plain CSS, Python/FastAPI;
 no SSR, production Node server or Tailwind.
 

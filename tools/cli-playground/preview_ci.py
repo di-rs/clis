@@ -20,6 +20,7 @@ from typing import Protocol, cast
 
 import anyio
 import httpx
+from cli_check.affected import affected_packages, changed_paths
 from cli_check.checks.layout import check as check_layout
 from cli_check.workspace import discover as discover_workspace
 from githubkit import BaseAuthStrategy, GitHub, TokenAuthStrategy
@@ -187,15 +188,9 @@ def discover(root: Path = ROOT) -> dict[str, str]:
     return packages
 
 
-def production(path: str, directory: str) -> bool:
-    prefix = "" if directory == "." else directory + "/"
-    if not path.startswith(prefix):
-        return False
-    relative = path.removeprefix(prefix)
-    return relative in {"Cargo.toml", "build.rs"} or relative.startswith("src/")
-
-
-def select(packages: dict[str, str], paths: list[str]) -> list[str]:
+def select(
+    packages: dict[str, str], paths: list[str], base: str, head: str, *, root: Path = ROOT
+) -> list[str]:
     paths = [
         path
         for path in paths
@@ -203,7 +198,6 @@ def select(packages: dict[str, str], paths: list[str]) -> list[str]:
     ]
     global_paths = {
         "Cargo.toml",
-        "Cargo.lock",
         "rust-toolchain.toml",
         "tools/cli-playground/Build.Dockerfile",
         "tools/cli-playground/Build.Dockerfile.dockerignore",
@@ -213,18 +207,11 @@ def select(packages: dict[str, str], paths: list[str]) -> list[str]:
     if any(
         path in global_paths
         or path.startswith(".cargo/")
-        or path.startswith("utils/")
-        and "/src/" in path
-        or path.startswith("utils/")
-        and path.endswith(("/Cargo.toml", "/build.rs"))
+        or path.startswith("tools/cli-check/src/")
         for path in paths
     ):
         return sorted(packages)
-    return sorted(
-        name
-        for name, directory in packages.items()
-        if any(production(path, directory) for path in paths)
-    )
+    return sorted(packages.keys() & affected_packages(root, base, head, paths))
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -724,22 +711,8 @@ def main() -> None:
     args = parser.parse_args()
     try:
         if args.command == "build":
-            diff = subprocess.run(
-                [
-                    "git",
-                    "diff",
-                    "--name-only",
-                    "--no-renames",
-                    "-z",
-                    f"{args.base}...{args.head}",
-                    "--",
-                ],
-                cwd=ROOT,
-                check=True,
-                capture_output=True,
-            )
-            paths = [os.fsdecode(item) for item in diff.stdout.split(b"\0") if item]
-            names = select(discover(), paths)
+            paths = changed_paths(ROOT, args.base, args.head)
+            names = select(discover(), paths, args.base, args.head, root=ROOT)
             selection = "CLI playground builds: " + (", ".join(names) or "none")
             print(selection)
             if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
