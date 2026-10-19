@@ -71,17 +71,25 @@ class RequestLogging:
                         self.completed(scope.get("method", "other"), route, status, duration)
                     except Exception:
                         pass
-                if runtime is not None:
+                healthy_probe = (
+                    route in ("/healthz", "/readyz")
+                    and status == "2xx"
+                    and failure is None
+                    and not disconnected
+                )
+                if runtime is not None and not healthy_probe:
                     runtime.emit(
                         "request.completed",
-                        level=40 if failure is not None else 20,
+                        level=40
+                        if failure is not None or status in ("error", "4xx", "5xx")
+                        else 20,
                         error=failure,
                         duration_ms=duration * 1000,
                         outcome=(
                             "cancelled"
                             if status == "disconnected"
                             else "failed"
-                            if status == "error"
+                            if status in ("error", "4xx", "5xx")
                             else "succeeded"
                         ),
                     )
