@@ -8,7 +8,7 @@ from typing import Any, Never
 import pulumi
 import pytest
 import yaml
-from playground_infra.host import HostConfig, provision
+from cli_playground_infra.host import HostConfig, provision
 from pulumi.runtime.settings import get_root_resource, reset_options
 from pulumi.runtime.stack import Stack
 

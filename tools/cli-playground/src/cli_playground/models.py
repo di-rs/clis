@@ -13,7 +13,7 @@ from pydantic import (
     field_validator,
 )
 
-from playground.artifacts import CLI_PATTERN, MAX_CLIS
+from cli_playground.artifacts import CLI_PATTERN, MAX_CLIS
 
 SHA_PATTERN = r"[0-9a-f]{40}"
 ID_PATTERN = r"[0-9a-f]{32}"

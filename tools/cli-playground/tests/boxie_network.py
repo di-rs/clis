@@ -10,10 +10,10 @@ from pathlib import Path
 import httpx
 import uvicorn
 from boxie_test_support.terminal_network import EchoDaemon, Network, network
+from cli_playground.app import create_app
+from cli_playground.boxie_client import HttpBoxieClient
+from cli_playground.service import CliPlaygroundService
 from fastapi import FastAPI
-from playground.app import create_app
-from playground.boxie_client import HttpBoxieClient
-from playground.service import PlaygroundService
 
 from .helpers import MutableClock, Settings
 
@@ -22,7 +22,7 @@ from .helpers import MutableClock, Settings
 class Product:
     http: httpx.AsyncClient
     app: FastAPI
-    service: PlaygroundService
+    service: CliPlaygroundService
 
 
 @asynccontextmanager

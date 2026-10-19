@@ -25,7 +25,7 @@ for image in "$BOXIE_RUNTIME_IMAGE" "$PLAYGROUND_IMAGE" "$PLAYGROUND_SANDBOX_IMA
     timeout 180 docker pull "$image" >/dev/null
 done
 bash /opt/sanctuary/boxie/credentials.sh /etc/sanctuary/boxie
-python3 /opt/sanctuary/playground/playground_infra/installation.py /opt/sanctuary/playground
+python3 /opt/sanctuary/playground/cli_playground_infra/installation.py /opt/sanctuary/playground
 bash /opt/sanctuary/boxie/install.sh "$source" "$(cat "$source/revision")"
 bash /opt/sanctuary/playground/install.sh
 bash /opt/sanctuary/playground/deploy.sh

@@ -7,14 +7,14 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
-from playground import service as service_module
-from playground.artifacts import stage_archive
-from playground.boxie_client import SandboxRequest, SandboxView
-from playground.config import Settings
-from playground.models import BuildIdentity, BuildUpdate
-from playground.service import PlaygroundService
-from playground.session_store import SessionStore
-from playground.storage import ArtifactConflictError, EnvironmentStore
+from cli_playground import service as service_module
+from cli_playground.artifacts import stage_archive
+from cli_playground.boxie_client import SandboxRequest, SandboxView
+from cli_playground.config import Settings
+from cli_playground.models import BuildIdentity, BuildUpdate
+from cli_playground.service import CliPlaygroundService
+from cli_playground.session_store import SessionStore
+from cli_playground.storage import ArtifactConflictError, EnvironmentStore
 
 from .boxie_fake import FakeBoxie
 from .helpers import MutableClock, binary_bundle, elf_binary
@@ -175,9 +175,9 @@ def test_failed_manifest_swap_leaves_the_previous_batch_readable(
 
 def make_service(
     settings: Settings, client: FakeBoxie | None = None, *, clock: MutableClock | None = None
-) -> PlaygroundService:
+) -> CliPlaygroundService:
     clock = clock or MutableClock()
-    return PlaygroundService(
+    return CliPlaygroundService(
         settings,
         EnvironmentStore(settings, clock=clock),
         SessionStore(settings.data_dir),
@@ -186,7 +186,7 @@ def make_service(
     )
 
 
-def boxie(service: PlaygroundService) -> FakeBoxie:
+def boxie(service: CliPlaygroundService) -> FakeBoxie:
     assert isinstance(service.boxie, FakeBoxie)
     return service.boxie
 
@@ -195,7 +195,7 @@ def test_failed_remote_upload_preserves_ready_and_retries_the_same_artifact(
     docker_settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from playground.boxie_client import BoxieUnavailable
+    from cli_playground.boxie_client import BoxieUnavailable
 
     async def body() -> AsyncIterator[bytes]:
         yield binary_bundle({"echor": elf_binary()})
@@ -333,7 +333,7 @@ def test_abandoned_create_and_upload_retry_without_a_backend_restart(
     docker_settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from playground.boxie_client import BoxieUnavailable
+    from cli_playground.boxie_client import BoxieUnavailable
 
     async def body() -> AsyncIterator[bytes]:
         yield binary_bundle({"echor": elf_binary()})
@@ -400,7 +400,7 @@ def test_close_reopen_never_recovers_a_previous_generation_upload(
     ci: bool,
     failure: str,
 ) -> None:
-    from playground.boxie_client import BoxieUnavailable
+    from cli_playground.boxie_client import BoxieUnavailable
 
     async def body() -> AsyncIterator[bytes]:
         yield binary_bundle({"echor": elf_binary()})

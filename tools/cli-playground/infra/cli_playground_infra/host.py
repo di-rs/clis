@@ -4,7 +4,7 @@ import pulumi_hcloud as hcloud
 from host_infra.host import HostConfig as SharedHostConfig
 from host_infra.host import provision as provision_host
 
-from playground_infra.dns import DnsConfig, provision_dns
+from cli_playground_infra.dns import DnsConfig, provision_dns
 
 
 class HostConfig(SharedHostConfig, DnsConfig):

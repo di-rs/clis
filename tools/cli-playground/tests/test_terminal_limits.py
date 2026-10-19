@@ -130,7 +130,7 @@ def test_final_control_preserves_buffered_product_status(
     from urllib.parse import urlsplit
 
     from boxie_test_support.terminal_completion import CompletionBarrier
-    from playground.boxie_client import HttpTerminal
+    from cli_playground.boxie_client import HttpTerminal
 
     async def exercise() -> None:
         barrier = CompletionBarrier(monkeypatch, HttpTerminal, phase, kind, close_code)
@@ -192,9 +192,9 @@ def test_closed_product_control_drain_keeps_abort_and_error_boundaries(
     monkeypatch: pytest.MonkeyPatch, scenario: str
 ) -> None:
     from boxie_test_support.terminal_completion import failed_drain
-    from playground import transport
-    from playground.boxie_client import BoxieUnavailable, TerminalWriteClosed
-    from playground.terminal_protocol import response
+    from cli_playground import transport
+    from cli_playground.boxie_client import BoxieUnavailable, TerminalWriteClosed
+    from cli_playground.terminal_protocol import response
 
     async def exercise() -> None:
         monkeypatch.setattr(transport, "TERMINAL_DRAIN_TIMEOUT", 0.02)

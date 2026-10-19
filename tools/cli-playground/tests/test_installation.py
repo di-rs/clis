@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 from boxie_infra.installation import render, write_environment
-from playground_infra.installation import render as render_product
-from playground_infra.installation import update_profile
+from cli_playground_infra.installation import render as render_product
+from cli_playground_infra.installation import update_profile
 
 ROOT = Path(__file__).resolve().parents[3]
 

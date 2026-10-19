@@ -29,7 +29,7 @@ from githubkit.exception import GitHubException
 # Keep direct script invocation usable from any working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
-from playground.artifacts import CLI_PATTERN, MAX_ARCHIVE, MAX_CLIS, binary_archive  # noqa: E402
+from cli_playground.artifacts import CLI_PATTERN, MAX_ARCHIVE, MAX_CLIS, binary_archive  # noqa: E402
 
 MAX_JSON = 2 * 1024 * 1024
 MAX_PAGES = 20

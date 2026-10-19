@@ -107,7 +107,7 @@ uv run --locked pytest packages/boxie/tests/test_packaging.py -m integration
 The optional native Linux [sandbox check](../../../.github/workflows/boxie-lifecycle.yml)
 starts isolated PostgreSQL, Temporal, API, orchestrator and Playground services.
 Manual `workflow_dispatch` runs exercise browser recovery, process faults and both
-`boxie_infra.smoke` and `playground_infra.smoke` through HTTP and WebSocket. Each
+`boxie_infra.smoke` and `cli_playground_infra.smoke` through HTTP and WebSocket. Each
 inspects the actual sandbox's `runsc`, non-root user, no-network mode, read-only
 root/artifact, capabilities, no-new-privileges, resource limits, tmpfs, disabled
 Docker logs and confirmed container deletion. The product smoke also checks the

@@ -7,7 +7,8 @@ playground, runtime and orchestrator for overlapping responsibilities. This
 change gives each responsibility one name and updates its references together.
 
 The vocabulary below is agreed. This change covers naming and the migration of
-renamed identifiers. Product implementation has not started.
+renamed identifiers. Source and package renames form the first implementation
+phase; stored-state and deployment renames require the coordinated cutover below.
 
 ## Scope and follow-up
 

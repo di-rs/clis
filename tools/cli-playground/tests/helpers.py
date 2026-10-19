@@ -10,8 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import httpx
+from cli_playground.config import Settings as EnvironmentSettings
 from fastapi.testclient import TestClient
-from playground.config import Settings as EnvironmentSettings
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 from starlette.testclient import WebSocketTestSession
 

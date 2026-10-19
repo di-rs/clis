@@ -23,7 +23,7 @@ def test_operations_manifest_keeps_docker_socket_out_of_operator_jobs() -> None:
 @pytest.mark.integration
 @pytest.mark.parametrize(
     "package,module,forbidden",
-    [("boxie", "boxie", "playground"), ("cli-playground", "playground", "boxie")],
+    [("boxie", "boxie", "cli_playground"), ("cli-playground", "cli_playground", "boxie")],
 )
 def test_real_isolated_installation(
     tmp_path: Path, package: str, module: str, forbidden: str
@@ -34,7 +34,7 @@ def test_real_isolated_installation(
 
     service = ROOT / ("packages" if package == "boxie" else "tools") / package
     if package == "cli-playground":
-        assert (service / "src/playground/static/index.html").is_file(), (
+        assert (service / "src/cli_playground/static/index.html").is_file(), (
             "Build the real frontend first"
         )
     wheels = tmp_path / "wheels"
@@ -91,12 +91,16 @@ def test_real_isolated_installation(
 import importlib, importlib.util, pathlib
 module = importlib.import_module({module!r})
 assert pathlib.Path(module.__file__).is_relative_to({str(python.parent.parent)!r})
-for name in ({forbidden!r}, 'boxie_infra', 'playground_infra', 'boxie_test_support', 'pulumi', 'pytest'):
+for name in ({forbidden!r}, 'playground', 'playground_infra', 'boxie_infra', 'cli_playground_infra', 'boxie_test_support', 'pulumi', 'pytest'):
     assert importlib.util.find_spec(name) is None, name
 """
     if module == "boxie":
         probe += (
             "import boxie.bootstrap.api, boxie.bootstrap.orchestrator, boxie.bootstrap.workers\n"
+            "import boxie.observability.process, boxie.sandbox.execution.sandbox\n"
+            "from boxie.bootstrap.api import ApiProcessConfig\n"
+            "from boxie.observability.telemetry.logging import LogDispatcher\n"
+            "from boxie.sandbox.execution.sandbox import SandboxExecution\n"
             "from io import StringIO\n"
             "from alembic import command\n"
             "from boxie.persistence.migrate import migration_config\n"
@@ -111,8 +115,8 @@ for name in ({forbidden!r}, 'boxie_infra', 'playground_infra', 'boxie_test_suppo
         # Real installed assets via ASGI HTTP, without pytest/httpx or source imports.
         probe += """
 import asyncio, json, re
-from playground.app import create_app, STATIC_DIR
-from playground.config import Settings
+from cli_playground.app import create_app, STATIC_DIR
+from cli_playground.config import Settings
 secret = pathlib.Path('consumer.secret'); secret.write_text('isolated-consumer-secret'); secret.chmod(0o600)
 app = create_app(Settings(data_dir=pathlib.Path.cwd()/'data', public_url='http://localhost', deploy_token='local-token', boxie_url='http://127.0.0.1:1', boxie_credential_file=secret.absolute()))
 async def request(path):

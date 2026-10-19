@@ -38,14 +38,14 @@ pnpm --dir tools/cli-playground/frontend install --frozen-lockfile
 pnpm --dir tools/cli-playground/frontend build
 ```
 
-The Python package lives in `src/playground/`. The frontend build places real assets
-in `src/playground/static/`, included in the installed
+The Python package lives in `src/cli_playground/`. The frontend build places real assets
+in `src/cli_playground/static/`, included in the installed
 wheel and sdist. To run the installed service, set `PLAYGROUND_DATA_DIR`,
 `PLAYGROUND_PUBLIC_URL`, `PLAYGROUND_DEPLOY_TOKEN`, `PLAYGROUND_BOXIE_URL`, and
 `PLAYGROUND_BOXIE_CREDENTIAL_FILE` (a private regular file):
 
 ```sh
-uv run --locked --package cli-playground uvicorn playground.app:create_app \
+uv run --locked --package cli-playground uvicorn cli_playground.app:create_app \
   --factory --host 127.0.0.1 --port 8000 --workers 1 --no-proxy-headers
 ```
 

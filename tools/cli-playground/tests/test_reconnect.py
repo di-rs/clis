@@ -7,8 +7,8 @@ from uuid import UUID
 
 import pytest
 from boxie_test_support.terminal_network import attach
+from cli_playground import transport
 from fastapi import WebSocket
-from playground import transport
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 from websockets.typing import Origin

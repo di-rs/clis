@@ -412,7 +412,7 @@ def test_native_generic_product_and_browser(lifecycle_stack: LifecycleStack) -> 
     stack = lifecycle_stack
     for module, extra in (
         ("boxie_infra.smoke", []),
-        ("playground_infra.smoke", ["--binary", str(stack.binary)]),
+        ("cli_playground_infra.smoke", ["--binary", str(stack.binary)]),
     ):
         subprocess.run(
             [

@@ -61,10 +61,10 @@ def test_sandbox_update_preserves_boxie_image_and_custom_profile(tmp_path: Path)
     (config / "boxie-image.env").write_text("BOXIE_RUNTIME_IMAGE=" + boxie_image + "\n")
     owner = tmp_path / "owner"
     (owner / "profiles").mkdir(parents=True)
-    (owner / "playground_infra").mkdir()
+    (owner / "cli_playground_infra").mkdir()
     shutil.copy(
-        ROOT / "tools/cli-playground/infra/playground_infra/installation.py",
-        owner / "playground_infra/installation.py",
+        ROOT / "tools/cli-playground/infra/cli_playground_infra/installation.py",
+        owner / "cli_playground_infra/installation.py",
     )
     (owner / "profiles/playground.json").write_text(json.dumps(profile))
     docker = tmp_path / "docker"

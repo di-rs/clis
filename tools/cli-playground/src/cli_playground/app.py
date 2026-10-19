@@ -11,13 +11,13 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from playground.boxie_client import BoxieClient, HttpBoxieClient
-from playground.config import Settings
-from playground.routes import create_router
-from playground.service import PlaygroundService
-from playground.session_store import SessionStore
-from playground.storage import EnvironmentStore
-from playground.transport import RequestHostBoundary
+from cli_playground.boxie_client import BoxieClient, HttpBoxieClient
+from cli_playground.config import Settings
+from cli_playground.routes import create_router
+from cli_playground.service import CliPlaygroundService
+from cli_playground.session_store import SessionStore
+from cli_playground.storage import EnvironmentStore
+from cli_playground.transport import RequestHostBoundary
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -39,7 +39,7 @@ def create_app(
         if not 16 <= len(credential) <= 4096 or any(not 33 <= ord(c) <= 126 for c in credential):
             raise ValueError("invalid Boxie credential file")
         boxie = HttpBoxieClient(settings.boxie_url, credential)
-    service = PlaygroundService(
+    service = CliPlaygroundService(
         settings,
         EnvironmentStore(settings, clock=clock),
         SessionStore(settings.data_dir),

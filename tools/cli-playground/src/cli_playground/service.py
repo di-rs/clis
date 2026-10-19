@@ -16,16 +16,16 @@ from uuid import UUID, uuid4
 
 from anyio import CancelScope
 
-from playground.artifacts import canonical_archive, stage_archive
-from playground.boxie_client import (
+from cli_playground.artifacts import canonical_archive, stage_archive
+from cli_playground.boxie_client import (
     BoxieClient,
     BoxieUnavailable,
     SandboxRequest,
     SandboxView,
     validate_sandbox,
 )
-from playground.config import Settings
-from playground.models import (
+from cli_playground.config import Settings
+from cli_playground.models import (
     ArtifactIdentity,
     ArtifactMetadata,
     BuildIdentity,
@@ -33,8 +33,8 @@ from playground.models import (
     Environment,
     EnvironmentMetadata,
 )
-from playground.session_store import CreateIntent, SessionBinding, SessionStore, UploadIntent
-from playground.storage import ArtifactConflictError, EnvironmentStore
+from cli_playground.session_store import CreateIntent, SessionBinding, SessionStore, UploadIntent
+from cli_playground.storage import ArtifactConflictError, EnvironmentStore
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ class UploadTooLargeError(Exception):
     """An artifact exceeded the configured size limit."""
 
 
-class PlaygroundService:
+class CliPlaygroundService:
     def __init__(
         self,
         settings: Settings,

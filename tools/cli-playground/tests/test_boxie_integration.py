@@ -100,7 +100,7 @@ def test_authenticated_readiness_wait_is_not_an_abandoned_page_response(
     import json
     from uuid import UUID
 
-    from playground import boxie_client as client_module
+    from cli_playground import boxie_client as client_module
     from websockets.asyncio.client import connect
     from websockets.typing import Origin
 

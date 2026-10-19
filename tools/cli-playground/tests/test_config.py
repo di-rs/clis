@@ -3,8 +3,8 @@
 from pathlib import Path
 
 import pytest
-from playground.config import Settings
-from playground.storage import EnvironmentStore
+from cli_playground.config import Settings
+from cli_playground.storage import EnvironmentStore
 from pydantic import ValidationError
 
 
@@ -66,7 +66,7 @@ def test_readable_pr_hosts_bind_to_the_correct_preview() -> None:
 
 @pytest.mark.usefixtures("configured_environment")
 def test_composition_root_rejects_symlinked_consumer_credentials(tmp_path: Path) -> None:
-    from playground.app import create_app
+    from cli_playground.app import create_app
 
     secret = tmp_path / "actual-secret"
     secret.write_text("private-boxie-consumer-secret")

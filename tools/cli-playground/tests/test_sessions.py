@@ -5,10 +5,10 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
+from cli_playground.app import create_app
+from cli_playground.boxie_client import BoxieUnavailable, SandboxView
+from cli_playground.service import CliPlaygroundService
 from fastapi.testclient import TestClient
-from playground.app import create_app
-from playground.boxie_client import BoxieUnavailable, SandboxView
-from playground.service import PlaygroundService
 from starlette.websockets import WebSocketDisconnect
 
 from .boxie_fake import FakeBoxie
@@ -77,7 +77,7 @@ def test_first_frame_must_authenticate_before_upstream_attach(
 
 
 def test_copied_ids_cannot_attach_or_delete_and_no_raw_credential_is_persisted(
-    service: PlaygroundService,
+    service: CliPlaygroundService,
     api_client: TestClient,
 ) -> None:
     first, second = upload(api_client), upload(api_client, pr=456)
@@ -105,7 +105,7 @@ def test_copied_ids_cannot_attach_or_delete_and_no_raw_credential_is_persisted(
 
 
 def test_page_reload_gets_a_fresh_binding_and_backend_shutdown_keeps_claimed_sandbox(
-    service: PlaygroundService,
+    service: CliPlaygroundService,
     api_client: TestClient,
 ) -> None:
     identifier = upload(api_client)["id"]
@@ -125,7 +125,7 @@ def test_page_reload_gets_a_fresh_binding_and_backend_shutdown_keeps_claimed_san
 
 @pytest.mark.parametrize("expiry", [False, True])
 def test_stop_failure_survives_preview_removal_and_restart_without_touching_other_pr(
-    service: PlaygroundService,
+    service: CliPlaygroundService,
     api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     expiry: bool,

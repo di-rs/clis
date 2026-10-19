@@ -8,8 +8,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-from playground.boxie_client import SandboxRequest, SandboxView
-from playground.models import ArtifactMetadata, BuildIdentity
+from cli_playground.boxie_client import SandboxRequest, SandboxView
+from cli_playground.models import ArtifactMetadata, BuildIdentity
 
 
 def atomic_write(path: Path, data: bytes) -> None:

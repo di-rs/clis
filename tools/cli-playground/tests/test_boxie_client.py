@@ -7,8 +7,8 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from cli_playground.boxie_client import BoxieUnavailable, HttpBoxieClient
 from fastapi import FastAPI
-from playground.boxie_client import BoxieUnavailable, HttpBoxieClient
 
 from .boxie_network import serve
 
@@ -127,8 +127,8 @@ def test_sandbox_lifetime_cannot_drift_after_acceptance(method: str, field: str)
 
 @pytest.mark.parametrize("valid", [True, False])
 def test_terminal_adapter_validates_events_before_returning_them(valid: bool) -> None:
+    from cli_playground.terminal_protocol import Attached
     from fastapi import WebSocket
-    from playground.terminal_protocol import Attached
 
     async def exercise() -> None:
         peer = FastAPI()

@@ -12,8 +12,8 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationErro
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosedOK, WebSocketException
 
-from playground.terminal_protocol import TerminalEvent
-from playground.terminal_protocol import response as terminal_response
+from cli_playground.terminal_protocol import TerminalEvent
+from cli_playground.terminal_protocol import response as terminal_response
 
 
 class BoxieUnavailable(RuntimeError):

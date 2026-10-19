@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from playground.artifacts import MAX_ARCHIVE, MAX_BINARY
+from cli_playground.artifacts import MAX_ARCHIVE, MAX_BINARY
 
 
 class Settings(BaseSettings):

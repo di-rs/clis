@@ -6,8 +6,8 @@ from pathlib import Path
 
 import httpx
 import pytest
+from cli_playground.app import create_app
 from fastapi.testclient import TestClient
-from playground.app import create_app
 from starlette.websockets import WebSocketDisconnect
 
 from .boxie_fake import FakeBoxie

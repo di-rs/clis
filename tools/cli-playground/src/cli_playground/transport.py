@@ -14,12 +14,12 @@ from fastapi.responses import PlainTextResponse
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from playground.boxie_client import (
+from cli_playground.boxie_client import (
     TerminalPort,
     TerminalWriteClosed,
 )
-from playground.config import Settings
-from playground.terminal_protocol import (
+from cli_playground.config import Settings
+from cli_playground.terminal_protocol import (
     Ack,
     Attached,
     AttachRequest,

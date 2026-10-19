@@ -9,8 +9,8 @@ from uuid import UUID
 import aiohttp
 import pytest
 from boxie_test_support.terminal_network import attach
-from playground import boxie_client as client_module
-from playground.boxie_client import BoxieUnavailable
+from cli_playground import boxie_client as client_module
+from cli_playground.boxie_client import BoxieUnavailable
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosedError, InvalidStatus
 from websockets.typing import Origin

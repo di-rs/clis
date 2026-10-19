@@ -22,13 +22,13 @@ from fastapi import Path as PathParameter
 from fastapi.responses import FileResponse
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
-from playground.boxie_client import (
+from cli_playground.boxie_client import (
     BoxieUnavailable,
     SandboxState,
     TerminationReason,
     validate_sandbox,
 )
-from playground.models import (
+from cli_playground.models import (
     ID_PATTERN,
     SHA_PATTERN,
     ArtifactRevision,
@@ -38,16 +38,16 @@ from playground.models import (
     DeploymentResult,
     EnvironmentMetadata,
 )
-from playground.service import PlaygroundService, UploadBusyError, UploadTooLargeError
-from playground.storage import ArtifactConflictError
-from playground.terminal_protocol import (
+from cli_playground.service import CliPlaygroundService, UploadBusyError, UploadTooLargeError
+from cli_playground.storage import ArtifactConflictError
+from cli_playground.terminal_protocol import (
     AttachRequest,
     UpstreamAttach,
 )
-from playground.transport import bridge_terminal, close_terminal
+from cli_playground.transport import bridge_terminal, close_terminal
 
 
-def create_router(service: PlaygroundService, static_dir: Path) -> APIRouter:
+def create_router(service: CliPlaygroundService, static_dir: Path) -> APIRouter:
     router = APIRouter()
     settings = service.settings
 

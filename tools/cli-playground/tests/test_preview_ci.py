@@ -19,8 +19,8 @@ from unittest.mock import Mock
 import httpx
 import preview_ci
 import pytest
+from cli_playground import artifacts
 from githubkit import GitHub, TokenAuthStrategy
-from playground import artifacts
 
 from .helpers import clean_git_env, elf_binary, git_commit
 

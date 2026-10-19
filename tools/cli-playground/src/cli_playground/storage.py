@@ -10,9 +10,9 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from playground.artifacts import validate_elf_header
-from playground.config import Settings
-from playground.models import (
+from cli_playground.artifacts import validate_elf_header
+from cli_playground.config import Settings
+from cli_playground.models import (
     ID_PATTERN,
     ArtifactMetadata,
     BuildIdentity,
@@ -57,12 +57,12 @@ class EnvironmentStore:
         return (self.closed / str(pr)).exists()
 
     def close_pull_request(self, pr: int) -> None:
-        from playground.session_store import atomic_write
+        from cli_playground.session_store import atomic_write
 
         atomic_write(self.closed / str(pr), b"")
 
     def reopen_pull_request(self, pr: int) -> None:
-        from playground.session_store import unlink_and_sync
+        from cli_playground.session_store import unlink_and_sync
 
         unlink_and_sync(self.closed / str(pr))
 
@@ -198,7 +198,7 @@ class EnvironmentStore:
         return ArtifactMetadata.model_validate_json(path.read_bytes()) if path.exists() else None
 
     def publish(self, artifact: ArtifactMetadata, build: BuildIdentity | None) -> Environment:
-        from playground.session_store import atomic_write
+        from cli_playground.session_store import atomic_write
 
         self.check_build(artifact.pr, build)
         if build is not None and build.sha != artifact.sha:
