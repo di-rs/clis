@@ -96,7 +96,7 @@ for name in ({forbidden!r}, 'boxie_infra', 'playground_infra', 'boxie_test_suppo
 """
     if module == "boxie":
         probe += (
-            "import boxie.bootstrap.api, boxie.bootstrap.orchestrator, boxie.bootstrap.runtime\n"
+            "import boxie.bootstrap.api, boxie.bootstrap.orchestrator, boxie.bootstrap.workers\n"
             "from io import StringIO\n"
             "from alembic import command\n"
             "from boxie.persistence.migrate import migration_config\n"

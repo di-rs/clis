@@ -106,7 +106,7 @@ def _exception(error: BaseException) -> dict[str, object]:
     }
 
 
-class LogRuntime(QueueListener):
+class LogDispatcher(QueueListener):
     def __init__(
         self,
         settings: LogSettings,
@@ -272,20 +272,20 @@ class LogRuntime(QueueListener):
 
 
 class _Handler(logging.Handler):
-    def __init__(self, runtime: LogRuntime) -> None:
+    def __init__(self, dispatcher: LogDispatcher) -> None:
         super().__init__()
-        self.runtime = runtime
+        self.dispatcher = dispatcher
 
     def emit(self, record: logging.LogRecord) -> None:
         event = "foreign_log"
         if type(record.msg) is str and len(record.msg) <= 256 and type(record.name) is str:
-            event = self.runtime._routes.get((record.name, record.msg), event)
+            event = self.dispatcher._routes.get((record.name, record.msg), event)
         error = record.exc_info[1] if record.exc_info else None
-        self.runtime.emit(event, level=record.levelno, logger=record.name, error=error)
+        self.dispatcher.emit(event, level=record.levelno, logger=record.name, error=error)
         # Deliberately never getMessage(), format(), formatException() or handleError().
 
 
-_runtime: LogRuntime | None = None
+_dispatcher: LogDispatcher | None = None
 _config_lock = threading.Lock()
 
 
@@ -295,13 +295,13 @@ def configure_logging(
     events: Mapping[str, str] | None = None,
     routes: Mapping[tuple[str, str], str] | None = None,
     _bootstrap: bool = False,
-) -> LogRuntime:
-    global _runtime
+) -> LogDispatcher:
+    global _dispatcher
     with _config_lock:
-        if _runtime is not None:
-            if _runtime.settings != settings:
-                _runtime.configuration_error()
-            return _runtime
+        if _dispatcher is not None:
+            if _dispatcher.settings != settings:
+                _dispatcher.configuration_error()
+            return _dispatcher
         sink: int | None = None
         state = "unavailable"
         try:
@@ -312,8 +312,10 @@ def configure_logging(
             if sink is not None:
                 os.close(sink)
                 sink = None
-        _runtime = runtime = LogRuntime(settings, events or {}, routes or {}, sink, 8192, state)
-        handler = _Handler(runtime)
+        _dispatcher = dispatcher = LogDispatcher(
+            settings, events or {}, routes or {}, sink, 8192, state
+        )
+        handler = _Handler(dispatcher)
         root = logging.getLogger()
         root.handlers[:] = [handler]
         root.setLevel(settings.level)
@@ -326,9 +328,9 @@ def configure_logging(
                 value.propagate = True
 
         if _bootstrap:
-            _install_hooks(runtime)
-            atexit.register(runtime.close)
-        return runtime
+            _install_hooks(dispatcher)
+            atexit.register(dispatcher.close)
+        return dispatcher
 
 
 def bootstrap_logging(
@@ -336,32 +338,32 @@ def bootstrap_logging(
     *,
     events: Mapping[str, str] | None = None,
     routes: Mapping[tuple[str, str], str] | None = None,
-) -> LogRuntime:
+) -> LogDispatcher:
     """Configure process logging after CLI parsing, preserving standard streams."""
     return configure_logging(settings, events=events, routes=routes, _bootstrap=True)
 
 
-def _install_hooks(runtime: LogRuntime) -> None:
+def _install_hooks(dispatcher: LogDispatcher) -> None:
     def exception_hook(
         _kind: type[BaseException], error: BaseException, _tb: TracebackType | None
     ) -> None:
-        runtime.emit("process_failed", level=logging.ERROR, error=error)
+        dispatcher.emit("process_failed", level=logging.ERROR, error=error)
 
     def thread_hook(args: threading.ExceptHookArgs) -> None:
-        runtime.emit("thread_failed", level=logging.ERROR, error=args.exc_value)
+        dispatcher.emit("thread_failed", level=logging.ERROR, error=args.exc_value)
 
     def unraisable_hook(args: Any) -> None:
-        runtime.emit("unraisable_failed", level=logging.ERROR, error=args.exc_value)
+        dispatcher.emit("unraisable_failed", level=logging.ERROR, error=args.exc_value)
 
     sys.excepthook = exception_hook
     threading.excepthook = thread_hook
     sys.unraisablehook = unraisable_hook
 
 
-def install_asyncio_handler(runtime: LogRuntime) -> None:
+def install_asyncio_handler(dispatcher: LogDispatcher) -> None:
     def exception_handler(_loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
         error = context.get("exception")
-        runtime.emit(
+        dispatcher.emit(
             "async_failed",
             level=logging.ERROR,
             error=error if isinstance(error, BaseException) else None,
@@ -371,7 +373,7 @@ def install_asyncio_handler(runtime: LogRuntime) -> None:
 
 
 def run_process(
-    runtime: LogRuntime,
+    dispatcher: LogDispatcher,
     run: Callable[[], None],
     *,
     close_metrics: Callable[[float], None] | None = None,
@@ -380,28 +382,28 @@ def run_process(
         run()
     except BaseException as error:
         if not isinstance(error, SystemExit) or error.code:
-            runtime.emit("process_failed", level=logging.ERROR, error=error)
+            dispatcher.emit("process_failed", level=logging.ERROR, error=error)
         if isinstance(error, (SystemExit, KeyboardInterrupt)):
             raise
         raise SystemExit(1) from None
     finally:
         # This owner runs after asyncio.run has returned. Start log drain before
         # stopping/joining the metrics listener, sharing one terminal deadline.
-        deadline = runtime.begin_close()
+        deadline = dispatcher.begin_close()
         try:
             if close_metrics is not None:
                 close_metrics(max(0.0, deadline - time.monotonic()))
         finally:
-            runtime.close(max(0.0, deadline - time.monotonic()))
+            dispatcher.close(max(0.0, deadline - time.monotonic()))
 
 
-def log_runtime() -> LogRuntime:
-    """Return the explicitly initialized process runtime for composition code."""
-    if _runtime is None:
+def log_dispatcher() -> LogDispatcher:
+    """Return the explicitly initialized log dispatcher for composition code."""
+    if _dispatcher is None:
         raise RuntimeError("logging not configured")
-    return _runtime
+    return _dispatcher
 
 
-def configured_runtime() -> LogRuntime | None:
+def configured_dispatcher() -> LogDispatcher | None:
     """Inspect without initialization; safe for embeddable app factories."""
-    return _runtime
+    return _dispatcher

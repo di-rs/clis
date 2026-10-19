@@ -330,18 +330,18 @@ API. Routes receive those interfaces directly.
 
 The orchestrator implementation is grouped by responsibility:
 
-- `sandbox/execution/`: coordination, one runtime owner per sandbox, journal,
+- `sandbox/execution/`: coordination, one execution owner per sandbox, journal,
   provisioning, physical reconciliation and retention.
 - `sandbox/terminal/`: PTY reader, bounded replay and WebSocket session delivery.
 - `sandbox/transport/`: authenticated orchestrator client/server and terminal relay.
 - `bootstrap/`: configuration loading, dependency construction, readiness probes
   and background service startup/shutdown.
 
-Each `ExecutionRuntime` owns its locks, deadlines, tasks, terminal and session
+Each `SandboxExecution` owns its locks, deadlines, tasks, terminal and session
 references. Persisted `ExecutionRecord` values retain the existing journal format.
-A terminal session pins its runtime until WebSocket delivery and closing finish;
+A terminal session pins its execution until WebSocket delivery and closing finish;
 retention requires settled local work, a saved removal confirmation and the
-existing control-plane receipt before removing the record and runtime together.
+existing control-plane receipt before removing the record and execution together.
 Network adapters validate incoming terminal controls once and return typed events
 to relays, which serialize them for the next connection.
 
@@ -352,7 +352,7 @@ workers on installation/host-specific lifecycle and maintenance queues. Its OS
 owner lock excludes a second process using the same data directory. An
 orchestrator restart also restarts its workers and ends existing terminals.
 
-Provisioning activities await the local runtime. Normal cleanup retries,
+Provisioning activities await the local execution. Normal cleanup retries,
 30-second inspection, command recovery, artifact collection, journal compaction
 and SQL retention are driven by Temporal. Local safety enforcement and journal
 flushes remain independent of Temporal availability. SQL admission/stop and the

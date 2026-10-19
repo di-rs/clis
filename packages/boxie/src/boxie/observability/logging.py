@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from boxie.observability.events import EVENTS
 from boxie.observability.telemetry import logging as producer
 from boxie.observability.telemetry.asgi import RequestLogging as RequestLogging
-from boxie.observability.telemetry.logging import LogRuntime as LogRuntime
+from boxie.observability.telemetry.logging import LogDispatcher as LogDispatcher
 from boxie.observability.telemetry.logging import LogSettings as LogSettings
 
 if TYPE_CHECKING:
@@ -47,21 +47,21 @@ _EVENTS = {
 }
 
 
-def configure_logging(settings: LogSettings) -> LogRuntime:
+def configure_logging(settings: LogSettings) -> LogDispatcher:
     return producer.configure_logging(settings, events=_EVENTS, routes=_ROUTES)
 
 
-def bootstrap_logging(settings: LogSettings) -> LogRuntime:
+def bootstrap_logging(settings: LogSettings) -> LogDispatcher:
     return producer.bootstrap_logging(settings, events=_EVENTS, routes=_ROUTES)
 
 
-def process_logging(role: str) -> LogRuntime:
-    runtime = bootstrap_logging(
+def process_logging(role: str) -> LogDispatcher:
+    dispatcher = bootstrap_logging(
         LogSettings(service="boxie", role=role, release=os.environ.get("BOXIE_RELEASE", "unknown"))
     )
     global _temporal_runtime
     if _temporal_runtime is not None:
-        return runtime
+        return dispatcher
     # SDK adapter remains replay aware. Raw suffixes and full Info never enter logs.
     from temporalio import activity, workflow
     from temporalio.runtime import (
@@ -100,7 +100,7 @@ def process_logging(role: str) -> LogRuntime:
     except Exception:
         # The native Runtime has no public close. Own one successful fallback
         # until restart, rather than reconstructing successful runtimes on retries.
-        runtime.configuration_error()
+        dispatcher.configuration_error()
         _temporal_runtime = Runtime(telemetry=TelemetryConfig(logging=logging_config))
     Runtime.set_default(_temporal_runtime)
-    return runtime
+    return dispatcher

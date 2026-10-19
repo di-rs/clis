@@ -44,28 +44,28 @@ def test_final_record_requires_receipt_and_settled_sessions(tmp_path: Path) -> N
         await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
         await asyncio.gather(
             *(
-                runtime.activity
-                for runtime in orchestrator.runtimes.values()
-                if runtime.activity is not None
+                execution.activity
+                for execution in orchestrator.executions.values()
+                if execution.activity is not None
             )
         )
         await orchestrator.compact()
         assert request.ref.id in orchestrator.records
         guard.receipt = True
-        orchestrator.runtimes[request.ref.id].sessions = 1
+        orchestrator.executions[request.ref.id].sessions = 1
         await orchestrator.compact()
         assert request.ref.id in orchestrator.records
-        orchestrator.runtimes[request.ref.id].sessions = 0
+        orchestrator.executions[request.ref.id].sessions = 0
         await orchestrator.compact()
-        assert not orchestrator.records and not orchestrator.runtimes
+        assert not orchestrator.records and not orchestrator.executions
         assert json.loads(orchestrator.journal.path.read_bytes())["records"] == []
         guard.missing = True
         with pytest.raises(BoxieError):
             await launch_execution(orchestrator, request)
-        assert not orchestrator.records and not orchestrator.runtimes
+        assert not orchestrator.records and not orchestrator.executions
         with pytest.raises(BoxieError):
             await orchestrator.inspect(SandboxRef(uuid4(), 1))
-        assert not orchestrator.runtimes
+        assert not orchestrator.executions
         await orchestrator.close()
 
     asyncio.run(exercise())
@@ -98,7 +98,7 @@ def test_concurrent_compaction_skips_records_already_forgotten(
         try:
             await asyncio.wait_for(entered.wait(), 1)
             await orchestrator.compact()
-            assert not orchestrator.records and not orchestrator.runtimes
+            assert not orchestrator.records and not orchestrator.executions
             release.set()
             await slow
             assert json.loads(orchestrator.journal.path.read_bytes())["records"] == []
@@ -120,9 +120,9 @@ def test_compaction_failure_preserves_barrier_and_readiness(
         await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
         await asyncio.gather(
             *(
-                runtime.activity
-                for runtime in orchestrator.runtimes.values()
-                if runtime.activity is not None
+                execution.activity
+                for execution in orchestrator.executions.values()
+                if execution.activity is not None
             )
         )
         guard.receipt = True
@@ -171,7 +171,7 @@ def test_admission_ceiling_serializes_live_and_cleanup_headroom(tmp_path: Path) 
     from dataclasses import replace
 
     from boxie.sandbox.execution.journal import ExecutionRecord
-    from boxie.sandbox.execution.runtime import ExecutionRuntime
+    from boxie.sandbox.execution.sandbox import SandboxExecution
 
     async def exercise() -> None:
         orchestrator, request, _, _, guard = await setup(tmp_path)
@@ -184,7 +184,7 @@ def test_admission_ceiling_serializes_live_and_cleanup_headroom(tmp_path: Path) 
             record = ExecutionRecord.model_validate(original.model_dump())
             record.id = uuid4()
             orchestrator.records[record.id] = record
-            orchestrator.runtimes[record.id] = ExecutionRuntime(orchestrator, record)
+            orchestrator.executions[record.id] = SandboxExecution(orchestrator, record)
         orchestrator._save()
         requests = [replace(request, ref=SandboxRef(uuid4(), 1)) for _ in range(10)]
         results = await asyncio.gather(
@@ -201,9 +201,9 @@ def test_admission_ceiling_serializes_live_and_cleanup_headroom(tmp_path: Path) 
         assert sum(isinstance(r, BoxieError) and r.status == 503 for r in results) == 4
         await asyncio.gather(
             *(
-                runtime.activity
-                for runtime in orchestrator.runtimes.values()
-                if runtime.activity is not None
+                execution.activity
+                for execution in orchestrator.executions.values()
+                if execution.activity is not None
             )
         )
         more = replace(request, ref=SandboxRef(uuid4(), 1))
@@ -238,7 +238,7 @@ def test_final_reader_callback_settles_before_forgetting(tmp_path: Path) -> None
     async def exercise() -> None:
         orchestrator, request, daemon, _, guard = await setup(tmp_path)
         await settled(orchestrator, request.ref, SandboxState.READY)
-        terminal = orchestrator.runtimes[request.ref.id].pty
+        terminal = orchestrator.executions[request.ref.id].pty
         original = terminal.terminate
         entered, release = asyncio.Event(), asyncio.Event()
 
@@ -301,14 +301,14 @@ def test_active_final_protocol_session_blocks_compaction(
                 await net.orchestrator.compact()
                 assert (
                     ref.id in net.orchestrator.records
-                    and net.orchestrator.runtimes[ref.id].sessions == 1
+                    and net.orchestrator.executions[ref.id].sessions == 1
                 )
                 release.set()
             for _ in range(100):
-                if not any(r.sessions for r in net.orchestrator.runtimes.values()):
+                if not any(r.sessions for r in net.orchestrator.executions.values()):
                     break
                 await asyncio.sleep(0.01)
-            assert not any(r.sessions for r in net.orchestrator.runtimes.values())
+            assert not any(r.sessions for r in net.orchestrator.executions.values())
             await net.orchestrator.compact()
             assert not net.orchestrator.records
 
@@ -326,12 +326,12 @@ def test_unknown_create_deleted_during_failed_save_remains_uncertain_after_resta
         daemon.create_gate = asyncio.Event()
         daemon.lost_ack = True
         await daemon.create_entered.wait()
-        worker = orchestrator.runtimes[request.ref.id].activity
+        worker = orchestrator.executions[request.ref.id].activity
         assert worker is not None
         worker.cancel()
         await asyncio.gather(worker, return_exceptions=True)
         daemon.create_gate.set()
-        creating = orchestrator.runtimes[request.ref.id].create
+        creating = orchestrator.executions[request.ref.id].create
         assert creating is not None
         await creating
         assert daemon.resources and not daemon.started
@@ -371,7 +371,7 @@ def test_unknown_create_deleted_during_failed_save_remains_uncertain_after_resta
         pending = await recovered.inspect(request.ref)
         assert pending.cleanup_pending and not pending.removal_confirmed
         assert recovered.records[request.ref.id].creation_uncertain
-        assert not any(r.terminal for r in recovered.runtimes.values()) and not daemon.started
+        assert not any(r.terminal for r in recovered.executions.values()) and not daemon.started
         await recovered.compact()
         assert request.ref.id in recovered.records
         await recovered.close()
@@ -386,9 +386,9 @@ def test_receipt_error_and_changed_version_never_authorize_forgetting(tmp_path: 
         await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
         await asyncio.gather(
             *(
-                runtime.activity
-                for runtime in orchestrator.runtimes.values()
-                if runtime.activity is not None
+                execution.activity
+                for execution in orchestrator.executions.values()
+                if execution.activity is not None
             )
         )
 

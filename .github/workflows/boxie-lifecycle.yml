@@ -91,7 +91,7 @@ jobs:
       - name: ⏳ Verify Python imports and pinned Temporal test server
         timeout-minutes: 3
         run: |
-          uv run --locked python -c 'import temporalio.bridge.temporal_sdk_bridge; import boxie.bootstrap.runtime'
+          uv run --locked python -c 'import temporalio.bridge.temporal_sdk_bridge; import boxie.bootstrap.workers'
           uv run --locked python - <<'PYTHON'
           import hashlib, io, json, os, pathlib, tarfile, urllib.request
           pins = json.loads(pathlib.Path("packages/boxie/tests/test-server-pins.json").read_text())

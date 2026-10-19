@@ -29,7 +29,7 @@ def create_orchestrator_app(
     artifacts: PostgresArtifactStore,
     *,
     credential: bytes,
-    runtime: Callable[[], AbstractAsyncContextManager[None]] | None = None,
+    workers: Callable[[], AbstractAsyncContextManager[None]] | None = None,
     request_completed: Callable[[str, str, str, float], None] | None = None,
 ) -> FastAPI:
     """Compose process services; the HTTP adapter receives only its required ports."""
@@ -58,7 +58,7 @@ def create_orchestrator_app(
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await orchestrator.start()
         try:
-            async with runtime() if runtime is not None else nullcontext():
+            async with workers() if workers is not None else nullcontext():
                 yield
         finally:
             await orchestrator.close()
@@ -73,13 +73,13 @@ def create_orchestrator_app(
 def _main(metrics: Metrics, config_path: Path) -> None:
     import uvicorn
 
-    from boxie.bootstrap.runtime import embedded_workers
-    from boxie.observability.runtime import (
+    from boxie.bootstrap.workers import embedded_workers
+    from boxie.observability.process import (
         background,
         orchestrator_cache,
         orchestrator_dependencies,
     )
-    from boxie.observability.telemetry.logging import install_asyncio_handler, log_runtime
+    from boxie.observability.telemetry.logging import install_asyncio_handler, log_dispatcher
     from boxie.persistence.postgres import PostgresLifecycle
     from boxie.persistence.start_guard import PostgresStartGuard
     from boxie.sandbox.docker import DockerBackend
@@ -94,7 +94,7 @@ def _main(metrics: Metrics, config_path: Path) -> None:
     dsn_file = lifecycle.postgres_dsn_file
 
     async def run() -> None:
-        install_asyncio_handler(log_runtime())
+        install_asyncio_handler(log_dispatcher())
         with acquire_owner_lock(config.data_dir):
             await run_owned()
 
@@ -124,7 +124,7 @@ def _main(metrics: Metrics, config_path: Path) -> None:
                 artifacts,
                 credential=credential,
                 request_completed=metrics.http_completed,
-                runtime=lambda: embedded_workers(client, repository, orchestrator, artifacts),
+                workers=lambda: embedded_workers(client, repository, orchestrator, artifacts),
             )
 
             def reload_profiles() -> None:
@@ -169,7 +169,7 @@ def main() -> None:
     from boxie.observability.logging import process_logging
 
     logs = process_logging("orchestrator")
-    from boxie.observability.runtime import run_metrics_process
+    from boxie.observability.process import run_metrics_process
 
     run_metrics_process(logs, "orchestrator", lambda metrics: _main(metrics, args.config))
 

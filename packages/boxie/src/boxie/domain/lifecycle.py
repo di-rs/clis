@@ -40,7 +40,7 @@ class OrchestratorObservation:
     Boot changes require an explicit compare-and-set bind_orchestrator_boot call by a
     trusted control-plane caller; a report cannot select its own current boot.
     removal_confirmed means a successful physical absence check, never merely a
-    terminal state or an unavailable runtime. Versions are monotonic per boot.
+    terminal state or unavailable sandbox execution. Versions are monotonic per boot.
     """
 
     sandbox_id: UUID

@@ -161,15 +161,17 @@ with socket.socket() as occupied:
 
 
 def test_disabled_log_sink_is_visible_without_traffic() -> None:
-    from boxie.observability.telemetry.logging import LogRuntime, LogSettings
+    from boxie.observability.telemetry.logging import LogDispatcher, LogSettings
     from boxie.observability.telemetry.metrics import ProcessMetrics
 
-    runtime = LogRuntime(LogSettings(service="boxie", role="api"), {}, {}, None, 4096, "disabled")
+    dispatcher = LogDispatcher(
+        LogSettings(service="boxie", role="api"), {}, {}, None, 4096, "disabled"
+    )
     try:
-        body = ProcessMetrics("boxie", logs=runtime).render()
+        body = ProcessMetrics("boxie", logs=dispatcher).render()
         assert b"boxie_log_sink_available 0.0" in body
     finally:
-        runtime.close()
+        dispatcher.close()
 
 
 @pytest.mark.parametrize("cancel", [False, True])
@@ -182,12 +184,16 @@ def test_disconnect_completion_is_cancelled_once(
 
     from boxie.observability.metrics import Metrics
     from boxie.observability.telemetry.asgi import RequestLogging
-    from boxie.observability.telemetry.logging import LogRuntime, LogSettings
+    from boxie.observability.telemetry.logging import LogDispatcher, LogSettings
 
     read, write = os.pipe()
-    runtime = LogRuntime(LogSettings(service="boxie", role="api"), {}, {}, write, 4096, "enabled")
+    dispatcher = LogDispatcher(
+        LogSettings(service="boxie", role="api"), {}, {}, write, 4096, "enabled"
+    )
     metrics = Metrics("api")
-    monkeypatch.setattr("boxie.observability.telemetry.asgi.configured_runtime", lambda: runtime)
+    monkeypatch.setattr(
+        "boxie.observability.telemetry.asgi.configured_dispatcher", lambda: dispatcher
+    )
 
     async def receive() -> dict[str, str]:
         return {"type": "http.disconnect"}
@@ -214,7 +220,7 @@ def test_disconnect_completion_is_cancelled_once(
 
     try:
         asyncio.run(exercise())
-        runtime.close()
+        dispatcher.close()
         records = [json.loads(line) for line in os.read(read, 65536).splitlines()]
         assert len(records) == 1
         assert records[0]["event"] == "request.completed"
@@ -224,7 +230,7 @@ def test_disconnect_completion_is_cancelled_once(
             in metrics.render()
         )
     finally:
-        runtime.close()
+        dispatcher.close()
         os.close(read)
 
 
@@ -236,7 +242,7 @@ def test_dependency_probes_follow_configured_namespace_and_owned_queues() -> Non
 
     from boxie.domain.models import OrchestratorIdentity
     from boxie.observability.metrics import Metrics
-    from boxie.observability.runtime import api_dependencies
+    from boxie.observability.process import api_dependencies
     from boxie.temporal.contracts import lifecycle_queue, maintenance_queue
     from google.protobuf.timestamp_pb2 import Timestamp
     from temporalio.api.taskqueue.v1 import PollerInfo
@@ -307,12 +313,14 @@ def test_dependency_probes_follow_configured_namespace_and_owned_queues() -> Non
 def test_invalid_metrics_bind_does_not_prevent_application_start(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from boxie.observability.runtime import run_metrics_process
-    from boxie.observability.telemetry.logging import LogRuntime, LogSettings
+    from boxie.observability.process import run_metrics_process
+    from boxie.observability.telemetry.logging import LogDispatcher, LogSettings
 
-    runtime = LogRuntime(LogSettings(service="boxie", role="api"), {}, {}, None, 4096, "disabled")
+    dispatcher = LogDispatcher(
+        LogSettings(service="boxie", role="api"), {}, {}, None, 4096, "disabled"
+    )
     monkeypatch.setenv("BOXIE_METRICS_HOST", "never-log-this.invalid")
     started: list[str] = []
-    run_metrics_process(runtime, "api", lambda metrics: started.append(metrics.role))
+    run_metrics_process(dispatcher, "api", lambda metrics: started.append(metrics.role))
     assert started == ["api"]
-    assert runtime.stats.configuration_errors == 1
+    assert dispatcher.stats.configuration_errors == 1

@@ -20,7 +20,7 @@ from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import SandboxRef
 from boxie.domain.models import SandboxState
 from boxie.sandbox.execution.orchestrator import Orchestrator
-from boxie.sandbox.execution.runtime import TerminalSession
+from boxie.sandbox.execution.sandbox import TerminalSession
 from boxie.sandbox.terminal.replay import StreamGap
 
 SEND_TIMEOUT = 10.0

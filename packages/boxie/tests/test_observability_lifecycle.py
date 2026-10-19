@@ -230,7 +230,7 @@ def test_real_sql_http_worker_history_replay_does_not_emit(
     from typing import Any, cast
     from uuid import UUID
 
-    from boxie.bootstrap.runtime import embedded_workers
+    from boxie.bootstrap.workers import embedded_workers
     from boxie.observability.metrics import Metrics
     from boxie.observability.snapshot import operational_snapshot
     from boxie.temporal.workflows import SandboxLifecycle
@@ -289,20 +289,20 @@ def test_domain_events_reach_safe_logging_catalog() -> None:
     import os
 
     from boxie.observability.events import EVENTS
-    from boxie.observability.telemetry.logging import LogRuntime, LogSettings
+    from boxie.observability.telemetry.logging import LogDispatcher, LogSettings
 
     read, write = os.pipe()
-    runtime = LogRuntime(
+    dispatcher = LogDispatcher(
         LogSettings(service="boxie", role="api"), EVENTS, {}, write, 4096, "enabled"
     )
     try:
         for event in EVENTS:
-            runtime.emit(
+            dispatcher.emit(
                 event,
                 sandbox_id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
                 reason="provisioning_failed",
             )
-        runtime.close()
+        dispatcher.close()
         records = [json.loads(line) for line in os.read(read, 65536).splitlines()]
         assert {item["event"] for item in records} == set(EVENTS)
         assert all(item["reason"] == "provisioning_failed" for item in records)

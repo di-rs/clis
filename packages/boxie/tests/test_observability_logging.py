@@ -14,7 +14,7 @@ from dataclasses import asdict
 from uuid import UUID
 from boxie.observability.logging import LogSettings, configure_logging, bootstrap_logging
 from boxie.observability.context import bind_context
-runtime = bootstrap_logging(LogSettings(service="boxie", role="api"))
+dispatcher = bootstrap_logging(LogSettings(service="boxie", role="api"))
 """
 SECRET = "SENTINEL_http_auth_terminal_history_secret"
 
@@ -51,19 +51,19 @@ def records(result: subprocess.CompletedProcess[str]) -> list[dict[str, object]]
 
 def test_json_context_isolation_and_terminal_close() -> None:
     result = child("""
-assert configure_logging(runtime.settings) is runtime
-assert configure_logging(LogSettings(service="boxie", role="orchestrator")) is runtime
+assert configure_logging(dispatcher.settings) is dispatcher
+assert configure_logging(LogSettings(service="boxie", role="orchestrator")) is dispatcher
 async def task(number):
     with bind_context(request_id=str(UUID(int=number))):
         await asyncio.sleep(0)
-        runtime.emit("request.completed", duration_ms=number)
+        dispatcher.emit("request.completed", duration_ms=number)
 async def run(): await asyncio.gather(task(1), task(2))
 asyncio.run(run())
-runtime.emit("request.completed")
-assert runtime.stats.configuration_errors == 1
-runtime.close()
-assert configure_logging(runtime.settings) is runtime
-assert runtime.stats.closed
+dispatcher.emit("request.completed")
+assert dispatcher.stats.configuration_errors == 1
+dispatcher.close()
+assert configure_logging(dispatcher.settings) is dispatcher
+assert dispatcher.stats.closed
 """)
     events = records(result)
     assert [event.get("request_id") for event in events] == [
@@ -89,8 +89,8 @@ try:
         raise RuntimeError(secret) from e
 except RuntimeError:
     logging.getLogger("uvicorn.error").exception(secret)
-    runtime.emit("request.completed", error=sys.exception(), request_id=secret, token=secret)
-runtime.close()
+    dispatcher.emit("request.completed", error=sys.exception(), request_id=secret, token=secret)
+dispatcher.close()
 """)
     events = records(result)
     assert SECRET not in result.stdout + result.stderr
@@ -125,7 +125,7 @@ class Ports:
         assert principal.consumer_id == "one"
         assert str(identifier) == "11111111-1111-1111-1111-111111111111"
 ports = Ports()
-metrics = Metrics("api", logs=runtime)
+metrics = Metrics("api", logs=dispatcher)
 app = create_app(
     ApiConfig(release="test", consumers={{"one":b"consumer-one-secret"}}),
     ports, ports, ports, request_completed=metrics.http_completed,
@@ -139,7 +139,7 @@ asyncio.run(run())
 route = {path!r} if {method!r} == "GET" else "/v1/artifacts/{{artifact_id}}"
 sample = f'boxie_http_requests_total{{{{method="{method}",route="{{route}}",status_class="{status // 100}xx"}}}} 1.0'
 assert sample.encode() in metrics.render()
-runtime.close()
+dispatcher.close()
 """)
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stderr == ""
@@ -192,8 +192,8 @@ def test_file_sink_and_standard_streams_remain_usable(tmp_path: Path) -> None:
                 + """
 assert os.get_blocking(1)
 os.write(2, b"terminal remains usable\\n")
-runtime.emit("request.completed")
-runtime.close()
+dispatcher.emit("request.completed")
+dispatcher.close()
 """,
             ],
             stdout=sink,
@@ -228,10 +228,10 @@ def test_unicode_messages_and_context_ids_stay_intact() -> None:
     code = """
 from boxie.observability.telemetry.logging import bootstrap_logging, LogSettings
 from boxie.observability.telemetry.context import bind_context
-runtime = bootstrap_logging(LogSettings(service="boxie", role="api"), events={"multiline": "é\\n" * 64})
+dispatcher = bootstrap_logging(LogSettings(service="boxie", role="api"), events={"multiline": "é\\n" * 64})
 with bind_context(request_id="11111111-1111-1111-1111-111111111111", workflow_id="boxie/sandbox/11111111-1111-1111-1111-111111111111"):
-    runtime.emit("multiline")
-runtime.close()
+    dispatcher.emit("multiline")
+dispatcher.close()
 """
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=5)
     events = records(result)
@@ -243,16 +243,16 @@ runtime.close()
 def test_oversize_record_is_dropped_whole(tmp_path: Path) -> None:
     import os
 
-    from boxie.observability.telemetry.logging import LogRuntime, LogSettings
+    from boxie.observability.telemetry.logging import LogDispatcher, LogSettings
 
     output = tmp_path / "events.jsonl"
     with output.open("wb") as sink:
-        runtime = LogRuntime(
+        dispatcher = LogDispatcher(
             LogSettings(service="boxie", role="api"), {}, {}, os.dup(sink.fileno()), 512, "enabled"
         )
         try:
             identifier = "11111111-1111-1111-1111-111111111111"
-            runtime.emit(
+            dispatcher.emit(
                 "request.completed",
                 request_id=identifier,
                 sandbox_id=identifier,
@@ -261,10 +261,10 @@ def test_oversize_record_is_dropped_whole(tmp_path: Path) -> None:
                 workflow_id="boxie/sandbox/" + identifier,
             )
         finally:
-            runtime.close()
+            dispatcher.close()
     assert output.read_bytes() == b""
-    assert runtime.stats.dropped_count == 1
-    assert runtime.stats.queued_records == 0
+    assert dispatcher.stats.dropped_count == 1
+    assert dispatcher.stats.queued_records == 0
 
 
 def test_thread_asyncio_and_unraisable_hooks() -> None:
@@ -278,10 +278,10 @@ class Unraisable:
     def __del__(self): raise KeyError(secret)
 Unraisable(); gc.collect()
 async def run():
-    install_asyncio_handler(runtime)
+    install_asyncio_handler(dispatcher)
     asyncio.get_running_loop().call_exception_handler({{"message":secret,"exception":RuntimeError(secret)}})
 asyncio.run(run())
-runtime.close()
+dispatcher.close()
 """)
     events = records(result)
     assert {event["event"] for event in events} == {
@@ -301,11 +301,11 @@ def test_broken_reader_disables_delivery(tmp_path: Path) -> None:
             PRELUDE
             + f"""
 for _ in range(100):
-    runtime.emit("request.completed")
-    if runtime.stats.sink_state == "broken": break
+    dispatcher.emit("request.completed")
+    if dispatcher.stats.sink_state == "broken": break
     time.sleep(.01)
-runtime.close()
-Path({str(evidence)!r}).write_text(json.dumps(asdict(runtime.stats)))
+dispatcher.close()
+Path({str(evidence)!r}).write_text(json.dumps(asdict(dispatcher.stats)))
 """,
         ],
         stdout=subprocess.PIPE,
@@ -343,8 +343,8 @@ ports = Ports()
 app = create_app(ApiConfig(release="test", consumers={{"one":b"consumer-one-secret"}}), ports, ports, ports)
 async def run():
     async with serve(app) as origin:
-        for _ in range(12000): runtime.emit("request.completed")
-        assert runtime.stats.dropped_count > 0
+        for _ in range(12000): dispatcher.emit("request.completed")
+        assert dispatcher.stats.dropped_count > 0
         async with httpx.AsyncClient(base_url=origin) as http:
             response = await asyncio.wait_for(http.get("/healthz?secret={SECRET}", headers={{"X-Request-ID":"{SECRET}"}}), 1)
             assert response.status_code == 200
@@ -361,14 +361,14 @@ async def run():
             else: raise AssertionError("PTY stalled")
         finally:
             os.close(master); os.close(slave)
-    Path({str(evidence)!r}).write_text(json.dumps({{"terminal_roundtrip_completed":True,"drops":runtime.stats.dropped_count}}))
+    Path({str(evidence)!r}).write_text(json.dumps({{"terminal_roundtrip_completed":True,"drops":dispatcher.stats.dropped_count}}))
 asyncio.run(run())
-runtime.close(.1)
-assert runtime.stats.closed and runtime.stats.queued_records == 0
-dropped = runtime.stats.dropped_count
-runtime.emit("request.completed")
-runtime.close(.1)
-assert runtime.stats.dropped_count == dropped + 1
+dispatcher.close(.1)
+assert dispatcher.stats.closed and dispatcher.stats.queued_records == 0
+dropped = dispatcher.stats.dropped_count
+dispatcher.emit("request.completed")
+dispatcher.close(.1)
+assert dispatcher.stats.dropped_count == dropped + 1
 '''
     )
     process = subprocess.Popen(
@@ -420,7 +420,7 @@ from pathlib import Path
 from types import SimpleNamespace
 sys.path.insert(0, {str(tests)!r})
 from boxie.observability.logging import process_logging
-runtime = process_logging("orchestrator")
+dispatcher = process_logging("orchestrator")
 import pytest
 from test_outbox import test_committed_command_recovers_without_api_delivery
 settings = json.loads(Path({str(config)!r}).read_text())
@@ -430,8 +430,8 @@ with pytest.MonkeyPatch.context() as patch:
     test_committed_command_recovers_without_api_delivery(
         settings["dsn"], fixture, Path({str(scenario_root)!r}), False, patch
     )
-runtime.emit("request.completed", outcome="succeeded")
-runtime.close()
+dispatcher.emit("request.completed", outcome="succeeded")
+dispatcher.close()
 """
     result = subprocess.run(
         [sys.executable, "-c", code], capture_output=True, text=True, timeout=150
@@ -466,7 +466,7 @@ import asyncio, importlib
 from uuid import UUID
 from boxie.observability.telemetry.context import bind_context, current_context
 assembly = importlib.import_module({module!r})
-runtime = assembly.bootstrap_logging(assembly.LogSettings(service={service!r}, role={role!r}))
+dispatcher = assembly.bootstrap_logging(assembly.LogSettings(service={service!r}, role={role!r}))
 secret = {SECRET!r}
 seen = {{}}
 parent_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
@@ -508,8 +508,8 @@ async def run():
     await asyncio.gather(*(request(case) for case in ("success", "other", "failure", "cancelled", "websocket")))
     assert len(set(seen.values())) == 4
 asyncio.run(run())
-runtime.emit("request.completed")
-runtime.close()
+dispatcher.emit("request.completed")
+dispatcher.close()
 """
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=5)
     events = records(result)

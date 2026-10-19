@@ -74,7 +74,7 @@ def test_failed_resume_cannot_stop_healthy_successor_and_browser_loss_crosses_bo
                         record = network.orchestrator.records[saved.sandbox.id]
                         assert not record.attached
                         assert (
-                            network.orchestrator.runtimes[record.id].timers.disconnect
+                            network.orchestrator.executions[record.id].timers.disconnect
                             == network.clock.monotonic() + 120
                         )
 
@@ -177,7 +177,7 @@ def test_delayed_old_attach_cannot_replace_a_healthy_successor(
                             assert saved is not None
                             record = network.orchestrator.records[saved.sandbox.id]
                             assert record.attachment_epoch == epoch and record.attached
-                            grace = vars(network.orchestrator.runtimes[record.id].timers).copy()
+                            grace = vars(network.orchestrator.executions[record.id].timers).copy()
                             if in_flight:
                                 release.set()
                             else:
@@ -186,7 +186,7 @@ def test_delayed_old_attach_cannot_replace_a_healthy_successor(
                             await asyncio.sleep(0.3)
                             assert record.attachment_epoch == epoch and record.attached
                             assert new.close_code is None
-                            assert vars(network.orchestrator.runtimes[record.id].timers) == grace
+                            assert vars(network.orchestrator.executions[record.id].timers) == grace
                             assert record.attachment_order == 2
                             async with connect(url, origin=origin) as forged:
                                 await forged.send(
@@ -208,7 +208,7 @@ def test_delayed_old_attach_cannot_replace_a_healthy_successor(
                                 )
                                 await asyncio.wait_for(forged.wait_closed(), 2)
                             assert record.attachment_order == 2 and record.attachment_epoch == epoch
-                            assert vars(network.orchestrator.runtimes[record.id].timers) == grace
+                            assert vars(network.orchestrator.executions[record.id].timers) == grace
                             await new.send(
                                 json.dumps(
                                     {

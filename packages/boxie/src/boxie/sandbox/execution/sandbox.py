@@ -29,7 +29,7 @@ class Deadlines:
 
 
 @dataclass
-class ExecutionRuntime:
+class SandboxExecution:
     owner: Orchestrator
     record: ExecutionRecord
     deadlines: Deadlines | None = None
@@ -208,12 +208,12 @@ async def _create(
 class TerminalSession(AbstractContextManager["TerminalSession"]):
     """Pins execution ownership until transport has drained and closed."""
 
-    def __init__(self, runtime: ExecutionRuntime) -> None:
-        self.runtime = runtime
-        self.terminal = runtime.pty
+    def __init__(self, execution: SandboxExecution) -> None:
+        self.execution = execution
+        self.terminal = execution.pty
 
     def __enter__(self) -> TerminalSession:
-        self.runtime.sessions += 1
+        self.execution.sessions += 1
         return self
 
     def __exit__(
@@ -222,12 +222,12 @@ class TerminalSession(AbstractContextManager["TerminalSession"]):
         value: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        self.runtime.sessions -= 1
+        self.execution.sessions -= 1
 
     @property
     def state(self) -> SandboxState:
-        return self.runtime.record.state
+        return self.execution.record.state
 
     @property
     def reason(self) -> TerminationReason | None:
-        return self.runtime.record.reason
+        return self.execution.record.reason

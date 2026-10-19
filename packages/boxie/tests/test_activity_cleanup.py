@@ -60,7 +60,7 @@ def test_cleanup_completion_waits_for_sessions_before_forgetting_journal(
                     assert sandbox.id in orchestrator.records
                     assert len(json.loads(orchestrator.journal.path.read_bytes())["records"]) == 1
                 await finish(str(sandbox.id))
-                assert not orchestrator.records and not orchestrator.runtimes
+                assert not orchestrator.records and not orchestrator.executions
                 assert json.loads(orchestrator.journal.path.read_bytes())["records"] == []
                 await finish(str(sandbox.id))
                 assert daemon.creates == 1

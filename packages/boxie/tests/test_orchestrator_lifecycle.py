@@ -241,7 +241,7 @@ def test_restart_retains_unknown_create_then_reconciles_late_resource(tmp_path: 
         await daemon.create_entered.wait()
         await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
         # Model process loss: preserve the daemon operation but cancel the waiting worker.
-        worker = orchestrator.runtimes[request.ref.id].activity
+        worker = orchestrator.executions[request.ref.id].activity
         assert worker is not None
         worker.cancel()
         await asyncio.gather(worker, return_exceptions=True)
@@ -253,7 +253,7 @@ def test_restart_retains_unknown_create_then_reconciles_late_resource(tmp_path: 
         await replacement.start()
         assert (await replacement.inspect(request.ref)).cleanup_pending
         daemon.create_gate.set()
-        creating = orchestrator.runtimes[request.ref.id].create
+        creating = orchestrator.executions[request.ref.id].create
         assert creating is not None
         await asyncio.wait_for(creating, 1)
         await replacement.reconcile()
@@ -307,7 +307,7 @@ def test_stop_during_attach_closes_late_stream(tmp_path: Path) -> None:
             await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
         ).removal_confirmed
         release.set()
-        worker = orchestrator.runtimes[request.ref.id].activity
+        worker = orchestrator.executions[request.ref.id].activity
         assert worker is not None
         await asyncio.wait_for(worker, 1)
         assert stream.closed, "late attach must not leak a PTY after confirmed removal"
@@ -402,7 +402,7 @@ def test_output_drain_is_active_before_start_acknowledgement(tmp_path: Path) -> 
 
         daemon.start = start  # type: ignore[method-assign]
         await started.wait()
-        terminal = orchestrator.runtimes[request.ref.id].pty
+        terminal = orchestrator.executions[request.ref.id].pty
         try:
             await asyncio.wait_for(terminal.replay.changed.wait(), 0.05)
             assert terminal.replay.after(0)[0].data == b"early output"
@@ -587,7 +587,7 @@ def test_journal_failure_fences_an_already_provisioning_final_start(
             assert pending.cleanup_pending and not pending.removal_confirmed
             assert not orchestrator.execution_ready
             release.set()
-            worker = orchestrator.runtimes[second.ref.id].activity
+            worker = orchestrator.executions[second.ref.id].activity
             assert worker is not None
             await asyncio.gather(worker, return_exceptions=True)
             assert len(daemon.started) == 1, "journal failure must fence a pending start"

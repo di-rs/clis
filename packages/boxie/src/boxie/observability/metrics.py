@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from boxie.domain.models import SandboxState
 from boxie.observability.events import Transition, emit
-from boxie.observability.telemetry.logging import LogRuntime
+from boxie.observability.telemetry.logging import LogDispatcher
 from boxie.observability.telemetry.metrics import ProcessMetrics
 
 STATES = tuple(state.value for state in SandboxState)
@@ -56,7 +56,7 @@ class Metrics(ProcessMetrics):
         role: str,
         *,
         clock: Callable[[], float] = time.monotonic,
-        logs: LogRuntime | None = None,
+        logs: LogDispatcher | None = None,
     ) -> None:
         self.role, self.clock = role, clock
         self._lock = threading.Lock()

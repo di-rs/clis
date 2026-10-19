@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from boxie.observability.metrics import Metrics
 
 
-class RuntimeConfig(FileOwnedSettings):
+class ApiProcessConfig(FileOwnedSettings):
     api: ApiConfig
     orchestrator_url: str
     orchestrator_credential: bytes = Field(repr=False)
@@ -30,7 +30,7 @@ class RuntimeConfig(FileOwnedSettings):
     request_timeout: float = 20
 
 
-def load_configuration(path: Path) -> RuntimeConfig:
+def load_configuration(path: Path) -> ApiProcessConfig:
     from pydantic import TypeAdapter, ValidationError
 
     from boxie.bootstrap.config import read_credential
@@ -60,7 +60,7 @@ def load_configuration(path: Path) -> RuntimeConfig:
     data["lifecycle"] = lifecycle_config(data.pop("lifecycle"))
     data["identity"] = orchestrator_identity(data.pop("identity"))
     return validate_file_model(
-        RuntimeConfig, {"api": api, "orchestrator_credential": orchestrator, **data}
+        ApiProcessConfig, {"api": api, "orchestrator_credential": orchestrator, **data}
     )
 
 
@@ -70,9 +70,9 @@ def _main(metrics: Metrics, config_path: Path) -> None:
     from boxie.api.app import create_app
     from boxie.bootstrap.dependencies import Dependencies, database_for, temporal_client
     from boxie.bootstrap.schedules import check_schedules
-    from boxie.observability.runtime import api_dependencies, background
+    from boxie.observability.process import api_dependencies, background
     from boxie.observability.snapshot import refresh_snapshots
-    from boxie.observability.telemetry.logging import install_asyncio_handler, log_runtime
+    from boxie.observability.telemetry.logging import install_asyncio_handler, log_dispatcher
     from boxie.persistence.outbox import PostgresOutbox
     from boxie.persistence.postgres import PostgresLifecycle
     from boxie.sandbox.transport.client import OrchestratorClient
@@ -82,7 +82,7 @@ def _main(metrics: Metrics, config_path: Path) -> None:
     config = load_configuration(config_path)
 
     async def run() -> None:
-        install_asyncio_handler(log_runtime())
+        install_asyncio_handler(log_dispatcher())
         # SQL-backed retry/status/stop and observations must remain reachable
         # during Temporal outages. Readiness connects with a bounded timeout;
         # only new admission depends on that probe. Worker startup stays eager.
@@ -148,7 +148,7 @@ def main() -> None:
     from boxie.observability.logging import process_logging
 
     logs = process_logging("api")
-    from boxie.observability.runtime import run_metrics_process
+    from boxie.observability.process import run_metrics_process
 
     run_metrics_process(logs, "api", lambda metrics: _main(metrics, args.config))
 

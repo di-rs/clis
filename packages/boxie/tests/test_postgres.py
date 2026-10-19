@@ -813,7 +813,7 @@ def test_terminal_receipt_survives_prior_boot_and_retry_row_purge(
             assert not restarted.records
             with pytest.raises(BoxieError):
                 await launch_execution(restarted, request)
-            assert not restarted.records and not restarted.runtimes
+            assert not restarted.records and not restarted.executions
             await restarted.close()
 
     asyncio.run(exercise())

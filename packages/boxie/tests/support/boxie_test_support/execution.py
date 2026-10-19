@@ -89,11 +89,11 @@ async def launch_execution(orchestrator: Any, request: Any) -> Any:
     from boxie.domain.models import SandboxState
 
     observation = await orchestrator.initialize(request)
-    runtime = orchestrator.runtimes[request.ref.id]
-    if runtime.activity is None and observation.state not in {
+    execution = orchestrator.executions[request.ref.id]
+    if execution.activity is None and observation.state not in {
         SandboxState.READY,
         SandboxState.TERMINATED,
         SandboxState.FAILED,
     }:
-        runtime.activity = asyncio.create_task(orchestrator.ensure_ready(request))
+        execution.activity = asyncio.create_task(orchestrator.ensure_ready(request))
     return observation

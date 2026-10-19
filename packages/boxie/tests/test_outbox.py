@@ -8,8 +8,8 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from boxie.bootstrap.runtime import embedded_workers
 from boxie.bootstrap.schedules import check_schedules, ensure_schedules, schedule_definitions
+from boxie.bootstrap.workers import embedded_workers
 from boxie.domain.lifecycle import OrchestratorObservation
 from boxie.domain.models import SandboxState, TerminationReason
 from boxie.persistence.models import Outbox

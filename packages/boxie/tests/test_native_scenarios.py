@@ -50,7 +50,7 @@ def test_collection_observer_reaches_actual_orchestrator_bootstrap(
     monkeypatch.setattr(orchestrator, "database_for", pool)
     monkeypatch.setattr(PostgresArtifactStore, "__init__", inspect_store)
     monkeypatch.setattr(producer, "install_asyncio_handler", lambda _: None)
-    monkeypatch.setattr(producer, "log_runtime", lambda: None)
+    monkeypatch.setattr(producer, "log_dispatcher", lambda: None)
     monkeypatch.setattr(orchestrator, "main", lambda: orchestrator._main(None, Path("/unused")))  # type: ignore[arg-type]
     # Restore the test wrapper's module substitution after exercising the real _main import.
     monkeypatch.setattr(

@@ -10,11 +10,11 @@ MAX_RECORDS = 128
 
 async def compact(orchestrator: Orchestrator) -> None:
     for record in list(orchestrator.records.values()):
-        runtime = orchestrator.runtimes.get(record.id)
+        execution = orchestrator.executions.get(record.id)
         if (
-            runtime is None
+            execution is None
             or orchestrator.records.get(record.id) is not record
-            or not runtime.settled
+            or not execution.settled
         ):
             continue
         version = record.event_version
@@ -28,7 +28,7 @@ async def compact(orchestrator: Orchestrator) -> None:
             if (
                 orchestrator.records.get(record.id) is not record
                 or record.event_version != version
-                or not orchestrator.runtimes[record.id].settled
+                or not orchestrator.executions[record.id].settled
             ):
                 continue
             # No await through replacement or map reclamation. Old lock waiters can
@@ -39,4 +39,4 @@ async def compact(orchestrator: Orchestrator) -> None:
             except Exception:
                 orchestrator.records[record.id] = record
                 continue
-            orchestrator.runtimes.pop(record.id)
+            orchestrator.executions.pop(record.id)

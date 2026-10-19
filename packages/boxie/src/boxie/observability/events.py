@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from boxie.observability.telemetry.logging import configured_runtime
+from boxie.observability.telemetry.logging import configured_dispatcher
 
 EVENTS = {
     "sandbox.accepted": "Sandbox accepted",
@@ -35,9 +35,9 @@ type DiagnosticSink = Callable[[Transition], None]
 
 
 def emit(event: Transition) -> None:
-    runtime = configured_runtime()
-    if runtime is not None:
-        runtime.emit(
+    dispatcher = configured_dispatcher()
+    if dispatcher is not None:
+        dispatcher.emit(
             event.event,
             sandbox_id=str(event.sandbox_id) if event.sandbox_id else None,
             outcome=event.outcome,

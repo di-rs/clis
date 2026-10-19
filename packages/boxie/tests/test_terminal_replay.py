@@ -49,13 +49,13 @@ def test_reattach_fences_stale_controls_and_terminal_replies_do_not_renew_idle(
             ):
                 with pytest.raises(BoxieError):
                     await operation
-            original = orchestrator.runtimes[request.ref.id].timers.idle
+            original = orchestrator.executions[request.ref.id].timers.idle
             clock.advance(20)
             await orchestrator.write(request.ref, newer, b"\x1b[1;1R", source="terminal")
-            assert orchestrator.runtimes[request.ref.id].timers.idle == original
+            assert orchestrator.executions[request.ref.id].timers.idle == original
             assert orchestrator.records[request.ref.id].last_input_at is None
             await orchestrator.write(request.ref, newer, b"hello", source="user")
-            assert orchestrator.runtimes[request.ref.id].timers.idle == clock.monotonic() + 600
+            assert orchestrator.executions[request.ref.id].timers.idle == clock.monotonic() + 600
         finally:
             await orchestrator.close()
 
@@ -67,7 +67,7 @@ def test_pty_drain_does_not_wait_for_reader_and_payload_cap_is_exact(tmp_path: P
         orchestrator, request, daemon, _, _ = await setup(tmp_path)
         try:
             await settled(orchestrator, request.ref, SandboxState.READY)
-            terminal = orchestrator.runtimes[request.ref.id].pty
+            terminal = orchestrator.executions[request.ref.id].pty
             assert hasattr(terminal, "replay"), "PTY replay missing"
             stream = next(iter(daemon.streams.values()))
             # No terminal attachment or ACK: drain still reaches the hard cap.
@@ -209,7 +209,7 @@ def test_network_replay_resize_barrier_and_browser_heartbeat(tmp_path: Path) -> 
                     await asyncio.wait_for(new.wait_closed(), 2)
                     assert not orchestrator.records[request.ref.id].attached
                     assert (
-                        orchestrator.runtimes[request.ref.id].timers.disconnect
+                        orchestrator.executions[request.ref.id].timers.disconnect
                         == clock.monotonic() + 120
                     )
 
@@ -314,7 +314,7 @@ def test_failed_resize_releases_output_order_without_recording_unapplied_geometr
             with pytest.raises((TimeoutError, OSError)):
                 await orchestrator.resize(request.ref, epoch, 100, 30)
             stream.queue.put_nowait(b"after")
-            terminal = orchestrator.runtimes[request.ref.id].pty
+            terminal = orchestrator.executions[request.ref.id].pty
             await asyncio.wait_for(terminal.replay.changed.wait(), 0.2)
             assert terminal.replay.after(0)[0].geometry == (80, 24)
             assert await orchestrator.attach(request.ref, attachment_order=2) == epoch + 1
@@ -342,14 +342,14 @@ def test_attachment_order_persists_and_preserves_cursor_and_journal_failure_fenc
                 saved.attachment_order == 3 and saved.attachment_epoch == epoch and saved.attached
             )
             snapshot = orchestrator.records[request.ref.id].model_dump()
-            deadlines = vars(orchestrator.runtimes[request.ref.id].timers).copy()
+            deadlines = vars(orchestrator.executions[request.ref.id].timers).copy()
             for order in (1, 3):
                 with pytest.raises(BoxieError):
                     await orchestrator.attach(request.ref, attachment_order=order, resume_after=0)
             with pytest.raises(ValueError):
                 await orchestrator.attach(request.ref, attachment_order=4, resume_after=999)
             assert orchestrator.records[request.ref.id].model_dump() == snapshot
-            assert vars(orchestrator.runtimes[request.ref.id].timers) == deadlines
+            assert vars(orchestrator.executions[request.ref.id].timers) == deadlines
             newer = await orchestrator.attach(request.ref, attachment_order=4, resume_after=0)
             await orchestrator.detach(request.ref, epoch)
             assert orchestrator.records[request.ref.id].attached
@@ -419,7 +419,7 @@ def test_attachment_order_requires_json_integer_without_changing_epoch_or_grace(
             net.clock.advance(10)
             record = net.orchestrator.records[UUID(identifier)]
             before = record.model_dump()
-            grace = vars(net.orchestrator.runtimes[record.id].timers).copy()
+            grace = vars(net.orchestrator.executions[record.id].timers).copy()
             missing = object()
             for invalid in (True, False, "2", 3.0, None, missing, 0, -1, 2**53):
                 request: dict[str, object] = {
@@ -435,7 +435,7 @@ def test_attachment_order_requires_json_integer_without_changing_epoch_or_grace(
                     with pytest.raises(ConnectionClosed):
                         await asyncio.wait_for(rejected.recv(), 1)
                 assert record.model_dump() == before
-                assert vars(net.orchestrator.runtimes[record.id].timers) == grace
+                assert vars(net.orchestrator.executions[record.id].timers) == grace
             if healthy:
                 assert current.close_code is None
                 await current.send(

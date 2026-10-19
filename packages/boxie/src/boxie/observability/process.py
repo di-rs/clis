@@ -12,7 +12,7 @@ from temporalio.api.taskqueue.v1 import TaskQueue
 from temporalio.api.workflowservice.v1 import DescribeNamespaceRequest, DescribeTaskQueueRequest
 
 from boxie.observability.metrics import Metrics
-from boxie.observability.telemetry.logging import LogRuntime, run_process
+from boxie.observability.telemetry.logging import LogDispatcher, run_process
 from boxie.observability.telemetry.metrics import MetricsListener
 from boxie.temporal.contracts import lifecycle_queue, maintenance_queue
 
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from boxie.sandbox.transport.client import OrchestratorClient
 
 
-def run_metrics_process(logs: LogRuntime, role: str, run: Callable[[Metrics], None]) -> None:
+def run_metrics_process(logs: LogDispatcher, role: str, run: Callable[[Metrics], None]) -> None:
     """Own the private listener beside logging, outside the application's loop."""
     listener: MetricsListener | None = None
 
@@ -129,9 +129,9 @@ async def api_dependencies(
 async def orchestrator_cache(metrics: Metrics, orchestrator: Orchestrator) -> None:
     while True:
         remaining = [
-            max(0, runtime.deadlines.lease - orchestrator.monotonic())
-            for identifier, runtime in orchestrator.runtimes.items()
-            if runtime.deadlines is not None
+            max(0, execution.deadlines.lease - orchestrator.monotonic())
+            for identifier, execution in orchestrator.executions.items()
+            if execution.deadlines is not None
             and identifier in orchestrator.records
             and orchestrator.records[identifier].state.value
             in ("accepted", "provisioning", "ready")
