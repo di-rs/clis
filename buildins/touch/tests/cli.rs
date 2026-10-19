@@ -479,6 +479,8 @@ fn rejects_invalid_dates_adjustments_and_missing_references_before_changes() -> 
         (vec!["-d", "nonsense"], 1),
         (vec!["-d", "2024-02-30T00:00:00Z"], 1),
         (vec!["-d", "2024-03-10T02:30:00"], 1),
+        (vec!["-d", "2024-03-10T02:30"], 1),
+        (vec!["-d", "2024-03-10 02:30"], 1),
         (vec!["-d", "2024-03-10 02:30:00 "], 1),
         (vec!["-d", "2024-03-10T02:30:00.1234567891"], 1),
         (vec!["-d", "2024-01-01T00:00:60"], 1),
@@ -636,7 +638,12 @@ fn no_dereference_copies_reference_symlink_times() -> Result<()> {
 #[test]
 fn ambiguous_local_timestamp_uses_first_occurrence() -> Result<()> {
     let dir = TempDir::new()?;
-    for flags in [["-t", "202411030130"], ["-d", "2024-11-03 01:30:00"]] {
+    for flags in [
+        ["-t", "202411030130"],
+        ["-d", "2024-11-03 01:30:00"],
+        ["-d", "2024-11-03 01:30"],
+        ["-d", "2024-11-03T01:30"],
+    ] {
         command(&dir)
             .env("TZ", "America/New_York")
             .args(flags)

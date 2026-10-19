@@ -174,7 +174,12 @@ pub fn date_times(value: &str, reference: Option<&Timestamps>) -> Result<Timesta
         }
         _ => local,
     };
-    for format in ["%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%d %H:%M:%S%.f"] {
+    for format in [
+        "%Y-%m-%dT%H:%M:%S%.f",
+        "%Y-%m-%d %H:%M:%S%.f",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d %H:%M",
+    ] {
         if let Ok(naive) = DateTime::strptime(format, &local) {
             // Jiff clamps leap seconds; date expressions must reject them.
             if local

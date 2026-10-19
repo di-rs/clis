@@ -44,9 +44,6 @@ instead of an action reference and commit hash.
 
 When renaming a workflow or job, update dependent workflow triggers, publisher
 identity checks, benchmark timing lookups and required status checks together.
-The Gitmoji job keeps its required `git-policy` check name so existing branch
-protection and other open PRs continue to work. Its workflow and steps have
-descriptive emoji names.
 
 ## Local hooks and full CI checks
 
