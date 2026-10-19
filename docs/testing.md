@@ -50,26 +50,19 @@ descriptive emoji names.
 
 ## Local hooks and full CI checks
 
-Install the Git hooks with `prek install`. On commit, prek selects staged files;
+Install the Git hooks with `prek install`. On commit, prek checks staged files;
 `prek run` uses the same selection. To check specific working-tree files, use
-`prek run --files PATH...`.
+`prek run --files PATH...`. CI keeps `prek run --all-files` to check every tracked
+file. Use that command locally when you want the full checks.
 
-Local Ruff and workflow checks receive the selected filenames. Cargo formatting
-runs for their owning packages; Clippy and nextest also include transitive workspace
-dependents. Python types and tests run for affected areas. Service and infrastructure
-areas run together because they share test code; changes to `cli-check` also check
-`cli-bench`. Shared test support, shared configuration and files without a known
-owner trigger full checks. CLI repository standards always check the whole workspace.
+Ruff, workflow linting, Markdown links and spelling receive matching filenames
+from prek. Separate configuration hooks run full lint checks when their settings
+change. Cargo, mypy, pytest and CLI repository standards keep their workspace-wide
+commands, but only run when their file filters match a change. Prek selects files
+and hooks; it does not infer which packages or tests depend on changed code.
 
-The selection helper is [tools/check_changed.py](../tools/check_changed.py) and
-requires Python 3.11 or newer. Keep its Python area relationships up to date when
-adding cross-package imports. Cargo relationships come from `cargo metadata`.
-
-CI keeps `prek run --all-files` and the full workspace commands. The helper also
-forces full commands when `CI=true`. To run all checks locally, use
-`prek run --all-files`; the selected root configuration triggers full checks.
-See prek's [file filtering and filename passing reference](https://prek.j178.dev/0.5.5/reference/configuration/)
-for the underlying hook behavior.
+This uses prek's native [file filters and filename passing](https://prek.j178.dev/0.5.5/reference/configuration/),
+with no selection script to maintain.
 
 ## Choose checks by changed area
 
