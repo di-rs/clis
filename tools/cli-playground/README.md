@@ -69,9 +69,9 @@ DOM composition events; they do not claim OS-native IME coverage.
 ## Production releases
 
 Use the [shared-host guide](../../infra/environments/single-host/README.md) for
-setup, deployment gates and failure inspection. Releases are manual: one workflow
-builds and deploys Boxie, the Playground sandbox and the gateway from the same
-commit. Preview publication retains its separate trust boundary.
+setup, deployment gates and failure inspection. Releases are manual. The Playground release builds and deploys its backend and
+frontend together. A separate Boxie release delivers the runtime and sandbox.
+Preview publication retains its separate trust boundary.
 
 ## Workflow responsibilities
 
@@ -79,7 +79,8 @@ commit. Preview publication retains its separate trust boundary.
 | --- | --- |
 | [🏗️ Playground PR binary builds](../../.github/workflows/cli-playground.yml) | Compile affected PR binaries without deployment credentials |
 | [🌐 Playground PR previews](../../.github/workflows/cli-playground-preview.yml) | Trusted build-state updates, artifact publication and PR close/reopen reconciliation |
-| [🚀 Boxie Runtime and Sandbox Release](../../.github/workflows/cli-playground-release.yml) | Manually build and deploy Boxie, sandbox and gateway together |
+| [🚀 CLI Playground Release](../../.github/workflows/cli-playground-release.yml) | Manually build and deploy the Playground backend and frontend |
+| [🚀 Boxie Runtime and Sandbox Release](../../.github/workflows/boxie-release.yml) | Manually build and deploy the Boxie runtime and sandbox together |
 | [☁️ Playground infrastructure setup](../../.github/workflows/cli-playground-setup.yml) | Manually provision infrastructure and install services |
 | [🧪 Boxie lifecycle integration](../../.github/workflows/boxie-lifecycle.yml) | Verify PostgreSQL/Temporal recovery and native Linux/gVisor lifecycle and browser faults |
 

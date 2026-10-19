@@ -1,4 +1,4 @@
-name: 🚀 Boxie Runtime and Sandbox Release
+name: 🚀 CLI Playground Release
 'on':
   workflow_dispatch: {}
 permissions: {}
@@ -28,24 +28,6 @@ jobs:
         run: |
           printf 'sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           printf 'attempt=%s\n' "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
-  boxie:
-    needs: source
-    uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
-    with:
-      component: boxie
-      revision: ${{ needs.source.outputs.sha }}
-    permissions:
-      contents: read
-      packages: write
-  sandbox:
-    needs: source
-    uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
-    with:
-      component: playground-sandbox
-      revision: ${{ needs.source.outputs.sha }}
-    permissions:
-      contents: read
-      packages: write
   gateway:
     needs: source
     uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
@@ -55,79 +37,9 @@ jobs:
     permissions:
       contents: read
       packages: write
-  deploy-boxie:
-    name: 🚀 Update Boxie with Compose
-    needs: [source, boxie, gateway, sandbox]
-    if: ${{ github.ref == 'refs/heads/master' && vars.DEPLOYMENT_ACCEPTANCE_PASSED == 'true' }}
-    environment: boxie
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    permissions:
-      contents: read
-      packages: read
-    steps:
-      - name: 🔎 Require a complete workflow retry
-        env:
-          SOURCE_ATTEMPT: ${{ needs.source.outputs.attempt }}
-        run: |
-          if [[ -z $SOURCE_ATTEMPT || $SOURCE_ATTEMPT != "$GITHUB_RUN_ATTEMPT" ]]; then
-            echo 'Use Re-run all jobs or start a new workflow run to select current master.' >&2
-            exit 1
-          fi
-      - name: 📥 Check out the built source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: ${{ needs.source.outputs.sha }}
-          persist-credentials: false
-      - name: 🚀 Copy Boxie files and run Compose
-        env:
-          SOURCE_SHA: ${{ needs.source.outputs.sha }}
-          BUILT_SHA: ${{ needs.boxie.outputs.source_sha }}
-          IMAGE: ${{ needs.boxie.outputs.image }}
-          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-          GHCR_TOKEN: ${{ github.token }}
-        run: bash infra/environments/single-host/release.sh boxie
-
-  deploy-sandbox:
-    name: 🚀 Update Playground sandbox
-    needs: [source, sandbox, deploy-boxie]
-    if: ${{ github.ref == 'refs/heads/master' && vars.DEPLOYMENT_ACCEPTANCE_PASSED == 'true' }}
-    environment: playground
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    permissions:
-      contents: read
-      packages: read
-    steps:
-      - name: 🔎 Require a complete workflow retry
-        env:
-          SOURCE_ATTEMPT: ${{ needs.source.outputs.attempt }}
-        run: |
-          if [[ -z $SOURCE_ATTEMPT || $SOURCE_ATTEMPT != "$GITHUB_RUN_ATTEMPT" ]]; then
-            echo 'Use Re-run all jobs or start a new workflow run to select current master.' >&2
-            exit 1
-          fi
-      - name: 📥 Check out the built source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: ${{ needs.source.outputs.sha }}
-          persist-credentials: false
-      - name: 🚀 Copy profile files and recreate the orchestrator
-        env:
-          SOURCE_SHA: ${{ needs.source.outputs.sha }}
-          BUILT_SHA: ${{ needs.sandbox.outputs.source_sha }}
-          IMAGE: ${{ needs.sandbox.outputs.image }}
-          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-          GHCR_TOKEN: ${{ github.token }}
-        run: bash infra/environments/single-host/release.sh sandbox
-
   deploy-gateway:
     name: 🚀 Update Playground with Compose
-    needs: [source, gateway, deploy-sandbox]
+    needs: [source, gateway]
     if: ${{ github.ref == 'refs/heads/master' && vars.DEPLOYMENT_ACCEPTANCE_PASSED == 'true' }}
     environment: playground
     runs-on: ubuntu-24.04

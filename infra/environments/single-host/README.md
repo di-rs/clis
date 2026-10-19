@@ -119,11 +119,17 @@ temporary files under `/run`; it expires with the token's lifetime.
 
 ## Release and inspect failures
 
-Run **🚀 Boxie Runtime and Sandbox Release** manually from Actions on `master`.
-The [release workflow](../../../.github/workflows/cli-playground-release.yml) builds
-Boxie, the Playground gateway and the sandbox from one commit before deployment.
-It updates Boxie first, then the sandbox profile, then the gateway. A failed stage
-stops the remaining deployments; completed stages are not rolled back automatically.
+Run either release manually from Actions on `master`:
+
+- [🚀 CLI Playground Release](../../../.github/workflows/cli-playground-release.yml)
+  builds and deploys the Playground backend and frontend together in the gateway image.
+- [🚀 Boxie Runtime and Sandbox Release](../../../.github/workflows/boxie-release.yml)
+  builds the Boxie runtime and sandbox from one commit, then updates Boxie followed
+  by the sandbox profile. It does not release the Playground application.
+
+A failed stage stops the remaining deployments in its workflow; completed stages
+are not rolled back automatically. Boxie stages use the `boxie` environment;
+the Playground release uses `playground`.
 Each stage calls the shared [release transport](release.sh) for SSH, image settings
 and temporary registry credentials; service scripts own migration and readiness checks.
 
@@ -180,7 +186,7 @@ uv run --locked pytest infra/host/tests infra/environments/single-host/tests \
 ```
 
 On an authorized native Linux amd64 host, exercise fresh setup, an unchanged
-rerun, each independent release, migration failure and retry, metrics, tunnel
+rerun, both release workflows, migration failure and retry, metrics, tunnel
 configuration and preview publication. The local command tests cannot establish
 those host behaviors. The [runtime requirements](../../../packages/boxie/infra/runtime.md)
 include the runsc and backup checks.
