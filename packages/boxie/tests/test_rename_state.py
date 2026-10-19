@@ -244,6 +244,15 @@ def test_sql_rename_preserves_retry_artifact_and_snapshot(
         assert observation is not None
         assert str(observation["sandbox_id"]) == legacy["id"]
         assert observation["event_version"] == 7
+        constraints = query.execute(
+            "SELECT conname FROM pg_constraint WHERE conrelid = 'supervisor_observations'::regclass"
+        ).fetchall()
+        assert {constraint["conname"] for constraint in constraints} == {
+            "supervisor_observations_pkey",
+            "supervisor_observations_sandbox_id_fkey",
+            "observation_removal",
+            "observation_version",
+        }
 
     import asyncio
 

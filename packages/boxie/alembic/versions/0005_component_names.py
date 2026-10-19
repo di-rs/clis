@@ -96,6 +96,14 @@ def upgrade() -> None:
         WHERE reason IN ('orchestrator_restart', 'orchestrator_shutdown')
     """)
     op.rename_table("orchestrator_observations", "supervisor_observations")
+    op.execute(
+        "ALTER TABLE supervisor_observations RENAME CONSTRAINT "
+        "orchestrator_observations_pkey TO supervisor_observations_pkey"
+    )
+    op.execute(
+        "ALTER TABLE supervisor_observations RENAME CONSTRAINT "
+        "orchestrator_observations_sandbox_id_fkey TO supervisor_observations_sandbox_id_fkey"
+    )
     op.alter_column("sandboxes", "orchestrator_boot_id", new_column_name="supervisor_boot_id")
 
 
