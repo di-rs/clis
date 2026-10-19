@@ -48,6 +48,22 @@ The Gitmoji job keeps its required `git-policy` check name so existing branch
 protection and other open PRs continue to work. Its workflow and steps have
 descriptive emoji names.
 
+## Local hooks and full CI checks
+
+Install the Git hooks with `prek install`. On commit, prek checks staged files;
+`prek run` uses the same selection. To check specific working-tree files, use
+`prek run --files PATH...`. CI keeps `prek run --all-files` to check every tracked
+file. Use that command locally when you want the full checks.
+
+Ruff, workflow linting, Markdown links and spelling receive matching filenames
+from prek. Separate configuration hooks run full lint checks when their settings
+change. Cargo, mypy, pytest and CLI repository standards keep their workspace-wide
+commands, but only run when their file filters match a change. Prek selects files
+and hooks; it does not infer which packages or tests depend on changed code.
+
+This uses prek's native [file filters and filename passing](https://prek.j178.dev/0.5.5/reference/configuration/),
+with no selection script to maintain.
+
 ## Choose checks by changed area
 
 Replace `PACKAGE` below with the affected Cargo package name.

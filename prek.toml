@@ -4,6 +4,7 @@
 
 default_install_hook_types = ["pre-commit", "commit-msg"]
 default_stages = ["pre-commit"]
+minimum_prek_version = "0.5.5"
 
 [[repos]]
 repo = "builtin"
@@ -32,6 +33,7 @@ hooks = [
     entry = "cargo fmt --",
     types = ["rust"],
     pass_filenames = false,
+    include_deleted = true,
   },
   {
     id = "cargo-clippy",
@@ -40,6 +42,7 @@ hooks = [
     entry = "cargo clippy --locked --workspace --all-targets --all-features -- -D warnings -F unsafe_code",
     files = '(\.rs$|(^|/)Cargo\.(toml|lock)$|(^|/)(rust-toolchain|clippy|prek)\.toml$|(^|/)tests/|^\.config/nextest\.toml$)',
     pass_filenames = false,
+    include_deleted = true,
   },
   {
     id = "cargo-nexttest",
@@ -48,6 +51,7 @@ hooks = [
     entry = "cargo nextest run --locked --workspace --hide-progress-bar --failure-output final",
     files = '(\.rs$|(^|/)Cargo\.(toml|lock)$|(^|/)(rust-toolchain|clippy|prek)\.toml$|(^|/)tests/|^\.config/nextest\.toml$)',
     pass_filenames = false,
+    include_deleted = true,
   },
   {
     id = "cli-check",
@@ -56,22 +60,21 @@ hooks = [
     entry = "uv run --locked cli-check",
     files = '\.rs$|(^|/)(Cargo\.toml|README\.md|mk-outs\.nu|mk-outputs\.nu)$|(^|/)(tests|benches)/|^tools/cli-check/|^(pyproject\.toml|uv\.lock|prek\.toml)$',
     pass_filenames = false,
+    include_deleted = true,
   },
   {
     id = "ruff",
     name = "Python lint",
     language = "system",
-    entry = "uv run --locked ruff check .",
-    files = '(\.pyi?$|(^|/)pyproject\.toml$|^(uv\.lock|\.python-version|prek\.toml)$)',
-    pass_filenames = false,
+    entry = "uv run --locked ruff check --force-exclude --",
+    types_or = ["python", "pyi"],
   },
   {
     id = "ruff-format",
     name = "Python format check",
     language = "system",
-    entry = "uv run --locked ruff format --check .",
-    files = '(\.pyi?$|(^|/)pyproject\.toml$|^(uv\.lock|\.python-version|prek\.toml)$)',
-    pass_filenames = false,
+    entry = "uv run --locked ruff format --check --force-exclude --",
+    types_or = ["python", "pyi"],
   },
   {
     id = "mypy",
@@ -80,6 +83,7 @@ hooks = [
     entry = "uv run --locked mypy",
     files = '(\.pyi?$|(^|/)pyproject\.toml$|^(uv\.lock|\.python-version|prek\.toml)$)',
     pass_filenames = false,
+    include_deleted = true,
   },
   {
     id = "python-tests",
@@ -88,6 +92,7 @@ hooks = [
     entry = "uv run --locked pytest",
     files = '(\.pyi?$|(^|/)pyproject\.toml$|^(uv\.lock|\.python-version|prek\.toml)$)',
     pass_filenames = false,
+    include_deleted = true,
   },
   {
     id = "lychee",
@@ -108,15 +113,49 @@ hooks = [
     name = "workflow syntax and shell linting",
     language = "system",
     entry = "actionlint -color",
-    files = '(^\.github/.*\.ya?ml$|^prek\.toml$)',
-    pass_filenames = false,
+    files = '^\.github/workflows/[^/]+\.ya?ml$',
   },
   {
     id = "zizmor",
     name = "zizmor workflow security",
     language = "system",
-    entry = "zizmor --offline --no-progress .github/workflows",
-    files = '(^\.github/.*\.ya?ml$|^zizmor\.ya?ml$|^prek\.toml$)',
+    entry = "zizmor --offline --no-progress",
+    files = '^\.github/(workflows/[^/]+|.*/action)\.ya?ml$',
+  },
+  {
+    id = "ruff-config",
+    name = "Python lint after configuration changes",
+    language = "system",
+    entry = "uv run --locked ruff check .",
+    files = '(^|/)(pyproject\.toml|\.?ruff\.toml)$|^(uv\.lock|\.python-version|prek\.toml)$',
     pass_filenames = false,
+    include_deleted = true,
+  },
+  {
+    id = "ruff-format-config",
+    name = "Python formatting after configuration changes",
+    language = "system",
+    entry = "uv run --locked ruff format --check .",
+    files = '(^|/)(pyproject\.toml|\.?ruff\.toml)$|^(uv\.lock|\.python-version|prek\.toml)$',
+    pass_filenames = false,
+    include_deleted = true,
+  },
+  {
+    id = "actionlint-config",
+    name = "workflow lint after configuration changes",
+    language = "system",
+    entry = "actionlint -color",
+    files = '^\.github/actionlint\.ya?ml$|^prek\.toml$',
+    pass_filenames = false,
+    include_deleted = true,
+  },
+  {
+    id = "zizmor-config",
+    name = "workflow security after configuration changes",
+    language = "system",
+    entry = "zizmor --offline --no-progress .github/workflows",
+    files = '^zizmor\.ya?ml$|^prek\.toml$',
+    pass_filenames = false,
+    include_deleted = true,
   }
 ]
