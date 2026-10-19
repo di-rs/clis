@@ -145,7 +145,7 @@ jobs:
               result = subprocess.run([
                   sys.executable, "tools/cli-bench/bench.py", suite,
                   "--warmup", os.environ["WARMUP"], "--runs", os.environ["RUNS"],
-                  "--output", "target/benchmarks/" + suite.replace("/", "-"),
+                  "--output", os.path.join(os.environ["RUNNER_TEMP"], "benchmarks", suite.replace("/", "-")),
               ])
               if result.returncode:
                   failed.append(suite)
@@ -157,6 +157,6 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cli-bench-${{ matrix.os }}
-          path: target/benchmarks/
+          path: ${{ runner.temp }}/benchmarks/
           retention-days: 14
           if-no-files-found: ignore
