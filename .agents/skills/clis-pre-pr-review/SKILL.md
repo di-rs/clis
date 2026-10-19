@@ -1,9 +1,9 @@
 ---
-name: pre-pr-review
-description: Use when preparing to open a pull request or push new changes to an existing pull request in this repository.
+name: clis-pre-pr-review
+description: Use when preparing to open a pull request or push new changes to an existing pull request in the clis repository.
 ---
 
-# Pre-PR review
+# CLIs pre-PR review
 
 Get two independent reviews before publishing the change. The implementer checks
 both reports and decides what needs fixing from evidence and actual risk.

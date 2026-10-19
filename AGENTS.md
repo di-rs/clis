@@ -6,11 +6,6 @@ Use `.agents/skills/dev-new-branch/SKILL.md` when starting development work.
 Use `.agents/skills/gitmoji-commit/SKILL.md` for every commit and PR title.
 Development branches must use `feat/`, `fix/`, `chore/`, `docs/`, or `refactor/`.
 
-Before opening a PR or pushing new changes to an existing PR, use
-`.agents/skills/pre-pr-review/SKILL.md`. Run two independent, fresh-context
-subagents: Superpowers code review and Ponytail review. Validate their findings
-against the code and tests, then address them according to the actual risk.
-
 ## One crate, one CLI
 
 Every Rust CLI must have its own Cargo package and directory. A CLI package must
