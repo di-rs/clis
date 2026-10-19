@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from boxie.bootstrap.runtime import embedded_workers
-from boxie.bootstrap.schedules import check_schedules, schedule_definitions
+from boxie.bootstrap.schedules import check_schedules, ensure_schedules, schedule_definitions
 from boxie.domain.lifecycle import OrchestratorObservation
 from boxie.domain.models import SandboxState, TerminationReason
 from boxie.persistence.models import Outbox
@@ -25,6 +25,237 @@ from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.worker import Replayer
 
 pytestmark = pytest.mark.integration
+
+
+def test_idle_recovery_survives_database_failure_without_polling_workflows(
+    postgres_dsn: str,
+    temporal_stack: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+
+    from boxie.persistence.outbox import OutboxEvent, PostgresOutbox
+    from boxie.temporal.contracts import maintenance_queue
+    from boxie.temporal.maintenance import MaintenanceActivities
+
+    caplog.set_level(logging.INFO, logger="boxie")
+
+    async def exercise() -> None:
+        client = await Client.connect(
+            temporal_stack.address,
+            namespace="boxie",
+            tls=tls(temporal_stack, "boxie-orchestrator"),
+            data_converter=pydantic_data_converter,
+        )
+        async with lifecycle_stack(postgres_dsn, tmp_path, client) as stack:
+            pending = PostgresOutbox.pending
+            recovered = asyncio.Event()
+            attempts = 0
+
+            async def unavailable_once(
+                store: PostgresOutbox, sandbox_id: UUID | None = None
+            ) -> list[OutboxEvent]:
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    raise OSError("temporary database outage")
+                events = await pending(store, sandbox_id)
+                if attempts >= 3:
+                    recovered.set()
+                return events
+
+            monkeypatch.setattr(PostgresOutbox, "pending", unavailable_once)
+            async with embedded_workers(client, stack.life, stack.orchestrator, stack.artifacts):
+                await asyncio.wait_for(recovered.wait(), 15)
+                assert not [
+                    execution
+                    async for execution in client.list_workflows(
+                        query=f'TaskQueue = "{maintenance_queue(stack.orchestrator.config.identity)}"'
+                    )
+                    if "/commands-" in execution.id or "/journal-" in execution.id
+                ]
+                maintenance = MaintenanceActivities(
+                    stack.delivery, stack.life, stack.orchestrator, stack.artifacts
+                )
+                await maintenance.maintain("artifacts")
+                await maintenance.maintain("retention")
+                assert [
+                    record.getMessage()
+                    for record in caplog.records
+                    if record.name.startswith("boxie.temporal.")
+                ] == ["command recovery unavailable"]
+                for identifier in schedule_definitions(stack.orchestrator.config.identity):
+                    await client.get_schedule_handle(identifier).delete()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("kind", ["artifacts", "artifacts_unavailable", "retention"])
+def test_daily_cleanup_drains_more_than_one_batch(
+    postgres_dsn: str,
+    temporal_stack: Any,
+    tmp_path: Path,
+    kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+    import shutil
+    import time
+
+    from boxie.persistence.models import Artifact, Sandbox
+    from boxie.temporal.maintenance import MaintenanceActivities
+    from sqlmodel import select
+
+    async def exercise() -> None:
+        client = await Client.connect(
+            temporal_stack.address,
+            namespace="boxie",
+            tls=tls(temporal_stack, "boxie-orchestrator"),
+            data_converter=pydantic_data_converter,
+        )
+        async with lifecycle_stack(postgres_dsn, tmp_path, client) as stack:
+            live = await upload(stack.artifacts)
+            live_path = await stack.artifacts.path(OWNER, live.artifact_id)
+            old = datetime.now(UTC) - timedelta(days=8)
+            blocked: Path | None = None
+            async with stack.sessions.begin() as session:
+                if kind.startswith("artifacts"):
+                    for index in range(101):
+                        storage = uuid4()
+                        (stack.artifacts.root / str(storage)).mkdir()
+                        if kind == "artifacts_unavailable" and index == 0:
+                            blocked = stack.artifacts.root / str(storage)
+                        orphan = stack.artifacts.root / str(uuid4())
+                        orphan.mkdir()
+                        os.utime(orphan, (time.time() - 7200, time.time() - 7200))
+                        session.add(
+                            Artifact(
+                                id=uuid4(),
+                                consumer_id="one",
+                                digest="0" * 64,
+                                storage_id=storage,
+                                retired=True,
+                                collection_pending=True,
+                                created_at=old + timedelta(seconds=index),
+                            )
+                        )
+                else:
+                    for index in range(1001):
+                        session.add(
+                            Sandbox(
+                                id=uuid4(),
+                                consumer_id="one",
+                                idempotency_key=f"expired-{index}",
+                                request_hash="0" * 64,
+                                spec={},
+                                snapshot={},
+                                installation_id=stack.orchestrator.config.identity.installation_id,
+                                host_id=stack.orchestrator.config.identity.host_id,
+                                accepted_at=old,
+                                absolute_deadline=old + timedelta(hours=1),
+                                state="terminated",
+                                desired_stop=True,
+                                cleaned_at=old,
+                            )
+                        )
+            maintenance = MaintenanceActivities(
+                stack.delivery, stack.life, stack.orchestrator, stack.artifacts
+            )
+            remove = shutil.rmtree
+
+            def fail_one(path: Path) -> None:
+                if path == blocked:
+                    raise OSError("one artifact is unavailable")
+                remove(path)
+
+            with monkeypatch.context() as patch:
+                patch.setattr(shutil, "rmtree", fail_one)
+                await maintenance.maintain("artifacts" if kind.startswith("artifacts") else kind)
+            assert live_path.is_dir()
+            if kind.startswith("artifacts"):
+                assert set(stack.artifacts.root.iterdir()) == {live_path.parent} | (
+                    {blocked} if blocked else set()
+                )
+            else:
+                async with stack.sessions() as session:
+                    assert (await session.exec(select(Sandbox))).all() == []
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("previous", [False, True])
+def test_upgrade_replaces_polling_schedules_with_twice_daily_cleanup(
+    temporal_stack: Any, previous: bool
+) -> None:
+    from boxie.domain.models import OrchestratorIdentity
+    from boxie.temporal.contracts import maintenance_queue
+    from boxie.temporal.maintenance import Maintenance
+    from temporalio.client import (
+        Schedule,
+        ScheduleActionStartWorkflow,
+        ScheduleIntervalSpec,
+        ScheduleOverlapPolicy,
+        SchedulePolicy,
+        ScheduleSpec,
+    )
+    from temporalio.service import RPCError, RPCStatusCode
+
+    async def exercise() -> None:
+        client = await Client.connect(
+            temporal_stack.address,
+            namespace="boxie",
+            tls=tls(temporal_stack, "boxie-orchestrator"),
+            data_converter=pydantic_data_converter,
+        )
+        identity = OrchestratorIdentity(uuid4(), "upgrade")
+        queue = maintenance_queue(identity)
+        identifiers = [
+            f"{queue}/{kind}" for kind in ("commands", "journal", "artifacts", "retention")
+        ]
+        try:
+            for kind, seconds in (
+                ("commands", 15 if previous else 5),
+                ("journal", 60 if previous else 30),
+                ("artifacts", 300 if previous else 30),
+                ("retention", 300 if previous else 30),
+            ):
+                await client.create_schedule(
+                    f"{queue}/{kind}",
+                    Schedule(
+                        action=ScheduleActionStartWorkflow(
+                            Maintenance.run, kind, id=f"{queue}/{kind}", task_queue=queue
+                        ),
+                        spec=ScheduleSpec(
+                            intervals=[ScheduleIntervalSpec(every=timedelta(seconds=seconds))]
+                        ),
+                        policy=SchedulePolicy(
+                            overlap=ScheduleOverlapPolicy.SKIP, catchup_window=timedelta(minutes=1)
+                        ),
+                    ),
+                )
+            await ensure_schedules(client, identity)
+            await ensure_schedules(client, identity)
+            for kind in ("commands", "journal"):
+                with pytest.raises(RPCError) as missing:
+                    await client.get_schedule_handle(f"{queue}/{kind}").describe()
+                assert missing.value.status == RPCStatusCode.NOT_FOUND
+            for kind in ("artifacts", "retention"):
+                description = await client.get_schedule_handle(f"{queue}/{kind}").describe()
+                assert description.schedule.spec.intervals == [
+                    ScheduleIntervalSpec(every=timedelta(hours=12))
+                ]
+            await check_schedules(client, identity)
+        finally:
+            for identifier in identifiers:
+                try:
+                    await client.get_schedule_handle(identifier).delete()
+                except RPCError as error:
+                    if error.status != RPCStatusCode.NOT_FOUND:
+                        raise
+
+    asyncio.run(exercise())
 
 
 @pytest.mark.parametrize("stop_first", [False, True])
@@ -68,6 +299,9 @@ def test_committed_command_recovers_without_api_delivery(
                     ):
                         await asyncio.sleep(0.1)
                 assert lost_sql_ack
+                async with asyncio.timeout(10):
+                    while await stack.delivery.store.pending(view.id):
+                        await asyncio.sleep(0.05)
                 first_run = (
                     await client.get_workflow_handle(f"boxie/sandbox/{view.id}").describe()
                 ).run_id

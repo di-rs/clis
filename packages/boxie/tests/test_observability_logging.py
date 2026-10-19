@@ -79,6 +79,7 @@ secret = {SECRET!r}
 class Hostile:
     def __str__(self): raise AssertionError("must never format")
     def __repr__(self): raise AssertionError("must never repr")
+logging.getLogger("httpx").warning("GET https://example/?token=%s", secret)
 logging.getLogger("httpx").error("GET https://example/?token=%s", secret)
 logging.getLogger(secret).error(Hostile(), Hostile())
 try:
@@ -93,8 +94,63 @@ runtime.close()
 """)
     events = records(result)
     assert SECRET not in result.stdout + result.stderr
+    assert {event["level"] for event in events if event["logger"] == "dependency"} == {
+        "WARNING",
+        "ERROR",
+    }
     assert any(event.get("error_type") == "RuntimeError" for event in events)
     assert any(event.get("error_message") == "operation failed" for event in events)
+
+
+@pytest.mark.parametrize(
+    "method,path,ready,status,outcome",
+    [
+        ("GET", "/healthz", True, 200, None),
+        ("GET", "/readyz", True, 200, None),
+        ("GET", "/readyz", False, 503, "failed"),
+        ("DELETE", "/v1/artifacts/11111111-1111-1111-1111-111111111111", True, 204, "succeeded"),
+    ],
+)
+def test_real_http_probe_logs_preserve_failures_and_metrics(
+    method: str, path: str, ready: bool, status: int, outcome: str | None
+) -> None:
+    result = child(f"""
+import httpx
+from boxie.api.app import ApiConfig, create_app
+from boxie.observability.metrics import Metrics
+from boxie_test_support.api import CONSUMER_AUTH, serve
+class Ports:
+    async def ready(self): return {ready!r}
+    async def retire(self, principal, identifier):
+        assert principal.consumer_id == "one"
+        assert str(identifier) == "11111111-1111-1111-1111-111111111111"
+ports = Ports()
+metrics = Metrics("api", logs=runtime)
+app = create_app(
+    ApiConfig(release="test", consumers={{"one":b"consumer-one-secret"}}),
+    ports, ports, ports, request_completed=metrics.http_completed,
+)
+async def run():
+    async with serve(app) as origin:
+        async with httpx.AsyncClient(base_url=origin, headers=CONSUMER_AUTH) as http:
+            response = await http.request({method!r}, {path!r})
+            assert response.status_code == {status}
+asyncio.run(run())
+route = {path!r} if {method!r} == "GET" else "/v1/artifacts/{{artifact_id}}"
+sample = f'boxie_http_requests_total{{{{method="{method}",route="{{route}}",status_class="{status // 100}xx"}}}} 1.0'
+assert sample.encode() in metrics.render()
+runtime.close()
+""")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stderr == ""
+    if outcome is None:
+        assert result.stdout == ""
+    else:
+        events = records(result)
+        assert len(events) == 1
+        assert events[0]["event"] == "request.completed"
+        assert events[0]["outcome"] == outcome
+        assert events[0]["level"] == ("ERROR" if outcome == "failed" else "INFO")
 
 
 def test_factory_import_does_not_take_over_streams() -> None:

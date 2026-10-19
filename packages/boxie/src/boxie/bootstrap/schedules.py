@@ -1,5 +1,6 @@
-"""Verify the native recovery/maintenance schedules before admitting new work."""
+"""Migrate and verify the owning host's twice-daily cleanup schedules."""
 
+from dataclasses import replace
 from datetime import timedelta
 
 from temporalio.client import (
@@ -14,6 +15,7 @@ from temporalio.client import (
     ScheduleUpdate,
     ScheduleUpdateInput,
 )
+from temporalio.service import RPCError, RPCStatusCode
 
 from boxie.domain.models import OrchestratorIdentity
 from boxie.temporal.contracts import maintenance_queue
@@ -27,17 +29,12 @@ def schedule_definitions(identity: OrchestratorIdentity) -> dict[str, Schedule]:
             action=ScheduleActionStartWorkflow(
                 Maintenance.run, kind, id=f"{queue}/{kind}", task_queue=queue
             ),
-            spec=ScheduleSpec(intervals=[ScheduleIntervalSpec(every=timedelta(seconds=seconds))]),
+            spec=ScheduleSpec(intervals=[ScheduleIntervalSpec(every=timedelta(hours=12))]),
             policy=SchedulePolicy(
-                overlap=ScheduleOverlapPolicy.SKIP, catchup_window=timedelta(minutes=1)
+                overlap=ScheduleOverlapPolicy.SKIP, catchup_window=timedelta(hours=12)
             ),
         )
-        for kind, seconds in (
-            ("commands", 15),
-            ("artifacts", 300),
-            ("journal", 60),
-            ("retention", 300),
-        )
+        for kind in ("artifacts", "retention")
     }
 
 
@@ -70,32 +67,60 @@ async def ensure_schedules(client: Client, identity: OrchestratorIdentity) -> No
         try:
             await client.create_schedule(identifier, schedule)
         except ScheduleAlreadyRunningError:
-            # Only upgrade the exact original cadence; reject operator changes.
+            # Only upgrade shipped configurations; reject operator changes.
             async def upgrade(
                 update: ScheduleUpdateInput,
                 expected: Schedule = schedule,
-                schedule_id: str = identifier,
             ) -> ScheduleUpdate | None:
                 actual = update.description.schedule
                 if actual.spec == expected.spec:
                     await _check_schedule(client, actual, expected)
                     return None
-                legacy = Schedule(
+                legacy = replace(
+                    expected,
                     action=expected.action,
                     spec=ScheduleSpec(
-                        intervals=[
-                            ScheduleIntervalSpec(
-                                every=timedelta(
-                                    seconds=5 if schedule_id.endswith("/commands") else 30
-                                )
-                            )
-                        ]
+                        intervals=[ScheduleIntervalSpec(every=timedelta(seconds=30))]
                     ),
-                    policy=expected.policy,
+                    policy=SchedulePolicy(
+                        overlap=ScheduleOverlapPolicy.SKIP, catchup_window=timedelta(minutes=1)
+                    ),
                 )
+                if actual.spec == ScheduleSpec(
+                    intervals=[ScheduleIntervalSpec(every=timedelta(seconds=300))]
+                ):
+                    legacy.spec = actual.spec
                 await _check_schedule(client, actual, legacy)
                 actual.spec = expected.spec
+                actual.policy = expected.policy
                 return ScheduleUpdate(schedule=actual)
 
             await client.get_schedule_handle(identifier).update(upgrade)
+    queue = maintenance_queue(identity)
+    for kind, seconds in (("commands", 5), ("journal", 30)):
+        identifier = f"{queue}/{kind}"
+        handle = client.get_schedule_handle(identifier)
+        try:
+            actual = (await handle.describe()).schedule
+        except RPCError as error:
+            if error.status == RPCStatusCode.NOT_FOUND:
+                continue
+            raise
+        expected = Schedule(
+            action=ScheduleActionStartWorkflow(
+                Maintenance.run, kind, id=identifier, task_queue=queue
+            ),
+            spec=ScheduleSpec(intervals=[ScheduleIntervalSpec(every=timedelta(seconds=seconds))]),
+            policy=SchedulePolicy(
+                overlap=ScheduleOverlapPolicy.SKIP, catchup_window=timedelta(minutes=1)
+            ),
+        )
+        if actual.spec == ScheduleSpec(
+            intervals=[
+                ScheduleIntervalSpec(every=timedelta(seconds=15 if kind == "commands" else 60))
+            ]
+        ):
+            expected.spec = actual.spec
+        await _check_schedule(client, actual, expected)
+        await handle.delete()
     await check_schedules(client, identity)

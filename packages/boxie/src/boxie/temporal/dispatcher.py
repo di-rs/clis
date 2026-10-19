@@ -1,4 +1,4 @@
-"""Idempotent post-commit command delivery and bounded Temporal recovery."""
+"""Idempotent post-commit delivery and process-owned outbox recovery."""
 
 import asyncio
 import logging
@@ -56,6 +56,15 @@ class CommandDelivery:
             for event in events:
                 batch.create_task(self._one(event, semaphore))
 
+    async def run(self) -> None:
+        while True:
+            try:
+                async with asyncio.timeout(20):
+                    await self.recover_once()
+            except Exception:
+                logger.warning("command recovery unavailable")
+            await asyncio.sleep(5)
+
     async def deliver_pending(self, sandbox_id: UUID) -> None:
         try:
             async with asyncio.timeout(1):
@@ -63,4 +72,4 @@ class CommandDelivery:
                     await self.deliver(event)
                     await self.store.acknowledge(event)
         except Exception:
-            pass  # Acceptance is already committed to SQL; scheduled recovery repairs delivery.
+            pass  # Acceptance is already committed to SQL; the recovery loop repairs delivery.

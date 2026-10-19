@@ -317,6 +317,7 @@ def configure_logging(
         root = logging.getLogger()
         root.handlers[:] = [handler]
         root.setLevel(settings.level)
+        logging.getLogger("httpx").setLevel(logging.WARNING)
         logging.captureWarnings(True)
         # Remove pre-existing dependency handlers, including Uvicorn's raw stderr.
         for value in logging.Logger.manager.loggerDict.values():

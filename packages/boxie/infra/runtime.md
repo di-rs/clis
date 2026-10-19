@@ -65,19 +65,31 @@ SQL observations or Temporal history. Terminal framing/replay remain unchanged.
 
 ## Native maintenance
 
-Startup verifies installation/host-specific Temporal Schedules before serving:
+Pending start/stop delivery runs in a supervised loop in the orchestrator process.
+It starts immediately, attempts up to 32 commands with eight concurrent deliveries
+and a 20-second deadline, then waits five seconds before the next pass. Failed
+deliveries stay pending and produce warnings; an empty pass creates no Temporal
+workflow or log event.
+
+Startup creates or verifies two installation/host-specific Temporal Schedules
+before serving. Both run at midnight and noon UTC, skip overlapping runs and
+have a 12-hour catch-up window:
 
 | Operation | Interval | Bounds |
 | --- | --- | --- |
-| Pending start/stop delivery | 15 seconds | 32 commands, eight concurrent deliveries, 20-second activity deadline |
-| Artifact collection | 5 minutes | Bounded existing file/SQL collection batches |
-| Journal compaction | 1 minute | Settled runtime, no live sessions, authoritative SQL receipt |
-| SQL retention | 5 minutes | Existing retention and ownership constraints |
+| Artifact collection | 12 hours | Drain eligible artifacts in batches of 100, then scan orphan files |
+| SQL retention | 12 hours | Compact eligible journal records, then purge eligible SQL rows in batches of 1,000 |
 
-Schedules skip overlapping runs and catch up at most one minute. Each operation
-has its own schedule, with maintenance activity capacity separate from lifecycle
-capacity. One failure must not suppress unrelated maintenance or lease renewal.
-Missing, paused or incompatible schedules close new admission.
+Each activity attempt has a 20-second deadline and a 60-second overall retry
+deadline. Maintenance activity capacity is separate from lifecycle capacity;
+one failed operation does not suppress the other schedule or lease renewal.
+
+Startup upgrades the shipped 30-second and five-minute cleanup schedules and
+deletes the retired command and journal schedules at their known old intervals
+(5 or 15 seconds for commands, 30 or 60 seconds for journals). Other schedule
+changes, including pauses, are rejected. Handlers remain available for maintenance
+workflows that already started. Missing, paused or incompatible cleanup schedules
+close new admission.
 
 New admission also rejects an oldest pending command over 30 seconds or a backlog
 of 100. Readiness verifies SQL, orchestrator health, schedule configuration and
@@ -85,6 +97,12 @@ recent lifecycle pollers. Poller presence is evidence up to 90 seconds old, not
 instantaneous worker liveness.
 
 ## Ownership and retention
+
+Before a lifecycle workflow finishes, its facts activity compacts the local journal
+record once SQL confirms cleanup. If the record still has unsettled work, the
+activity retries with `CleanupPending`. One startup compaction pass and the
+twice-daily retention schedule also reclaim eligible records from older completed
+workflows.
 
 Only executions whose removal is saved in the journal, without pending create
 operations, uncertainty, active activities or terminal sessions, can be compacted.
