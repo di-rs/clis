@@ -119,19 +119,29 @@ temporary files under `/run`; it expires with the token's lifetime.
 
 ## Release and inspect failures
 
-The [Boxie workflow](../../../.github/workflows/boxie-release.yml) pulls its image,
-stops API and orchestrator, runs Alembic migration, and starts both services with
-the metrics overlay. PostgreSQL and Temporal stay up. Authenticated readiness
-must pass before Actions reports success. Pending requests may resume after the
-restart; an empty capacity table is not a release condition. The separate native
-host acceptance run covers terminal allocation and cleanup.
+Run either release manually from Actions on `master`:
 
-The [Playground gateway workflow](../../../.github/workflows/cli-playground-release.yml)
-pulls and recreates only `gateway`. Its proxy stays up. The separate
-[sandbox workflow](../../../.github/workflows/cli-playground-sandbox-release.yml)
-changes the approved Playground profile digest and recreates the current Boxie
-orchestrator. It preserves the current Boxie image and the other profile fields.
-Shared build settings may cause extra application releases.
+- [🚀 CLI Playground Release](../../../.github/workflows/cli-playground-release.yml)
+  builds and deploys the Playground backend and frontend together in the gateway image.
+- [🚀 Boxie Runtime and Sandbox Release](../../../.github/workflows/boxie-release.yml)
+  builds the Boxie runtime and sandbox from one commit, then updates Boxie followed
+  by the sandbox profile. It does not release the Playground application.
+
+A failed stage stops the remaining deployments in its workflow; completed stages
+are not rolled back automatically. Boxie stages use the `boxie` environment;
+the Playground release uses `playground`.
+Each stage calls the shared [release transport](release.sh) for SSH, image settings
+and temporary registry credentials; service scripts own migration and readiness checks.
+
+The Boxie stage pulls its image, stops API and orchestrator, runs Alembic migration,
+and starts both services with the metrics overlay. PostgreSQL and Temporal stay
+up. Authenticated readiness must pass before the next stage. Pending requests may
+resume after the restart; an empty capacity table is not a release condition.
+The separate native host acceptance run covers terminal allocation and cleanup.
+
+The sandbox stage changes the approved Playground profile digest and recreates
+Boxie's orchestrator, preserving other profile fields. The gateway stage pulls
+and recreates only `gateway`; its proxy stays up.
 
 Setup and release workflows share one `sanctuary-production` queue. Each run selects
 current `master` after entering the queue, then builds and deploys that checkout.
@@ -140,9 +150,8 @@ only failed jobs keeps the earlier source selection and is rejected before
 deployment or provisioning starts.
 
 Builds can run before production activation; deployments still require
-`DEPLOYMENT_ACCEPTANCE_PASSED` and `BOXIE_BACKUP_RESTORE_VERIFIED`. Push-triggered
-releases also require `BOXIE_AUTO_DEPLOY` or `PLAYGROUND_AUTO_DEPLOY` for their
-respective application.
+`DEPLOYMENT_ACCEPTANCE_PASSED`. Pushes do not
+trigger releases.
 
 An unsuccessful SSH or Compose command fails the Actions run. On the host, inspect
 services and recent logs before rerunning the workflow:
@@ -177,12 +186,12 @@ uv run --locked pytest infra/host/tests infra/environments/single-host/tests \
 ```
 
 On an authorized native Linux amd64 host, exercise fresh setup, an unchanged
-rerun, each independent release, migration failure and retry, metrics, tunnel
+rerun, both release workflows, migration failure and retry, metrics, tunnel
 configuration and preview publication. The local command tests cannot establish
 those host behaviors. The [runtime requirements](../../../packages/boxie/infra/runtime.md)
 include the runsc and backup checks.
 
 The generated Boxie TLS leaf certificates last 90 days and the CAs last 365 days.
 Plan renewal separately. Maintain an off-host backup and rehearse restoration
-before setting `BOXIE_BACKUP_RESTORE_VERIFIED`; the protected disk alone is not a
+before relying on recovery; the protected disk alone is not a
 backup.

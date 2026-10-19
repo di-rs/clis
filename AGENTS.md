@@ -36,9 +36,11 @@ Follow [Testing](docs/testing.md) for Rust and Python checks and
 Use the root uv workspace and committed lockfile for Python tooling; keep shared
 Ruff and strict mypy configuration at the root.
 
-Run checks directly with `prek run --all-files` before committing. For focused
-checks, use `prek run HOOK_ID --files PATH...`. Use `prek install` to install
-hooks; keep the installed hooks and Gitmoji validation enabled. Do not use
+Run focused checks directly before committing with `prek run --files PATH...`
+or `prek run HOOK_ID --files PATH...`, selecting the changed files. Do not run
+`prek run --all-files` locally unless the user explicitly requests it; reserve
+full-repository runs for CI. Use `prek install` to install hooks; keep the
+installed hooks and Gitmoji validation enabled. Do not use
 `git commit` as a test runner or repeatedly retry commits to discover failures.
 
 Tests that invoke Git in temporary repositories must clear inherited

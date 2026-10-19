@@ -66,14 +66,12 @@ when upgrading xterm. This private dependency keeps terminal-generated replies
 working during replay without counting them as user activity. Browser tests drive
 DOM composition events; they do not claim OS-native IME coverage.
 
-## Production transition
+## Production releases
 
-Production activation is unavailable until PR4. The [hosting reference](infra/README.md)
-retains protected host/DNS provisioning; setup now provisions only. Release and
-all deploy entrypoints fail before state reads, publication or activation. Keep
-automatic release disabled through this transition. Existing preview-controller
-trust boundaries remain unchanged; local Compose and native runsc CI validate the
-split runtime independently.
+Use the [shared-host guide](../../infra/environments/single-host/README.md) for
+setup, deployment gates and failure inspection. Releases are manual. The Playground release builds and deploys its backend and
+frontend together. A separate Boxie release delivers the runtime and sandbox.
+Preview publication retains its separate trust boundary.
 
 ## Workflow responsibilities
 
@@ -81,8 +79,9 @@ split runtime independently.
 | --- | --- |
 | [🏗️ Playground PR binary builds](../../.github/workflows/cli-playground.yml) | Compile affected PR binaries without deployment credentials |
 | [🌐 Playground PR previews](../../.github/workflows/cli-playground-preview.yml) | Trusted build-state updates, artifact publication and PR close/reopen reconciliation |
-| [🚀 Playground runtime release](../../.github/workflows/cli-playground-release.yml) | Fails explicitly until split-service release support in PR4 |
-| [☁️ Playground infrastructure setup](../../.github/workflows/cli-playground-setup.yml) | Manually provision infrastructure only |
+| [🚀 CLI Playground Release](../../.github/workflows/cli-playground-release.yml) | Manually build and deploy the Playground backend and frontend |
+| [🚀 Boxie Runtime and Sandbox Release](../../.github/workflows/boxie-release.yml) | Manually build and deploy the Boxie runtime and sandbox together |
+| [☁️ Playground infrastructure setup](../../.github/workflows/cli-playground-setup.yml) | Manually provision infrastructure and install services |
 | [🧪 Boxie lifecycle integration](../../.github/workflows/boxie-lifecycle.yml) | Verify PostgreSQL/Temporal recovery and native Linux/gVisor lifecycle and browser faults |
 
 PR publication stores a binary batch and preview metadata. It does not deploy
