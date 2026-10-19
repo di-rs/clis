@@ -9,12 +9,12 @@ from cli_check.workspace import Binary, Package, discover
 
 
 def test_workspace_records_validate_discovered_targets(tmp_path: Path) -> None:
-    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["coreutils/*"]\n')
+    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["buildins/*"]\n')
     add_cli(tmp_path)
     packages = discover(tmp_path)
     assert [package.name for package in packages] == ["echo"]
     assert [binary.name for binary in packages[0].binaries] == ["echo"]
-    assert packages[0].directory == (tmp_path / "coreutils/echo").resolve()
+    assert packages[0].directory == (tmp_path / "buildins/echo").resolve()
     with pytest.raises(ValueError):
         Binary(name=123, source=tmp_path / "src/main.rs")
     with pytest.raises(ValueError):
@@ -35,7 +35,7 @@ def write(root: Path, path: str, content: str) -> None:
 
 def add_cli(
     root: Path,
-    directory: str = "coreutils/echo",
+    directory: str = "buildins/echo",
     *,
     package_options: str = "",
     test_targets: str = "",
@@ -65,13 +65,13 @@ def test_valid_workspace_includes_globs_and_ignores_libraries_and_excludes(tmp_p
     write(
         tmp_path,
         "Cargo.toml",
-        '[workspace]\nmembers = ["coreutils/*", "utils/*"]\nexclude = ["coreutils/excluded"]\n',
+        '[workspace]\nmembers = ["buildins/*", "utils/*"]\nexclude = ["buildins/excluded"]\n',
     )
     add_cli(tmp_path)
     write(tmp_path, "utils/helper/Cargo.toml", '[package]\nname = "helper"\n')
     write(tmp_path, "utils/helper/src/lib.rs", "pub fn helper() {}\n")
-    write(tmp_path, "coreutils/excluded/Cargo.toml", '[package]\nname = "excluded"\n')
-    write(tmp_path, "coreutils/excluded/src/main.rs", "fn main() {}\n")
+    write(tmp_path, "buildins/excluded/Cargo.toml", '[package]\nname = "excluded"\n')
+    write(tmp_path, "buildins/excluded/src/main.rs", "fn main() {}\n")
 
     result = run_policy(tmp_path)
 
@@ -81,9 +81,9 @@ def test_valid_workspace_includes_globs_and_ignores_libraries_and_excludes(tmp_p
 
 @pytest.mark.parametrize("contents", [None, "", " \n\t"])
 def test_cli_requires_nonempty_e2e_entrypoint(tmp_path: Path, contents: str | None) -> None:
-    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["coreutils/*"]\n')
+    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["buildins/*"]\n')
     add_cli(tmp_path)
-    entrypoint = tmp_path / "coreutils/echo/tests/cli.rs"
+    entrypoint = tmp_path / "buildins/echo/tests/cli.rs"
     if contents is None:
         entrypoint.unlink()
     else:
@@ -92,41 +92,41 @@ def test_cli_requires_nonempty_e2e_entrypoint(tmp_path: Path, contents: str | No
     result = run_policy(tmp_path)
 
     assert result.returncode == 1
-    assert "coreutils/echo/tests/cli.rs: requires a nonempty CLI integration test" in result.stderr
+    assert "buildins/echo/tests/cli.rs: requires a nonempty CLI integration test" in result.stderr
 
 
 def test_new_cli_requires_shared_dev_dependency(tmp_path: Path) -> None:
-    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["coreutils/*"]\n')
+    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["buildins/*"]\n')
     add_cli(tmp_path)
-    write(tmp_path, "coreutils/echo/Cargo.toml", '[package]\nname = "echo"\n')
+    write(tmp_path, "buildins/echo/Cargo.toml", '[package]\nname = "echo"\n')
 
     result = run_policy(tmp_path)
 
     assert result.returncode == 1
-    assert "coreutils/echo/Cargo.toml: requires cli-testing in [dev-dependencies]" in result.stderr
+    assert "buildins/echo/Cargo.toml: requires cli-testing in [dev-dependencies]" in result.stderr
 
 
 def test_legacy_generator_is_rejected(tmp_path: Path) -> None:
-    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["coreutils/*"]\n')
+    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["buildins/*"]\n')
     add_cli(tmp_path)
-    write(tmp_path, "coreutils/echo/mk-outs.nu", "# legacy fixture generator\n")
+    write(tmp_path, "buildins/echo/mk-outs.nu", "# legacy fixture generator\n")
 
     result = run_policy(tmp_path)
 
     assert result.returncode == 1
-    assert "coreutils/echo/mk-outs.nu: rename to mk-outputs.nu" in result.stderr
+    assert "buildins/echo/mk-outs.nu: rename to mk-outputs.nu" in result.stderr
 
 
 def test_generator_requires_expected_directory(tmp_path: Path) -> None:
-    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["coreutils/*"]\n')
+    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["buildins/*"]\n')
     add_cli(tmp_path)
-    write(tmp_path, "coreutils/echo/mk-outputs.nu", "# reference fixture generator\n")
+    write(tmp_path, "buildins/echo/mk-outputs.nu", "# reference fixture generator\n")
 
     result = run_policy(tmp_path)
 
     assert result.returncode == 1
-    assert "coreutils/echo/mk-outputs.nu: requires tests/expected/" in result.stderr
-    (tmp_path / "coreutils/echo/tests/expected").mkdir()
+    assert "buildins/echo/mk-outputs.nu: requires tests/expected/" in result.stderr
+    (tmp_path / "buildins/echo/tests/expected").mkdir()
     assert run_policy(tmp_path).returncode == 0
 
 
@@ -208,17 +208,15 @@ def test_disabled_binary_autodiscovery_does_not_require_cli_tests(tmp_path: Path
 def test_cli_entrypoint_must_be_enabled_as_a_test_target(
     tmp_path: Path, package_options: str, test_targets: str, enabled: bool
 ) -> None:
-    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["coreutils/*"]\n')
+    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["buildins/*"]\n')
     add_cli(tmp_path, package_options=package_options, test_targets=test_targets)
-    write(tmp_path, "coreutils/echo/tests/other.rs", "#[test]\nfn other() {}\n")
+    write(tmp_path, "buildins/echo/tests/other.rs", "#[test]\nfn other() {}\n")
 
     result = run_policy(tmp_path)
 
     assert result.returncode == (0 if enabled else 1), result.stderr
     if not enabled:
-        assert (
-            "coreutils/echo/tests/cli.rs: must be enabled as a Cargo test target" in result.stderr
-        )
+        assert "buildins/echo/tests/cli.rs: must be enabled as a Cargo test target" in result.stderr
 
 
 def run_check(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
@@ -232,13 +230,13 @@ def run_check(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
 
 @pytest.fixture
 def workspace(tmp_path: Path) -> Path:
-    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["coreutils/*", "utils/*"]\n')
+    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["buildins/*", "utils/*"]\n')
     add_cli(tmp_path)
-    write(tmp_path, "README.md", "[echo](coreutils/echo/README.md)\n")
-    write(tmp_path, "coreutils/echo/README.md", "# echo\nPrint arguments.\n")
+    write(tmp_path, "README.md", "[echo](buildins/echo/README.md)\n")
+    write(tmp_path, "buildins/echo/README.md", "# echo\nPrint arguments.\n")
     write(
         tmp_path,
-        "coreutils/echo/benches/cli-bench.toml",
+        "buildins/echo/benches/cli-bench.toml",
         'binary = "echo"\n[[cases]]\nname = "basic"\nargs = []\n',
     )
     return tmp_path
@@ -270,7 +268,7 @@ def test_all_groups_accept_valid_workspace(workspace: Path) -> None:
 def test_layout_reports_broken_binary_boundaries(
     workspace: Path, path: str, content: str, message: str
 ) -> None:
-    write(workspace, f"coreutils/echo/{path}", content)
+    write(workspace, f"buildins/echo/{path}", content)
     result = run_check(workspace, "layout")
     assert result.returncode == 1
     assert message in result.stderr
@@ -278,15 +276,15 @@ def test_layout_reports_broken_binary_boundaries(
 
 
 def test_bin_only_package_is_not_hidden(workspace: Path) -> None:
-    (workspace / "coreutils/echo/src/main.rs").unlink()
-    write(workspace, "coreutils/echo/src/bin/echo.rs", "fn main() {}\n")
+    (workspace / "buildins/echo/src/main.rs").unlink()
+    write(workspace, "buildins/echo/src/bin/echo.rs", "fn main() {}\n")
     result = run_check(workspace, "layout")
     assert result.returncode == 1
     assert "src/main.rs" in result.stderr
 
 
 def test_explicit_matching_binary_does_not_duplicate_automatic_target(workspace: Path) -> None:
-    manifest = workspace / "coreutils/echo/Cargo.toml"
+    manifest = workspace / "buildins/echo/Cargo.toml"
     manifest.write_text(manifest.read_text() + '\n[[bin]]\nname = "echo"\npath = "src/main.rs"\n')
     assert run_check(workspace, "layout").returncode == 0
 
@@ -294,12 +292,12 @@ def test_explicit_matching_binary_does_not_duplicate_automatic_target(workspace:
 def test_library_and_cli_library_are_allowed(workspace: Path) -> None:
     write(workspace, "utils/helper/Cargo.toml", '[package]\nname = "helper"\n')
     write(workspace, "utils/helper/src/lib.rs", "pub fn helper() {}\n")
-    write(workspace, "coreutils/echo/src/lib.rs", "pub fn helper() {}\n")
+    write(workspace, "buildins/echo/src/lib.rs", "pub fn helper() {}\n")
     assert run_check(workspace).returncode == 0
 
 
 def test_groups_do_not_run_other_checks(workspace: Path) -> None:
-    (workspace / "coreutils/echo/tests/cli.rs").unlink()
+    (workspace / "buildins/echo/tests/cli.rs").unlink()
     assert run_check(workspace, "layout").returncode == 0
     assert run_check(workspace, "tests").returncode == 1
 
@@ -307,7 +305,7 @@ def test_groups_do_not_run_other_checks(workspace: Path) -> None:
 def test_root_can_be_found_from_package_cwd(workspace: Path) -> None:
     result = subprocess.run(
         [sys.executable, "-m", "cli_check", "layout"],
-        cwd=workspace / "coreutils/echo",
+        cwd=workspace / "buildins/echo",
         capture_output=True,
         text=True,
     )
@@ -322,8 +320,8 @@ def test_invalid_group_and_missing_workspace_have_distinct_exit_codes(tmp_path: 
 
 
 def test_multiple_violations_are_reported_in_path_order(workspace: Path) -> None:
-    (workspace / "coreutils/echo/tests/cli.rs").unlink()
-    write(workspace, "coreutils/echo/mk-outs.nu", "# legacy\n")
+    (workspace / "buildins/echo/tests/cli.rs").unlink()
+    write(workspace, "buildins/echo/mk-outs.nu", "# legacy\n")
     result = run_check(workspace, "tests")
     assert result.returncode == 1
     assert "mk-outs.nu" in result.stderr and "tests/cli.rs" in result.stderr
@@ -332,14 +330,14 @@ def test_multiple_violations_are_reported_in_path_order(workspace: Path) -> None
 
 @pytest.mark.parametrize("contents", [None, "", " \n"])
 def test_docs_require_nonempty_package_readme(workspace: Path, contents: str | None) -> None:
-    readme = workspace / "coreutils/echo/README.md"
+    readme = workspace / "buildins/echo/README.md"
     if contents is None:
         readme.unlink()
     else:
         readme.write_text(contents)
     result = run_check(workspace, "docs")
     assert result.returncode == 1
-    assert "coreutils/echo/README.md" in result.stderr
+    assert "buildins/echo/README.md" in result.stderr
 
 
 def test_root_readme_must_link_each_cli(workspace: Path) -> None:
@@ -350,18 +348,18 @@ def test_root_readme_must_link_each_cli(workspace: Path) -> None:
 
 
 def test_docs_resolve_references_images_and_encoded_paths(workspace: Path) -> None:
-    write(workspace, "coreutils/echo/a b.md", "# Details\n")
-    write(workspace, "coreutils/echo/logo.svg", "<svg/>\n")
+    write(workspace, "buildins/echo/a b.md", "# Details\n")
+    write(workspace, "buildins/echo/logo.svg", "<svg/>\n")
     write(
         workspace,
-        "coreutils/echo/README.md",
+        "buildins/echo/README.md",
         "# echo\n[details][guide]\n\n[guide]: a%20b.md#details\n\n"
         "![logo](logo.svg)\n[web](https://example.invalid)\n[section](#echo)\n"
         "```md\n[ignored](missing.md)\n```\n",
     )
     assert run_check(workspace, "docs").returncode == 0
-    (workspace / "coreutils/echo/a b.md").unlink()
-    (workspace / "coreutils/echo/logo.svg").unlink()
+    (workspace / "buildins/echo/a b.md").unlink()
+    (workspace / "buildins/echo/logo.svg").unlink()
     result = run_check(workspace, "docs")
     assert result.returncode == 1
     assert "a%20b.md#details" in result.stderr and "logo.svg" in result.stderr
@@ -385,7 +383,7 @@ def test_docs_resolve_references_images_and_encoded_paths(workspace: Path) -> No
 def test_benchmarks_report_missing_or_malformed_suites(
     workspace: Path, suite: str | None, message: str
 ) -> None:
-    path = workspace / "coreutils/echo/benches/cli-bench.toml"
+    path = workspace / "buildins/echo/benches/cli-bench.toml"
     if suite is None:
         path.unlink()
     else:
@@ -397,7 +395,7 @@ def test_benchmarks_report_missing_or_malformed_suites(
 
 
 def test_benchmark_exemption_needs_reason_and_no_suite(workspace: Path) -> None:
-    manifest = workspace / "coreutils/echo/Cargo.toml"
+    manifest = workspace / "buildins/echo/Cargo.toml"
     original = manifest.read_text()
     manifest.write_text(original + '\n[package.metadata.cli-check]\nbenchmark-exemption = ""\n')
     assert run_check(workspace, "benches").returncode == 1
@@ -407,7 +405,7 @@ def test_benchmark_exemption_needs_reason_and_no_suite(workspace: Path) -> None:
     result = run_check(workspace, "benches")
     assert result.returncode == 1
     assert "exemption" in result.stderr
-    (workspace / "coreutils/echo/benches/cli-bench.toml").unlink()
+    (workspace / "buildins/echo/benches/cli-bench.toml").unlink()
     assert run_check(workspace, "benches").returncode == 0
 
 

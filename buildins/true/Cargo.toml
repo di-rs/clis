@@ -1,0 +1,15 @@
+[package]
+license.workspace = true
+name = "true"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cli-log.workspace = true
+
+[dev-dependencies]
+cli-testing.workspace = true
+predicates = { workspace = true }
+
+[lints]
+workspace = true

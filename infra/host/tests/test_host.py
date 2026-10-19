@@ -32,13 +32,13 @@ async def test_host_owns_protected_disk_and_no_product_dns() -> None:
     assert mocks.registrations["hcloud:index/volume:Volume", name].opts.protect
     assert any(kind == "hcloud:index/volumeAttachment:VolumeAttachment" for kind, _ in mocks.inputs)
     assert not any(kind == "cloudflare:index/dnsRecord:DnsRecord" for kind, _ in mocks.inputs)
-    server_options = mocks.registrations["hcloud:index/server:Server", "clis"].opts
+    server_options = mocks.registrations["hcloud:index/server:Server", "sanctuary"].opts
     assert server_options.protect
     assert server_options.additional_secret_outputs == ["userData"]
     assert server_options.ignore_changes == ["userData", "sshKeys"]
     for name in ("deployment-key", "host-key"):
         assert mocks.registrations["tls:index/privateKey:PrivateKey", name].opts.protect
-    firewall = mocks.inputs["hcloud:index/firewall:Firewall", "clis"]
+    firewall = mocks.inputs["hcloud:index/firewall:Firewall", "sanctuary"]
     assert {rule.get("port") for rule in firewall["rules"] if rule["protocol"] == "tcp"} == {
         "22",
         "80",
@@ -47,7 +47,7 @@ async def test_host_owns_protected_disk_and_no_product_dns() -> None:
     user_data = await server.user_data.future()
     assert user_data is not None
     data = json.loads(user_data.removeprefix("#cloud-config\n"))
-    assert any(file["path"] == "/etc/clis/storage-device" for file in data["write_files"])
+    assert any(file["path"] == "/etc/sanctuary/storage-device" for file in data["write_files"])
     root = get_root_resource()
     assert isinstance(root, Stack)
     assert await pulumi.Output.from_input(root.outputs["sshPrivateKey"]).is_secret()
@@ -61,16 +61,16 @@ async def test_optional_admin_key_does_not_change_server_key_count() -> None:
     mocks = HostMocks()
     server = provision(HostConfig(ssh_public_key=admin_key))
     await mocks.finish()
-    assert len(mocks.inputs["hcloud:index/server:Server", "clis"]["sshKeys"]) == 1
+    assert len(mocks.inputs["hcloud:index/server:Server", "sanctuary"]["sshKeys"]) == 1
     assert ("hcloud:index/sshKey:SshKey", "admin") not in mocks.inputs
     user_data = await server.user_data.future()
     assert user_data is not None
     data = json.loads(user_data.removeprefix("#cloud-config\n"))
     files = {item["path"]: item["content"] for item in data["write_files"]}
-    assert files["/etc/clis/admin-ssh-key"] == admin_key + "\n"
+    assert files["/etc/sanctuary/admin-ssh-key"] == admin_key + "\n"
     assert data["runcmd"][:3] == [
         ["install", "-d", "-m", "0700", "/root/.ssh"],
-        ["bash", "-c", "cat /etc/clis/admin-ssh-key >> /root/.ssh/authorized_keys"],
+        ["bash", "-c", "cat /etc/sanctuary/admin-ssh-key >> /root/.ssh/authorized_keys"],
         ["chmod", "0600", "/root/.ssh/authorized_keys"],
     ]
 
@@ -81,7 +81,7 @@ def test_storage_guard_refuses_missing_disk(tmp_path: Path) -> None:
             "bash",
             str(ROOT / "infra/host/storage-guard.sh"),
             str(tmp_path),
-            "/dev/missing-clis-volume",
+            "/dev/missing-sanctuary-volume",
         ],
         capture_output=True,
         text=True,
@@ -95,16 +95,16 @@ def test_cloud_init_contains_only_immutable_first_boot_files() -> None:
 
     data = json.loads(cloud_init("private", "public", "123").removeprefix("#cloud-config\n"))
     files = {item["path"]: item["content"] for item in data["write_files"]}
-    assert "/usr/local/sbin/clis-operation" not in files
-    assert not any(name.startswith("/etc/systemd/system/clis-") for name in files)
-    assert "/usr/local/sbin/clis-bootstrap" in files
-    assert "/usr/local/sbin/clis-storage-guard" in files
+    assert "/usr/local/sbin/sanctuary-operation" not in files
+    assert not any(name.startswith("/etc/systemd/system/sanctuary-") for name in files)
+    assert "/usr/local/sbin/sanctuary-bootstrap" in files
+    assert "/usr/local/sbin/sanctuary-storage-guard" in files
 
 
 def test_bootstrap_prepares_fixed_compose_directories() -> None:
     bootstrap = (ROOT / "infra/host/bootstrap.sh").read_text()
-    assert "/opt/clis/boxie /opt/clis/playground" in bootstrap
-    assert "/opt/clis/releases" not in bootstrap
+    assert "/opt/sanctuary/boxie /opt/sanctuary/playground" in bootstrap
+    assert "/opt/sanctuary/releases" not in bootstrap
 
 
 @pulumi.runtime.test  # type: ignore[untyped-decorator]

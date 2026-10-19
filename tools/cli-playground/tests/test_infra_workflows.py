@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 WORKFLOWS = Path(__file__).resolve().parents[3] / ".github/workflows"
-QUEUE = {"group": "clis-production", "queue": "max", "cancel-in-progress": "false"}
+QUEUE = {"group": "sanctuary-production", "queue": "max", "cancel-in-progress": "false"}
 
 
 def workflow(name: str) -> dict[str, Any]:
@@ -117,7 +117,7 @@ def test_release_uses_one_queue_current_master_and_direct_ssh(filename: str, app
     assert "R2_" not in str(deployment)
     assert "HCLOUD" not in str(deployment)
     assert not any(
-        path.startswith(("coreutils/", "utils/")) for path in release["on"]["push"]["paths"]
+        path.startswith(("buildins/", "utils/")) for path in release["on"]["push"]["paths"]
     )
 
 
@@ -151,7 +151,7 @@ def test_setup_pulls_all_images_before_starting_boxie() -> None:
     installer = (WORKFLOWS.parent.parent / "infra/environments/single-host/install.sh").read_text()
     assert "PLAYGROUND_SANDBOX_IMAGE" in installer
     assert installer.index('docker pull "$image"') < installer.index(
-        "bash /opt/clis/boxie/install.sh"
+        "bash /opt/sanctuary/boxie/install.sh"
     )
 
 
@@ -196,7 +196,7 @@ def test_infrastructure_checks_require_trusted_dispatch_or_opted_in_schedule() -
     assert protected["environment"] == "platform"
     assert protected["permissions"] == {"contents": "read"}
     assert check["concurrency"] == {
-        "group": "clis-production",
+        "group": "sanctuary-production",
         "queue": "max",
         "cancel-in-progress": "false",
     }

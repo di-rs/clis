@@ -1,16 +1,17 @@
 [workspace]
 resolver = "3"
-members = ["biggie", "calr", "kara", "parsu", "utils/*", "coreutils/*"]
+members = ["packages/biggie", "packages/kara", "packages/parsu", "utils/*", "buildins/*"]
 
 [workspace.package]
 authors = ["Dima P <dimapm@pm.me>"]
 edition = "2024"
-license = "MIT"
-repository = "https://github.com/di-rs/clis"
+license = "Apache-2.0"
+repository = "https://github.com/di-rs/sanctuary"
 readme = "README.md"
 include = ["README.md", "LICENSE", "build.rs", "Cargo.toml", "src/**/*.rs"]
 
 [workspace.dependencies]
+cli-log = { path = "utils/cli-log" }
 cli-testing = { path = "utils/cli-testing" }
 csv = "1.4.0"
 log = { version = "0.4", features = ["std", "kv"] }

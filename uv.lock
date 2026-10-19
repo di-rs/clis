@@ -10,7 +10,7 @@ members = [
     "cli-bench",
     "cli-check",
     "cli-playground",
-    "clis-tools",
+    "sanctuary-tools",
     "host-infra",
     "playground-infra",
 ]
@@ -220,7 +220,7 @@ wheels = [
 [[package]]
 name = "boxie"
 version = "0.1.0"
-source = { editable = "tools/boxie" }
+source = { editable = "packages/boxie" }
 dependencies = [
     { name = "aiodocker" },
     { name = "aiohttp" },
@@ -259,7 +259,7 @@ requires-dist = [
 [[package]]
 name = "boxie-infra"
 version = "0.1.0"
-source = { editable = "tools/boxie/infra" }
+source = { editable = "packages/boxie/infra" }
 dependencies = [
     { name = "httpx" },
     { name = "websockets" },
@@ -274,7 +274,7 @@ requires-dist = [
 [[package]]
 name = "boxie-test-support"
 version = "0.1.0"
-source = { editable = "tools/boxie/tests/support" }
+source = { editable = "packages/boxie/tests/support" }
 dependencies = [
     { name = "boxie" },
     { name = "httpx" },
@@ -360,7 +360,7 @@ wheels = [
 ]
 
 [[package]]
-name = "clis-tools"
+name = "sanctuary-tools"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
@@ -394,7 +394,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "boxie-test-support", editable = "tools/boxie/tests/support" },
+    { name = "boxie-test-support", editable = "packages/boxie/tests/support" },
     { name = "mypy" },
     { name = "pulumi", specifier = "==3.268.0" },
     { name = "pulumi-cloudflare", specifier = "==6.22.1" },

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 [[ $# == 0 ]] || exit 2
-owner=${CLIS_PLAYGROUND_DIR:-/opt/clis/playground}
-config=${CLIS_CONFIG_DIR:-/etc/clis}
+owner=${SANCTUARY_PLAYGROUND_DIR:-/opt/sanctuary/playground}
+config=${SANCTUARY_CONFIG_DIR:-/etc/sanctuary}
 if ! docker network inspect playground-proxy >/dev/null 2>&1; then docker network create playground-proxy >/dev/null; fi
 for volume in playground-data playground-certificates; do
     if ! docker volume inspect "$volume" >/dev/null 2>&1; then docker volume create "$volume" >/dev/null; fi

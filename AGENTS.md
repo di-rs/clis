@@ -12,7 +12,7 @@ Every Rust CLI must have its own Cargo package and directory. A CLI package must
 define exactly one binary, with the same name as the package and directory.
 Use `src/main.rs`; do not combine independent commands under `src/bin/` or add
 multiple `[[bin]]` targets. For example, `true` and `false` are separate packages
-in `coreutils/true/` and `coreutils/false/`.
+in `buildins/true/` and `buildins/false/`.
 
 A CLI package may also expose a library for its implementation or consumers.
 Shared library packages under `utils/` may have no CLI. Test, example, and
@@ -57,7 +57,7 @@ performance changes from those samples.
 
 ## Human-facing documentation
 
-Use `.agents/skills/clis-documentation-pipeline/SKILL.md` when creating, editing,
+Use `.agents/skills/sanctuary-documentation-pipeline/SKILL.md` when creating, editing,
 or reviewing persistent documentation for human readers about CLIs, tools,
 products, or architecture. It runs `write-docs`, `technical-documentation`, and
 `editorial-pass` in that order. This includes READMEs, guides, references, and

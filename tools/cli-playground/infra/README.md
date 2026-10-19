@@ -9,7 +9,7 @@ current Boxie image.
 ## Independent local unit
 
 First obtain a private Boxie URL and consumer credential from its operator; see
-[Boxie infrastructure](../../boxie/infra/README.md). Boxie's approved `playground`
+[Boxie infrastructure](../../../packages/boxie/infra/README.md). Boxie's approved `playground`
 profile must use the immutable product sandbox image, command
 `["/opt/playground/shell.sh"]`, environment allowlist `TERM=["xterm-256color"]`, and
 artifact mount `/opt/artifact`. The declaration is in
@@ -18,7 +18,7 @@ and merge it into the **operator-owned Boxie profiles file**. The product cannot
 upload or change its profile. Build the product sandbox separately:
 
 ```sh
-docker build -f tools/cli-playground/Sandbox.Dockerfile -t clis-playground-sandbox:local .
+docker build -f tools/cli-playground/Sandbox.Dockerfile -t sanctuary-playground-sandbox:local .
 docker build -f tools/cli-playground/infra/Playground.Dockerfile -t cli-playground:local .
 ```
 
@@ -65,7 +65,7 @@ host deployment credentials.
 ## Validation
 
 Build the real frontend before `uv run --locked pytest
-tools/boxie/tests/test_packaging.py -m integration`. The required PR frontend job
+packages/boxie/tests/test_packaging.py -m integration`. The required PR frontend job
 checks isolated packaging and static responses. The separate
 [Linux sandbox workflow](../../../.github/workflows/boxie-lifecycle.yml)
 checks native runsc security and both generic and product terminals through the

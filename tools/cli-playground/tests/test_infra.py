@@ -90,23 +90,23 @@ async def test_resource_graph_limits_public_exposure_and_protects_host() -> None
     mocks = HostMocks()
     server = provision(HostConfig(domain="play.example.com", cloudflare_zone_id=ZONE_ID))
     await mocks.finish()
-    host = mocks.inputs["hcloud:index/server:Server", "clis"]
+    host = mocks.inputs["hcloud:index/server:Server", "sanctuary"]
     assert host["firewallIds"] == [123]
     assert host["deleteProtection"] is True
     assert host["rebuildProtection"] is True
     assert host["publicNets"] == [{"ipv4": 123, "ipv4Enabled": True, "ipv6Enabled": False}]
-    firewall = mocks.inputs["hcloud:index/firewall:Firewall", "clis"]
+    firewall = mocks.inputs["hcloud:index/firewall:Firewall", "sanctuary"]
     tcp_rules = {
         rule["port"]: rule["sourceIps"] for rule in firewall["rules"] if rule["protocol"] == "tcp"
     }
     assert set(tcp_rules) == {"22", "80", "443"}
     assert tcp_rules["22"] == ["0.0.0.0/0"]
     assert ("hcloud:index/sshKey:SshKey", "admin") not in mocks.inputs
-    ip = mocks.inputs["hcloud:index/primaryIp:PrimaryIp", "clis-ipv4"]
+    ip = mocks.inputs["hcloud:index/primaryIp:PrimaryIp", "sanctuary-ipv4"]
     assert ip["autoDelete"] is False
     assert ip["deleteProtection"] is True
-    assert mocks.registrations["hcloud:index/primaryIp:PrimaryIp", "clis-ipv4"].opts.protect
-    assert mocks.registrations["hcloud:index/server:Server", "clis"].opts.protect
+    assert mocks.registrations["hcloud:index/primaryIp:PrimaryIp", "sanctuary-ipv4"].opts.protect
+    assert mocks.registrations["hcloud:index/server:Server", "sanctuary"].opts.protect
 
     records = {
         value["name"]: value
@@ -140,17 +140,17 @@ async def test_optional_administrator_access_uses_first_boot_without_server_key_
         )
     )
     await mocks.finish()
-    firewall = mocks.inputs["hcloud:index/firewall:Firewall", "clis"]
+    firewall = mocks.inputs["hcloud:index/firewall:Firewall", "sanctuary"]
     ssh_rules = [rule for rule in firewall["rules"] if rule.get("port") == "22"]
     assert len(ssh_rules) == 1
     assert ssh_rules[0]["sourceIps"] == ["203.0.113.4/32"]
     assert ("hcloud:index/sshKey:SshKey", "admin") not in mocks.inputs
-    assert len(mocks.inputs["hcloud:index/server:Server", "clis"]["sshKeys"]) == 1
+    assert len(mocks.inputs["hcloud:index/server:Server", "sanctuary"]["sshKeys"]) == 1
     user_data = await server.user_data.future()
     assert user_data is not None
     config = json.loads(user_data.removeprefix("#cloud-config\n"))
     assert any(
-        entry["path"] == "/etc/clis/admin-ssh-key" and entry["content"] == "ssh-ed25519 YWJj\n"
+        entry["path"] == "/etc/sanctuary/admin-ssh-key" and entry["content"] == "ssh-ed25519 YWJj\n"
         for entry in config["write_files"]
     )
 
@@ -195,14 +195,14 @@ async def test_generated_ssh_identity_and_host_key_keep_private_material_secret(
     sshd_config = next(
         entry["content"]
         for entry in config["write_files"]
-        if entry["path"] == "/etc/ssh/sshd_config.d/00-clis.conf"
+        if entry["path"] == "/etc/ssh/sshd_config.d/00-sanctuary.conf"
     )
     assert sshd_config.splitlines() == [
         "PasswordAuthentication no",
         "KbdInteractiveAuthentication no",
         "PermitRootLogin prohibit-password",
     ]
-    assert config["runcmd"] == [["bash", "/usr/local/sbin/clis-bootstrap"]]
+    assert config["runcmd"] == [["bash", "/usr/local/sbin/sanctuary-bootstrap"]]
     assert "deployment-key-private" not in user_data
     assert "HCLOUD_TOKEN" not in user_data
     assert "CLOUDFLARE_API_TOKEN" not in user_data

@@ -1,0 +1,34 @@
+[package]
+name = "biggie"
+version = "0.1.0"
+description = "A tool to generate large files"
+homepage = "https://github.com/di-rs/sanctuary/tree/master/packages/biggie"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+include.workspace = true
+
+[features]
+default = ["csv"]
+csv = ["dep:csv"]
+
+[dependencies]
+csv = { workspace = true, optional = true }
+clap = { workspace = true }
+anyhow.workspace = true
+cli-log.workspace = true
+log.workspace = true
+thousands = "0.2.0"
+rand = "0.10.3"
+
+[dev-dependencies]
+cli-testing.workspace = true
+serde_json.workspace = true
+assert_cmd = { workspace = true }
+assert_fs = { workspace = true }
+predicates = { workspace = true }
+
+[lints]
+workspace = true

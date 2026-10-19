@@ -62,7 +62,7 @@ fn fixture_names_cannot_escape_their_directory() -> Result {
 fn command_defaults_are_deterministic_and_overridable() -> Result {
     let dir = TempDir::new()?;
     command("/bin/sh", dir.path())
-        .args(["-c", "printf '%s|' \"$LC_ALL\" \"$TZ\" \"$NO_COLOR\" \"$TERM\" \"$CLIS_LOG_LEVEL\" \"$CLIS_LOG_STDERR\"; pwd -P"])
+        .args(["-c", "printf '%s|' \"$LC_ALL\" \"$TZ\" \"$NO_COLOR\" \"$TERM\" \"$SANCTUARY_LOG_LEVEL\" \"$SANCTUARY_LOG_STDERR\"; pwd -P"])
         .assert().code(0).stderr("").stdout(format!(
             "C|UTC|1|dumb|off|off|{}\n", dir.path().canonicalize()?.display()
         ));

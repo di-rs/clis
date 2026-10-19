@@ -133,7 +133,7 @@
 {/if}
 <header class="masthead">
   <div class="wordmark" aria-label="CLIs playground">
-    <span class="brand">clis<span aria-hidden="true">_</span></span>
+    <span class="brand">Sanctuary<span aria-hidden="true">_</span></span>
     <span class="masthead-divider" aria-hidden="true">/</span><span>playground</span>
   </div>
 </header>

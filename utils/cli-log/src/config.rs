@@ -6,7 +6,7 @@ use std::{env, ffi::OsString, fs::DirBuilder, io, path::PathBuf};
 #[derive(Args, Debug)]
 pub struct LogArgs {
     /// File log threshold: off, error, warn, info, debug, trace
-    #[arg(long, env = "CLIS_LOG_LEVEL", default_value = "info", value_parser = parse_level)]
+    #[arg(long, env = "SANCTUARY_LOG_LEVEL", default_value = "info", value_parser = parse_level)]
     log_level: LevelFilter,
 }
 
@@ -26,7 +26,7 @@ pub struct GlobalLogArgs {
         short = 'L',
         long,
         global = true,
-        env = "CLIS_LOG_LEVEL",
+        env = "SANCTUARY_LOG_LEVEL",
         default_value = "info"
     )]
     log_level: OsString,
@@ -70,7 +70,7 @@ pub fn env_level(key: &str, default: LevelFilter) -> (LevelFilter, Option<String
 
 /// Resolve storage and privately create missing directories without changing existing modes.
 pub fn log_dir() -> io::Result<PathBuf> {
-    let root = nonempty_env("CLIS_LOG_DIR")
+    let root = nonempty_env("SANCTUARY_LOG_DIR")
         .or_else(default_log_dir)
         .ok_or_else(|| io::Error::other("no log directory is available"))?;
     let mut builder = DirBuilder::new();
@@ -93,17 +93,17 @@ fn nonempty_env(key: &str) -> Option<PathBuf> {
 #[cfg(not(windows))]
 fn default_log_dir() -> Option<PathBuf> {
     if let Some(path) = nonempty_env("XDG_STATE_HOME").filter(|path| path.is_absolute()) {
-        return Some(path.join("clis/logs"));
+        return Some(path.join("sanctuary/logs"));
     }
     let home = nonempty_env("HOME").filter(|path| path.is_absolute())?;
     if cfg!(target_os = "macos") {
-        Some(home.join("Library/Logs/clis"))
+        Some(home.join("Library/Logs/sanctuary"))
     } else {
-        Some(home.join(".local/state/clis/logs"))
+        Some(home.join(".local/state/sanctuary/logs"))
     }
 }
 
 #[cfg(windows)]
 fn default_log_dir() -> Option<PathBuf> {
-    nonempty_env("LOCALAPPDATA").map(|path| path.join("clis/logs"))
+    nonempty_env("LOCALAPPDATA").map(|path| path.join("sanctuary/logs"))
 }

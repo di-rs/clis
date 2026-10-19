@@ -1,0 +1,25 @@
+[package]
+license.workspace = true
+name = "lsr"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+log.workspace = true
+cli-log.workspace = true
+chrono = "0.4.45"
+clap = { workspace = true }
+exitcode = { workspace = true }
+tabular = "0.2.0"
+thiserror = { workspace = true }
+uzers = "0.12.2"
+
+[dev-dependencies]
+cli-testing.workspace = true
+serde_json.workspace = true
+assert_fs = { workspace = true }
+predicates = { workspace = true }
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

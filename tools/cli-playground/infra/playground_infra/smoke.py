@@ -79,7 +79,7 @@ async def exercise(binary: Path, url: str, credential_file: Path, profile: str) 
     artifact_id = uuid.uuid4()
     sandbox_id = None
     try:
-        with tempfile.TemporaryDirectory(prefix="clis-playground-smoke-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="sanctuary-playground-smoke-") as temporary:
             archive = Path(temporary) / "bundle.zip"
             with zipfile.ZipFile(archive, "w") as bundle:
                 bundle.write(binary, "echor")

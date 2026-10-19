@@ -25,7 +25,7 @@ pub fn command(binary: impl AsRef<OsStr>, package_dir: impl AsRef<Path>) -> Comm
         .current_dir(package_dir)
         .timeout(Duration::from_secs(30));
     for (key, _) in std::env::vars_os() {
-        if key.to_string_lossy().starts_with("CLIS_LOG_") {
+        if key.to_string_lossy().starts_with("SANCTUARY_LOG_") {
             command.env_remove(key);
         }
     }
@@ -34,8 +34,8 @@ pub fn command(binary: impl AsRef<OsStr>, package_dir: impl AsRef<Path>) -> Comm
         ("TZ", "UTC"),
         ("NO_COLOR", "1"),
         ("TERM", "dumb"),
-        ("CLIS_LOG_LEVEL", "off"),
-        ("CLIS_LOG_STDERR", "off"),
+        ("SANCTUARY_LOG_LEVEL", "off"),
+        ("SANCTUARY_LOG_STDERR", "off"),
     ]);
     command
 }

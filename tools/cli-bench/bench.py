@@ -330,7 +330,12 @@ def run(args: Arguments, suite: Suite, cases: list[Case]) -> None:
         "warmup": args.warmup,
         "runs": args.runs,
         "timeout": args.timeout,
-        "env": {"LC_ALL": "C", "TZ": "UTC", "CLIS_LOG_LEVEL": "off", "CLIS_LOG_STDERR": "off"}
+        "env": {
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "SANCTUARY_LOG_LEVEL": "off",
+            "SANCTUARY_LOG_STDERR": "off",
+        }
         | suite.get("env", {}),
     }
 

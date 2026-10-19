@@ -11,14 +11,14 @@ local command activity and errors.
 
 | Setting | Behavior |
 | --- | --- |
-| `CLIS_LOG_DIR` | Shared log directory override; relative paths use the working directory. |
-| `CLIS_LOG_LEVEL` | File threshold: `off`, `error`, `warn`, `info`, `debug`, `trace`; default `info`. |
-| `CLIS_LOG_STDERR` | Independent text logging to stderr; same levels, default `off`. |
-| `CLIS_LOG_SESSION` | Optional shell session identifier recorded at startup. |
+| `SANCTUARY_LOG_DIR` | Shared log directory override; relative paths use the working directory. |
+| `SANCTUARY_LOG_LEVEL` | File threshold: `off`, `error`, `warn`, `info`, `debug`, `trace`; default `info`. |
+| `SANCTUARY_LOG_STDERR` | Independent text logging to stderr; same levels, default `off`. |
+| `SANCTUARY_LOG_SESSION` | Optional shell session identifier recorded at startup. |
 
-Default directory: absolute `$XDG_STATE_HOME/clis/logs` on Unix when configured;
-otherwise `$HOME/Library/Logs/clis` on macOS, `$HOME/.local/state/clis/logs` on
-other Unix, or `$LOCALAPPDATA/clis/logs` on Windows. Relative `XDG_STATE_HOME` is
+Default directory: absolute `$XDG_STATE_HOME/sanctuary/logs` on Unix when configured;
+otherwise `$HOME/Library/Logs/sanctuary` on macOS, `$HOME/.local/state/sanctuary/logs` on
+other Unix, or `$LOCALAPPDATA/sanctuary/logs` on Windows. Relative `XDG_STATE_HOME` is
 ignored. `RUST_LOG` is not used. Invalid environment levels warn and use defaults;
 unavailable storage warns without failing the command.
 
@@ -28,8 +28,8 @@ Logging never writes to stdout. Required terminal diagnostics still print when
 logging is off, and already-reported errors are persisted without printing again.
 
 ```sh
-CLIS_LOG_DIR=/tmp/my-cli-logs CLIS_LOG_LEVEL=debug biggie bytes - -b 16
-CLIS_LOG_LEVEL=off catr input.txt
+SANCTUARY_LOG_DIR=/tmp/my-cli-logs SANCTUARY_LOG_LEVEL=debug biggie bytes - -b 16
+SANCTUARY_LOG_LEVEL=off catr input.txt
 ```
 
 ## Integrate a binary

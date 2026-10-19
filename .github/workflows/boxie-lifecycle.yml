@@ -7,8 +7,8 @@ on:
     paths:
       - '.github/workflows/boxie-lifecycle.yml'
       - 'tools/cli-playground/**'
-      - 'tools/boxie/**'
-      - 'coreutils/echor/**'
+      - 'packages/boxie/**'
+      - 'buildins/echor/**'
       - 'utils/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -42,7 +42,9 @@ jobs:
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: '0.13.0'
-          enable-cache: false
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: ${{ github.job }}
       - name: 🛡️ Install signed gVisor and configure sandbox runtime
         if: github.event_name == 'workflow_dispatch'
         run: |
@@ -60,11 +62,11 @@ jobs:
       - name: 🏗️ Build shared sandbox and native CLI
         if: github.event_name == 'workflow_dispatch'
         run: |
-          docker build -f tools/cli-playground/Sandbox.Dockerfile -t clis-playground-sandbox:lifecycle .
+          docker build -f tools/cli-playground/Sandbox.Dockerfile -t sanctuary-playground-sandbox:lifecycle .
           cargo build --locked --release --package echor
       - name: 🐳 Build Boxie runtime image
         run: |
-          docker build -f tools/boxie/infra/Runtime.Dockerfile -t boxie:lifecycle .
+          docker build -f packages/boxie/infra/Runtime.Dockerfile -t boxie:lifecycle .
       - name: 🐳 Build playground runtime image
         if: github.event_name == 'workflow_dispatch'
         run: |
@@ -77,7 +79,7 @@ jobs:
           node-version-file: .node-version
           version-file: package.json
           run-install: false
-          cache: false
+          cache: true
       - name: 📦 Install locked Python workspace dependencies
         run: |
           uv sync --locked --all-packages
@@ -92,7 +94,7 @@ jobs:
           uv run --locked python -c 'import temporalio.bridge.temporal_sdk_bridge; import boxie.bootstrap.runtime'
           uv run --locked python - <<'PYTHON'
           import hashlib, io, json, os, pathlib, tarfile, urllib.request
-          pins = json.loads(pathlib.Path("tools/boxie/tests/test-server-pins.json").read_text())
+          pins = json.loads(pathlib.Path("packages/boxie/tests/test-server-pins.json").read_text())
           pin = next(p for p in pins["artifacts"] if p["variant"] == "linux_amd64")
           with urllib.request.urlopen(pin["url"], timeout=60) as source:
               archive = source.read()
@@ -109,7 +111,7 @@ jobs:
               output.write(f"BOXIE_TEST_SERVER={path}\n")
           PYTHON
           export BOXIE_TEST_SERVER="$RUNNER_TEMP/boxie-test-server"
-          uv run --locked pytest -m integration tools/boxie/tests/test_temporal_lifecycle.py -vv --durations=10
+          uv run --locked pytest -m integration packages/boxie/tests/test_temporal_lifecycle.py -vv --durations=10
       - name: 🗂️ Enable persistent journal for the collector smoke
         run: |
           sudo mkdir -p /var/log/journal
@@ -118,18 +120,18 @@ jobs:
       - name: 🧪 Test PostgreSQL and Temporal cancellation, replay and diagnostics
         timeout-minutes: 9
         run: |
-          uv run --locked pytest -m integration tools/boxie/tests/test_temporal_deployment.py tools/boxie/tests/test_outbox.py tools/boxie/tests/integration/test_artifact_commit.py tools/boxie/tests/test_migrations.py tools/boxie/tests/test_observability_lifecycle.py tools/boxie/tests/test_observability_logging.py tools/boxie/tests/test_observability_native.py -vv --durations=10
+          uv run --locked pytest -m integration packages/boxie/tests/test_temporal_deployment.py packages/boxie/tests/test_outbox.py packages/boxie/tests/integration/test_artifact_commit.py packages/boxie/tests/test_migrations.py packages/boxie/tests/test_observability_lifecycle.py packages/boxie/tests/test_observability_logging.py packages/boxie/tests/test_observability_native.py -vv --durations=10
       - name: 🔐 Test native credential permissions and endpoint restarts
         timeout-minutes: 3
         run: |
-          uv run --locked pytest -m integration tools/boxie/tests/test_native_permissions.py tools/boxie/tests/test_native_scenarios.py -vv --durations=10
+          uv run --locked pytest -m integration packages/boxie/tests/test_native_permissions.py packages/boxie/tests/test_native_scenarios.py -vv --durations=10
       - name: 🗃️ Test PostgreSQL restart journal recovery
         timeout-minutes: 3
         run: |
-          uv run --locked pytest -m integration tools/boxie/tests/test_postgres.py -k failed_restart_journal -vv --durations=10
+          uv run --locked pytest -m integration packages/boxie/tests/test_postgres.py -k failed_restart_journal -vv --durations=10
       # Optional until the native suite's hang is resolved; never blocks a PR.
       - name: 🎭 Run optional native lifecycle and browser tests
         if: github.event_name == 'workflow_dispatch'
         timeout-minutes: 20
         run: |
-          uv run --locked python tools/boxie/tests/run_integration.py --runtime runsc --browser -- -vv --durations=10 -o faulthandler_timeout=120
+          uv run --locked python packages/boxie/tests/run_integration.py --runtime runsc --browser -- -vv --durations=10 -o faulthandler_timeout=120

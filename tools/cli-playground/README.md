@@ -21,7 +21,7 @@ per session: one CPU, 512 MiB RAM, 64 MiB workspace, 16 MiB terminal output, no 
 ## Run locally
 
 Playground connects to an independently operated private Boxie endpoint. Follow
-[local infrastructure](infra/README.md) and the [Boxie setup](../boxie/infra/README.md).
+[local infrastructure](infra/README.md) and the [Boxie setup](../../packages/boxie/infra/README.md).
 Use native Linux with gVisor for interactive sandboxes. Docker Desktop can build
 images and run the product UI against an independently supplied Boxie service,
 but does not provide the required sandbox runtime.

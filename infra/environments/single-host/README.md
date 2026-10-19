@@ -77,7 +77,7 @@ backup restore before enabling release gates.
 ## Give application workflows their SSH credentials
 
 Run the following locally from the repository root with your own authenticated
-Pulumi and `gh` sessions. Select the existing `clis` production stack first.
+Pulumi and `gh` sessions. Select the existing `sanctuary` production stack first.
 The application environments receive host-level root SSH authority, not
 per-application host isolation. They receive no R2 or provider credentials.
 
@@ -85,7 +85,7 @@ per-application host isolation. They receive no R2 or provider credentials.
 set -euo pipefail
 set +x
 umask 077
-repository=di-rs/clis
+repository=di-rs/sanctuary
 private=$(mktemp -d)
 trap 'rm -rf "$private"' EXIT
 pulumi -C infra/environments/single-host stack select production --non-interactive
@@ -100,7 +100,7 @@ ssh-keygen -y -f "$private/key" >/dev/null
 ssh-keygen -l -f "$private/known_hosts" >/dev/null
 ssh -o BatchMode=yes -o StrictHostKeyChecking=yes \
   -o "UserKnownHostsFile=$private/known_hosts" -i "$private/key" \
-  "root@$host" 'cat /etc/clis/boxie/preview-token' > "$private/token"
+  "root@$host" 'cat /etc/sanctuary/boxie/preview-token' > "$private/token"
 [[ $(cat "$private/token") =~ ^[a-f0-9]{64}$ ]]
 for environment in boxie playground; do
   gh variable set DEPLOY_HOST --repo "$repository" --env "$environment" --body "$host"
@@ -133,7 +133,7 @@ changes the approved Playground profile digest and recreates the current Boxie
 orchestrator. It preserves the current Boxie image and the other profile fields.
 Shared build settings may cause extra application releases.
 
-Setup and release workflows share one `clis-production` queue. Each run selects
+Setup and release workflows share one `sanctuary-production` queue. Each run selects
 current `master` after entering the queue, then builds and deploys that checkout.
 If a run fails, choose **Re-run all jobs** or start a new workflow run. Re-running
 only failed jobs keeps the earlier source selection and is rejected before
@@ -148,14 +148,14 @@ An unsuccessful SSH or Compose command fails the Actions run. On the host, inspe
 services and recent logs before rerunning the workflow:
 
 ```sh
-docker compose --env-file /etc/clis/boxie.env --env-file /etc/clis/boxie-image.env \
-  -f /opt/clis/boxie/compose.production.yml -f /opt/clis/boxie/compose.operations.yml \
-  -f /opt/clis/boxie/compose.observability.yml ps
-docker compose --env-file /etc/clis/boxie.env --env-file /etc/clis/boxie-image.env \
-  -f /opt/clis/boxie/compose.production.yml -f /opt/clis/boxie/compose.operations.yml \
-  -f /opt/clis/boxie/compose.observability.yml logs --tail 100 api orchestrator
-docker compose --env-file /etc/clis/playground.env --env-file /etc/clis/playground-image.env \
-  -f /opt/clis/playground/compose.production.yml ps
+docker compose --env-file /etc/sanctuary/boxie.env --env-file /etc/sanctuary/boxie-image.env \
+  -f /opt/sanctuary/boxie/compose.production.yml -f /opt/sanctuary/boxie/compose.operations.yml \
+  -f /opt/sanctuary/boxie/compose.observability.yml ps
+docker compose --env-file /etc/sanctuary/boxie.env --env-file /etc/sanctuary/boxie-image.env \
+  -f /opt/sanctuary/boxie/compose.production.yml -f /opt/sanctuary/boxie/compose.operations.yml \
+  -f /opt/sanctuary/boxie/compose.observability.yml logs --tail 100 api orchestrator
+docker compose --env-file /etc/sanctuary/playground.env --env-file /etc/sanctuary/playground-image.env \
+  -f /opt/sanctuary/playground/compose.production.yml ps
 ```
 
 A migration failure leaves Boxie's API and orchestrator stopped. Check migration
@@ -172,14 +172,14 @@ Run local checks from the repository root:
 ```sh
 uv sync --locked --all-packages
 uv run --locked pytest infra/host/tests infra/environments/single-host/tests \
-  tools/boxie/tests/test_deployment.py tools/cli-playground/tests/test_deployment.py \
+  packages/boxie/tests/test_deployment.py tools/cli-playground/tests/test_deployment.py \
   tools/cli-playground/tests/test_infra_workflows.py
 ```
 
 On an authorized native Linux amd64 host, exercise fresh setup, an unchanged
 rerun, each independent release, migration failure and retry, metrics, tunnel
 configuration and preview publication. The local command tests cannot establish
-those host behaviors. The [runtime requirements](../../../tools/boxie/infra/runtime.md)
+those host behaviors. The [runtime requirements](../../../packages/boxie/infra/runtime.md)
 include the runsc and backup checks.
 
 The generated Boxie TLS leaf certificates last 90 days and the CAs last 365 days.

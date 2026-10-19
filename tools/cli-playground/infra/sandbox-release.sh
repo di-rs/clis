@@ -3,9 +3,9 @@
 set -euo pipefail
 [[ $# == 1 && $1 =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]] || exit 2
 image=$1
-config=${CLIS_CONFIG_DIR:-/etc/clis}
-playground=${CLIS_PLAYGROUND_DIR:-/opt/clis/playground}
-boxie=${CLIS_BOXIE_DIR:-/opt/clis/boxie}
+config=${SANCTUARY_CONFIG_DIR:-/etc/sanctuary}
+playground=${SANCTUARY_PLAYGROUND_DIR:-/opt/sanctuary/playground}
+boxie=${SANCTUARY_BOXIE_DIR:-/opt/sanctuary/boxie}
 docker pull "$image"
 PLAYGROUND_SANDBOX_IMAGE=$image python3 "$playground/playground_infra/installation.py" "$playground" --profile-only
 compose() {

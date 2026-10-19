@@ -134,8 +134,7 @@ must be checked by the Linux smoke workflow and on the selected VPS.
 4. **Coverage:** affected Rust CLIs; frontend/infrastructure-only changes do not
    rebuild all native binaries.
 
-Revision updated 2026-10-14: the [preview lifecycle design](../../docs/superpowers/specs/2026-10-14-playground-preview-lifecycle-design.md)
-adds explicit build states and preserves each running terminal across new PR
+The [preview lifecycle](README.md) exposes explicit build states and preserves each running terminal across new PR
 uploads. Its five workflows separate PR building, trusted preview reconciliation,
 runtime releases, infrastructure setup and sandbox verification. Measure real
 concurrency, memory and startup time before changing host capacity or adding more

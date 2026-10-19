@@ -5,31 +5,31 @@ from conftest import Repository
 from select_suites import Suite
 
 ALL_SUITES = [
-    "biggie/benches/cli-bench.toml",
-    "coreutils/echor/benches/cli-bench.toml",
-    "coreutils/tailr/benches/cli-bench.toml",
-    "coreutils/wcr/benches/cli-bench.toml",
+    "buildins/echor/benches/cli-bench.toml",
+    "buildins/tailr/benches/cli-bench.toml",
+    "buildins/wcr/benches/cli-bench.toml",
+    "packages/biggie/benches/cli-bench.toml",
 ]
 
 
 def test_suite_record_rejects_empty_path() -> None:
     with pytest.raises(ValueError):
-        Suite(path="", package="tailr", directory="coreutils/tailr", generate=False)
+        Suite(path="", package="tailr", directory="buildins/tailr", generate=False)
 
 
 def test_whole_pr_uses_merge_base_and_includes_earlier_commits(repo: Repository) -> None:
     repo.git("checkout", "-b", "feature")
-    repo.write("coreutils/tailr/src/main.rs", "// changed\n")
+    repo.write("buildins/tailr/src/main.rs", "// changed\n")
     repo.commit()
     repo.write("README.md", "documentation in final PR commit\n")
     repo.commit()
     repo.git("checkout", "main")
-    repo.write("coreutils/echor/src/main.rs", "// target branch only\n")
+    repo.write("buildins/echor/src/main.rs", "// target branch only\n")
     repo.base = repo.commit()
     repo.git("checkout", "feature")
 
     result = repo.selection()
-    assert result["suites"] == ["coreutils/tailr/benches/cli-bench.toml"]
+    assert result["suites"] == ["buildins/tailr/benches/cli-bench.toml"]
     assert result["packages"] == ["biggie", "tailr"]
     assert result["binaries"] == ["tailr"]
     assert (result["runs"], result["warmup"]) == (1, 0)
@@ -38,7 +38,7 @@ def test_whole_pr_uses_merge_base_and_includes_earlier_commits(repo: Repository)
 
 
 def test_deleted_source_still_selects_owner(repo: Repository) -> None:
-    (repo.root / "coreutils/echor/src/main.rs").unlink()
+    (repo.root / "buildins/echor/src/main.rs").unlink()
     repo.commit()
     assert repo.selection()["packages"] == ["echor"]
 
@@ -46,8 +46,8 @@ def test_deleted_source_still_selects_owner(repo: Repository) -> None:
 @pytest.mark.parametrize(
     ("path", "content"),
     [
-        ("coreutils/echor/Cargo.toml", '[package]\nname = "echor"\nversion = "0.1.1"\n'),
-        ("coreutils/echor/build.rs", "fn main() {}\n"),
+        ("buildins/echor/Cargo.toml", '[package]\nname = "echor"\nversion = "0.1.1"\n'),
+        ("buildins/echor/build.rs", "fn main() {}\n"),
     ],
 )
 def test_package_manifest_and_build_script_select_owner(
@@ -59,17 +59,17 @@ def test_package_manifest_and_build_script_select_owner(
 
 
 def test_suite_change_selects_only_that_suite(repo: Repository) -> None:
-    repo.write("coreutils/echor/benches/other.toml", 'binary = "echor"\n')
+    repo.write("buildins/echor/benches/other.toml", 'binary = "echor"\n')
     repo.base = repo.commit()
-    repo.write_suite("coreutils/echor", "echor", generate=True)
+    repo.write_suite("buildins/echor", "echor", generate=True)
     repo.commit()
     result = repo.selection()
-    assert result["suites"] == ["coreutils/echor/benches/cli-bench.toml"]
+    assert result["suites"] == ["buildins/echor/benches/cli-bench.toml"]
     assert result["packages"] == ["biggie", "echor"]
 
 
 def test_deleted_suite_is_not_scheduled(repo: Repository) -> None:
-    (repo.root / "coreutils/tailr/benches/cli-bench.toml").unlink()
+    (repo.root / "buildins/tailr/benches/cli-bench.toml").unlink()
     repo.commit()
     assert repo.selection()["suites"] == []
 
@@ -78,10 +78,10 @@ def test_deleted_suite_is_not_scheduled(repo: Repository) -> None:
     "path",
     [
         "README.md",
-        "coreutils/tailr/README.md",
-        "coreutils/tailr/tests/cli.rs",
+        "buildins/tailr/README.md",
+        "buildins/tailr/tests/cli.rs",
         "utils/cli-log/tests/basic.rs",
-        "biggie/benches/performance.rs",
+        "packages/biggie/benches/performance.rs",
         "tools/cli-bench/tests/test_bench.py",
         "tools/cli-bench/tests/test_select_suites.py",
         "tools/cli-bench/tests/conftest.py",
@@ -128,9 +128,9 @@ def test_global_build_and_runner_changes_select_all_workspace_suites(
 @pytest.mark.parametrize(
     ("path", "content"),
     [
-        ("biggie/src/main.rs", "// changed\n"),
-        ("biggie/build.rs", "fn main() {}\n"),
-        ("biggie/Cargo.toml", '[package]\nname = "biggie"\nversion = "0.1.1"\n'),
+        ("packages/biggie/src/main.rs", "// changed\n"),
+        ("packages/biggie/build.rs", "fn main() {}\n"),
+        ("packages/biggie/Cargo.toml", '[package]\nname = "biggie"\nversion = "0.1.1"\n'),
     ],
 )
 def test_biggie_production_changes_select_biggie_and_generated_suites(
@@ -140,8 +140,8 @@ def test_biggie_production_changes_select_biggie_and_generated_suites(
     repo.commit()
     result = repo.selection()
     assert result["suites"] == [
-        "biggie/benches/cli-bench.toml",
-        "coreutils/tailr/benches/cli-bench.toml",
+        "buildins/tailr/benches/cli-bench.toml",
+        "packages/biggie/benches/cli-bench.toml",
     ]
     assert result["packages"] == ["biggie", "tailr"]
 
@@ -173,7 +173,7 @@ def test_shared_logger_and_other_utility_production_changes_select_all(
 def test_empty_and_auto_requests_use_affected_smoke_selection(
     repo: Repository, body: str | None
 ) -> None:
-    repo.write("coreutils/echor/src/main.rs", "// changed\n")
+    repo.write("buildins/echor/src/main.rs", "// changed\n")
     repo.commit()
     result = repo.selection(body)
     assert result["packages"] == ["echor"]
@@ -181,12 +181,12 @@ def test_empty_and_auto_requests_use_affected_smoke_selection(
 
 
 def test_explicit_request_overrides_affected_suites_and_uses_full_runs(repo: Repository) -> None:
-    repo.write("coreutils/echor/src/main.rs", "// changed\n")
+    repo.write("buildins/echor/src/main.rs", "// changed\n")
     repo.commit()
     result = repo.selection("Description\n\nBenchmark-CLIs: tailr, wcr\n\nMore details")
     assert result["suites"] == [
-        "coreutils/tailr/benches/cli-bench.toml",
-        "coreutils/wcr/benches/cli-bench.toml",
+        "buildins/tailr/benches/cli-bench.toml",
+        "buildins/wcr/benches/cli-bench.toml",
     ]
     assert result["packages"] == ["biggie", "tailr", "wcr"]
     assert (result["runs"], result["warmup"]) == (20, 3)
@@ -214,7 +214,7 @@ def test_request_must_be_a_standalone_field(repo: Repository) -> None:
 def test_unrelated_body_edit_does_not_repeat_previous_selection(
     repo: Repository, previous: str, current: str
 ) -> None:
-    repo.write("coreutils/echor/src/main.rs", "// changed\n")
+    repo.write("buildins/echor/src/main.rs", "// changed\n")
     repo.commit()
     result = repo.selection(current, previous_body=previous)
     assert result["suites"] == []
@@ -260,7 +260,7 @@ def test_invalid_and_duplicate_fields_fail_without_selection(
 
 
 def test_suite_binary_must_match_owning_package_even_when_unselected(repo: Repository) -> None:
-    repo.write_suite("coreutils/echor", "other-binary")
+    repo.write_suite("buildins/echor", "other-binary")
     repo.commit()
     result = repo.run_selector("Benchmark-CLIs: wcr")
     assert result.returncode != 0

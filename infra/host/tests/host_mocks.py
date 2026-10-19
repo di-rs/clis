@@ -11,7 +11,7 @@ class HostMocks(pulumi.runtime.Mocks):
         self.inputs: dict[tuple[str, str], dict[str, Any]] = {}
         self.registrations: dict[tuple[str, str], pulumi.ResourceTransformationArgs] = {}
         reset_options()
-        pulumi.runtime.set_mocks(self, project="clis", stack="test")
+        pulumi.runtime.set_mocks(self, project="sanctuary", stack="test")
         pulumi.runtime.register_stack_transformation(self.observe)
 
     def observe(self, args: pulumi.ResourceTransformationArgs) -> None:

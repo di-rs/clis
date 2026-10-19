@@ -56,7 +56,7 @@ Replace `PACKAGE` below with the affected Cargo package name.
 | --- | --- |
 | Rust implementation | `cargo nextest run --locked -p PACKAGE --profile ci` |
 | Rust library documentation | `cargo test --locked -p PACKAGE --doc` |
-| Shared Rust APIs | Test affected consumers; run `cargo run --locked --manifest-path tests/consumers/Cargo.toml`. |
+| Shared Rust APIs | Run library doctests and the affected packages’ CLI tests. |
 | CLI tests or fixtures | Follow the [CLI testing skill](../.agents/skills/cli-testing/SKILL.md). |
 | Python tools | Run the [Python checks](#python-tooling). |
 | Markdown | `prek run lychee --all-files --show-diff-on-failure` and `prek run typos --all-files --show-diff-on-failure` |
@@ -81,7 +81,8 @@ uv run --locked mypy
 uv run --locked pytest
 ```
 
-Keep tests beside their tool under `tools/NAME/tests/`. Register new tools in the
+Keep tests beside their package under `packages/NAME/tests/`, `tools/NAME/tests/`,
+or its infrastructure directory. Register new tools in the
 root uv workspace and pytest test paths; run `uv lock` after dependency changes.
 Use pytest functions and shared fixtures in `conftest.py`; prefer `tmp_path` and
 `monkeypatch` for temporary files and environment changes.
@@ -121,11 +122,11 @@ pnpm --dir tools/cli-playground/frontend test:browser
 
 Playground product tests, Boxie service tests and both infrastructure packages run
 with the shared Python suite. Default tests replace the Docker boundary and need
-no Docker daemon. The [Boxie infrastructure guide](../tools/boxie/infra/README.md)
+no Docker daemon. The [Boxie infrastructure guide](../packages/boxie/infra/README.md)
 covers the separate native Linux/gVisor smoke; Playground consumes Boxie's private
 HTTP/WebSocket API and owns no Docker access.
 
-The root pytest configuration registers the shared [dependency fixtures](../tools/boxie/tests/support/boxie_test_support/dependencies.py)
+The root pytest configuration registers the shared [dependency fixtures](../packages/boxie/tests/support/boxie_test_support/dependencies.py)
 once. PostgreSQL and Temporal servers start only when requested and are shared
 within the session; roles and databases remain isolated per test, with separate
 teardown for each acquired resource. Request fixtures by name rather than importing
@@ -147,7 +148,7 @@ or Docker. After a real frontend build, explicitly run:
 
 ```sh
 pnpm --dir tools/cli-playground/frontend build
-uv run --locked pytest tools/boxie/tests/test_packaging.py -m integration
+uv run --locked pytest packages/boxie/tests/test_packaging.py -m integration
 ```
 
 These checks build each service sdist/wheel, install it with only locked runtime
@@ -166,7 +167,7 @@ services; explicit integration selection fails when dependencies are missing.
 Run the isolated infrastructure tier (including SQL/Temporal observability, migration and history/privacy checks) with:
 
 ```sh
-uv run --locked python tools/boxie/tests/run_integration.py
+uv run --locked python packages/boxie/tests/run_integration.py
 ```
 
 The [Linux lifecycle workflow](../.github/workflows/boxie-lifecycle.yml) runs real
@@ -176,13 +177,13 @@ temporarily manual-only while their hang is investigated. Use `workflow_dispatch
 to build the native images and `echor` and run all six cases, or run locally:
 
 ```sh
-uv run --locked python tools/boxie/tests/run_integration.py --runtime runsc --browser -- -vv --durations=10
+uv run --locked python packages/boxie/tests/run_integration.py --runtime runsc --browser -- -vv --durations=10
 ```
 
 Each CI tier has its own timeout and reports individual tests and slow durations.
 The optional native E2Es require Linux amd64 Docker with configured gVisor,
 built `boxie:lifecycle`, `cli-playground:lifecycle`
-and `clis-playground-sandbox:lifecycle` images, `target/release/echor`, and Chromium.
+and `sanctuary-playground-sandbox:lifecycle` images, `target/release/echor`, and Chromium.
 `BOXIE_NATIVE_BINARY` may select the native executable. The fixture owns random
 Compose projects, volumes, identity labels and fault proxies. It independently
 kills API, orchestrator (including its embedded workers) and Temporal; tests failed
@@ -202,7 +203,7 @@ configuration and runs a compact Linux persistent-journal to Grafana datasource
 smoke after a collector outage. To run the validators locally on Docker Desktop:
 
 ```sh
-uv run --locked pytest -m integration tools/boxie/tests/test_observability_native.py -k native_configs
+uv run --locked pytest -m integration packages/boxie/tests/test_observability_native.py -k native_configs
 ```
 
 The full native file requires a Linux Docker host with persistent journald and

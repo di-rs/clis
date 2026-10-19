@@ -65,10 +65,10 @@ pub fn try_run<C: clap::Parser, E: Display>(
     }
 }
 
-/// Configure the crates.io backend from `CLIS_LOG_*`, without failing the CLI.
+/// Configure the crates.io backend from `SANCTUARY_LOG_*`, without failing the CLI.
 #[must_use]
 pub fn init(command: &str) -> Session {
-    let (level, warning) = config::env_level("CLIS_LOG_LEVEL", LevelFilter::Info);
+    let (level, warning) = config::env_level("SANCTUARY_LOG_LEVEL", LevelFilter::Info);
     if let Some(warning) = warning {
         warn(command, warning);
     }
@@ -79,7 +79,7 @@ pub fn init(command: &str) -> Session {
 #[must_use]
 pub fn init_with_level(command: &str, level: LevelFilter) -> Session {
     let started = Instant::now();
-    let (console, warning) = config::env_level("CLIS_LOG_STDERR", LevelFilter::Off);
+    let (console, warning) = config::env_level("SANCTUARY_LOG_STDERR", LevelFilter::Off);
     if let Some(warning) = warning {
         warn(command, warning);
     }
@@ -133,7 +133,7 @@ pub fn init_with_level(command: &str, level: LevelFilter) -> Session {
             if file_enabled() {
                 log::info!(target: FILE_TARGET, event = "command_started", command,
                     pid = std::process::id(), invocation_id = invocation.as_str(),
-                    session_id = std::env::var("CLIS_LOG_SESSION").ok().as_deref(); "command started");
+                    session_id = std::env::var("SANCTUARY_LOG_SESSION").ok().as_deref(); "command started");
                 let previous = std::panic::take_hook();
                 std::panic::set_hook(Box::new(move |info| {
                     log::error!(target: FILE_TARGET, event = "panic"; "{info}");

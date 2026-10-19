@@ -32,7 +32,7 @@ uv run --locked cli-check docs --root /path/to/workspace
 Violations go to stderr, sorted by path and rule, with a stable rule identifier:
 
 ```text
-coreutils/echo/Cargo.toml: must define exactly one binary [layout:single-binary]
+buildins/echo/Cargo.toml: must define exactly one binary [layout:single-binary]
 ```
 
 Exit status is 0 for success, 1 for violations or unreadable/invalid repository
