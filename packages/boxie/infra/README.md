@@ -15,8 +15,7 @@ For production setup, releases and failure inspection, use the
 [shared-host guide](../../../infra/environments/single-host/README.md). The
 `deploy.sh` script pulls Boxie, migrates and restarts API and orchestrator through
 Compose. Database, Temporal and monitoring projects remain separate maintenance.
-Native host acceptance and the off-host backup/restore gate must pass before
-automatic releases are enabled.
+Native host acceptance must pass before manual release deployments can run.
 
 ## Configure a disposable native Linux host
 

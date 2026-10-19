@@ -78,11 +78,10 @@ Setup is browser-only: create a private Standard R2 bucket manually once
 (EU jurisdiction recommended), store its bucket-scoped S3 credentials and the
 state encryption passphrase in the `master`-restricted GitHub environment, then
 run **☁️ Playground infrastructure setup**. R2 state remains outside the VPS lifecycle. The
-setup workflow applies infrastructure and calls the same release/deployment
-workflows used for later updates. After successful setup, the repository variable
-`PLAYGROUND_AUTO_DEPLOY=true` enables releases on relevant pushes to `master`.
-Manual releases remain available. Runtime deployment reads existing state for
-SSH identity and uses no provider administration tokens or Pulumi update.
+setup workflow applies infrastructure and installs services. Later updates use
+the manual [Boxie Runtime and Sandbox Release](../../.github/workflows/cli-playground-release.yml)
+workflow. Runtime deployment uses the configured SSH identity and no provider
+administration tokens or Pulumi update.
 
 Trusted default-branch CI builds the shared gateway and shell images and deploys
 their immutable digests over verified SSH. The VPS pulls images without building

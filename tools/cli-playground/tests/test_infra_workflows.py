@@ -23,9 +23,9 @@ def workflow(name: str) -> dict[str, Any]:
 @pytest.mark.parametrize(
     "filename,job_name",
     [
-        ("boxie-release.yml", "deploy"),
-        ("cli-playground-release.yml", "deploy"),
-        ("cli-playground-sandbox-release.yml", "deploy"),
+        ("cli-playground-release.yml", "deploy-boxie"),
+        ("cli-playground-release.yml", "deploy-gateway"),
+        ("cli-playground-release.yml", "deploy-sandbox"),
         ("cli-playground-setup.yml", "provision"),
     ],
 )
@@ -89,45 +89,56 @@ def test_reusable_builder_uses_fixed_components_without_deployment_secrets() -> 
 
 
 @pytest.mark.parametrize(
-    "filename,app",
-    [
-        ("boxie-release.yml", "boxie"),
-        ("cli-playground-release.yml", "playground"),
-        ("cli-playground-sandbox-release.yml", "playground"),
-    ],
+    "job_name,app",
+    [("deploy-boxie", "boxie"), ("deploy-gateway", "playground"), ("deploy-sandbox", "playground")],
 )
-def test_release_uses_one_queue_current_master_and_direct_ssh(filename: str, app: str) -> None:
-    release = yaml.load((WORKFLOWS / filename).read_text(), Loader=yaml.BaseLoader)
+def test_release_uses_one_queue_current_master_and_direct_ssh(job_name: str, app: str) -> None:
+    release = workflow("release")
     assert release["concurrency"] == QUEUE
     assert release["jobs"]["source"]["steps"][0]["with"]["ref"] == "master"
-    deployment = release["jobs"]["deploy"]
+    deployment = release["jobs"][job_name]
     assert deployment["environment"] == app
     assert "concurrency" not in deployment
     gate = deployment["if"]
     assert "DEPLOYMENT_ACCEPTANCE_PASSED" in gate
-    assert "BOXIE_BACKUP_RESTORE_VERIFIED" in gate
-    assert "AUTO_DEPLOY" in gate
+    assert "BOXIE_BACKUP_RESTORE_VERIFIED" not in gate
+    assert "AUTO_DEPLOY" not in gate
     commands = "\n".join(step.get("run", "") for step in deployment["steps"])
-    assert "ssh -F" in commands
-    assert "scp -F" in commands
+    component = job_name.removeprefix("deploy-")
+    assert deployment["steps"][-1]["run"] == (
+        f"bash infra/environments/single-host/release.sh {component}"
+    )
+    assert deployment["steps"][-1]["env"]["IMAGE"] == (
+        "${{ needs." + component + ".outputs.image }}"
+    )
     assert "submit-release.sh" not in commands
     assert "release_selection.py" not in commands
     assert "expected-revision" not in commands
     assert "PULUMI_" not in str(deployment)
     assert "R2_" not in str(deployment)
     assert "HCLOUD" not in str(deployment)
-    assert not any(
-        path.startswith(("buildins/", "utils/")) for path in release["on"]["push"]["paths"]
-    )
 
 
-def test_gateway_release_does_not_build_sandbox() -> None:
-    gateway = workflow("release")
-    assert "sandbox" not in gateway["jobs"]
-    assert "Sandbox.Dockerfile" not in str(gateway["on"]["push"]["paths"])
-    sandbox = workflow("sandbox-release")
-    assert "Sandbox.Dockerfile" in str(sandbox["on"]["push"]["paths"])
-    assert "fixtures" in str(sandbox["on"]["push"]["paths"])
+def test_release_is_manual_and_builds_all_components_before_ordered_deployment() -> None:
+    release = workflow("release")
+    assert release["on"] == {"workflow_dispatch": {}}
+    jobs = release["jobs"]
+    for name, component in {
+        "boxie": "boxie",
+        "gateway": "playground-gateway",
+        "sandbox": "playground-sandbox",
+    }.items():
+        assert jobs[name]["needs"] == "source"
+        assert jobs[name]["uses"] == "./.github/workflows/build-runtime-image.yml"
+        assert jobs[name]["with"] == {
+            "component": component,
+            "revision": "${{ needs.source.outputs.sha }}",
+        }
+    assert set(jobs["deploy-boxie"]["needs"]) == {"source", "boxie", "gateway", "sandbox"}
+    assert set(jobs["deploy-sandbox"]["needs"]) == {"source", "sandbox", "deploy-boxie"}
+    assert set(jobs["deploy-gateway"]["needs"]) == {"source", "gateway", "deploy-sandbox"}
+    assert not (WORKFLOWS / "boxie-release.yml").exists()
+    assert not (WORKFLOWS / "cli-playground-sandbox-release.yml").exists()
 
 
 def test_only_manual_setup_can_provision_cloud_resources() -> None:
