@@ -1,4 +1,4 @@
-"""Settings validate environment input before the gateway starts."""
+"""Settings validate environment input before the backend starts."""
 
 from pathlib import Path
 
@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 @pytest.mark.usefixtures("configured_environment")
 def test_data_directory_requires_an_absolute_mount_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PLAYGROUND_DATA_DIR", "relative")
+    monkeypatch.setenv("CLI_PLAYGROUND_DATA_DIR", "relative")
     with pytest.raises(ValidationError):
         Settings()
 
@@ -47,7 +47,7 @@ def test_preview_urls_and_hosts_remain_scoped_to_one_preview() -> None:
 
 @pytest.mark.usefixtures("configured_environment")
 def test_empty_preview_domain_keeps_path_based_previews(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PLAYGROUND_PREVIEW_DOMAIN", "")
+    monkeypatch.setenv("CLI_PLAYGROUND_PREVIEW_DOMAIN", "")
     settings = Settings()
     assert settings.preview_url("a" * 32) == (
         "https://play.example/p/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

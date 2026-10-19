@@ -9,9 +9,9 @@ from pydantic import Field
 from boxie.contracts.common import ConsumerId, Positive, WireModel
 from boxie.contracts.consumer import PolicyWire, ProfileRequest
 from boxie.domain.models import (
-    OrchestratorIdentity,
     ProfileSnapshot,
     SandboxLimits,
+    SupervisorIdentity,
 )
 
 
@@ -66,8 +66,8 @@ class IdentityWire(WireModel):
     installation_id: UUID
     host_id: Annotated[str, Field(min_length=1, max_length=128)]
 
-    def domain(self) -> OrchestratorIdentity:
-        return OrchestratorIdentity(self.installation_id, self.host_id)
+    def domain(self) -> SupervisorIdentity:
+        return SupervisorIdentity(self.installation_id, self.host_id)
 
 
 class ControlRequest(WireModel):

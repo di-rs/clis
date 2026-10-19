@@ -9,11 +9,11 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from boxie.bootstrap.config import OrchestratorConfig
-from boxie.domain.models import OrchestratorIdentity
+from boxie.bootstrap.config import SupervisorConfig
+from boxie.domain.models import SupervisorIdentity
 
 IMAGE = "example.org/shell@sha256:" + "1" * 64
-AUTH = {"Authorization": "Bearer orchestrator-test-secret"}
+AUTH = {"Authorization": "Bearer supervisor-test-secret"}
 
 
 def bundle(files: dict[str, bytes] | None = None) -> bytes:
@@ -67,10 +67,10 @@ class FakeTerminal:
         self.queue.put_nowait(b"")
 
 
-def configuration(root: Path, **changes: Any) -> OrchestratorConfig:
+def configuration(root: Path, **changes: Any) -> SupervisorConfig:
     root.mkdir(exist_ok=True)
-    secret = root / "orchestrator.secret"
-    secret.write_text("orchestrator-test-secret\n")
+    secret = root / "supervisor.secret"
+    secret.write_text("supervisor-test-secret\n")
     secret.chmod(0o600)
     profile = root / "profiles.json"
     profile.write_text(
@@ -85,11 +85,11 @@ def configuration(root: Path, **changes: Any) -> OrchestratorConfig:
             }
         )
     )
-    return OrchestratorConfig(
+    return SupervisorConfig(
         data_dir=root / "state",
         profiles_file=profile,
         credential_file=secret,
-        identity=OrchestratorIdentity(uuid4(), "host-1"),
+        identity=SupervisorIdentity(uuid4(), "host-1"),
         sweep_seconds=0.01,
         **changes,
     )

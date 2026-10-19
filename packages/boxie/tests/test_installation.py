@@ -20,7 +20,7 @@ def test_generated_credentials_survive_rerun_without_output(tmp_path: Path) -> N
     assert first.returncode == 0, first.stderr
     before = {path.name: path.read_bytes() for path in directory.iterdir() if path.is_file()}
     assert len(before["consumer.secret"].strip()) >= 48
-    assert before["consumer.secret"] != before["orchestrator.secret"]
+    assert before["consumer.secret"] != before["supervisor.secret"]
     (tmp_path / "data").write_text("persistent sentinel")
     second = credentials(directory)
     assert second.returncode == 0, second.stderr
@@ -113,7 +113,7 @@ def test_certificates_have_separate_identities_and_private_ca(tmp_path: Path) ->
         for name, file in (
             ("server", "frontend.key"),
             ("api", "boxie-api.key"),
-            ("orchestrator", "boxie-orchestrator.key"),
+            ("supervisor", "boxie-supervisor.key"),
             ("ui", "ui-client.key"),
             ("operator", "operator.key"),
         )

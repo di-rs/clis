@@ -26,7 +26,7 @@ class LifecycleStack(ProductionStack):
     ) -> None:
         super().__init__(root, command_runner=command_runner)
         self.runtime_overlay = runtime_overlay
-        self.runtime_services = ("faults", "orchestrator", "api", "playground")
+        self.runtime_services = ("faults", "supervisor", "api", "cli-playground")
         self.capture_teardown_logs = True
         self.installation = str(uuid4())
         self.host = self.name
@@ -41,25 +41,27 @@ class LifecycleStack(ProductionStack):
             # Bind-mounted private files and writable storage belong to this runner.
             # UID 0 with cap_drop ALL cannot bypass another UID's mode-0600 files.
             BOXIE_TEST_USER=f"{os.getuid()}:{os.getgid()}",
-            BOXIE_TEST_ORCHESTRATOR_SCRIPT=str(Path(__file__).with_name("orchestrator_fixture.py")),
+            BOXIE_TEST_SUPERVISOR_SCRIPT=str(Path(__file__).with_name("supervisor_fixture.py")),
             BOXIE_TEST_FAULTS_SCRIPT=str(Path(__file__).with_name("faults.py")),
-            BOXIE_RUNTIME_IMAGE=os.environ.get("BOXIE_RUNTIME_IMAGE", "boxie:lifecycle"),
-            PLAYGROUND_IMAGE=os.environ.get("PLAYGROUND_IMAGE", "cli-playground:lifecycle"),
+            BOXIE_IMAGE=os.environ.get("BOXIE_IMAGE", "boxie:lifecycle"),
+            CLI_PLAYGROUND_BACKEND_IMAGE=os.environ.get(
+                "CLI_PLAYGROUND_BACKEND_IMAGE", "cli-playground-backend:lifecycle"
+            ),
             BOXIE_DATA_DIR=str(root / "data"),
-            BOXIE_ORCHESTRATOR_CONFIG=str(root / "orchestrator.json"),
+            BOXIE_SUPERVISOR_CONFIG=str(root / "supervisor.json"),
             BOXIE_API_CONFIG=str(root / "api.json"),
             BOXIE_PROFILES_FILE=str(root / "profiles.json"),
-            BOXIE_ORCHESTRATOR_CREDENTIAL_FILE=str(root / "orchestrator.secret"),
+            BOXIE_SUPERVISOR_CREDENTIAL_FILE=str(root / "supervisor.secret"),
             BOXIE_CONSUMER_CREDENTIAL_FILE=str(root / "consumer.secret"),
             BOXIE_POSTGRES_DSN_FILE=str(root / "postgres-dsn"),
             BOXIE_TEMPORAL_CA_FILE=str(root / "clients/frontend-ca.pem"),
             BOXIE_API_TEMPORAL_CERT_FILE=str(root / "clients/boxie-api.pem"),
             BOXIE_API_TEMPORAL_KEY_FILE=str(root / "clients/boxie-api.key"),
-            BOXIE_ORCHESTRATOR_TEMPORAL_CERT_FILE=str(root / "clients/boxie-orchestrator.pem"),
-            BOXIE_ORCHESTRATOR_TEMPORAL_KEY_FILE=str(root / "clients/boxie-orchestrator.key"),
+            BOXIE_SUPERVISOR_TEMPORAL_CERT_FILE=str(root / "clients/boxie-supervisor.pem"),
+            BOXIE_SUPERVISOR_TEMPORAL_KEY_FILE=str(root / "clients/boxie-supervisor.key"),
             BOXIE_CONSUMER_NETWORK=self.name + "-consumer",
-            PLAYGROUND_DEPLOY_TOKEN=self.deploy,
-            PLAYGROUND_PUBLIC_URL="http://127.0.0.1:1",
+            CLI_PLAYGROUND_DEPLOY_TOKEN=self.deploy,
+            CLI_PLAYGROUND_PUBLIC_URL="http://127.0.0.1:1",
         )
 
     def runtime_command(self, *args: str) -> str:
@@ -87,18 +89,18 @@ class LifecycleStack(ProductionStack):
             raise RuntimeError(
                 "native lifecycle requires Linux amd64 Docker with configured runsc; no fallback"
             )
-        if "playground" in self.runtime_services and not self.binary.is_file():
+        if "cli-playground" in self.runtime_services and not self.binary.is_file():
             raise RuntimeError("native echor binary is required (BOXIE_NATIVE_BINARY)")
         super().start()
         for name, value in (
-            ("orchestrator.secret", secrets.token_hex(24)),
+            ("supervisor.secret", secrets.token_hex(24)),
             ("consumer.secret", self.consumer),
         ):
             path = self.root / name
             path.write_text(value)
             path.chmod(0o600)
         self.dsn = f"host=127.0.0.1 port={self.pg_port} dbname=boxie user=boxie password={self.env['BOXIE_DB_PASSWORD']} sslmode=disable"
-        for name, host in (("postgres-dsn", "postgres"), ("orchestrator-dsn", "faults")):
+        for name, host in (("postgres-dsn", "postgres"), ("supervisor-dsn", "faults")):
             path = self.root / name
             path.write_text(
                 f"host={host} dbname=boxie user=boxie password={self.env['BOXIE_DB_PASSWORD']} sslmode=disable"
@@ -109,8 +111,10 @@ class LifecycleStack(ProductionStack):
         (self.root / "data/profiles").mkdir(parents=True, mode=0o700)
         (self.root / "faults").mkdir()
         profiles = (
-            json.loads((ROOT / "tools/cli-playground/infra/profiles/playground.json").read_text())
-            if "playground" in self.runtime_services
+            json.loads(
+                (ROOT / "tools/cli-playground/infra/profiles/cli-playground.json").read_text()
+            )
+            if "cli-playground" in self.runtime_services
             else {}
         )
         profiles.update(
@@ -121,7 +125,7 @@ class LifecycleStack(ProductionStack):
                 "docker",
                 "image",
                 "inspect",
-                self.env.get("BOXIE_SANDBOX_IMAGE", "sanctuary-playground-sandbox:lifecycle"),
+                self.env.get("BOXIE_SANDBOX_IMAGE", "sanctuary-cli-playground-sandbox:lifecycle"),
                 "--format",
                 "{{.Id}}",
             ]
@@ -159,13 +163,13 @@ class LifecycleStack(ProductionStack):
             port = reservation.getsockname()[1]
         self.env["BOXIE_TEST_PRODUCT_PORT"] = str(port)
         self.product_url = f"http://127.0.0.1:{port}"
-        self.env["PLAYGROUND_PUBLIC_URL"] = self.product_url
+        self.env["CLI_PLAYGROUND_PUBLIC_URL"] = self.product_url
         self.runtime_started = True
         self.runtime_command("up", "--detach", *self.runtime_services)
         self.api_url = "http://" + self.runtime_command("port", "api", "8090")
-        if "playground" in self.runtime_services:
-            self.product_url = "http://" + self.runtime_command("port", "playground", "8000")
-        self.env["PLAYGROUND_PUBLIC_URL"] = self.product_url
+        if "cli-playground" in self.runtime_services:
+            self.product_url = "http://" + self.runtime_command("port", "cli-playground", "8000")
+        self.env["CLI_PLAYGROUND_PUBLIC_URL"] = self.product_url
         self.wait_ready()
         self.evidence.update(
             native_runtime="runsc",
@@ -196,20 +200,20 @@ class LifecycleStack(ProductionStack):
             + self.runtime_command("logs", "--tail", "80")
         )
 
-    def orchestrator_boot(self) -> UUID:
-        """Read the running orchestrator's authenticated identity after startup reconciliation."""
+    def supervisor_boot(self) -> UUID:
+        """Read the running supervisor's authenticated identity after startup reconciliation."""
         return UUID(
             self.runtime_command(
                 "exec",
                 "-T",
-                "orchestrator",
+                "supervisor",
                 "python",
                 "-c",
                 """
 import time
 from pathlib import Path
 import httpx
-credential = Path('/run/secrets/orchestrator').read_text().strip()
+credential = Path('/run/secrets/supervisor').read_text().strip()
 with httpx.Client(headers={'Authorization': 'Bearer ' + credential}, timeout=1, trust_env=False) as client:
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
@@ -221,7 +225,7 @@ with httpx.Client(headers={'Authorization': 'Bearer ' + credential}, timeout=1, 
         except httpx.HTTPError:
             time.sleep(0.2)
     else:
-        raise RuntimeError('restarted orchestrator identity unavailable')
+        raise RuntimeError('restarted supervisor identity unavailable')
 """,
             )
         )
@@ -236,7 +240,7 @@ with httpx.Client(headers={'Authorization': 'Bearer ' + credential}, timeout=1, 
             path.unlink(missing_ok=True)
 
     def process(self, service: str, action: str) -> None:
-        if service not in {"api", "orchestrator", "temporal"} or action not in {
+        if service not in {"api", "supervisor", "temporal"} or action not in {
             "kill",
             "start",
         }:

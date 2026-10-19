@@ -1,4 +1,4 @@
-"""Render Playground settings and its approved profile from installation inputs."""
+"""Render cli-playground settings and its approved profile from installation inputs."""
 
 import argparse
 import json
@@ -29,17 +29,17 @@ def render(root: Path, source: Path) -> None:
         return (credentials / name).read_text().strip()
 
     write_environment(
-        root / "playground.env",
+        root / "cli-playground.env",
         {
-            "PLAYGROUND_IMAGE": os.environ["PLAYGROUND_IMAGE"],
-            "PLAYGROUND_DOMAIN": os.environ["PLAYGROUND_DOMAIN"],
-            "PLAYGROUND_DEPLOY_TOKEN": secret("preview-token"),
-            "PLAYGROUND_BOXIE_URL": "http://boxie-api:8090",
-            "PLAYGROUND_BOXIE_CREDENTIAL_FILE": str(credentials / "consumer.secret"),
-            "PLAYGROUND_CONSUMER_NETWORK": "boxie-consumers",
-            "PLAYGROUND_PROXY_NETWORK": "playground-proxy",
-            "PLAYGROUND_DATA_VOLUME": "playground-data",
-            "PLAYGROUND_CERTIFICATES_VOLUME": "playground-certificates",
+            "CLI_PLAYGROUND_BACKEND_IMAGE": os.environ["CLI_PLAYGROUND_BACKEND_IMAGE"],
+            "CLI_PLAYGROUND_DOMAIN": os.environ["CLI_PLAYGROUND_DOMAIN"],
+            "CLI_PLAYGROUND_DEPLOY_TOKEN": secret("preview-token"),
+            "CLI_PLAYGROUND_BOXIE_URL": "http://boxie-api:8090",
+            "CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE": str(credentials / "consumer.secret"),
+            "CLI_PLAYGROUND_CONSUMER_NETWORK": "boxie-consumers",
+            "CLI_PLAYGROUND_PROXY_NETWORK": "cli-playground-proxy",
+            "CLI_PLAYGROUND_DATA_VOLUME": "cli-playground-data",
+            "CLI_PLAYGROUND_CERTIFICATES_VOLUME": "cli-playground-certificates",
             "ACME_EMAIL": os.environ["ACME_EMAIL"],
             "CLOUDFLARE_DNS_API_TOKEN": os.environ["CLOUDFLARE_DNS_API_TOKEN"],
         },
@@ -50,11 +50,13 @@ def render(root: Path, source: Path) -> None:
 def update_profile(root: Path, source: Path) -> None:
     profiles_path = root / "boxie/profiles.json"
     profiles = json.loads(profiles_path.read_text()) if profiles_path.exists() else {}
-    profile = profiles.get("playground")
+    profile = profiles.get("cli-playground")
     if profile is None:
-        profile = json.loads((source / "profiles/playground.json").read_text())["playground"]
-    profile["image_digest"] = os.environ["PLAYGROUND_SANDBOX_IMAGE"]
-    profiles["playground"] = profile
+        profile = json.loads((source / "profiles/cli-playground.json").read_text())[
+            "cli-playground"
+        ]
+    profile["image_digest"] = os.environ["CLI_PLAYGROUND_SANDBOX_IMAGE"]
+    profiles["cli-playground"] = profile
     with tempfile.NamedTemporaryFile(mode="w", dir=profiles_path.parent, delete=False) as output:
         temporary = Path(output.name)
         try:

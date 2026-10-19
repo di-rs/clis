@@ -8,18 +8,18 @@ case $component in
     boxie)
         owner=boxie
         files=packages/boxie/infra
-        image_key=BOXIE_RUNTIME_IMAGE
+        image_key=BOXIE_IMAGE
         retained_key=OBS_COLLECTOR_IMAGE
         ;;
-    sandbox|gateway)
-        owner=playground
+    cli-playground-sandbox|cli-playground-backend)
+        owner=cli-playground
         files=tools/cli-playground/infra
-        if [[ $component == sandbox ]]; then
-            image_key=PLAYGROUND_SANDBOX_IMAGE
-            retained_key=PLAYGROUND_IMAGE
+        if [[ $component == cli-playground-sandbox ]]; then
+            image_key=CLI_PLAYGROUND_SANDBOX_IMAGE
+            retained_key=CLI_PLAYGROUND_BACKEND_IMAGE
         else
-            image_key=PLAYGROUND_IMAGE
-            retained_key=PLAYGROUND_SANDBOX_IMAGE
+            image_key=CLI_PLAYGROUND_BACKEND_IMAGE
+            retained_key=CLI_PLAYGROUND_SANDBOX_IMAGE
         fi
         ;;
     *) echo 'Unknown release component' >&2; exit 2 ;;
@@ -66,7 +66,7 @@ scp -F "$private/config" "$private/image.env" "deployment:$remote/image.env"
 scp -F "$private/config" -r "$private/registry" "deployment:$remote/registry"
 case $component in
     boxie) command="/opt/sanctuary/boxie/deploy.sh $SOURCE_SHA" ;;
-    sandbox) command="/opt/sanctuary/playground/sandbox-release.sh $IMAGE" ;;
-    gateway) command=/opt/sanctuary/playground/deploy.sh ;;
+    cli-playground-sandbox) command="/opt/sanctuary/cli-playground/sandbox-release.sh $IMAGE" ;;
+    cli-playground-backend) command=/opt/sanctuary/cli-playground/deploy.sh ;;
 esac
 ssh -F "$private/config" deployment "set -e; trap 'rm -rf $remote' EXIT; install -m 0600 $remote/image.env /etc/sanctuary/$owner-image.env; DOCKER_CONFIG=$remote/registry bash $command"

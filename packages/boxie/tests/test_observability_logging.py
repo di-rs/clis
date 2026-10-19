@@ -52,7 +52,7 @@ def records(result: subprocess.CompletedProcess[str]) -> list[dict[str, object]]
 def test_json_context_isolation_and_terminal_close() -> None:
     result = child("""
 assert configure_logging(dispatcher.settings) is dispatcher
-assert configure_logging(LogSettings(service="boxie", role="orchestrator")) is dispatcher
+assert configure_logging(LogSettings(service="boxie", role="supervisor")) is dispatcher
 async def task(number):
     with bind_context(request_id=str(UUID(int=number))):
         await asyncio.sleep(0)
@@ -164,7 +164,7 @@ def test_factory_import_does_not_take_over_streams() -> None:
     assert result.stdout == "intact\n"
 
 
-@pytest.mark.parametrize("role", ["api", "orchestrator"])
+@pytest.mark.parametrize("role", ["api", "supervisor"])
 def test_real_entrypoint_startup_failure_is_sanitized(role: str, tmp_path: Path) -> None:
     path = tmp_path / SECRET
     path.write_text('{"password":"' + SECRET + '"}')
@@ -206,7 +206,7 @@ dispatcher.close()
     assert json.loads(output.read_text())["event"] == "request.completed"
 
 
-@pytest.mark.parametrize("role", ["api", "orchestrator"])
+@pytest.mark.parametrize("role", ["api", "supervisor"])
 @pytest.mark.parametrize(
     "arguments,status,stream",
     [(["--help"], 0, "stdout"), ([], 2, "stderr"), (["--unknown"], 2, "stderr")],
@@ -330,7 +330,7 @@ Path({str(evidence)!r}).write_text(json.dumps(asdict(dispatcher.stats)))
 def test_real_http_and_pty_progress_while_log_pipe_is_unread(tmp_path: Path) -> None:
     evidence = tmp_path / "progress.json"
     # Real API HTTP and OS PTY; application ports only are minimal injected doubles.
-    # Full Temporal + orchestrator/WebSocket path is exercised separately by the live fixture.
+    # Full Temporal + supervisor/WebSocket path is exercised separately by the live fixture.
     code = (
         PRELUDE
         + f'''
@@ -401,7 +401,7 @@ def test_real_temporal_history_and_http_terminal_logs_are_private(
 
     Parent fixtures own disposable SQL/Temporal resources. The scenario verifies
     real HTTP/WS and worker replacement, scans decoded history wire payloads and
-    replays it. Only the orchestrator's Docker port is substituted by that fixture.
+    replays it. Only the supervisor's Docker port is substituted by that fixture.
     """
     from typing import Any, cast
 
@@ -420,7 +420,7 @@ from pathlib import Path
 from types import SimpleNamespace
 sys.path.insert(0, {str(tests)!r})
 from boxie.observability.logging import process_logging
-dispatcher = process_logging("orchestrator")
+dispatcher = process_logging("supervisor")
 import pytest
 from test_outbox import test_committed_command_recovers_without_api_delivery
 settings = json.loads(Path({str(config)!r}).read_text())
@@ -441,7 +441,7 @@ dispatcher.close()
     events = [json.loads(line) for line in result.stdout.splitlines()]
     assert events and all(event["schema_version"] == 1 for event in events)
     logs = result.stdout + result.stderr
-    for sentinel in ("SECRET-", "consumer-one-secret", "orchestrator-test-secret"):
+    for sentinel in ("SECRET-", "consumer-one-secret", "supervisor-test-secret"):
         assert sentinel not in logs
     assert any(
         event["event"] == "request.completed" and event.get("outcome") == "succeeded"
@@ -453,7 +453,7 @@ dispatcher.close()
     "module,service,role",
     [
         ("boxie.observability.logging", "boxie", "api"),
-        ("boxie.observability.logging", "boxie", "orchestrator"),
+        ("boxie.observability.logging", "boxie", "supervisor"),
     ],
 )
 def test_request_boundaries_isolate_reset_and_sanitize_context(

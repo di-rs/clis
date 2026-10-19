@@ -1,4 +1,4 @@
-"""Real SQL, Temporal and HTTP with orchestrator-owned embedded workers."""
+"""Real SQL, Temporal and HTTP with supervisor-owned embedded workers."""
 
 import json
 import time
@@ -11,21 +11,21 @@ from typing import Any
 
 import httpx
 from boxie.api.app import ApiConfig, create_app
-from boxie.bootstrap.orchestrator import create_orchestrator_app
+from boxie.bootstrap.supervisor import create_supervisor_app
 from boxie.persistence.database import database
 from boxie.persistence.migrate import migrate
 from boxie.persistence.outbox import PostgresOutbox
 from boxie.persistence.postgres import PostgresLifecycle
 from boxie.persistence.postgres_artifacts import PostgresArtifactStore
 from boxie.persistence.start_guard import PostgresStartGuard
-from boxie.sandbox.execution.orchestrator import Orchestrator
-from boxie.sandbox.transport.client import OrchestratorClient
+from boxie.sandbox.execution.supervisor import Supervisor
+from boxie.sandbox.transport.client import SupervisorClient
 from boxie.temporal.activities import LifecycleActivities
 from boxie.temporal.contracts import lifecycle_queue
 from boxie.temporal.dispatcher import CommandDelivery
 from boxie_test_support.api import CONSUMER_AUTH, serve
 from boxie_test_support.execution import Daemon
-from boxie_test_support.orchestrator import configuration
+from boxie_test_support.supervisor import configuration
 from temporalio.client import Client
 from temporalio.service import TLSConfig
 
@@ -41,7 +41,7 @@ async def lifecycle_stack(dsn: str, root: Path, client: Client) -> AsyncIterator
     daemon = Daemon()
     async with database(dsn) as sessions:
         artifacts = PostgresArtifactStore(sessions, root / "artifacts")
-        orchestrator = Orchestrator(
+        supervisor = Supervisor(
             config,
             daemon,
             artifacts.path,
@@ -49,12 +49,10 @@ async def lifecycle_stack(dsn: str, root: Path, client: Client) -> AsyncIterator
             lambda: datetime.now(UTC),
             time.monotonic,
         )
-        app = create_orchestrator_app(
-            orchestrator, artifacts, credential=b"orchestrator-test-secret"
-        )
+        app = create_supervisor_app(supervisor, artifacts, credential=b"supervisor-test-secret")
         async with (
             serve(app) as origin,
-            OrchestratorClient(origin, b"orchestrator-test-secret") as control,
+            SupervisorClient(origin, b"supervisor-test-secret") as control,
         ):
             life = PostgresLifecycle(sessions, control, config.identity, control.ready)
             delivery = CommandDelivery(
@@ -74,12 +72,12 @@ async def lifecycle_stack(dsn: str, root: Path, client: Client) -> AsyncIterator
                 yield SimpleNamespace(
                     http=http,
                     life=life,
-                    orchestrator=orchestrator,
+                    supervisor=supervisor,
                     daemon=daemon,
                     sessions=sessions,
                     artifacts=artifacts,
                     delivery=delivery,
-                    activities=LifecycleActivities(life, orchestrator),
+                    activities=LifecycleActivities(life, supervisor),
                 )
 
 

@@ -1,4 +1,4 @@
-"""Production API and orchestrator protocol over independent loopback sockets."""
+"""Production API and supervisor protocol over independent loopback sockets."""
 
 import asyncio
 import json
@@ -121,16 +121,16 @@ def test_final_control_preserves_buffered_status(
 ) -> None:
     from urllib.parse import urlsplit
 
-    from boxie.sandbox.transport.terminal import OrchestratorTerminal
+    from boxie.sandbox.transport.terminal import SupervisorTerminal
     from boxie_test_support.terminal_completion import CompletionBarrier
 
     async def exercise() -> None:
-        barrier = CompletionBarrier(monkeypatch, OrchestratorTerminal, phase, kind, close_code)
+        barrier = CompletionBarrier(monkeypatch, SupervisorTerminal, phase, kind, close_code)
         async with network(tmp_path) as net:
             profiles = json.loads(net.config.profiles_file.read_text())
             profiles["shell"]["limits"] = {"output_bytes": 10}
             net.config.profiles_file.write_text(json.dumps(profiles))
-            net.orchestrator.profiles.reload()
+            net.supervisor.profiles.reload()
             barrier.port = urlsplit(str(net.api.base_url)).port
             identifier = await create(net.api, await artifact(net.api))
             await ready(net.api, identifier)

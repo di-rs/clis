@@ -1,4 +1,4 @@
-"""Sandbox ownership and observation facts shared by orchestrator and orchestration."""
+"""Sandbox ownership and observation facts shared by supervisor and orchestration."""
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -7,11 +7,11 @@ from typing import Literal, Protocol
 from uuid import UUID
 
 from boxie.domain.models import (
-    OrchestratorIdentity,
     Principal,
     ProfileSnapshot,
     SandboxSpec,
     SandboxState,
+    SupervisorIdentity,
     TerminationReason,
 )
 
@@ -22,9 +22,9 @@ class SandboxRequest:
 
     sandbox_id: UUID
     principal: Principal
-    identity: OrchestratorIdentity
+    identity: SupervisorIdentity
     generation: int
-    orchestrator_boot_id: UUID | None
+    supervisor_boot_id: UUID | None
     spec: SandboxSpec
     snapshot: ProfileSnapshot
     accepted_at: datetime
@@ -34,10 +34,10 @@ class SandboxRequest:
 
 
 @dataclass(frozen=True)
-class OrchestratorObservation:
-    """Accepted only from the authenticated orchestrator bound to this ownership fence.
+class SupervisorObservation:
+    """Accepted only from the authenticated supervisor bound to this ownership fence.
 
-    Boot changes require an explicit compare-and-set bind_orchestrator_boot call by a
+    Boot changes require an explicit compare-and-set bind_supervisor_boot call by a
     trusted control-plane caller; a report cannot select its own current boot.
     removal_confirmed means a successful physical absence check, never merely a
     terminal state or unavailable sandbox execution. Versions are monotonic per boot.
@@ -45,7 +45,7 @@ class OrchestratorObservation:
 
     sandbox_id: UUID
     principal: Principal
-    identity: OrchestratorIdentity
+    identity: SupervisorIdentity
     generation: int
     boot_id: UUID
     event_version: int
@@ -96,7 +96,7 @@ class SandboxRef:
 class EnsureRequest:
     ref: SandboxRef
     principal: Principal
-    identity: OrchestratorIdentity
+    identity: SupervisorIdentity
     spec: SandboxSpec
     profile_snapshot: ProfileSnapshot
     accepted_at: datetime
@@ -116,7 +116,7 @@ class EnsureRequest:
 
 
 class StartGuard(Protocol):
-    """Orchestrator-owned guard. The callback is only the bounded final Docker start.
+    """Supervisor-owned guard. The callback is only the bounded final Docker start.
 
     start_allowed validates immutable admission AND its retained artifact reference,
     before mount and again before READY. It is not final-start authorization.

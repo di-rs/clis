@@ -8,11 +8,11 @@ def test_provision_preserves_approved_isolation_and_entrypoint(tmp_path: Path) -
     from typing import Any
 
     from boxie.domain.models import SandboxState
-    from boxie_test_support.orchestrator import IMAGE
+    from boxie_test_support.supervisor import IMAGE
     from lifecycle_support import settled, setup
 
     async def exercise() -> None:
-        orchestrator, request, daemon, _, _ = await setup(tmp_path)
+        supervisor, request, daemon, _, _ = await setup(tmp_path)
         original = daemon.create
         captured: list[dict[str, Any]] = []
 
@@ -21,8 +21,8 @@ def test_provision_preserves_approved_isolation_and_entrypoint(tmp_path: Path) -
             await original(name, config)
 
         daemon.create = create  # type: ignore[method-assign]
-        ready = await settled(orchestrator, request.ref, SandboxState.READY)
-        await launch_execution(orchestrator, request)
+        ready = await settled(supervisor, request.ref, SandboxState.READY)
+        await launch_execution(supervisor, request)
         assert daemon.creates == 1 and ready.container_id in daemon.streams
         payload = captured[0]
         assert payload["Image"] == IMAGE
@@ -40,6 +40,6 @@ def test_provision_preserves_approved_isolation_and_entrypoint(tmp_path: Path) -
         mount = host["Mounts"][0]
         assert mount["Target"] == "/opt/artifact" and mount["ReadOnly"] is True
         assert mount["Source"] == str(tmp_path)
-        await orchestrator.close()
+        await supervisor.close()
 
     asyncio.run(exercise())

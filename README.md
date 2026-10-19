@@ -9,7 +9,7 @@ for per-CLI TOML suites using Biggie and hyperfine.
 [cli-check](tools/cli-check/README.md) validates CLI package boundaries, test and
 documentation layout, and benchmark coverage with one local or CI command.
 
-The [CLI playground](tools/cli-playground/README.md) provides a deployable Python
+The [cli-playground](tools/cli-playground/README.md) provides a deployable Python
 web terminal with real Rust binaries, disposable sample files, and one preview URL per PR.
 
 ## Layout

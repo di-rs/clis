@@ -1,9 +1,9 @@
 {
-  "playground": {
+  "cli-playground": {
     "image_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
     "commands": [
       [
-        "/opt/playground/shell.sh"
+        "/opt/cli-playground/shell.sh"
       ]
     ],
     "env": {

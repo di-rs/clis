@@ -1,4 +1,4 @@
-name: ☁️ Playground infrastructure review
+name: ☁️ Sanctuary infrastructure review
 
 on:
   workflow_dispatch:
@@ -19,7 +19,7 @@ concurrency:
 jobs:
   revision:
     name: 🔎 Validate reviewed revision
-    if: ${{ github.ref == 'refs/heads/master' && (github.event_name == 'workflow_dispatch' || vars.PLAYGROUND_INFRA_DRIFT_CHECK == 'true') }}
+    if: ${{ github.ref == 'refs/heads/master' && (github.event_name == 'workflow_dispatch' || vars.SANCTUARY_INFRA_DRIFT_CHECK == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -53,7 +53,7 @@ jobs:
   check:
     name: ☁️ Pulumi review (${{ needs.revision.outputs.revision }})
     needs: revision
-    environment: platform
+    environment: sanctuary
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:

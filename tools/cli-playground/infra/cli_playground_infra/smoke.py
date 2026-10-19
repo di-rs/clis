@@ -1,4 +1,4 @@
-"""Exercise an approved Playground shell profile through Boxie's private API.
+"""Exercise an approved cli-playground shell profile through Boxie's private API.
 
 Run against a disposable local Boxie stack with an existing Linux x86_64 echor
 binary, --boxie-url, and --credential-file. This does not configure Docker.
@@ -19,7 +19,7 @@ from boxie_infra.terminal import Session
 from cli_playground.boxie_client import HttpBoxieClient, SandboxRequest
 from cli_playground.storage import validate_elf
 
-PROMPT = b"__PLAYGROUND_SMOKE_PROMPT__ "
+PROMPT = b"__CLI_PLAYGROUND_SMOKE_PROMPT__ "
 ANSI = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
@@ -50,7 +50,7 @@ class Shell:
         # Disable command echo so an echoed assertion cannot masquerade as its output.
         await self.session.write(
             b"stty -echo; bind 'set enable-bracketed-paste off'; "
-            b"PS1='__PLAYGROUND_SMOKE_PROMPT__ '\n"
+            b"PS1='__CLI_PLAYGROUND_SMOKE_PROMPT__ '\n"
         )
         # The initial line is echoed, including the new prompt; first consume its newline.
         await self.until(b"\n")
@@ -79,7 +79,7 @@ async def exercise(binary: Path, url: str, credential_file: Path, profile: str) 
     artifact_id = uuid.uuid4()
     sandbox_id = None
     try:
-        with tempfile.TemporaryDirectory(prefix="sanctuary-playground-smoke-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="sanctuary-cli-playground-smoke-") as temporary:
             archive = Path(temporary) / "bundle.zip"
             with zipfile.ZipFile(archive, "w") as bundle:
                 bundle.write(binary, "echor")
@@ -123,7 +123,7 @@ async def exercise(binary: Path, url: str, credential_file: Path, profile: str) 
                 await shell.run(
                     'test "$(id -u)" -eq 65534 && '
                     "test ! -e /var/run/docker.sock && "
-                    "! touch /etc/playground-smoke 2>/dev/null"
+                    "! touch /etc/cli-playground-smoke 2>/dev/null"
                 )
 
                 await session.resize(101, 37)
@@ -160,7 +160,7 @@ def main() -> int:
     parser.add_argument("--binary", type=Path, required=True, help="Linux x86_64 echor executable")
     parser.add_argument("--boxie-url", required=True)
     parser.add_argument("--credential-file", type=Path, required=True)
-    parser.add_argument("--profile", default="playground")
+    parser.add_argument("--profile", default="cli-playground")
     arguments = parser.parse_args()
     try:
         asyncio.run(

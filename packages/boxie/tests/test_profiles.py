@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 from boxie.domain.errors import BoxieError
 from boxie.sandbox.profiles import ProfileRegistry
-from boxie_test_support.orchestrator import IMAGE, configuration
+from boxie_test_support.supervisor import IMAGE, configuration
 
 
 def test_reload_is_atomic_and_retains_approved_snapshot(tmp_path: Path) -> None:
@@ -70,7 +70,7 @@ def test_service_sighup_reload_is_atomic(
     import sys
 
     import httpx
-    from boxie_test_support.orchestrator import AUTH
+    from boxie_test_support.supervisor import AUTH
 
     async def exercise() -> None:
         from boxie.persistence.migrate import migrate
@@ -84,7 +84,7 @@ def test_service_sighup_reload_is_atomic(
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
             port = listener.getsockname()[1]
-        settings = tmp_path / "orchestrator.json"
+        settings = tmp_path / "supervisor.json"
         settings.write_text(
             json.dumps(
                 {
@@ -102,20 +102,20 @@ def test_service_sighup_reload_is_atomic(
                         "temporal_server_name": "temporal",
                         "temporal_ca_file": str(temporal_stack.root / "clients/frontend-ca.pem"),
                         "temporal_cert_file": str(
-                            temporal_stack.root / "clients/boxie-orchestrator.pem"
+                            temporal_stack.root / "clients/boxie-supervisor.pem"
                         ),
                         "temporal_key_file": str(
-                            temporal_stack.root / "clients/boxie-orchestrator.key"
+                            temporal_stack.root / "clients/boxie-supervisor.key"
                         ),
                     },
                 }
             )
         )
-        with (tmp_path / "orchestrator.log").open("wb") as log:
+        with (tmp_path / "supervisor.log").open("wb") as log:
             process = await asyncio.create_subprocess_exec(
                 sys.executable,
                 "-m",
-                "boxie.bootstrap.orchestrator",
+                "boxie.bootstrap.supervisor",
                 "--config",
                 str(settings),
                 stdout=log,
@@ -133,7 +133,7 @@ def test_service_sighup_reload_is_atomic(
                         except httpx.ConnectError:
                             await asyncio.sleep(0.01)
                     else:
-                        raise AssertionError((tmp_path / "orchestrator.log").read_text())
+                        raise AssertionError((tmp_path / "supervisor.log").read_text())
                     assert first.json()["image_digest"] == IMAGE
                     data = json.loads(config.profiles_file.read_text())
                     replacement = "sha256:" + "4" * 64
@@ -156,6 +156,6 @@ def test_service_sighup_reload_is_atomic(
                 if process.returncode is None:
                     process.terminate()
                 await asyncio.wait_for(process.wait(), 5)
-        assert "orchestrator-test-secret" not in (tmp_path / "orchestrator.log").read_text()
+        assert "supervisor-test-secret" not in (tmp_path / "supervisor.log").read_text()
 
     asyncio.run(exercise())

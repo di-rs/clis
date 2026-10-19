@@ -1,1 +1,1 @@
-"""Native Rust CLI preview gateway."""
+"""Native Rust CLI preview backend."""

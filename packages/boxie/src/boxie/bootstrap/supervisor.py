@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from boxie.bootstrap.config import OrchestratorConfig, read_credential
+from boxie.bootstrap.config import SupervisorConfig, read_credential
 from boxie.bootstrap.dependencies import database_for, temporal_client
 from boxie.persistence.postgres_artifacts import PostgresArtifactStore
 
@@ -21,11 +21,11 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
     from boxie.observability.metrics import Metrics
-    from boxie.sandbox.execution.orchestrator import Orchestrator
+    from boxie.sandbox.execution.supervisor import Supervisor
 
 
-def create_orchestrator_app(
-    orchestrator: Orchestrator,
+def create_supervisor_app(
+    supervisor: Supervisor,
     artifacts: PostgresArtifactStore,
     *,
     credential: bytes,
@@ -37,12 +37,12 @@ def create_orchestrator_app(
     from sqlmodel import select
 
     from boxie.observability.logging import RequestLogging
-    from boxie.sandbox.transport.server import create_orchestrator_app as create_transport_app
+    from boxie.sandbox.transport.server import create_supervisor_app as create_transport_app
 
     async def readiness() -> dict[str, bool]:
         try:
             async with asyncio.timeout(5):
-                docker_ready = await orchestrator.docker.ready()
+                docker_ready = await supervisor.docker.ready()
                 async with artifacts.sessions() as session:
                     await session.exec(select(1))
                 sql_ready = True
@@ -51,20 +51,20 @@ def create_orchestrator_app(
         return {
             "docker": docker_ready,
             "postgres": sql_ready,
-            "execution": orchestrator.execution_ready,
+            "execution": supervisor.execution_ready,
         }
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        await orchestrator.start()
+        await supervisor.start()
         try:
             async with workers() if workers is not None else nullcontext():
                 yield
         finally:
-            await orchestrator.close()
+            await supervisor.close()
 
     app = create_transport_app(
-        orchestrator, artifacts, credential=credential, readiness=readiness, lifespan=lifespan
+        supervisor, artifacts, credential=credential, readiness=readiness, lifespan=lifespan
     )
     app.add_middleware(RequestLogging, completed=request_completed)
     return app
@@ -76,20 +76,20 @@ def _main(metrics: Metrics, config_path: Path) -> None:
     from boxie.bootstrap.workers import embedded_workers
     from boxie.observability.process import (
         background,
-        orchestrator_cache,
-        orchestrator_dependencies,
+        supervisor_cache,
+        supervisor_dependencies,
     )
     from boxie.observability.telemetry.logging import install_asyncio_handler, log_dispatcher
     from boxie.persistence.postgres import PostgresLifecycle
     from boxie.persistence.start_guard import PostgresStartGuard
     from boxie.sandbox.docker import DockerBackend
-    from boxie.sandbox.execution.orchestrator import Orchestrator
     from boxie.sandbox.execution.ownership import acquire_owner_lock
+    from boxie.sandbox.execution.supervisor import Supervisor
 
-    config = OrchestratorConfig.from_file(config_path)
+    config = SupervisorConfig.from_file(config_path)
 
     if config.lifecycle is None:
-        raise ValueError("orchestrator requires PostgreSQL and Temporal lifecycle configuration")
+        raise ValueError("supervisor requires PostgreSQL and Temporal lifecycle configuration")
     lifecycle = config.lifecycle
     dsn_file = lifecycle.postgres_dsn_file
 
@@ -101,7 +101,7 @@ def _main(metrics: Metrics, config_path: Path) -> None:
     async def run_owned() -> None:
         async with database_for(dsn_file) as sessions:
             artifacts = PostgresArtifactStore(sessions, config.data_dir / "artifacts")
-            orchestrator = Orchestrator(
+            supervisor = Supervisor(
                 config,
                 DockerBackend(config.docker_timeout),
                 artifacts.path,
@@ -112,24 +112,24 @@ def _main(metrics: Metrics, config_path: Path) -> None:
             )
 
             async def local_ready() -> bool:
-                return orchestrator.execution_ready
+                return supervisor.execution_ready
 
             repository = PostgresLifecycle(
-                sessions, orchestrator, config.identity, local_ready, diagnostics=metrics.transition
+                sessions, supervisor, config.identity, local_ready, diagnostics=metrics.transition
             )
             client = await temporal_client(lifecycle)
             credential = read_credential(config.credential_file)
-            app = create_orchestrator_app(
-                orchestrator,
+            app = create_supervisor_app(
+                supervisor,
                 artifacts,
                 credential=credential,
                 request_completed=metrics.http_completed,
-                workers=lambda: embedded_workers(client, repository, orchestrator, artifacts),
+                workers=lambda: embedded_workers(client, repository, supervisor, artifacts),
             )
 
             def reload_profiles() -> None:
                 try:
-                    orchestrator.profiles.reload()
+                    supervisor.profiles.reload()
                 except Exception:
                     logging.getLogger(__name__).error(
                         "profile reload rejected; retaining approved profiles"
@@ -152,8 +152,8 @@ def _main(metrics: Metrics, config_path: Path) -> None:
                     )
                 )
                 async with background(
-                    orchestrator_cache(metrics, orchestrator),
-                    orchestrator_dependencies(metrics, orchestrator, sessions),
+                    supervisor_cache(metrics, supervisor),
+                    supervisor_dependencies(metrics, supervisor, sessions),
                 ):
                     await server.serve()
             finally:
@@ -163,15 +163,15 @@ def _main(metrics: Metrics, config_path: Path) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Boxie private sandbox orchestrator")
+    parser = argparse.ArgumentParser(description="Boxie private sandbox supervisor")
     parser.add_argument("--config", type=Path, required=True)
     args = parser.parse_args()
     from boxie.observability.logging import process_logging
 
-    logs = process_logging("orchestrator")
+    logs = process_logging("supervisor")
     from boxie.observability.process import run_metrics_process
 
-    run_metrics_process(logs, "orchestrator", lambda metrics: _main(metrics, args.config))
+    run_metrics_process(logs, "supervisor", lambda metrics: _main(metrics, args.config))
 
 
 if __name__ == "__main__":

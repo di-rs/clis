@@ -15,7 +15,7 @@ from boxie.domain.models import Principal
 from boxie.persistence.artifacts import ArtifactLimits
 from boxie.persistence.zip_metadata import Directory
 from boxie_test_support.archive import Archive, chunks
-from boxie_test_support.orchestrator import bundle
+from boxie_test_support.supervisor import bundle
 from pydantic import ValidationError
 
 

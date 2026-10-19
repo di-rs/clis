@@ -103,7 +103,7 @@ def test_cloud_init_contains_only_immutable_first_boot_files() -> None:
 
 def test_bootstrap_prepares_fixed_compose_directories() -> None:
     bootstrap = (ROOT / "infra/host/bootstrap.sh").read_text()
-    assert "/opt/sanctuary/boxie /opt/sanctuary/playground" in bootstrap
+    assert "/opt/sanctuary/boxie /opt/sanctuary/cli-playground" in bootstrap
     assert "/opt/sanctuary/releases" not in bootstrap
 
 

@@ -23,7 +23,7 @@ def acquire_owner_lock(data_dir: Path) -> Iterator[None]:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise RuntimeError("orchestrator data directory already owned") from None
+            raise RuntimeError("supervisor data directory already owned") from None
         try:
             yield
         finally:

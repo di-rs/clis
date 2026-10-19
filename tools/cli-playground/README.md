@@ -1,4 +1,4 @@
-# CLI playground
+# cli-playground
 
 Run a PR's native Rust CLIs in a browser terminal. Each PR has one stable URL
 containing all affected CLIs; each tab gets Bash, sample files and a disposable
@@ -26,7 +26,7 @@ per session: one CPU, 512 MiB RAM, 64 MiB workspace, 16 MiB terminal output, no 
 
 ## Run locally
 
-Playground connects to an independently operated private Boxie endpoint. Follow
+cli-playground connects to an independently operated private Boxie endpoint. Follow
 [local infrastructure](infra/README.md) and the [Boxie setup](../../packages/boxie/infra/README.md).
 Use native Linux with gVisor for interactive sandboxes. Docker Desktop can build
 images and run the product UI against an independently supplied Boxie service,
@@ -40,9 +40,9 @@ pnpm --dir tools/cli-playground/frontend build
 
 The Python package lives in `src/cli_playground/`. The frontend build places real assets
 in `src/cli_playground/static/`, included in the installed
-wheel and sdist. To run the installed service, set `PLAYGROUND_DATA_DIR`,
-`PLAYGROUND_PUBLIC_URL`, `PLAYGROUND_DEPLOY_TOKEN`, `PLAYGROUND_BOXIE_URL`, and
-`PLAYGROUND_BOXIE_CREDENTIAL_FILE` (a private regular file):
+wheel and sdist. To run the installed service, set `CLI_PLAYGROUND_DATA_DIR`,
+`CLI_PLAYGROUND_PUBLIC_URL`, `CLI_PLAYGROUND_DEPLOY_TOKEN`, `CLI_PLAYGROUND_BOXIE_URL`, and
+`CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE` (a private regular file):
 
 ```sh
 uv run --locked --package cli-playground uvicorn cli_playground.app:create_app \
@@ -50,7 +50,7 @@ uv run --locked --package cli-playground uvicorn cli_playground.app:create_app \
 ```
 
 No Docker client, Docker socket or Boxie implementation is installed in the
-Playground image. Its server-side consumer credential is not sent to the browser.
+cli-playground image. Its server-side consumer credential is not sent to the browser.
 Production activation is unavailable until PR4; setup currently provisions only.
 The terminal keeps credentials, applied output sequence and screen in page memory.
 Reconnect drains pending xterm writes, resumes retained output exactly once and
@@ -69,23 +69,23 @@ DOM composition events; they do not claim OS-native IME coverage.
 ## Production releases
 
 Use the [shared-host guide](../../infra/environments/single-host/README.md) for
-setup, deployment gates and failure inspection. Releases are manual. The Playground release builds and deploys its backend and
-frontend together. A separate Boxie release delivers the runtime and sandbox.
+setup, deployment gates and failure inspection. Releases are manual. The cli-playground release builds and deploys its backend and
+frontend together. A separate Boxie release delivers the Boxie and sandbox images.
 Preview publication retains its separate trust boundary.
 
 ## Workflow responsibilities
 
 | Workflow | Responsibility |
 | --- | --- |
-| [🏗️ Playground PR binary builds](../../.github/workflows/cli-playground.yml) | Compile affected PR binaries without deployment credentials |
-| [🌐 Playground PR previews](../../.github/workflows/cli-playground-preview.yml) | Trusted build-state updates, artifact publication and PR close/reopen reconciliation |
-| [🚀 CLI Playground Release](../../.github/workflows/cli-playground-release.yml) | Manually build and deploy the Playground backend and frontend |
-| [🚀 Boxie Runtime and Sandbox Release](../../.github/workflows/boxie-release.yml) | Manually build and deploy the Boxie runtime and sandbox together |
-| [☁️ Playground infrastructure setup](../../.github/workflows/cli-playground-setup.yml) | Manually provision infrastructure and install services |
+| [🏗️ cli-playground PR binary builds](../../.github/workflows/cli-playground.yml) | Compile affected PR binaries without deployment credentials |
+| [🌐 cli-playground PR previews](../../.github/workflows/cli-playground-preview.yml) | Trusted build-state updates, artifact publication and PR close/reopen reconciliation |
+| [🚀 cli-playground Release](../../.github/workflows/cli-playground-release.yml) | Manually build and deploy cli-playground Backend and Frontend |
+| [🚀 Boxie and cli-playground Sandbox Release](../../.github/workflows/boxie-release.yml) | Manually build and deploy the Boxie and sandbox images together |
+| [☁️ Single-host Sanctuary setup](../../.github/workflows/sanctuary-setup.yml) | Manually provision infrastructure and install services |
 | [🧪 Boxie lifecycle integration](../../.github/workflows/boxie-lifecycle.yml) | Verify PostgreSQL/Temporal recovery and native Linux/gVisor lifecycle and browser faults |
 
 PR publication stores a binary batch and preview metadata. It does not deploy
-the runtime or start a sandbox; each browser terminal starts its own sandbox.
+Boxie or start a sandbox; each browser terminal starts its own sandbox.
 The build and preview workflows remain separate because they execute with
 different trust and credentials.
 

@@ -256,7 +256,7 @@ def create_router(service: CliPlaygroundService, static_dir: Path) -> APIRouter:
                         identifier, session_id, revision, auth.credential, binding.attachment_claim
                     )
                     # An upstream send may already be in flight when a newer claim
-                    # wins. The orchestrator's persisted ordering fence is authoritative.
+                    # wins. The supervisor's persisted ordering fence is authoritative.
                     return UpstreamAttach(
                         **request.model_dump(), attachment_order=binding.attachment_claim
                     ).model_dump_json()

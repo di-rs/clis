@@ -1,4 +1,4 @@
-"""Production orchestrator bootstrap with test-only collection entry/completion markers.
+"""Production supervisor bootstrap with test-only collection entry/completion markers.
 
 The wrapper changes no collection timing, locking, deadline or deletion logic.
 """
@@ -6,7 +6,7 @@ The wrapper changes no collection timing, locking, deadline or deletion logic.
 import time
 from pathlib import Path
 
-import boxie.bootstrap.orchestrator
+import boxie.bootstrap.supervisor
 from boxie.persistence.postgres_artifacts import PostgresArtifactStore
 
 
@@ -28,5 +28,5 @@ class ObservedArtifacts(PostgresArtifactStore):
 
 
 if __name__ == "__main__":
-    vars(boxie.bootstrap.orchestrator)["PostgresArtifactStore"] = ObservedArtifacts
-    boxie.bootstrap.orchestrator.main()
+    vars(boxie.bootstrap.supervisor)["PostgresArtifactStore"] = ObservedArtifacts
+    boxie.bootstrap.supervisor.main()

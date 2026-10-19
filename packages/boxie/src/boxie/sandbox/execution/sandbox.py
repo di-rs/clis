@@ -17,7 +17,7 @@ from boxie.sandbox.execution.reconcile import owned_container
 from boxie.sandbox.terminal.pty import ExecutionTerminal
 
 if TYPE_CHECKING:
-    from boxie.sandbox.execution.orchestrator import Orchestrator
+    from boxie.sandbox.execution.supervisor import Supervisor
 
 
 @dataclass
@@ -30,7 +30,7 @@ class Deadlines:
 
 @dataclass
 class SandboxExecution:
-    owner: Orchestrator
+    owner: Supervisor
     record: ExecutionRecord
     deadlines: Deadlines | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)

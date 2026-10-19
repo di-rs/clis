@@ -68,7 +68,7 @@ def docker_settings(tmp_path: Path) -> Settings:
 @pytest.fixture
 def clean_settings_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in tuple(os.environ):
-        if name.upper().startswith("PLAYGROUND_"):
+        if name.upper().startswith("CLI_PLAYGROUND_"):
             monkeypatch.delenv(name)
 
 
@@ -77,11 +77,11 @@ def configured_environment(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, clean_settings_environment: None
 ) -> None:
     for name, value in {
-        "PLAYGROUND_DATA_DIR": str(tmp_path / "data"),
-        "PLAYGROUND_PUBLIC_URL": "https://play.example/",
-        "PLAYGROUND_DEPLOY_TOKEN": "private-deployment-token",
-        "PLAYGROUND_BOXIE_URL": "http://boxie.internal",
-        "PLAYGROUND_BOXIE_CREDENTIAL_FILE": str(tmp_path / "boxie.secret"),
+        "CLI_PLAYGROUND_DATA_DIR": str(tmp_path / "data"),
+        "CLI_PLAYGROUND_PUBLIC_URL": "https://play.example/",
+        "CLI_PLAYGROUND_DEPLOY_TOKEN": "private-deployment-token",
+        "CLI_PLAYGROUND_BOXIE_URL": "http://boxie.internal",
+        "CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE": str(tmp_path / "boxie.secret"),
     }.items():
         monkeypatch.setenv(name, value)
 

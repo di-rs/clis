@@ -27,7 +27,7 @@ def test_owner_settings_use_private_credentials_and_preserve_profiles(
         "host-id",
         "installation-id",
         "consumer.secret",
-        "orchestrator.secret",
+        "supervisor.secret",
         "postgres-password",
         "boxie-password",
         "temporal-password",
@@ -40,18 +40,18 @@ def test_owner_settings_use_private_credentials_and_preserve_profiles(
         json.dumps(
             {
                 "other": {"commands": [["other"]]},
-                "playground": {"image_digest": "old", "commands": [["custom"]]},
+                "cli-playground": {"image_digest": "old", "commands": [["custom"]]},
             }
         )
     )
     for name in (
-        "BOXIE_RUNTIME_IMAGE",
+        "BOXIE_IMAGE",
         "OBS_COLLECTOR_IMAGE",
         "OBS_JOURNAL_GROUP_GID",
         "OPERATOR_GRAFANA_HOSTNAME",
-        "PLAYGROUND_IMAGE",
-        "PLAYGROUND_DOMAIN",
-        "PLAYGROUND_SANDBOX_IMAGE",
+        "CLI_PLAYGROUND_BACKEND_IMAGE",
+        "CLI_PLAYGROUND_DOMAIN",
+        "CLI_PLAYGROUND_SANDBOX_IMAGE",
         "ACME_EMAIL",
         "CLOUDFLARE_DNS_API_TOKEN",
         "OPERATOR_TUNNEL_ID",
@@ -65,13 +65,13 @@ def test_owner_settings_use_private_credentials_and_preserve_profiles(
     render_product(tmp_path, ROOT)
     assert (credentials / "consumer.secret").read_bytes() == before
     assert not (tmp_path / "boxie.env").exists()
-    assert json.loads((credentials / "profiles.json").read_text())["playground"]["commands"] == [
-        ["custom"]
-    ]
-    product = (tmp_path / "playground.env").read_text()
-    assert "PLAYGROUND_BOXIE_URL='http://boxie-api:8090'" in product
-    assert "PLAYGROUND_DEPLOY_TOKEN='" + "1" * 64 + "'" in product
-    assert (tmp_path / "playground.env").stat().st_mode & 0o077 == 0
+    assert json.loads((credentials / "profiles.json").read_text())["cli-playground"][
+        "commands"
+    ] == [["custom"]]
+    product = (tmp_path / "cli-playground.env").read_text()
+    assert "CLI_PLAYGROUND_BOXIE_URL='http://boxie-api:8090'" in product
+    assert "CLI_PLAYGROUND_DEPLOY_TOKEN='" + "1" * 64 + "'" in product
+    assert (tmp_path / "cli-playground.env").stat().st_mode & 0o077 == 0
     assert json.loads((credentials / "profiles.json").read_text())["other"] == {
         "commands": [["other"]]
     }
@@ -93,15 +93,15 @@ def test_profile_seed_reads_fixed_owner_directory(
 ) -> None:
     owner = tmp_path / "owner"
     (owner / "profiles").mkdir(parents=True)
-    (owner / "profiles/playground.json").write_text(
-        json.dumps({"playground": {"commands": [["shell"]], "image_digest": "old"}})
+    (owner / "profiles/cli-playground.json").write_text(
+        json.dumps({"cli-playground": {"commands": [["shell"]], "image_digest": "old"}})
     )
     config = tmp_path / "config"
     (config / "boxie").mkdir(parents=True)
-    monkeypatch.setenv("PLAYGROUND_SANDBOX_IMAGE", "new-digest")
+    monkeypatch.setenv("CLI_PLAYGROUND_SANDBOX_IMAGE", "new-digest")
     update_profile(config, owner)
     assert json.loads((config / "boxie/profiles.json").read_text()) == {
-        "playground": {"commands": [["shell"]], "image_digest": "new-digest"}
+        "cli-playground": {"commands": [["shell"]], "image_digest": "new-digest"}
     }
 
 
@@ -120,7 +120,7 @@ def test_boxie_render_does_not_require_product_settings(
     ):
         (credentials / name).write_text("value")
     for name in (
-        "BOXIE_RUNTIME_IMAGE",
+        "BOXIE_IMAGE",
         "OBS_COLLECTOR_IMAGE",
         "OBS_JOURNAL_GROUP_GID",
         "OPERATOR_GRAFANA_HOSTNAME",
@@ -131,8 +131,12 @@ def test_boxie_render_does_not_require_product_settings(
         "OPERATOR_TEMPORAL_AUDIENCE",
     ):
         monkeypatch.setenv(name, "setting")
-    for name in ("PLAYGROUND_IMAGE", "PLAYGROUND_DOMAIN", "CLOUDFLARE_DNS_API_TOKEN"):
+    for name in (
+        "CLI_PLAYGROUND_BACKEND_IMAGE",
+        "CLI_PLAYGROUND_DOMAIN",
+        "CLOUDFLARE_DNS_API_TOKEN",
+    ):
         monkeypatch.delenv(name, raising=False)
     render(tmp_path, ROOT)
     assert (tmp_path / "boxie.env").is_file()
-    assert not (tmp_path / "playground.env").exists()
+    assert not (tmp_path / "cli-playground.env").exists()

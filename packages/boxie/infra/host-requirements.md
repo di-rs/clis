@@ -1,4 +1,4 @@
-# Runtime prerequisites
+# Host requirements
 
 Boxie uses independently operated [PostgreSQL](postgres/README.md)
 and production [Temporal](temporal/README.md) on the private control
@@ -6,11 +6,11 @@ network. Apply their explicit schema and namespace jobs first. Production never
 uses a development/test Temporal server. Temporal certificate holders are trusted
 cluster administrators; a namespace is organizational, not an RBAC boundary.
 
-The two Boxie processes are `boxie-api` and `boxie-orchestrator`. The orchestrator
+The two Boxie processes are `boxie-api` and `boxie-supervisor`. The supervisor
 embeds Temporal SDK workers; there is no standalone worker service or worker
-configuration. Generate `api.json` and `orchestrator.json` with `boxie_infra.config`
+configuration. Generate `api.json` and `supervisor.json` with `boxie_infra.config`
 using [config.example.env](config.example.env). Both receive distinct mTLS client
-identities. Only the orchestrator receives Docker access and artifact storage.
+identities. Only the supervisor receives Docker access and artifact storage.
 
 Migration sources live in `packages/boxie/alembic/`, alongside `alembic.ini`, and are
 included in the installed Boxie package. Apply them explicitly:
@@ -44,9 +44,9 @@ After commit, the API attempts signal-with-start within one second. A crash or
 transport failure leaves a pending command; committed acceptance still succeeds.
 Status, matching retries and stop requests use SQL during Temporal outages.
 
-The orchestrator holds an exclusive OS lock on its data directory before opening
+The supervisor holds an exclusive OS lock on its data directory before opening
 execution resources. SDK workers poll stable installation/host lifecycle and
-maintenance queues. Activities invoke the runtime directly and validate ownership;
+maintenance queues. Activities invoke the Supervisor directly and validate ownership;
 boot/generation fences and SQL's final-start lock remain mandatory.
 
 The lifecycle workflow awaits provisioning, inspects/renews every 30 seconds,
@@ -65,7 +65,7 @@ SQL observations or Temporal history. Terminal framing/replay remain unchanged.
 
 ## Native maintenance
 
-Pending start/stop delivery runs in a supervised loop in the orchestrator process.
+Pending start/stop delivery runs in a supervised loop in the supervisor process.
 It starts immediately, attempts up to 32 commands with eight concurrent deliveries
 and a 20-second deadline, then waits five seconds before the next pass. Failed
 deliveries stay pending and produce warnings; an empty pass creates no Temporal
@@ -92,7 +92,7 @@ workflows that already started. Missing, paused or incompatible cleanup schedule
 close new admission.
 
 New admission also rejects an oldest pending command over 30 seconds or a backlog
-of 100. Readiness verifies SQL, orchestrator health, schedule configuration and
+of 100. Readiness verifies SQL, supervisor health, schedule configuration and
 recent lifecycle pollers. Poller presence is evidence up to 90 seconds old, not
 instantaneous worker liveness.
 
@@ -112,7 +112,7 @@ additional cleanup-only identities. Journal failures close new admission until a
 full save succeeds. An uncertain create plus lost journal writes may
 still require operator investigation.
 
-Worker execution shares the orchestrator process and its Docker trust boundary.
+Worker execution shares the supervisor process and its Docker trust boundary.
 Restarting it ends PTYs. Shutdown closes terminal admission, drains SDK work within
 its 25-second grace, and retains uncertain physical operations for restart cleanup.
 

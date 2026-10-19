@@ -8,7 +8,7 @@ owner=${SANCTUARY_BOXIE_DIR:-/opt/sanctuary/boxie}
 bash "$owner/credentials.sh" /etc/sanctuary/boxie
 bash "$owner/certificates.sh" /etc/sanctuary/tls
 python3 "$owner/boxie_infra/config.py" --output /etc/sanctuary/boxie --data-dir /srv/sanctuary/boxie \
-    --installation-id "$(cat /etc/sanctuary/boxie/installation-id)" --host-id "$(cat /etc/sanctuary/boxie/host-id)" --consumer-id playground
+    --installation-id "$(cat /etc/sanctuary/boxie/installation-id)" --host-id "$(cat /etc/sanctuary/boxie/host-id)" --consumer-id cli-playground
 export OBS_JOURNAL_GROUP_GID
 OBS_JOURNAL_GROUP_GID=$(getent group systemd-journal | cut -d: -f3)
 python3 "$owner/boxie_infra/installation.py" "$source"

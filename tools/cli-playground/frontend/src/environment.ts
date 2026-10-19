@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// Validate the fields the UI consumes; the gateway owns artifact and lifecycle rules.
+// Validate the fields the UI consumes; the backend owns artifact and lifecycle rules.
 const environmentSchema = z
   .object({
     id: z.string(),

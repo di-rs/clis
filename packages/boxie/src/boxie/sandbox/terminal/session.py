@@ -19,8 +19,8 @@ from boxie.contracts.terminal import (
 from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import SandboxRef
 from boxie.domain.models import SandboxState
-from boxie.sandbox.execution.orchestrator import Orchestrator
 from boxie.sandbox.execution.sandbox import TerminalSession
+from boxie.sandbox.execution.supervisor import Supervisor
 from boxie.sandbox.terminal.replay import StreamGap
 
 SEND_TIMEOUT = 10.0
@@ -35,14 +35,14 @@ async def close_socket(websocket: WebSocket, code: int = 1000) -> None:
             await websocket.close(code=code)
 
 
-async def serve_terminal(websocket: WebSocket, orchestrator: Orchestrator, ref: SandboxRef) -> None:
-    with orchestrator.terminal_session(ref) as session:
-        await _serve_terminal(websocket, orchestrator, ref, session)
+async def serve_terminal(websocket: WebSocket, supervisor: Supervisor, ref: SandboxRef) -> None:
+    with supervisor.terminal_session(ref) as session:
+        await _serve_terminal(websocket, supervisor, ref, session)
 
 
 async def _serve_terminal(
     websocket: WebSocket,
-    orchestrator: Orchestrator,
+    supervisor: Supervisor,
     ref: SandboxRef,
     session: TerminalSession,
 ) -> None:
@@ -70,7 +70,7 @@ async def _serve_terminal(
             raise ValueError("attach too large")
         request = AttachRequest.model_validate_json(text)
         ring.after(request.resume_after)
-        epoch = await orchestrator.attach(
+        epoch = await supervisor.attach(
             ref, attachment_order=request.attachment_order, resume_after=request.resume_after
         )
         # No await between validation/cursor snapshot and registering delivery.
@@ -80,7 +80,7 @@ async def _serve_terminal(
         acked = cursor
         outstanding: deque[tuple[int, int]] = deque()
         pending_bytes = 0
-        last_heartbeat = orchestrator.monotonic()
+        last_heartbeat = supervisor.monotonic()
         last_nonce = -1
         resize: Resize | None = None
         replaying = True
@@ -97,7 +97,7 @@ async def _serve_terminal(
                 message = control.validate_json(text)
                 if isinstance(message, AttachRequest) or message.epoch != epoch:
                     raise ValueError("incorrect attachment epoch")
-                await orchestrator.check_attachment(ref, epoch, allow_ended=True)
+                await supervisor.check_attachment(ref, epoch, allow_ended=True)
                 # Late input/resize must not cancel final output/status delivery.
                 # Only ACKs and heartbeat still have work while the terminal drains.
                 if session.state != SandboxState.READY and not isinstance(
@@ -108,7 +108,7 @@ async def _serve_terminal(
                     if message.source == "user" and not input_ready:
                         raise ValueError("input before resize barrier")
                     try:
-                        await orchestrator.write(
+                        await supervisor.write(
                             ref, epoch, message.data.encode(), source=message.source
                         )
                     except BoxieError:
@@ -129,7 +129,7 @@ async def _serve_terminal(
                     if message.nonce <= last_nonce:
                         raise ValueError("stale heartbeat")
                     last_nonce = message.nonce
-                    last_heartbeat = orchestrator.monotonic()
+                    last_heartbeat = supervisor.monotonic()
                     await send(message.model_dump())
                 elif isinstance(message, Detach):
                     return
@@ -140,7 +140,7 @@ async def _serve_terminal(
             assert epoch is not None
             sent_geometry: tuple[int, int] | None = None
             while True:
-                await orchestrator.check_attachment(ref, epoch, allow_ended=True)
+                await supervisor.check_attachment(ref, epoch, allow_ended=True)
                 ring.changed.clear()
                 frames = ring.after(cursor)
                 limit = boundary if replaying else ring.tail
@@ -193,7 +193,7 @@ async def _serve_terminal(
                         continue
                     size, resize = resize, None
                     try:
-                        await orchestrator.resize(ref, epoch, size.cols, size.rows)
+                        await supervisor.resize(ref, epoch, size.cols, size.rows)
                     except BoxieError:
                         if session.reason is None:
                             raise
@@ -213,8 +213,8 @@ async def _serve_terminal(
             assert epoch is not None
             while True:
                 await asyncio.sleep(0.25)
-                await orchestrator.check_attachment(ref, epoch, allow_ended=True)
-                if orchestrator.monotonic() - last_heartbeat >= HEARTBEAT_TIMEOUT:
+                await supervisor.check_attachment(ref, epoch, allow_ended=True)
+                if supervisor.monotonic() - last_heartbeat >= HEARTBEAT_TIMEOUT:
                     return
 
         tasks = [
@@ -240,6 +240,6 @@ async def _serve_terminal(
         finally:
             try:
                 if epoch is not None:
-                    await orchestrator.detach(ref, epoch)
+                    await supervisor.detach(ref, epoch)
             finally:
                 await close_socket(websocket)

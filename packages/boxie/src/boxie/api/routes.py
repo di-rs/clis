@@ -1,4 +1,4 @@
-"""Consumer schemas exclude all orchestrator ownership and privileged configuration."""
+"""Consumer schemas exclude all supervisor ownership and privileged configuration."""
 
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict

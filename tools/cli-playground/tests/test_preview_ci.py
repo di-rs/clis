@@ -50,7 +50,7 @@ def test_build_script_runs_from_another_directory(tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout == "CLI playground builds: none\n"
+    assert result.stdout == "cli-playground builds: none\n"
     assert not (tmp_path / "artifact").exists()
 
 
@@ -180,7 +180,7 @@ def test_build_packages_only_affected_clis(tmp_path: Path, change: str) -> None:
         capture_output=True,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout == "CLI playground builds: " + (", ".join(expected) or "none") + "\n"
+    assert result.stdout == "cli-playground builds: " + (", ".join(expected) or "none") + "\n"
     assert (
         sorted(path.name for path in output.iterdir()) == expected
         if expected
@@ -240,7 +240,7 @@ class FakeGitHub(GitHub[TokenAuthStrategy]):
             "status": "completed",
             "conclusion": "success",
             "path": ".github/workflows/cli-playground.yml",
-            "name": "🏗️ Playground PR binary builds",
+            "name": "🏗️ cli-playground PR binary builds",
             "workflow_id": 21,
             "repository": {"full_name": REPO},
             "head_sha": SHA,
@@ -303,7 +303,7 @@ class FakeGitHub(GitHub[TokenAuthStrategy]):
 
 
 @pytest.mark.parametrize(
-    "name", ["🏗️ Playground PR binary builds", "🏗️ Playground CLI builds for PR #7"]
+    "name", ["🏗️ cli-playground PR binary builds", "🏗️ Playground CLI builds for PR #7"]
 )
 def test_unconfigured_publish_reports_artifact_links_without_fake_live_url(name: str) -> None:
     github = FakeGitHub()
@@ -334,9 +334,9 @@ def test_stale_or_unrelated_run_has_no_writes(change: str) -> None:
 def test_pr_change_during_download_prevents_upload() -> None:
     github = FakeGitHub()
     github.stale_after_download = True
-    gateway = Mock(side_effect=AssertionError("stale upload"))
+    backend = Mock(side_effect=AssertionError("stale upload"))
     assert (
-        preview_ci.publish(github, REPO, 500, "https://play.example", "token", gateway=gateway)
+        preview_ci.publish(github, REPO, 500, "https://play.example", "token", backend=backend)
         is None
     )
     assert github.writes == []
@@ -345,19 +345,19 @@ def test_pr_change_during_download_prevents_upload() -> None:
 def test_pr_closure_during_batch_upload_stops_github_writes() -> None:
     github = FakeGitHub()
 
-    def gateway(*args: object, **kwargs: object) -> dict[str, object]:
+    def backend(*args: object, **kwargs: object) -> dict[str, object]:
         github.pull["state"] = "closed"
         return {"id": "a" * 32, "url": "https://play.example/p/" + "a" * 32}
 
     assert (
-        preview_ci.publish(github, REPO, 500, "https://play.example", "token", gateway=gateway)
+        preview_ci.publish(github, REPO, 500, "https://play.example", "token", backend=backend)
         is None
     )
     assert github.writes == []
 
 
 @pytest.mark.parametrize(
-    "name", ["🏗️ Playground PR binary builds", "🏗️ Playground CLI builds for PR #7"]
+    "name", ["🏗️ cli-playground PR binary builds", "🏗️ Playground CLI builds for PR #7"]
 )
 def test_batch_uses_one_upload_one_preview_and_constant_github_requests(name: str) -> None:
     github = FakeGitHub()
@@ -365,9 +365,9 @@ def test_batch_uses_one_upload_one_preview_and_constant_github_requests(name: st
     github.payload = archive([f"cli{index:04}" for index in range(1024)])
     identifier = "a" * 32
     url = f"https://{identifier}.play.example/p/{identifier}"
-    gateway = Mock(return_value={"id": identifier, "url": url})
-    body = preview_ci.publish(github, REPO, 500, "https://play.example", "token", gateway=gateway)
-    gateway.assert_called_once_with(
+    backend = Mock(return_value={"id": identifier, "url": url})
+    body = preview_ci.publish(github, REPO, 500, "https://play.example", "token", backend=backend)
+    backend.assert_called_once_with(
         "https://play.example",
         "token",
         f"/api/environments?sha={SHA}&pr=7&run_id=500&run_number=2&run_attempt=1",
@@ -393,17 +393,17 @@ def test_batch_uses_one_upload_one_preview_and_constant_github_requests(name: st
 def test_failed_batch_never_records_success_or_an_untrusted_link(failure: object) -> None:
     github = FakeGitHub()
     github.payload = archive(["echor", "sorty"])
-    gateway = Mock(
+    backend = Mock(
         side_effect=[
             failure,
             {"id": "a" * 32, "url": "https://play.example/p/" + "a" * 32},
         ]
     )
     with pytest.raises(ValueError, match="Failed to publish"):
-        preview_ci.publish(github, REPO, 500, "https://play.example", "token", gateway=gateway)
-    assert gateway.call_count == 2
-    assert gateway.call_args_list[0].kwargs["method"] == "POST"
-    assert gateway.call_args_list[1].kwargs["method"] == "PUT"
+        preview_ci.publish(github, REPO, 500, "https://play.example", "token", backend=backend)
+    assert backend.call_count == 2
+    assert backend.call_args_list[0].kwargs["method"] == "POST"
+    assert backend.call_args_list[1].kwargs["method"] == "PUT"
     assert not any("/deployments" in path for path, _ in github.writes)
     body = str(github.writes[-1][1])
     assert "Publish failed" in body and "evil.example" not in body
@@ -411,10 +411,10 @@ def test_failed_batch_never_records_success_or_an_untrusted_link(failure: object
 
 def test_stale_close_event_does_not_delete_a_reopened_preview() -> None:
     github = FakeGitHub()
-    gateway = Mock(side_effect=AssertionError)
+    backend = Mock(side_effect=AssertionError)
     assert (
         preview_ci.lifecycle(
-            github, REPO, 7, "closed", "https://play.example", "token", gateway=gateway
+            github, REPO, 7, "closed", "https://play.example", "token", backend=backend
         )
         is None
     )
@@ -425,10 +425,10 @@ def test_lifecycle_rejects_a_different_base_repository() -> None:
     github = FakeGitHub()
     github.pull["state"] = "closed"
     github.pull["base"] = {"ref": "master", "repo": {"full_name": "other/repo"}}
-    gateway = Mock(side_effect=AssertionError)
+    backend = Mock(side_effect=AssertionError)
     assert (
         preview_ci.lifecycle(
-            github, REPO, 7, "closed", "https://play.example", "token", gateway=gateway
+            github, REPO, 7, "closed", "https://play.example", "token", backend=backend
         )
         is None
     )
@@ -442,11 +442,11 @@ def test_closed_pull_is_deleted_and_only_its_deployment_becomes_inactive() -> No
         {"id": 10, "environment": "cli-playground/pr-7"},
         {"id": 11, "environment": "cli-playground/pr-70"},
     ]
-    gateway = Mock(return_value={"deleted": 1})
+    backend = Mock(return_value={"deleted": 1})
     assert preview_ci.lifecycle(
-        github, REPO, 7, "closed", "https://play.example", "token", gateway=gateway
+        github, REPO, 7, "closed", "https://play.example", "token", backend=backend
     )
-    gateway.assert_called_once_with(
+    backend.assert_called_once_with(
         "https://play.example", "token", "/api/pull-requests/7", method="DELETE"
     )
     assert github.writes == [
@@ -459,11 +459,11 @@ def test_closed_pull_is_deleted_and_only_its_deployment_becomes_inactive() -> No
 
 def test_reopened_pull_clears_tombstone_without_reactivating_old_deployments() -> None:
     github = FakeGitHub()
-    gateway = Mock(return_value={"reopened": 7})
+    backend = Mock(return_value={"reopened": 7})
     assert preview_ci.lifecycle(
-        github, REPO, 7, "reopened", "https://play.example", "token", gateway=gateway
+        github, REPO, 7, "reopened", "https://play.example", "token", backend=backend
     )
-    gateway.assert_called_once_with(
+    backend.assert_called_once_with(
         "https://play.example", "token", "/api/pull-requests/7/reopen", method="POST"
     )
     assert github.writes == []
@@ -483,7 +483,7 @@ def test_reopen_replays_only_latest_current_head_build_after_clearing_tombstone(
     ]
     requests: list[tuple[str, str]] = []
 
-    def gateway(
+    def backend(
         base: str, token: str, path: str, *, method: str, **kwargs: object
     ) -> dict[str, object]:
         requests.append((method, path))
@@ -492,7 +492,7 @@ def test_reopen_replays_only_latest_current_head_build_after_clearing_tombstone(
         return {"id": "a" * 32, "url": "https://pr-7.play.example/p/" + "a" * 32}
 
     preview_ci.lifecycle(
-        github, REPO, 7, "reopened", "https://play.example", "secret", gateway=gateway
+        github, REPO, 7, "reopened", "https://play.example", "secret", backend=backend
     )
     assert len(requests) == 2
     assert requests[0] == ("POST", "/api/pull-requests/7/reopen")
@@ -508,9 +508,9 @@ def test_large_deployment_history_does_not_fail_successful_hosted_cleanup() -> N
     github.pull["state"] = "closed"
     # Every page is full, exhausting the real bounded GitHub paginator.
     github.deployments = [{"id": index, "environment": "production"} for index in range(100)]
-    gateway = Mock(return_value={"deleted": 2})
+    backend = Mock(return_value={"deleted": 2})
     message = preview_ci.lifecycle(
-        github, REPO, 7, "closed", "https://play.example", "token", gateway=gateway
+        github, REPO, 7, "closed", "https://play.example", "token", backend=backend
     )
     assert message is not None and "Deleted 2 hosted" in message
     assert "pagination limit" in message and "may remain active" in message
@@ -520,8 +520,8 @@ def test_large_deployment_history_does_not_fail_successful_hosted_cleanup() -> N
 def test_unconfigured_cleanup_does_not_claim_hosted_cleanup() -> None:
     github = FakeGitHub()
     github.pull["state"] = "closed"
-    gateway = Mock(side_effect=AssertionError)
-    message = preview_ci.lifecycle(github, REPO, 7, "closed", "", "", gateway=gateway)
+    backend = Mock(side_effect=AssertionError)
+    message = preview_ci.lifecycle(github, REPO, 7, "closed", "", "", backend=backend)
     assert message is not None and "No hosted environments were cleaned" in message
     assert github.writes == []
 
@@ -529,10 +529,10 @@ def test_unconfigured_cleanup_does_not_claim_hosted_cleanup() -> None:
 def test_missing_cleanup_acknowledgement_prevents_github_updates() -> None:
     github = FakeGitHub()
     github.pull["state"] = "closed"
-    gateway = Mock(return_value={"id": "a" * 32, "url": "https://play.example/p/" + "a" * 32})
+    backend = Mock(return_value={"id": "a" * 32, "url": "https://play.example/p/" + "a" * 32})
     with pytest.raises(ValueError):
         preview_ci.lifecycle(
-            github, REPO, 7, "closed", "https://play.example", "token", gateway=gateway
+            github, REPO, 7, "closed", "https://play.example", "token", backend=backend
         )
     assert github.writes == []
 
@@ -558,7 +558,7 @@ def test_lifecycle_failure_does_not_log_secrets(
 
 
 @contextmanager
-def gateway_server(
+def backend_server(
     response: bytes, *, status: int | Callable[[], int] = 200, delay: float = 0
 ) -> Iterator[tuple[str, list[tuple[str, str, str | None, bytes]]]]:
     received: list[tuple[str, str, str | None, bytes]] = []
@@ -599,7 +599,7 @@ def gateway_server(
             thread.join(timeout=1)
 
 
-def gateway_at(origin: str) -> preview_ci.GatewayRequest:
+def backend_at(origin: str) -> preview_ci.BackendRequest:
     def request(
         base: str,
         token: str,
@@ -610,16 +610,16 @@ def gateway_at(origin: str) -> preview_ci.GatewayRequest:
         content_type: str = "application/zip",
     ) -> dict[str, object]:
         assert base == "https://play.example"
-        return preview_ci.gateway_request(
+        return preview_ci.backend_request(
             origin, token, path, method=method, data=data, content_type=content_type
         )
 
     return request
 
 
-def test_lifecycle_gateway_transport_authenticates_deletion() -> None:
-    with gateway_server(b'{"deleted": 1}') as (base, received):
-        assert preview_ci.gateway_request(
+def test_lifecycle_backend_transport_authenticates_deletion() -> None:
+    with backend_server(b'{"deleted": 1}') as (base, received):
+        assert preview_ci.backend_request(
             base, "secret", "/api/pull-requests/7", method="DELETE"
         ) == {"deleted": 1}
     assert received == [("DELETE", "/api/pull-requests/7", "Bearer secret", b"")]
@@ -628,7 +628,7 @@ def test_lifecycle_gateway_transport_authenticates_deletion() -> None:
 def test_upload_sends_the_entire_zip_in_one_request() -> None:
     bundle = archive(["echor", "catr"])
     result = {"id": "a" * 32, "url": "https://play.example/p/" + "a" * 32}
-    with gateway_server(json.dumps(result).encode()) as (base, received):
+    with backend_server(json.dumps(result).encode()) as (base, received):
         assert (
             preview_ci.upload(
                 FakeGitHub(),
@@ -676,10 +676,10 @@ def test_publish_records_current_build_state_without_allocating_a_sandbox(
         github.artifacts.clear()
     url = "https://pr-7.play.example/p/" + "a" * 32
     response = {"id": "a" * 32, "url": url}
-    with gateway_server(json.dumps(response).encode()) as (base, received):
-        gateway = gateway_at(base)
+    with backend_server(json.dumps(response).encode()) as (base, received):
+        backend = backend_at(base)
         body = preview_ci.publish(
-            github, REPO, 500, "https://play.example", "secret", gateway=gateway
+            github, REPO, 500, "https://play.example", "secret", backend=backend
         )
     assert body is not None
     assert url in body
@@ -704,10 +704,10 @@ def test_reopened_successful_build_with_expired_artifact_is_unavailable_not_empt
         "id": "a" * 32,
         "url": "https://pr-7.play.example/p/" + "a" * 32,
     }
-    with gateway_server(json.dumps(response).encode()) as (base, received):
-        gateway = gateway_at(base)
+    with backend_server(json.dumps(response).encode()) as (base, received):
+        backend = backend_at(base)
         preview_ci.lifecycle(
-            github, REPO, 7, "reopened", "https://play.example", "secret", gateway=gateway
+            github, REPO, 7, "reopened", "https://play.example", "secret", backend=backend
         )
     assert [(method, path) for method, path, _, _ in received] == [
         ("POST", "/api/pull-requests/7/reopen"),
@@ -731,7 +731,7 @@ def test_preview_url_accepts_only_its_pr_subdomain() -> None:
 def test_ready_preview_is_not_relabelled_by_a_late_building_event() -> None:
     github = FakeGitHub()
     github.run.update(status="in_progress", conclusion=None)
-    gateway = Mock(
+    backend = Mock(
         return_value={
             "id": "a" * 32,
             "url": "https://pr-7.play.example/p/" + "a" * 32,
@@ -745,17 +745,17 @@ def test_ready_preview_is_not_relabelled_by_a_late_building_event() -> None:
         }
     )
     assert (
-        preview_ci.publish(github, REPO, 500, "https://play.example", "token", gateway=gateway)
+        preview_ci.publish(github, REPO, 500, "https://play.example", "token", backend=backend)
         is None
     )
     assert github.writes == []
 
 
-def test_upload_recovers_after_the_gateway_is_busy_for_over_a_minute() -> None:
+def test_upload_recovers_after_the_backend_is_busy_for_over_a_minute() -> None:
     delays: list[float] = []
     bundle = archive(["echor", "catr"])
     result = {"id": "a" * 32, "url": "https://play.example/p/" + "a" * 32}
-    with gateway_server(
+    with backend_server(
         json.dumps(result).encode(), status=lambda: 429 if sum(delays) < 65 else 200
     ) as (base, received):
         assert (
@@ -799,13 +799,13 @@ def test_pr_head_change_during_backoff_stops_upload_and_github_writes() -> None:
             github.pull["head"] = {"sha": "b" * 40}
 
     result = {"id": "a" * 32, "url": "https://play.example/p/" + "a" * 32}
-    with gateway_server(
+    with backend_server(
         json.dumps(result).encode(), status=lambda: 429 if len(received) <= 2 else 200
     ) as (base, received):
-        gateway = gateway_at(base)
+        backend = backend_at(base)
         assert (
             preview_ci.publish(
-                github, REPO, 500, "https://play.example", "token", gateway=gateway, sleep=sleep
+                github, REPO, 500, "https://play.example", "token", backend=backend, sleep=sleep
             )
             is None
         )
@@ -822,7 +822,7 @@ def test_upload_preserves_http_failure_after_its_retry_budget(status: int) -> No
         delays.append(seconds)
         assert sum(delays) <= 120
 
-    with gateway_server(b"rejected", status=status) as (base, received):
+    with backend_server(b"rejected", status=status) as (base, received):
         with pytest.raises(urllib.error.HTTPError) as error:
             preview_ci.upload(
                 FakeGitHub(),
@@ -842,10 +842,10 @@ def test_upload_preserves_http_failure_after_its_retry_budget(status: int) -> No
     assert 1 < len(received) <= 8 if status == 429 else len(received) == 1
 
 
-def test_gateway_redirects_never_forward_credentials() -> None:
-    with gateway_server(b"redirect", status=307) as (base, received):
+def test_backend_redirects_never_forward_credentials() -> None:
+    with backend_server(b"redirect", status=307) as (base, received):
         with pytest.raises((ValueError, urllib.error.HTTPError)):
-            preview_ci.gateway_request(base, "secret", "/api/pull-requests/7", method="POST")
+            preview_ci.backend_request(base, "secret", "/api/pull-requests/7", method="POST")
     assert received == [("POST", "/api/pull-requests/7", "Bearer secret", b"")]
 
 
@@ -855,10 +855,10 @@ def test_server_rejecting_a_stale_run_prevents_comments_and_deployment_updates(
 ) -> None:
     github = FakeGitHub()
     github.run["status"] = status
-    with gateway_server(b'{"detail":"stale build"}', status=409) as (base, received):
-        gateway = gateway_at(base)
+    with backend_server(b'{"detail":"stale build"}', status=409) as (base, received):
+        backend = backend_at(base)
         assert (
-            preview_ci.publish(github, REPO, 500, "https://play.example", "token", gateway=gateway)
+            preview_ci.publish(github, REPO, 500, "https://play.example", "token", backend=backend)
             is None
         )
     assert len(received) == 1
@@ -869,7 +869,7 @@ def test_server_rejecting_a_stale_run_prevents_comments_and_deployment_updates(
     "detail", ["build identity conflict", "this revision already has a different binary"]
 )
 def test_upload_does_not_hide_genuine_server_conflicts(detail: str) -> None:
-    with gateway_server(json.dumps({"detail": detail}).encode(), status=409) as (base, received):
+    with backend_server(json.dumps({"detail": detail}).encode(), status=409) as (base, received):
         with pytest.raises(urllib.error.HTTPError) as error:
             preview_ci.upload(
                 FakeGitHub(),
@@ -887,18 +887,18 @@ def test_upload_does_not_hide_genuine_server_conflicts(detail: str) -> None:
     assert len(received) == 1
 
 
-def test_gateway_response_size_is_bounded() -> None:
-    with gateway_server(b" " * 16385) as (base, _):
+def test_backend_response_size_is_bounded() -> None:
+    with backend_server(b" " * 16385) as (base, _):
         with pytest.raises(ValueError, match="response exceeds size limit"):
-            preview_ci.gateway_request(base, "secret", "/api/pull-requests/7", method="DELETE")
+            preview_ci.backend_request(base, "secret", "/api/pull-requests/7", method="DELETE")
 
 
-def test_gateway_stalled_response_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_backend_stalled_response_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(preview_ci, "TIMEOUT", 0.05)
-    with gateway_server(b'{"deleted": 2}', delay=0.3) as (base, _):
+    with backend_server(b'{"deleted": 2}', delay=0.3) as (base, _):
         started = time.monotonic()
         with pytest.raises(TimeoutError):
-            preview_ci.gateway_request(base, "secret", "/api/pull-requests/7", method="DELETE")
+            preview_ci.backend_request(base, "secret", "/api/pull-requests/7", method="DELETE")
         assert time.monotonic() - started < 0.25
 
 
@@ -930,11 +930,11 @@ def test_invalid_artifacts_are_never_uploaded(artifact: str) -> None:
         github.payload = archive(mode=0o120755)
     else:
         github.payload = archive(payload=b"not ELF" * 10)
-    gateway = Mock(return_value={"id": "a" * 32, "url": "https://play.example/p/" + "a" * 32})
+    backend = Mock(return_value={"id": "a" * 32, "url": "https://play.example/p/" + "a" * 32})
     with pytest.raises(ValueError, match="Failed to publish"):
-        preview_ci.publish(github, REPO, 500, "https://play.example", "token", gateway=gateway)
-    assert gateway.call_count == 1
-    assert gateway.call_args.kwargs["method"] == "PUT"
+        preview_ci.publish(github, REPO, 500, "https://play.example", "token", backend=backend)
+    assert backend.call_count == 1
+    assert backend.call_args.kwargs["method"] == "PUT"
     assert "Publish failed" in str(github.writes[-1][1])
     assert not any("/deployments" in path for path, _ in github.writes)
 
@@ -942,10 +942,10 @@ def test_invalid_artifacts_are_never_uploaded(artifact: str) -> None:
 def test_only_the_exact_bundle_artifact_name_reaches_upload() -> None:
     github = FakeGitHub()
     github.artifacts[0]["name"] = "cli-playground-binaries-extra"
-    gateway = Mock(return_value={"id": "a" * 32, "url": "https://play.example/p/" + "a" * 32})
-    body = preview_ci.publish(github, REPO, 500, "https://play.example", "token", gateway=gateway)
-    assert gateway.call_count == 1
-    assert gateway.call_args.kwargs["method"] == "PUT"
+    backend = Mock(return_value={"id": "a" * 32, "url": "https://play.example/p/" + "a" * 32})
+    body = preview_ci.publish(github, REPO, 500, "https://play.example", "token", backend=backend)
+    assert backend.call_count == 1
+    assert backend.call_args.kwargs["method"] == "PUT"
     assert body is not None and "No CLI binary artifacts" in body
 
 
@@ -991,7 +991,7 @@ def test_build_command_invokes_cargo_once_for_the_selected_batch(
         "base...head",
         "--",
     ]
-    assert summary.read_text() == "CLI playground builds: " + (", ".join(names) or "none") + "\n"
+    assert summary.read_text() == "cli-playground builds: " + (", ".join(names) or "none") + "\n"
     if not names:
         assert commands.call_count == 1
         assert not list(output.glob("*"))

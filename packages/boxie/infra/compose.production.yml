@@ -1,14 +1,14 @@
 name: ${BOXIE_PROJECT_NAME:-boxie}
 services:
   api:
-    image: ${BOXIE_RUNTIME_IMAGE:?Set approved immutable Boxie image}
+    image: ${BOXIE_IMAGE:?Set approved immutable Boxie image}
     command:
     - boxie-api
     - --config
     - /etc/boxie/api.json
     volumes:
     - ${BOXIE_API_CONFIG:?Set API config file}:/etc/boxie/api.json:ro
-    - ${BOXIE_ORCHESTRATOR_CREDENTIAL_FILE:?Set orchestrator credential file}:/run/secrets/orchestrator:ro
+    - ${BOXIE_SUPERVISOR_CREDENTIAL_FILE:?Set supervisor credential file}:/run/secrets/supervisor:ro
     - ${BOXIE_CONSUMER_CREDENTIAL_FILE:?Set consumer credential file}:/run/secrets/consumer:ro
     - ${BOXIE_POSTGRES_DSN_FILE:?Set Boxie database DSN file}:/run/secrets/postgres-dsn:ro
     - ${BOXIE_TEMPORAL_CA_FILE:?Set Temporal frontend CA}:/run/secrets/temporal-ca.pem:ro
@@ -37,22 +37,22 @@ services:
         max-buffer-size: 4m
         tag: boxie-api
     pids_limit: 256
-  orchestrator:
-    image: ${BOXIE_RUNTIME_IMAGE:?Set approved immutable Boxie image}
+  supervisor:
+    image: ${BOXIE_IMAGE:?Set approved immutable Boxie image}
     command:
-    - boxie-orchestrator
+    - boxie-supervisor
     - --config
-    - /etc/boxie/orchestrator.json
+    - /etc/boxie/supervisor.json
     volumes:
     - /var/run/docker.sock:/var/run/docker.sock
     - ${BOXIE_DATA_DIR:?Set absolute daemon host data directory}:${BOXIE_DATA_DIR}
-    - ${BOXIE_ORCHESTRATOR_CONFIG:?Set orchestrator config file}:/etc/boxie/orchestrator.json:ro
+    - ${BOXIE_SUPERVISOR_CONFIG:?Set supervisor config file}:/etc/boxie/supervisor.json:ro
     - ${BOXIE_PROFILES_FILE:?Set approved profiles file}:/etc/boxie/profiles.json:ro
-    - ${BOXIE_ORCHESTRATOR_CREDENTIAL_FILE}:/run/secrets/orchestrator:ro
+    - ${BOXIE_SUPERVISOR_CREDENTIAL_FILE}:/run/secrets/supervisor:ro
     - ${BOXIE_POSTGRES_DSN_FILE:?Set Boxie database DSN file}:/run/secrets/postgres-dsn:ro
     - ${BOXIE_TEMPORAL_CA_FILE:?Set Temporal frontend CA}:/run/secrets/temporal-ca.pem:ro
-    - ${BOXIE_ORCHESTRATOR_TEMPORAL_CERT_FILE:?Set dedicated Temporal client certificate}:/run/secrets/temporal-client.pem:ro
-    - ${BOXIE_ORCHESTRATOR_TEMPORAL_KEY_FILE:?Set dedicated Temporal client key}:/run/secrets/temporal-client.key:ro
+    - ${BOXIE_SUPERVISOR_TEMPORAL_CERT_FILE:?Set dedicated Temporal client certificate}:/run/secrets/temporal-client.pem:ro
+    - ${BOXIE_SUPERVISOR_TEMPORAL_KEY_FILE:?Set dedicated Temporal client key}:/run/secrets/temporal-client.key:ro
     networks:
       control: {}
     read_only: true
@@ -71,7 +71,7 @@ services:
       options:
         mode: non-blocking
         max-buffer-size: 4m
-        tag: boxie-orchestrator
+        tag: boxie-supervisor
     pids_limit: 256
 networks:
   consumer:

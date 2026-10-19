@@ -1,4 +1,4 @@
-name: 🐳 Build runtime image
+name: 🐳 Build image
 'on':
   workflow_call:
     inputs:
@@ -42,8 +42,8 @@ jobs:
         set -euo pipefail
         [[ $REVISION =~ ^[a-f0-9]{40}$ ]]
         case $COMPONENT in
-          boxie|playground-gateway|playground-sandbox|collector) ;;
-          *) echo 'Unknown runtime component' >&2; exit 2 ;;
+          boxie|cli-playground-backend|cli-playground-sandbox|collector) ;;
+          *) echo 'Unknown image component' >&2; exit 2 ;;
         esac
         sha=$(git rev-parse HEAD)
         [[ $sha == "$REVISION" ]]
@@ -56,9 +56,9 @@ jobs:
       run: |
         set -euo pipefail
         case $COMPONENT in
-          boxie) file=packages/boxie/infra/Runtime.Dockerfile; context=. ;;
-          playground-gateway) file=tools/cli-playground/infra/Playground.Dockerfile; context=. ;;
-          playground-sandbox) file=tools/cli-playground/Sandbox.Dockerfile; context=. ;;
+          boxie) file=packages/boxie/infra/Boxie.Dockerfile; context=. ;;
+          cli-playground-backend) file=tools/cli-playground/infra/Backend.Dockerfile; context=. ;;
+          cli-playground-sandbox) file=tools/cli-playground/Sandbox.Dockerfile; context=. ;;
           collector) file=packages/boxie/infra/observability/collector/Dockerfile; context=packages/boxie/infra/observability/collector ;;
         esac
         printf 'file=%s\ncontext=%s\nname=ghcr.io/%s-%s\n' "$file" "$context" "${REPOSITORY,,}" "$COMPONENT" >> "$GITHUB_OUTPUT"

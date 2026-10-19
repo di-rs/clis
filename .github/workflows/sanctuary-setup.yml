@@ -1,4 +1,4 @@
-name: ☁️ Single-host platform setup
+name: ☁️ Single-host Sanctuary setup
 'on':
   workflow_dispatch: {}
 permissions: {}
@@ -30,34 +30,34 @@ jobs:
           printf 'attempt=%s\n' "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
   boxie:
     needs: source
-    uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
+    uses: ./.github/workflows/build-image.yml # zizmor: ignore[self-repository]
     with:
       component: boxie
       revision: ${{ needs.source.outputs.sha }}
     permissions:
       contents: read
       packages: write
-  gateway:
+  backend:
     needs: source
-    uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
+    uses: ./.github/workflows/build-image.yml # zizmor: ignore[self-repository]
     with:
-      component: playground-gateway
+      component: cli-playground-backend
       revision: ${{ needs.source.outputs.sha }}
     permissions:
       contents: read
       packages: write
   sandbox:
     needs: source
-    uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
+    uses: ./.github/workflows/build-image.yml # zizmor: ignore[self-repository]
     with:
-      component: playground-sandbox
+      component: cli-playground-sandbox
       revision: ${{ needs.source.outputs.sha }}
     permissions:
       contents: read
       packages: write
   collector:
     needs: source
-    uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
+    uses: ./.github/workflows/build-image.yml # zizmor: ignore[self-repository]
     with:
       component: collector
       revision: ${{ needs.source.outputs.sha }}
@@ -66,9 +66,9 @@ jobs:
       packages: write
   provision:
     name: ☁️ Provision and install the shared host
-    needs: [source, boxie, gateway, sandbox, collector]
+    needs: [source, boxie, backend, sandbox, collector]
     if: ${{ github.ref == 'refs/heads/master' }}
-    environment: platform
+    environment: sanctuary
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     permissions:
@@ -114,17 +114,17 @@ jobs:
       env:
         SOURCE_SHA: ${{ needs.source.outputs.sha }}
         BOXIE_SOURCE_SHA: ${{ needs.boxie.outputs.source_sha }}
-        GATEWAY_SOURCE_SHA: ${{ needs.gateway.outputs.source_sha }}
+        BACKEND_SOURCE_SHA: ${{ needs.backend.outputs.source_sha }}
         SANDBOX_SOURCE_SHA: ${{ needs.sandbox.outputs.source_sha }}
         COLLECTOR_SOURCE_SHA: ${{ needs.collector.outputs.source_sha }}
-        BOXIE_RUNTIME_IMAGE: ${{ needs.boxie.outputs.image }}
-        PLAYGROUND_IMAGE: ${{ needs.gateway.outputs.image }}
-        PLAYGROUND_SANDBOX_IMAGE: ${{ needs.sandbox.outputs.image }}
+        BOXIE_IMAGE: ${{ needs.boxie.outputs.image }}
+        CLI_PLAYGROUND_BACKEND_IMAGE: ${{ needs.backend.outputs.image }}
+        CLI_PLAYGROUND_SANDBOX_IMAGE: ${{ needs.sandbox.outputs.image }}
         OBS_COLLECTOR_IMAGE: ${{ needs.collector.outputs.image }}
       run: |
         set -euo pipefail
         umask 077
-        for source in "$BOXIE_SOURCE_SHA" "$GATEWAY_SOURCE_SHA" "$SANDBOX_SOURCE_SHA" "$COLLECTOR_SOURCE_SHA"; do
+        for source in "$BOXIE_SOURCE_SHA" "$BACKEND_SOURCE_SHA" "$SANDBOX_SOURCE_SHA" "$COLLECTOR_SOURCE_SHA"; do
             [[ $source == "$SOURCE_SHA" ]]
         done
         [[ $(git rev-parse HEAD) == "$SOURCE_SHA" ]]
@@ -133,12 +133,12 @@ jobs:
         cp -a packages/boxie/infra .installation/packages/boxie/
         cp -a tools/cli-playground/infra .installation/tools/cli-playground/
         printf '%s\n' "$SOURCE_SHA" > .installation/revision
-        for key in BOXIE_RUNTIME_IMAGE PLAYGROUND_IMAGE PLAYGROUND_SANDBOX_IMAGE OBS_COLLECTOR_IMAGE; do
+        for key in BOXIE_IMAGE CLI_PLAYGROUND_BACKEND_IMAGE CLI_PLAYGROUND_SANDBOX_IMAGE OBS_COLLECTOR_IMAGE; do
             value=${!key}
             [[ $value =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
         done
-        printf 'BOXIE_RUNTIME_IMAGE=%s\nOBS_COLLECTOR_IMAGE=%s\n' "$BOXIE_RUNTIME_IMAGE" "$OBS_COLLECTOR_IMAGE" > .installation/boxie-image.env
-        printf 'PLAYGROUND_IMAGE=%s\nPLAYGROUND_SANDBOX_IMAGE=%s\n' "$PLAYGROUND_IMAGE" "$PLAYGROUND_SANDBOX_IMAGE" > .installation/playground-image.env
+        printf 'BOXIE_IMAGE=%s\nOBS_COLLECTOR_IMAGE=%s\n' "$BOXIE_IMAGE" "$OBS_COLLECTOR_IMAGE" > .installation/boxie-image.env
+        printf 'CLI_PLAYGROUND_BACKEND_IMAGE=%s\nCLI_PLAYGROUND_SANDBOX_IMAGE=%s\n' "$CLI_PLAYGROUND_BACKEND_IMAGE" "$CLI_PLAYGROUND_SANDBOX_IMAGE" > .installation/cli-playground-image.env
     - name: ☁️ Provision shared infrastructure
       working-directory: infra/environments/single-host
       run: |
@@ -157,7 +157,7 @@ jobs:
         settings = json.loads(os.environ['SINGLE_HOST_CONFIG'])
         allowed = {'domain', 'cloudflareZoneId', 'cloudflareAccountId', 'grafanaHostname', 'temporalHostname', 'operatorTeamName', 'operatorEmails', 'sshCidrs', 'sshPublicKey', 'location', 'serverType', 'diskSize', 'protect', 'acmeEmail'}
         if not isinstance(settings, dict) or set(settings) - allowed:
-            raise SystemExit('Invalid platform configuration keys')
+            raise SystemExit('Invalid Sanctuary configuration keys')
         config.update({'sanctuary:' + key: value for key, value in settings.items() if key != 'acmeEmail'})
         path.write_text(yaml.safe_dump(data))
         PYCODE
@@ -189,7 +189,7 @@ jobs:
             raise SystemExit('Expected a pinned Ed25519 host key')
         render = runpy.run_path('infra/environments/single-host/installation.py')['render_inputs']
         render({
-            'PLAYGROUND_DOMAIN': settings['domain'],
+            'CLI_PLAYGROUND_DOMAIN': settings['domain'],
             'ACME_EMAIL': settings['acmeEmail'],
             'CLOUDFLARE_DNS_API_TOKEN': os.environ['CLOUDFLARE_DNS_API_TOKEN'],
             'OPERATOR_GRAFANA_HOSTNAME': settings['grafanaHostname'],

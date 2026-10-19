@@ -87,10 +87,10 @@ async def exercise(url: str, credential_file: Path, profile: str) -> None:
                 json={
                     "artifact_id": artifact,
                     "profile_id": profile,
-                    "command": ["/opt/playground/shell.sh"]
-                    if profile == "playground"
+                    "command": ["/opt/cli-playground/shell.sh"]
+                    if profile == "cli-playground"
                     else ["/bin/sh"],
-                    "env": {"TERM": "xterm-256color"} if profile == "playground" else {},
+                    "env": {"TERM": "xterm-256color"} if profile == "cli-playground" else {},
                     "policy": {"max_seconds": 3600, "idle_seconds": 600, "disconnect_seconds": 120},
                 },
             )

@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func
 from sqlmodel import col, select
 
-from boxie.domain.models import OrchestratorIdentity
+from boxie.domain.models import SupervisorIdentity
 from boxie.persistence.database import SessionFactory
 from boxie.persistence.models import CapacitySlot, Outbox, Sandbox, SandboxArtifactRef
 
@@ -20,7 +20,7 @@ class OutboxEvent(BaseModel):
 
 class PostgresOutbox:
     def __init__(
-        self, sessions: SessionFactory, identity: OrchestratorIdentity | None = None
+        self, sessions: SessionFactory, identity: SupervisorIdentity | None = None
     ) -> None:
         self.sessions, self.identity = sessions, identity
 

@@ -140,7 +140,7 @@ class LogDispatcher(QueueListener):
         self._stats = LogStats(sink_state=state)
         self._identity = {
             "service": settings.service if settings.service == "boxie" else "unknown",
-            "role": settings.role if settings.role in {"api", "orchestrator"} else "unknown",
+            "role": settings.role if settings.role in {"api", "supervisor"} else "unknown",
             "release": settings.release
             if type(settings.release) is str
             and re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", settings.release)

@@ -62,15 +62,15 @@ jobs:
       - name: 🏗️ Build shared sandbox and native CLI
         if: github.event_name == 'workflow_dispatch'
         run: |
-          docker build -f tools/cli-playground/Sandbox.Dockerfile -t sanctuary-playground-sandbox:lifecycle .
+          docker build -f tools/cli-playground/Sandbox.Dockerfile -t sanctuary-cli-playground-sandbox:lifecycle .
           cargo build --locked --release --package echor
-      - name: 🐳 Build Boxie runtime image
+      - name: 🐳 Build Boxie image
         run: |
-          docker build -f packages/boxie/infra/Runtime.Dockerfile -t boxie:lifecycle .
-      - name: 🐳 Build playground runtime image
+          docker build -f packages/boxie/infra/Boxie.Dockerfile -t boxie:lifecycle .
+      - name: 🐳 Build cli-playground Backend image
         if: github.event_name == 'workflow_dispatch'
         run: |
-          docker build -f tools/cli-playground/infra/Playground.Dockerfile -t cli-playground:lifecycle .
+          docker build -f tools/cli-playground/infra/Backend.Dockerfile -t cli-playground-backend:lifecycle .
       - name: 🟢 Set up Node.js and frontend tooling
         uses: voidzero-dev/setup-vp@68f39c78aaf39be468cabd2afb09c162574c84af # v1.21.2
         if: github.event_name == 'workflow_dispatch'
@@ -120,7 +120,7 @@ jobs:
       - name: 🧪 Test PostgreSQL and Temporal cancellation, replay and diagnostics
         timeout-minutes: 9
         run: |
-          uv run --locked pytest -m integration packages/boxie/tests/test_temporal_deployment.py packages/boxie/tests/test_outbox.py packages/boxie/tests/integration/test_artifact_commit.py packages/boxie/tests/test_migrations.py packages/boxie/tests/test_observability_lifecycle.py packages/boxie/tests/test_observability_logging.py packages/boxie/tests/test_observability_native.py -vv --durations=10
+          uv run --locked pytest -m integration packages/boxie/tests/test_temporal_deployment.py packages/boxie/tests/test_outbox.py packages/boxie/tests/integration/test_artifact_commit.py packages/boxie/tests/test_migrations.py packages/boxie/tests/test_rename_state.py packages/boxie/tests/test_observability_lifecycle.py packages/boxie/tests/test_observability_logging.py packages/boxie/tests/test_observability_native.py -vv --durations=10
       - name: 🔐 Test native credential permissions and endpoint restarts
         timeout-minutes: 3
         run: |

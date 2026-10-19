@@ -11,17 +11,17 @@ from uuid import UUID, uuid4
 from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import (
     EnsureRequest,
-    OrchestratorObservation,
     SandboxRef,
     StartGuard,
+    SupervisorObservation,
 )
 from boxie.domain.models import (
     LifetimePolicy,
-    OrchestratorIdentity,
     Principal,
     ProfileSnapshot,
     SandboxSpec,
     SandboxState,
+    SupervisorIdentity,
     TerminationReason,
 )
 from boxie.domain.policy import validate_policy
@@ -48,7 +48,7 @@ class ExecutionConfig(Protocol):
     @property
     def profiles_file(self) -> Path: ...
     @property
-    def identity(self) -> OrchestratorIdentity: ...
+    def identity(self) -> SupervisorIdentity: ...
     @property
     def policy_maximum(self) -> LifetimePolicy: ...
     @property
@@ -57,7 +57,7 @@ class ExecutionConfig(Protocol):
     def sweep_seconds(self) -> float: ...
 
 
-class Orchestrator:
+class Supervisor:
     def __init__(
         self,
         config: ExecutionConfig,
@@ -89,7 +89,7 @@ class Orchestrator:
         self.sweeper: asyncio.Task[None] | None = None
         self.safety = ExecutionSafety(self)
         self.stopping = False
-        self.observer: Callable[[OrchestratorObservation], Awaitable[None]] | None = None
+        self.observer: Callable[[SupervisorObservation], Awaitable[None]] | None = None
         self._journal_healthy = True
 
     async def resolve_admission(self, spec: SandboxSpec) -> ProfileSnapshot:
@@ -155,8 +155,8 @@ class Orchestrator:
         record.event_version += 1
         self._save()
 
-    def _observation(self, record: ExecutionRecord) -> OrchestratorObservation:
-        return OrchestratorObservation(
+    def _observation(self, record: ExecutionRecord) -> SupervisorObservation:
+        return SupervisorObservation(
             record.id,
             Principal(record.consumer_id),
             self.config.identity,
@@ -186,13 +186,13 @@ class Orchestrator:
             except Exception:
                 pass  # Retried activity inspection repairs a lost live notification.
 
-    async def inspect(self, ref: SandboxRef) -> OrchestratorObservation:
+    async def inspect(self, ref: SandboxRef) -> SupervisorObservation:
         async with self._lock(ref):
             return self._observation(self._record(ref))
 
-    async def initialize(self, request: EnsureRequest) -> OrchestratorObservation:
+    async def initialize(self, request: EnsureRequest) -> SupervisorObservation:
         if request.identity != self.config.identity:
-            raise BoxieError(404, "orchestrator identity not found")
+            raise BoxieError(404, "supervisor identity not found")
         validate_policy(request.spec.policy, self.config.policy_maximum)
         self.profiles.validate_snapshot(request.profile_snapshot)
         snapshot, spec = request.profile_snapshot, request.spec
@@ -226,7 +226,7 @@ class Orchestrator:
                 or (mode == "execute" and self.reconciliation_failed)
                 or len(self.records) >= limit
             ):
-                raise BoxieError(503, "orchestrator execution unavailable")
+                raise BoxieError(503, "supervisor execution unavailable")
             now = self.clock()
             record = ExecutionRecord.create(request, self.boot_id, now + timedelta(seconds=90))
             if mode != "execute":
@@ -252,10 +252,10 @@ class Orchestrator:
                 record.reason = TerminationReason.PROVISIONING_FAILED
                 self.executions[record.id].safety_required = True
                 record.event_version += 1
-                raise BoxieError(503, "orchestrator execution unavailable") from None
+                raise BoxieError(503, "supervisor execution unavailable") from None
             return self._observation(record)
 
-    async def ensure_ready(self, request: EnsureRequest) -> OrchestratorObservation:
+    async def ensure_ready(self, request: EnsureRequest) -> SupervisorObservation:
         await self.initialize(request)
         execution = self.executions[request.ref.id]
         async with execution.provision_lock:
@@ -279,7 +279,7 @@ class Orchestrator:
     def _expiry(self, record: ExecutionRecord) -> TerminationReason | None:
         timers = self.executions[record.id].deadlines
         if timers is None:
-            return TerminationReason.ORCHESTRATOR_RESTART
+            return TerminationReason.SUPERVISOR_RESTART
         choices = [
             (timers.absolute, TerminationReason.EXPIRED),
             (timers.lease, TerminationReason.CONTROL_PLANE_LOST),
@@ -328,7 +328,7 @@ class Orchestrator:
             # attempt only ownership-checked removal. Confirmation requires a final save.
             self.executions[record.id].safety_required = True
 
-    async def remove(self, ref: SandboxRef, reason: TerminationReason) -> OrchestratorObservation:
+    async def remove(self, ref: SandboxRef, reason: TerminationReason) -> SupervisorObservation:
         async with self._lock(ref):
             record = self._record(ref)
             self._stop(record, reason)
@@ -378,7 +378,7 @@ class Orchestrator:
                         ),
                     )
 
-    async def renew_control_lease(self, ref: SandboxRef, boot_id: UUID) -> OrchestratorObservation:
+    async def renew_control_lease(self, ref: SandboxRef, boot_id: UUID) -> SupervisorObservation:
         async with self._lock(ref):
             record = self._record(ref)
             if boot_id != self.boot_id or not self._live(record):
@@ -533,7 +533,7 @@ class Orchestrator:
             await asyncio.gather(self.sweeper, return_exceptions=True)
         await asyncio.gather(
             *(
-                self.remove(r.ref, TerminationReason.ORCHESTRATOR_SHUTDOWN)
+                self.remove(r.ref, TerminationReason.SUPERVISOR_SHUTDOWN)
                 for r in list(self.records.values())
                 if r.state not in FINAL
             )

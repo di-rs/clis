@@ -81,15 +81,21 @@ def run_release(component: str, env: dict[str, str]) -> subprocess.CompletedProc
 @pytest.mark.parametrize(
     "component,owner,key,retained_key,command",
     [
-        ("boxie", "boxie", "BOXIE_RUNTIME_IMAGE", "OBS_COLLECTOR_IMAGE", "deploy.sh"),
+        ("boxie", "boxie", "BOXIE_IMAGE", "OBS_COLLECTOR_IMAGE", "deploy.sh"),
         (
-            "sandbox",
-            "playground",
-            "PLAYGROUND_SANDBOX_IMAGE",
-            "PLAYGROUND_IMAGE",
+            "cli-playground-sandbox",
+            "cli-playground",
+            "CLI_PLAYGROUND_SANDBOX_IMAGE",
+            "CLI_PLAYGROUND_BACKEND_IMAGE",
             "sandbox-release.sh",
         ),
-        ("gateway", "playground", "PLAYGROUND_IMAGE", "PLAYGROUND_SANDBOX_IMAGE", "deploy.sh"),
+        (
+            "cli-playground-backend",
+            "cli-playground",
+            "CLI_PLAYGROUND_BACKEND_IMAGE",
+            "CLI_PLAYGROUND_SANDBOX_IMAGE",
+            "deploy.sh",
+        ),
     ],
 )
 def test_release_preserves_other_image_and_cleans_credentials(
@@ -111,7 +117,7 @@ def test_release_preserves_other_image_and_cleans_credentials(
     assert "install -m 0600" in deployment
     assert (
         IMAGE
-        if component == "sandbox"
+        if component == "cli-playground-sandbox"
         else release_env["SOURCE_SHA"]
         if component == "boxie"
         else "deploy.sh"

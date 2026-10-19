@@ -18,19 +18,19 @@ _temporal_runtime: Runtime | None = None
 # Exact trusted source templates; arguments never cross this boundary.
 _ROUTES = {
     (
-        "boxie.bootstrap.orchestrator",
+        "boxie.bootstrap.supervisor",
         "profile reload rejected; retaining approved profiles",
     ): "profile_reload_rejected",
     (
-        "boxie.sandbox.execution.orchestrator",
+        "boxie.sandbox.execution.supervisor",
         "execution journal persistence failed; new execution disabled",
     ): "journal_failed",
     (
-        "boxie.sandbox.execution.orchestrator",
+        "boxie.sandbox.execution.supervisor",
         "execution journal persistence recovered",
     ): "journal_recovered",
     (
-        "boxie.sandbox.execution.orchestrator",
+        "boxie.sandbox.execution.supervisor",
         "sandbox reconciliation failed; retry pending: %s",
     ): "reconciliation_pending",
     ("boxie.temporal.dispatcher", "command delivery pending: %s"): "outbox_pending",

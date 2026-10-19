@@ -8,7 +8,7 @@ from temporalio.common import RetryPolicy
 with workflow.unsafe.imports_passed_through():
     from boxie.persistence.postgres import PostgresLifecycle
     from boxie.persistence.postgres_artifacts import PostgresArtifactStore
-    from boxie.sandbox.execution.orchestrator import Orchestrator
+    from boxie.sandbox.execution.supervisor import Supervisor
     from boxie.temporal.dispatcher import CommandDelivery
 
 
@@ -17,11 +17,11 @@ class MaintenanceActivities:
         self,
         delivery: CommandDelivery,
         repository: PostgresLifecycle,
-        orchestrator: Orchestrator,
+        supervisor: Supervisor,
         artifacts: PostgresArtifactStore,
     ) -> None:
         self.delivery, self.repository = delivery, repository
-        self.orchestrator, self.artifacts = orchestrator, artifacts
+        self.supervisor, self.artifacts = supervisor, artifacts
 
     @activity.defn
     async def maintain(self, kind: str) -> None:
@@ -35,10 +35,10 @@ class MaintenanceActivities:
                 if self.artifacts._scan is None:
                     break
         elif kind == "journal":
-            await self.orchestrator.compact()
+            await self.supervisor.compact()
         elif kind == "retention":
             # Retry compaction of legacy completed runs if startup storage was unavailable.
-            await self.orchestrator.compact()
+            await self.supervisor.compact()
             while await self.repository.purge_retained() == 1000:
                 pass
         else:

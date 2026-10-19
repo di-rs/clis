@@ -1,4 +1,4 @@
-"""Atomic local metadata replacement with file and directory fsync for the single-host orchestrator."""
+"""Atomic local metadata replacement with file and directory fsync for the single-host supervisor."""
 
 import os
 import tempfile

@@ -1,4 +1,4 @@
-"""Unprivileged API composition root: secrets and orchestrator origin are operator-owned."""
+"""Unprivileged API composition root: secrets and supervisor origin are operator-owned."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from pydantic import Field
 
 from boxie.api.app import ApiConfig
 from boxie.bootstrap.config import FileOwnedSettings, LifecycleConfig, validate_file_model
-from boxie.domain.models import OrchestratorIdentity
+from boxie.domain.models import SupervisorIdentity
 
 if TYPE_CHECKING:
     from boxie.observability.metrics import Metrics
@@ -21,10 +21,10 @@ if TYPE_CHECKING:
 
 class ApiProcessConfig(FileOwnedSettings):
     api: ApiConfig
-    orchestrator_url: str
-    orchestrator_credential: bytes = Field(repr=False)
+    supervisor_url: str
+    supervisor_credential: bytes = Field(repr=False)
     lifecycle: LifecycleConfig
-    identity: OrchestratorIdentity
+    identity: SupervisorIdentity
     bind_host: str = "127.0.0.1"
     bind_port: int = 8090
     request_timeout: float = 20
@@ -34,21 +34,21 @@ def load_configuration(path: Path) -> ApiProcessConfig:
     from pydantic import TypeAdapter, ValidationError
 
     from boxie.bootstrap.config import read_credential
-    from boxie.bootstrap.dependencies import lifecycle_config, orchestrator_identity
+    from boxie.bootstrap.dependencies import lifecycle_config, supervisor_identity
     from boxie.contracts.common import ConsumerId
 
     data = json.loads(path.read_text())
-    orchestrator = read_credential(Path(data.pop("orchestrator_credential_file")))
+    supervisor = read_credential(Path(data.pop("supervisor_credential_file")))
     consumers = {
         consumer: read_credential(Path(secret))
         for consumer, secret in data.pop("consumer_credential_files").items()
     }
     values = list(consumers.values())
-    if any(hmac.compare_digest(orchestrator, value) for value in values) or len(set(values)) != len(
+    if any(hmac.compare_digest(supervisor, value) for value in values) or len(set(values)) != len(
         values
     ):
-        raise ValueError("orchestrator and consumer credentials must be distinct")
-    # Consumer IDs obey the same wire constraint as the orchestrator's trusted identity field.
+        raise ValueError("supervisor and consumer credentials must be distinct")
+    # Consumer IDs obey the same wire constraint as the supervisor's trusted identity field.
     for consumer in consumers:
         try:
             TypeAdapter(ConsumerId).validate_python(consumer)
@@ -56,11 +56,11 @@ def load_configuration(path: Path) -> ApiProcessConfig:
             raise ValueError("invalid consumer ID") from None
     api = validate_file_model(ApiConfig, {"release": data.pop("release"), "consumers": consumers})
     if "lifecycle" not in data or "identity" not in data:
-        raise ValueError("lifecycle configuration and orchestrator identity required")
+        raise ValueError("lifecycle configuration and supervisor identity required")
     data["lifecycle"] = lifecycle_config(data.pop("lifecycle"))
-    data["identity"] = orchestrator_identity(data.pop("identity"))
+    data["identity"] = supervisor_identity(data.pop("identity"))
     return validate_file_model(
-        ApiProcessConfig, {"api": api, "orchestrator_credential": orchestrator, **data}
+        ApiProcessConfig, {"api": api, "supervisor_credential": supervisor, **data}
     )
 
 
@@ -75,7 +75,7 @@ def _main(metrics: Metrics, config_path: Path) -> None:
     from boxie.observability.telemetry.logging import install_asyncio_handler, log_dispatcher
     from boxie.persistence.outbox import PostgresOutbox
     from boxie.persistence.postgres import PostgresLifecycle
-    from boxie.sandbox.transport.client import OrchestratorClient
+    from boxie.sandbox.transport.client import SupervisorClient
     from boxie.temporal.contracts import lifecycle_queue
     from boxie.temporal.dispatcher import CommandDelivery
 
@@ -89,18 +89,18 @@ def _main(metrics: Metrics, config_path: Path) -> None:
         temporal = await temporal_client(config.lifecycle, lazy=True)
         async with (
             database_for(config.lifecycle.postgres_dsn_file) as sessions,
-            OrchestratorClient(
-                config.orchestrator_url,
-                config.orchestrator_credential,
+            SupervisorClient(
+                config.supervisor_url,
+                config.supervisor_credential,
                 timeout=config.request_timeout,
-            ) as orchestrator,
+            ) as supervisor,
         ):
             lifecycle = PostgresLifecycle(
                 sessions,
-                orchestrator,
+                supervisor,
                 config.identity,
                 Dependencies(
-                    orchestrator,
+                    supervisor,
                     temporal,
                     config.identity,
                     lambda: check_schedules(temporal, config.identity),
@@ -110,8 +110,8 @@ def _main(metrics: Metrics, config_path: Path) -> None:
             app = create_app(
                 config.api,
                 lifecycle,
-                orchestrator,
-                orchestrator,
+                supervisor,
+                supervisor,
                 request_completed=metrics.http_completed,
                 deliver=CommandDelivery(
                     PostgresOutbox(sessions, config.identity),
@@ -134,7 +134,7 @@ def _main(metrics: Metrics, config_path: Path) -> None:
             )
             async with background(
                 refresh_snapshots(metrics, config.lifecycle.postgres_dsn_file),
-                api_dependencies(metrics, orchestrator, temporal, config.identity),
+                api_dependencies(metrics, supervisor, temporal, config.identity),
             ):
                 await server.serve()
 

@@ -35,51 +35,51 @@ def test_reattach_fences_stale_controls_and_terminal_replies_do_not_renew_idle(
     tmp_path: Path,
 ) -> None:
     async def exercise() -> None:
-        orchestrator, request, daemon, clock, _ = await setup(tmp_path)
+        supervisor, request, daemon, clock, _ = await setup(tmp_path)
         try:
-            await settled(orchestrator, request.ref, SandboxState.READY)
-            epoch = await orchestrator.attach(request.ref, attachment_order=1)
-            newer = await orchestrator.attach(request.ref, attachment_order=2)
+            await settled(supervisor, request.ref, SandboxState.READY)
+            epoch = await supervisor.attach(request.ref, attachment_order=1)
+            newer = await supervisor.attach(request.ref, attachment_order=2)
             assert newer == epoch + 1
-            await orchestrator.detach(request.ref, epoch)
-            assert orchestrator.records[request.ref.id].attached
+            await supervisor.detach(request.ref, epoch)
+            assert supervisor.records[request.ref.id].attached
             for operation in (
-                orchestrator.write(request.ref, epoch, b"stale"),
-                orchestrator.resize(request.ref, epoch, 81, 25),
+                supervisor.write(request.ref, epoch, b"stale"),
+                supervisor.resize(request.ref, epoch, 81, 25),
             ):
                 with pytest.raises(BoxieError):
                     await operation
-            original = orchestrator.executions[request.ref.id].timers.idle
+            original = supervisor.executions[request.ref.id].timers.idle
             clock.advance(20)
-            await orchestrator.write(request.ref, newer, b"\x1b[1;1R", source="terminal")
-            assert orchestrator.executions[request.ref.id].timers.idle == original
-            assert orchestrator.records[request.ref.id].last_input_at is None
-            await orchestrator.write(request.ref, newer, b"hello", source="user")
-            assert orchestrator.executions[request.ref.id].timers.idle == clock.monotonic() + 600
+            await supervisor.write(request.ref, newer, b"\x1b[1;1R", source="terminal")
+            assert supervisor.executions[request.ref.id].timers.idle == original
+            assert supervisor.records[request.ref.id].last_input_at is None
+            await supervisor.write(request.ref, newer, b"hello", source="user")
+            assert supervisor.executions[request.ref.id].timers.idle == clock.monotonic() + 600
         finally:
-            await orchestrator.close()
+            await supervisor.close()
 
     asyncio.run(exercise())
 
 
 def test_pty_drain_does_not_wait_for_reader_and_payload_cap_is_exact(tmp_path: Path) -> None:
     async def exercise() -> None:
-        orchestrator, request, daemon, _, _ = await setup(tmp_path)
+        supervisor, request, daemon, _, _ = await setup(tmp_path)
         try:
-            await settled(orchestrator, request.ref, SandboxState.READY)
-            terminal = orchestrator.executions[request.ref.id].pty
+            await settled(supervisor, request.ref, SandboxState.READY)
+            terminal = supervisor.executions[request.ref.id].pty
             assert hasattr(terminal, "replay"), "PTY replay missing"
             stream = next(iter(daemon.streams.values()))
             # No terminal attachment or ACK: drain still reaches the hard cap.
             for _ in range(16):
                 await stream.queue.put(b"x" * 1024 * 1024)
-            await settled(orchestrator, request.ref, SandboxState.TERMINATED)
-            assert orchestrator.records[request.ref.id].reason == "output_limit"
+            await settled(supervisor, request.ref, SandboxState.TERMINATED)
+            assert supervisor.records[request.ref.id].reason == "output_limit"
             assert terminal.remaining == 0
             assert terminal.replay.retained_bytes == 1024 * 1024
             assert terminal.replay.tail == 1024
         finally:
-            await orchestrator.close()
+            await supervisor.close()
 
     asyncio.run(exercise())
 
@@ -89,35 +89,35 @@ def test_network_replay_resize_barrier_and_browser_heartbeat(tmp_path: Path) -> 
     from collections.abc import AsyncIterator
     from contextlib import asynccontextmanager
 
-    from boxie.sandbox.transport.server import create_orchestrator_app
+    from boxie.sandbox.transport.server import create_supervisor_app
     from boxie_test_support.api import serve
     from boxie_test_support.artifacts import Artifacts
     from fastapi import FastAPI
     from websockets.asyncio.client import connect
 
     async def exercise() -> None:
-        orchestrator, request, daemon, clock, _ = await setup(tmp_path)
+        supervisor, request, daemon, clock, _ = await setup(tmp_path)
 
         @asynccontextmanager
         async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             try:
-                await orchestrator.start()
+                await supervisor.start()
                 yield
             finally:
-                await orchestrator.close()
+                await supervisor.close()
 
         async def readiness() -> dict[str, bool]:
-            return {"docker": await daemon.ready(), "execution": orchestrator.execution_ready}
+            return {"docker": await daemon.ready(), "execution": supervisor.execution_ready}
 
-        app = create_orchestrator_app(
-            orchestrator,
+        app = create_supervisor_app(
+            supervisor,
             Artifacts(tmp_path / "artifacts"),
             credential=b"secret",
             readiness=readiness,
             lifespan=lifespan,
         )
         async with serve(app) as origin:
-            await settled(orchestrator, request.ref, SandboxState.READY)
+            await settled(supervisor, request.ref, SandboxState.READY)
             stream = next(iter(daemon.streams.values()))
             await stream.queue.put(b"first")
             await asyncio.sleep(0.01)
@@ -168,7 +168,7 @@ def test_network_replay_resize_barrier_and_browser_heartbeat(tmp_path: Path) -> 
                     "cols": 100,
                     "rows": 30,
                 }
-                assert orchestrator.records[request.ref.id].last_input_at is None
+                assert supervisor.records[request.ref.id].last_input_at is None
                 async with connect(
                     url, additional_headers={"Authorization": "Bearer secret"}
                 ) as new:
@@ -202,14 +202,14 @@ def test_network_replay_resize_barrier_and_browser_heartbeat(tmp_path: Path) -> 
                         "epoch": successor,
                         "nonce": 1,
                     }
-                    assert orchestrator.records[request.ref.id].attached
+                    assert supervisor.records[request.ref.id].attached
                     # Relay-local websocket pings still work, but no browser heartbeat does.
                     await (await new.ping())
                     clock.advance(30)
                     await asyncio.wait_for(new.wait_closed(), 2)
-                    assert not orchestrator.records[request.ref.id].attached
+                    assert not supervisor.records[request.ref.id].attached
                     assert (
-                        orchestrator.executions[request.ref.id].timers.disconnect
+                        supervisor.executions[request.ref.id].timers.disconnect
                         == clock.monotonic() + 120
                     )
 
@@ -299,10 +299,10 @@ def test_failed_resize_releases_output_order_without_recording_unapplied_geometr
     tmp_path: Path, failure: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def exercise() -> None:
-        orchestrator, request, daemon, _, _ = await setup(tmp_path, docker_timeout=0.02)
+        supervisor, request, daemon, _, _ = await setup(tmp_path, docker_timeout=0.02)
         try:
-            await settled(orchestrator, request.ref, SandboxState.READY)
-            epoch = await orchestrator.attach(request.ref, attachment_order=1)
+            await settled(supervisor, request.ref, SandboxState.READY)
+            epoch = await supervisor.attach(request.ref, attachment_order=1)
             stream = next(iter(daemon.streams.values()))
 
             async def resize(cols: int, rows: int) -> None:
@@ -312,14 +312,14 @@ def test_failed_resize_releases_output_order_without_recording_unapplied_geometr
 
             monkeypatch.setattr(stream, "resize", resize)
             with pytest.raises((TimeoutError, OSError)):
-                await orchestrator.resize(request.ref, epoch, 100, 30)
+                await supervisor.resize(request.ref, epoch, 100, 30)
             stream.queue.put_nowait(b"after")
-            terminal = orchestrator.executions[request.ref.id].pty
+            terminal = supervisor.executions[request.ref.id].pty
             await asyncio.wait_for(terminal.replay.changed.wait(), 0.2)
             assert terminal.replay.after(0)[0].geometry == (80, 24)
-            assert await orchestrator.attach(request.ref, attachment_order=2) == epoch + 1
+            assert await supervisor.attach(request.ref, attachment_order=2) == epoch + 1
         finally:
-            await orchestrator.close()
+            await supervisor.close()
 
     asyncio.run(exercise())
 
@@ -330,62 +330,62 @@ def test_attachment_order_persists_and_preserves_cursor_and_journal_failure_fenc
     from boxie.sandbox.execution.journal import ExecutionJournal
 
     async def exercise() -> None:
-        orchestrator, request, _, _, _ = await setup(tmp_path)
-        original_save = orchestrator.journal.save
+        supervisor, request, _, _, _ = await setup(tmp_path)
+        original_save = supervisor.journal.save
         try:
-            await settled(orchestrator, request.ref, SandboxState.READY)
-            epoch = await orchestrator.attach(request.ref, attachment_order=3, resume_after=0)
-            saved = ExecutionJournal(
-                orchestrator.journal.path, orchestrator.config.identity
-            ).records[request.ref.id]
+            await settled(supervisor, request.ref, SandboxState.READY)
+            epoch = await supervisor.attach(request.ref, attachment_order=3, resume_after=0)
+            saved = ExecutionJournal(supervisor.journal.path, supervisor.config.identity).records[
+                request.ref.id
+            ]
             assert (
                 saved.attachment_order == 3 and saved.attachment_epoch == epoch and saved.attached
             )
-            snapshot = orchestrator.records[request.ref.id].model_dump()
-            deadlines = vars(orchestrator.executions[request.ref.id].timers).copy()
+            snapshot = supervisor.records[request.ref.id].model_dump()
+            deadlines = vars(supervisor.executions[request.ref.id].timers).copy()
             for order in (1, 3):
                 with pytest.raises(BoxieError):
-                    await orchestrator.attach(request.ref, attachment_order=order, resume_after=0)
+                    await supervisor.attach(request.ref, attachment_order=order, resume_after=0)
             with pytest.raises(ValueError):
-                await orchestrator.attach(request.ref, attachment_order=4, resume_after=999)
-            assert orchestrator.records[request.ref.id].model_dump() == snapshot
-            assert vars(orchestrator.executions[request.ref.id].timers) == deadlines
-            newer = await orchestrator.attach(request.ref, attachment_order=4, resume_after=0)
-            await orchestrator.detach(request.ref, epoch)
-            assert orchestrator.records[request.ref.id].attached
+                await supervisor.attach(request.ref, attachment_order=4, resume_after=999)
+            assert supervisor.records[request.ref.id].model_dump() == snapshot
+            assert vars(supervisor.executions[request.ref.id].timers) == deadlines
+            newer = await supervisor.attach(request.ref, attachment_order=4, resume_after=0)
+            await supervisor.detach(request.ref, epoch)
+            assert supervisor.records[request.ref.id].attached
             assert newer == epoch + 1
 
             def failed_save() -> None:
                 raise OSError("journal unavailable")
 
-            monkeypatch.setattr(orchestrator.journal, "save", failed_save)
+            monkeypatch.setattr(supervisor.journal, "save", failed_save)
             with pytest.raises(OSError):
-                await orchestrator.attach(request.ref, attachment_order=5, resume_after=0)
-            assert not orchestrator.execution_ready
+                await supervisor.attach(request.ref, attachment_order=5, resume_after=0)
+            assert not supervisor.execution_ready
             with pytest.raises(BoxieError):
-                await orchestrator.attach(request.ref, attachment_order=6, resume_after=0)
-            saved = ExecutionJournal(
-                orchestrator.journal.path, orchestrator.config.identity
-            ).records[request.ref.id]
+                await supervisor.attach(request.ref, attachment_order=6, resume_after=0)
+            saved = ExecutionJournal(supervisor.journal.path, supervisor.config.identity).records[
+                request.ref.id
+            ]
             assert saved.attachment_order == 4 and saved.attachment_epoch == newer
-            monkeypatch.setattr(orchestrator.journal, "save", original_save)
+            monkeypatch.setattr(supervisor.journal, "save", original_save)
             # Same full-journal recovery boundary as the supervised sweeper.
-            orchestrator._save()
-            saved = ExecutionJournal(
-                orchestrator.journal.path, orchestrator.config.identity
-            ).records[request.ref.id]
+            supervisor._save()
+            saved = ExecutionJournal(supervisor.journal.path, supervisor.config.identity).records[
+                request.ref.id
+            ]
             assert saved.attachment_order == 5
             with pytest.raises(BoxieError):
-                await orchestrator.attach(request.ref, attachment_order=5, resume_after=0)
-            await orchestrator.attach(request.ref, attachment_order=6, resume_after=0)
+                await supervisor.attach(request.ref, attachment_order=5, resume_after=0)
+            await supervisor.attach(request.ref, attachment_order=6, resume_after=0)
         finally:
-            monkeypatch.setattr(orchestrator.journal, "save", original_save)
-            await orchestrator.close()
+            monkeypatch.setattr(supervisor.journal, "save", original_save)
+            await supervisor.close()
 
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize("boundary", ["api", "orchestrator"])
+@pytest.mark.parametrize("boundary", ["api", "supervisor"])
 @pytest.mark.parametrize("healthy", [False, True])
 def test_attachment_order_requires_json_integer_without_changing_epoch_or_grace(
     tmp_path: Path, boundary: str, healthy: bool
@@ -405,21 +405,21 @@ def test_attachment_order_requires_json_integer_without_changing_epoch_or_grace(
             await ready(net.api, identifier)
             url = terminal_url(net.api, identifier)
             headers = CONSUMER_AUTH
-            if boundary == "orchestrator":
+            if boundary == "supervisor":
                 url = (
-                    net.orchestrator_url.replace("http:", "ws:")
+                    net.supervisor_url.replace("http:", "ws:")
                     + f"/v1/sandboxes/{identifier}/terminal?consumer_id=one"
                 )
-                headers = {"Authorization": "Bearer orchestrator-test-secret"}
+                headers = {"Authorization": "Bearer supervisor-test-secret"}
             if healthy:
                 current = await connections.enter_async_context(
                     connect(url, additional_headers=headers)
                 )
                 await attach(current, order=1)
             net.clock.advance(10)
-            record = net.orchestrator.records[UUID(identifier)]
+            record = net.supervisor.records[UUID(identifier)]
             before = record.model_dump()
-            grace = vars(net.orchestrator.executions[record.id].timers).copy()
+            grace = vars(net.supervisor.executions[record.id].timers).copy()
             missing = object()
             for invalid in (True, False, "2", 3.0, None, missing, 0, -1, 2**53):
                 request: dict[str, object] = {
@@ -435,7 +435,7 @@ def test_attachment_order_requires_json_integer_without_changing_epoch_or_grace(
                     with pytest.raises(ConnectionClosed):
                         await asyncio.wait_for(rejected.recv(), 1)
                 assert record.model_dump() == before
-                assert vars(net.orchestrator.executions[record.id].timers) == grace
+                assert vars(net.supervisor.executions[record.id].timers) == grace
             if healthy:
                 assert current.close_code is None
                 await current.send(

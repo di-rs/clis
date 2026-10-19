@@ -6,11 +6,11 @@ from typing import TYPE_CHECKING
 from boxie.domain.models import SandboxState
 
 if TYPE_CHECKING:
-    from boxie.sandbox.execution.orchestrator import Orchestrator
+    from boxie.sandbox.execution.supervisor import Supervisor
 
 
 class ExecutionSafety:
-    def __init__(self, owner: Orchestrator) -> None:
+    def __init__(self, owner: Supervisor) -> None:
         self.owner = owner
         self.task: asyncio.Task[None] | None = None
 

@@ -1,14 +1,18 @@
 # Install and operate the shared host
 
-Use this guide to set up Boxie and CLI Playground on one Hetzner server, then
+Use this guide to set up Boxie and cli-playground on one Hetzner server, then
 inspect a failed release. Pulumi creates the host, disk, DNS and operator Access
 applications. The setup workflow copies the Compose projects and starts them.
 Routine releases run over pinned SSH from GitHub Actions.
 
-## Prepare the platform environment
+Existing installations must first follow the [component naming cutover](../../../docs/component-naming-cutover.md).
+It preserves configuration, credentials and data while adopting the new service
+names. Do not use fresh setup to bypass that migration.
 
-Create GitHub environments `platform`, `boxie`, `playground` and
-`playground-preview`. Restrict deployment to `master`. The platform environment
+## Prepare the Sanctuary environment
+
+Create GitHub environments `sanctuary`, `boxie`, `cli-playground` and
+`cli-playground-preview`. Restrict deployment to `master`. The Sanctuary environment
 holds the following provisioning inputs:
 
 | Setting | Purpose |
@@ -50,15 +54,15 @@ and Actions runners can reach the host.
 ## Run setup
 
 Grant this repository Actions access to its private GHCR packages. Run
-[Single-host platform setup](../../../.github/workflows/cli-playground-setup.yml)
-from `master`. This manual workflow builds Boxie, the Playground gateway and
+[Single-host Sanctuary setup](../../../.github/workflows/sanctuary-setup.yml)
+from `master`. This manual workflow builds Boxie, the cli-playground backend and
 sandbox, and the collector from current `master`; it does not ask for image
 digests. It then runs Pulumi, waits for cloud-init, copies the committed files
 and private settings over SSH, and starts the Compose projects. It can create
 paid cloud resources.
 
 Setup generates internal credentials and certificates, initializes PostgreSQL and
-Temporal, starts Boxie and its monitoring and tunnel, then starts Playground and
+Temporal, starts Boxie and its monitoring and tunnel, then starts cli-playground and
 its proxy. A rerun keeps existing credentials and data. Partial credentials cause
 setup to fail for inspection. PostgreSQL and Temporal server/schema upgrades stay
 separate from application releases. Cloud-init handles first boot; later edits to
@@ -102,13 +106,13 @@ ssh -o BatchMode=yes -o StrictHostKeyChecking=yes \
   -o "UserKnownHostsFile=$private/known_hosts" -i "$private/key" \
   "root@$host" 'cat /etc/sanctuary/boxie/preview-token' > "$private/token"
 [[ $(cat "$private/token") =~ ^[a-f0-9]{64}$ ]]
-for environment in boxie playground; do
+for environment in boxie cli-playground; do
   gh variable set DEPLOY_HOST --repo "$repository" --env "$environment" --body "$host"
   gh secret set DEPLOY_SSH_KEY --repo "$repository" --env "$environment" < "$private/key"
   gh secret set DEPLOY_KNOWN_HOSTS --repo "$repository" --env "$environment" < "$private/known_hosts"
 done
-gh variable set PLAYGROUND_URL --repo "$repository" --env playground-preview --body "$url"
-gh secret set PLAYGROUND_DEPLOY_TOKEN --repo "$repository" --env playground-preview < "$private/token"
+gh variable set CLI_PLAYGROUND_URL --repo "$repository" --env cli-playground-preview --body "$url"
+gh secret set CLI_PLAYGROUND_DEPLOY_TOKEN --repo "$repository" --env cli-playground-preview < "$private/token"
 ```
 
 All retrieved values are checked before the first GitHub write. If a GitHub write
@@ -121,27 +125,27 @@ temporary files under `/run`; it expires with the token's lifetime.
 
 Run either release manually from Actions on `master`:
 
-- [🚀 CLI Playground Release](../../../.github/workflows/cli-playground-release.yml)
-  builds and deploys the Playground backend and frontend together in the gateway image.
-- [🚀 Boxie Runtime and Sandbox Release](../../../.github/workflows/boxie-release.yml)
-  builds the Boxie runtime and sandbox from one commit, then updates Boxie followed
-  by the sandbox profile. It does not release the Playground application.
+- [🚀 cli-playground Release](../../../.github/workflows/cli-playground-release.yml)
+  builds and deploys the cli-playground backend and frontend together in the backend image.
+- [🚀 Boxie and Sandbox Release](../../../.github/workflows/boxie-release.yml)
+  builds the Boxie image and sandbox from one commit, then updates Boxie followed
+  by the sandbox profile. It does not release the cli-playground application.
 
 A failed stage stops the remaining deployments in its workflow; completed stages
 are not rolled back automatically. Boxie stages use the `boxie` environment;
-the Playground release uses `playground`.
+the cli-playground release uses `cli-playground`.
 Each stage calls the shared [release transport](release.sh) for SSH, image settings
 and temporary registry credentials; service scripts own migration and readiness checks.
 
-The Boxie stage pulls its image, stops API and orchestrator, runs Alembic migration,
+The Boxie stage pulls its image, stops API and supervisor, runs Alembic migration,
 and starts both services with the metrics overlay. PostgreSQL and Temporal stay
 up. Authenticated readiness must pass before the next stage. Pending requests may
 resume after the restart; an empty capacity table is not a release condition.
 The separate native host acceptance run covers terminal allocation and cleanup.
 
-The sandbox stage changes the approved Playground profile digest and recreates
-Boxie's orchestrator, preserving other profile fields. The gateway stage pulls
-and recreates only `gateway`; its proxy stays up.
+The sandbox stage changes the approved cli-playground profile digest and recreates
+Boxie's supervisor, preserving other profile fields. The backend stage pulls
+and recreates only `backend`; its proxy stays up.
 
 Setup and release workflows share one `sanctuary-production` queue. Each run selects
 current `master` after entering the queue, then builds and deploys that checkout.
@@ -162,12 +166,12 @@ docker compose --env-file /etc/sanctuary/boxie.env --env-file /etc/sanctuary/box
   -f /opt/sanctuary/boxie/compose.observability.yml ps
 docker compose --env-file /etc/sanctuary/boxie.env --env-file /etc/sanctuary/boxie-image.env \
   -f /opt/sanctuary/boxie/compose.production.yml -f /opt/sanctuary/boxie/compose.operations.yml \
-  -f /opt/sanctuary/boxie/compose.observability.yml logs --tail 100 api orchestrator
-docker compose --env-file /etc/sanctuary/playground.env --env-file /etc/sanctuary/playground-image.env \
-  -f /opt/sanctuary/playground/compose.production.yml ps
+  -f /opt/sanctuary/boxie/compose.observability.yml logs --tail 100 api supervisor
+docker compose --env-file /etc/sanctuary/cli-playground.env --env-file /etc/sanctuary/cli-playground-image.env \
+  -f /opt/sanctuary/cli-playground/compose.production.yml ps
 ```
 
-A migration failure leaves Boxie's API and orchestrator stopped. Check migration
+A migration failure leaves Boxie's API and supervisor stopped. Check migration
 output and database state before retrying; do not start an older application
 against a newer schema. After an SSH interruption, first check whether Compose
 finished the operation and whether the application is healthy. Fix the cause and
@@ -188,7 +192,7 @@ uv run --locked pytest infra/host/tests infra/environments/single-host/tests \
 On an authorized native Linux amd64 host, exercise fresh setup, an unchanged
 rerun, both release workflows, migration failure and retry, metrics, tunnel
 configuration and preview publication. The local command tests cannot establish
-those host behaviors. The [runtime requirements](../../../packages/boxie/infra/runtime.md)
+those host behaviors. The [host requirements](../../../packages/boxie/infra/host-requirements.md)
 include the runsc and backup checks.
 
 The generated Boxie TLS leaf certificates last 90 days and the CAs last 365 days.

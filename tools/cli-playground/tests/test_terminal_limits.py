@@ -17,8 +17,8 @@ from .boxie_network import admit, boxie_network, product_server, publish, socket
 from .helpers import upload
 
 
-@pytest.mark.parametrize("limit", [16777216, 10], ids=["default-cap", "lower-orchestrator-cap"])
-def test_orchestrator_output_limit_reaches_browser_at_exact_cap(
+@pytest.mark.parametrize("limit", [16777216, 10], ids=["default-cap", "lower-supervisor-cap"])
+def test_supervisor_output_limit_reaches_browser_at_exact_cap(
     tmp_path: Path, limit: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def exercise() -> None:
@@ -33,12 +33,12 @@ def test_orchestrator_output_limit_reaches_browser_at_exact_cap(
                 await asyncio.sleep(0.03)
 
             monkeypatch.setattr(WebSocket, "send_bytes", delayed_send)
-        async with boxie_network(tmp_path / "orchestrator") as network:
+        async with boxie_network(tmp_path / "supervisor") as network:
             profiles = json.loads(network.config.profiles_file.read_text())
             if limit != 16777216:
                 profiles["shell"]["limits"] = {"output_bytes": limit}
                 network.config.profiles_file.write_text(json.dumps(profiles))
-                network.orchestrator.profiles.reload()
+                network.supervisor.profiles.reload()
             async with product_server(tmp_path / "product", str(network.api.base_url)) as product:
                 identifier = (await publish(product, "a" * 40)).json()["id"]
                 binding = await admit(product, identifier, "a" * 40)
@@ -134,11 +134,11 @@ def test_final_control_preserves_buffered_product_status(
 
     async def exercise() -> None:
         barrier = CompletionBarrier(monkeypatch, HttpTerminal, phase, kind, close_code)
-        async with boxie_network(tmp_path / "orchestrator") as network:
+        async with boxie_network(tmp_path / "supervisor") as network:
             profiles = json.loads(network.config.profiles_file.read_text())
             profiles["shell"]["limits"] = {"output_bytes": 10}
             network.config.profiles_file.write_text(json.dumps(profiles))
-            network.orchestrator.profiles.reload()
+            network.supervisor.profiles.reload()
             async with product_server(tmp_path / "product", str(network.api.base_url)) as product:
                 barrier.port = urlsplit(str(product.http.base_url)).port
                 identifier = (await publish(product, "a" * 40)).json()["id"]

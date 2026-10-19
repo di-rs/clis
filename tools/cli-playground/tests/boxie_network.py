@@ -1,4 +1,4 @@
-"""Loopback product/API/orchestrator harness; only the Docker daemon is substituted."""
+"""Loopback product/API/supervisor harness; only the Docker daemon is substituted."""
 
 import asyncio
 import socket
@@ -27,7 +27,7 @@ class Product:
 
 @asynccontextmanager
 async def boxie_network(root: Path, *, daemon: EchoDaemon | None = None) -> AsyncIterator[Network]:
-    async with network(root, shell="/opt/playground/shell.sh", daemon=daemon) as result:
+    async with network(root, shell="/opt/cli-playground/shell.sh", daemon=daemon) as result:
         yield result
 
 

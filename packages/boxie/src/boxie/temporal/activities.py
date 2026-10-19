@@ -12,16 +12,16 @@ from temporalio.worker import ActivityInboundInterceptor, ExecuteActivityInput, 
 from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import (
     EnsureRequest,
-    OrchestratorObservation,
     SandboxRef,
     SandboxRequest,
+    SupervisorObservation,
 )
 from boxie.domain.models import SandboxState, TerminationReason
 from boxie.observability.context import bind_context
 from boxie.observability.events import Transition, deliver, emit
 from boxie.persistence.models import Sandbox
 from boxie.persistence.postgres import PostgresLifecycle
-from boxie.sandbox.execution.orchestrator import Orchestrator
+from boxie.sandbox.execution.supervisor import Supervisor
 from boxie.temporal.contracts import LifecycleFacts, StopRequest
 
 
@@ -82,28 +82,28 @@ class SafeActivityErrors(Interceptor):
 
 
 class LifecycleActivities:
-    def __init__(self, repository: PostgresLifecycle, orchestrator: Orchestrator) -> None:
-        self.repository, self.orchestrator = repository, orchestrator
+    def __init__(self, repository: PostgresLifecycle, supervisor: Supervisor) -> None:
+        self.repository, self.supervisor = repository, supervisor
 
     async def _request(self, sandbox_id: str) -> SandboxRequest:
         return await self.repository.load_request(UUID(sandbox_id))
 
     async def _bind(self, request: SandboxRequest) -> UUID:
-        if request.identity != self.orchestrator.config.identity:
-            raise BoxieError(404, "orchestrator identity not found")
-        boot = self.orchestrator.boot_id
-        if not await self.repository.bind_orchestrator_boot(
+        if request.identity != self.supervisor.config.identity:
+            raise BoxieError(404, "supervisor identity not found")
+        boot = self.supervisor.boot_id
+        if not await self.repository.bind_supervisor_boot(
             request.principal,
             request.identity,
             request.sandbox_id,
             request.generation,
-            request.orchestrator_boot_id,
+            request.supervisor_boot_id,
             boot,
         ):
-            raise BoxieError(409, "orchestrator boot changed")
+            raise BoxieError(409, "supervisor boot changed")
         return boot
 
-    async def _record(self, observation: OrchestratorObservation) -> None:
+    async def _record(self, observation: SupervisorObservation) -> None:
         await self.repository.record_observation(observation)
 
     @activity.defn
@@ -113,10 +113,10 @@ class LifecycleActivities:
             row = (
                 await session.exec(select(Sandbox).where(Sandbox.id == request.sandbox_id))
             ).one()
-        if row.cleaned_at is not None and request.sandbox_id in self.orchestrator.records:
+        if row.cleaned_at is not None and request.sandbox_id in self.supervisor.records:
             # Every workflow completion path reads facts; retries retain late session ownership.
-            await self.orchestrator.compact()
-            if request.sandbox_id in self.orchestrator.records:
+            await self.supervisor.compact()
+            if request.sandbox_id in self.supervisor.records:
                 raise ApplicationError("journal cleanup pending", type="CleanupPending")
         return LifecycleFacts(
             absolute_deadline=request.absolute_deadline.timestamp(),
@@ -131,7 +131,7 @@ class LifecycleActivities:
         if request.desired_stop:
             return
         await self._bind(request)
-        observation = await self.orchestrator.ensure_ready(EnsureRequest.from_request(request))
+        observation = await self.supervisor.ensure_ready(EnsureRequest.from_request(request))
         await self._record(observation)
         if observation.state != SandboxState.READY:
             raise ApplicationError(
@@ -147,26 +147,26 @@ class LifecycleActivities:
         boot = await self._bind(request)
         ref = SandboxRef(request.sandbox_id, request.generation)
         try:
-            observation = await self.orchestrator.inspect(ref)
+            observation = await self.supervisor.inspect(ref)
         except BoxieError as error:
             if error.status != 404:
                 raise
             return facts
-        record = self.orchestrator.records[ref.id]
-        if self.orchestrator._expiry(record) is not None:
-            await self.orchestrator._supervised_reconcile(record)
-            observation = await self.orchestrator.inspect(ref)
+        record = self.supervisor.records[ref.id]
+        if self.supervisor._expiry(record) is not None:
+            await self.supervisor._supervised_reconcile(record)
+            observation = await self.supervisor.inspect(ref)
         if not request.desired_stop and observation.state in (
             SandboxState.ACCEPTED,
             SandboxState.PROVISIONING,
             SandboxState.READY,
         ):
             try:
-                observation = await self.orchestrator.renew_control_lease(ref, boot)
+                observation = await self.supervisor.renew_control_lease(ref, boot)
             except BoxieError as error:
                 if error.status != 409:
                     raise
-                observation = await self.orchestrator.inspect(ref)
+                observation = await self.supervisor.inspect(ref)
         if observation.reason is not None:
             await self.repository.terminate(
                 request.principal, request.sandbox_id, observation.reason
@@ -178,7 +178,15 @@ class LifecycleActivities:
     async def request_stop(self, request: StopRequest) -> None:
         sandbox = await self._request(request.sandbox_id)
         await self.repository.terminate(
-            sandbox.principal, sandbox.sandbox_id, TerminationReason(request.reason)
+            sandbox.principal,
+            sandbox.sandbox_id,
+            # Recorded activity inputs retain their original reason across retries.
+            TerminationReason(
+                {
+                    "orchestrator_restart": "supervisor_restart",
+                    "orchestrator_shutdown": "supervisor_shutdown",
+                }.get(request.reason, request.reason)
+            ),
         )
 
     @activity.defn
@@ -189,8 +197,8 @@ class LifecycleActivities:
         if not request.desired_stop:
             raise BoxieError(409, "stop must be committed to SQL before removal")
         await self._bind(request)
-        await self.orchestrator.initialize(EnsureRequest.from_request(request))
-        observation = await self.orchestrator.remove(
+        await self.supervisor.initialize(EnsureRequest.from_request(request))
+        observation = await self.supervisor.remove(
             SandboxRef(request.sandbox_id, request.generation),
             request.reason or TerminationReason.REQUESTED,
         )

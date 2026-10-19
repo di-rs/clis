@@ -1,4 +1,4 @@
-"""Translate bounded consumer JSON input into the byte-preserving orchestrator stream."""
+"""Translate bounded consumer JSON input into the byte-preserving supervisor stream."""
 
 import asyncio
 from contextlib import suppress
@@ -80,7 +80,7 @@ async def proxy(websocket: WebSocket, connection: TerminalConnection) -> None:
             async with asyncio.timeout(20):
                 if isinstance(message, bytes):
                     if not 9 <= len(message) <= 16392:
-                        raise BoxieError(503, "invalid orchestrator output frame")
+                        raise BoxieError(503, "invalid supervisor output frame")
                     cursor = int.from_bytes(message[:8], "big")
                     await websocket.send_bytes(message)
                 else:

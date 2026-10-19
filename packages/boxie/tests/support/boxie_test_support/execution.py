@@ -1,10 +1,10 @@
-"""External Docker and authorization test boundaries for orchestrator execution."""
+"""External Docker and authorization test boundaries for supervisor execution."""
 
 import asyncio
 from typing import Any
 from uuid import uuid4
 
-from boxie_test_support.orchestrator import FakeTerminal
+from boxie_test_support.supervisor import FakeTerminal
 
 
 class Daemon:
@@ -84,16 +84,16 @@ class Guard:
         return not self.stopped
 
 
-async def launch_execution(orchestrator: Any, request: Any) -> Any:
+async def launch_execution(supervisor: Any, request: Any) -> Any:
     """Launch an activity-shaped call for tests that manipulate in-flight Docker I/O."""
     from boxie.domain.models import SandboxState
 
-    observation = await orchestrator.initialize(request)
-    execution = orchestrator.executions[request.ref.id]
+    observation = await supervisor.initialize(request)
+    execution = supervisor.executions[request.ref.id]
     if execution.activity is None and observation.state not in {
         SandboxState.READY,
         SandboxState.TERMINATED,
         SandboxState.FAILED,
     }:
-        execution.activity = asyncio.create_task(orchestrator.ensure_ready(request))
+        execution.activity = asyncio.create_task(supervisor.ensure_ready(request))
     return observation

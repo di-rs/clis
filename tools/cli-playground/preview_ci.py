@@ -230,11 +230,11 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 def public_origin(value: str) -> str:
     value = value.rstrip("/")
     if not re.fullmatch(r"https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?", value):
-        raise ValueError("PLAYGROUND_URL must be an HTTPS origin")
+        raise ValueError("CLI_PLAYGROUND_URL must be an HTTPS origin")
     return value
 
 
-def gateway_request(
+def backend_request(
     base: str,
     token: str,
     path: str,
@@ -256,7 +256,7 @@ def gateway_request(
     return table(json.loads(payload))
 
 
-class GatewayRequest(Protocol):
+class BackendRequest(Protocol):
     def __call__(
         self,
         base: str,
@@ -281,7 +281,7 @@ def upload(
     run_id: int,
     run_number: int,
     run_attempt: int,
-    gateway: GatewayRequest = gateway_request,
+    backend: BackendRequest = backend_request,
     sleep: Callable[[float], None] = sleep,
 ) -> dict[str, object] | None:
     query = urllib.parse.urlencode(
@@ -293,13 +293,13 @@ def upload(
             "run_attempt": run_attempt,
         }
     )
-    # Two minutes of backoff allow for the gateway's 60-second upload plus cleanup.
+    # Two minutes of backoff allow for the backend's 60-second upload plus cleanup.
     delays = iter((2, 4, 8, 16, 30, 30, 30))
     while True:
         if not current_pull(api, repo, pr, sha):
             return None
         try:
-            return gateway(base, token, "/api/environments?" + query, method="POST", data=data)
+            return backend(base, token, "/api/environments?" + query, method="POST", data=data)
         except urllib.error.HTTPError as error:
             if error.code == 409 and (stale_build(error) or not current_pull(api, repo, pr, sha)):
                 return None
@@ -331,12 +331,12 @@ def update_build(
     revision: tuple[int, int],
     state: str,
     *,
-    gateway: GatewayRequest = gateway_request,
+    backend: BackendRequest = backend_request,
 ) -> dict[str, object] | None:
     if not current_pull(api, repo, pr, sha):
         return None
     try:
-        return gateway(
+        return backend(
             base,
             token,
             f"/api/pull-requests/{pr}/build",
@@ -403,7 +403,7 @@ def lifecycle(
     base_url: str,
     token: str,
     *,
-    gateway: GatewayRequest = gateway_request,
+    backend: BackendRequest = backend_request,
 ) -> str | None:
     """Reconcile trusted close/reopen events with the PR's current GitHub state."""
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
@@ -416,13 +416,13 @@ def lifecycle(
         return None
     if not base_url or not token:
         return (
-            "Configuration needed: PLAYGROUND_URL and PLAYGROUND_DEPLOY_TOKEN. "
+            "Configuration needed: CLI_PLAYGROUND_URL and CLI_PLAYGROUND_DEPLOY_TOKEN. "
             "No hosted environments were cleaned or reopened."
         )
     base_url = public_origin(base_url)
     path = f"/api/pull-requests/{number}"
     if action == "reopened":
-        response = gateway(base_url, token, path + "/reopen", method="POST")
+        response = backend(base_url, token, path + "/reopen", method="POST")
         if positive(response.get("reopened")) != number:
             raise ValueError("invalid reopen acknowledgement")
         # A build can finish before the lifecycle job clears the closed tombstone.
@@ -447,9 +447,9 @@ def lifecycle(
             default=None,
         )
         if latest is not None:
-            publish(api, repo, positive(latest.get("id")), base_url, token, gateway=gateway)
+            publish(api, repo, positive(latest.get("id")), base_url, token, backend=backend)
         return f"PR #{number} reopened; reconciled the latest available build for its current head."
-    response = gateway(base_url, token, path, method="DELETE")
+    response = backend(base_url, token, path, method="DELETE")
     deleted = response.get("deleted")
     if type(deleted) is not int or deleted < 0:
         raise ValueError("invalid cleanup acknowledgement")
@@ -488,7 +488,7 @@ def publish(
     base_url: str,
     token: str,
     *,
-    gateway: GatewayRequest = gateway_request,
+    backend: BackendRequest = backend_request,
     sleep: Callable[[float], None] = sleep,
 ) -> str | None:
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
@@ -539,13 +539,13 @@ def publish(
         base_url = public_origin(base_url)
     run_url = f"https://github.com/{repo}/actions/runs/{run_id}"
     paragraphs = [
-        f"<!-- cli-playground run={revision[0]} attempt={revision[1]} -->\n### CLI playground",
+        f"<!-- cli-playground run={revision[0]} attempt={revision[1]} -->\n### cli-playground",
         f"Commit `{sha[:12]}` · [Build and artifacts]({run_url})",
     ]
     if not configured:
         paragraphs.append(
-            "**Configuration needed:** set repository variable `PLAYGROUND_URL` and secret "
-            "`PLAYGROUND_DEPLOY_TOKEN` after deploying the gateway. "
+            "**Configuration needed:** set repository variable `CLI_PLAYGROUND_URL` and secret "
+            "`CLI_PLAYGROUND_DEPLOY_TOKEN` after deploying the backend. "
             "Live previews are unavailable; binaries can be downloaded below."
         )
     completed = run.get("status") == "completed"
@@ -620,7 +620,7 @@ def publish(
                     run_id=run_id,
                     run_number=revision[0],
                     run_attempt=revision[1],
-                    gateway=gateway,
+                    backend=backend,
                     sleep=sleep,
                 )
                 if response is None:
@@ -630,11 +630,11 @@ def publish(
             except OSError, ValueError, KeyError, zipfile.BadZipFile, subprocess.SubprocessError:
                 publish_failed = True
                 paragraphs.append(
-                    "Publish failed: check the binary bundle and gateway configuration."
+                    "Publish failed: check the binary bundle and backend configuration."
                 )
     if configured and not url:
         status_response = update_build(
-            api, repo, base_url, token, sha, number, run_id, revision, state, gateway=gateway
+            api, repo, base_url, token, sha, number, run_id, revision, state, backend=backend
         )
         if status_response is None:
             return None
@@ -659,7 +659,7 @@ def publish(
                     "auto_merge": False,
                     "required_contexts": [],
                     "environment": f"cli-playground/pr-{number}",
-                    "description": f"CLI playground for PR #{number}",
+                    "description": f"cli-playground for PR #{number}",
                     "transient_environment": True,
                     "production_environment": False,
                 },
@@ -713,7 +713,7 @@ def main() -> None:
         if args.command == "build":
             paths = changed_paths(ROOT, args.base, args.head)
             names = select(discover(), paths, args.base, args.head, root=ROOT)
-            selection = "CLI playground builds: " + (", ".join(names) or "none")
+            selection = "cli-playground builds: " + (", ".join(names) or "none")
             print(selection)
             if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
                 with Path(summary).open("a") as stream:
@@ -736,8 +736,8 @@ def main() -> None:
                     shutil.copy2(ROOT / "target/release" / name, args.output / name)
         else:
             api = github_client()
-            base_url = os.environ.get("PLAYGROUND_URL", "")
-            token = os.environ.get("PLAYGROUND_DEPLOY_TOKEN", "")
+            base_url = os.environ.get("CLI_PLAYGROUND_URL", "")
+            token = os.environ.get("CLI_PLAYGROUND_DEPLOY_TOKEN", "")
             if args.command == "lifecycle":
                 message = lifecycle(api, args.repo, args.pr, args.action, base_url, token)
             else:
@@ -745,7 +745,9 @@ def main() -> None:
             if message:
                 print(message)
     except OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError:
-        sys.exit("Playground CI failed; check configuration, build logs, and artifact validity.")
+        sys.exit(
+            "cli-playground CI failed; check configuration, build logs, and artifact validity."
+        )
 
 
 if __name__ == "__main__":

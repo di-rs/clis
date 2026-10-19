@@ -33,8 +33,8 @@ TerminationReason = Literal[
     "output_limit",
     "exited",
     "provisioning_failed",
-    "orchestrator_restart",
-    "orchestrator_shutdown",
+    "supervisor_restart",
+    "supervisor_shutdown",
     "control_plane_lost",
 ]
 
@@ -60,7 +60,7 @@ class SandboxRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     artifact_id: UUID
     profile_id: str
-    command: tuple[str, ...] = ("/opt/playground/shell.sh",)
+    command: tuple[str, ...] = ("/opt/cli-playground/shell.sh",)
     env: dict[str, str] = {"TERM": "xterm-256color"}
     policy: dict[str, int] = {"max_seconds": 3600, "idle_seconds": 600, "disconnect_seconds": 120}
 

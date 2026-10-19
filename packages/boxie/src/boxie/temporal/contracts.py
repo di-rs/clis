@@ -4,7 +4,7 @@ from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict
 
-from boxie.domain.models import OrchestratorIdentity
+from boxie.domain.models import SupervisorIdentity
 
 TASK_QUEUE = "boxie-lifecycle"
 
@@ -29,9 +29,9 @@ class StopRequest(WorkflowPayload):
     reason: str
 
 
-def lifecycle_queue(identity: OrchestratorIdentity) -> str:
+def lifecycle_queue(identity: SupervisorIdentity) -> str:
     return f"boxie/{identity.installation_id}/{quote(identity.host_id, safe='')}/lifecycle"
 
 
-def maintenance_queue(identity: OrchestratorIdentity) -> str:
+def maintenance_queue(identity: SupervisorIdentity) -> str:
     return f"boxie/{identity.installation_id}/{quote(identity.host_id, safe='')}/maintenance"

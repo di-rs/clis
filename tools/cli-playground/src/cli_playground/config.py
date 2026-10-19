@@ -1,4 +1,4 @@
-"""Validated deployment configuration; one gateway worker owns the session limit."""
+"""Validated deployment configuration; one backend worker owns the session limit."""
 
 import hashlib
 import re
@@ -14,7 +14,7 @@ from cli_playground.artifacts import MAX_ARCHIVE, MAX_BINARY
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_prefix="PLAYGROUND_", frozen=True, populate_by_name=True, hide_input_in_errors=True
+        env_prefix="CLI_PLAYGROUND_", frozen=True, populate_by_name=True, hide_input_in_errors=True
     )
 
     data_dir: Path
@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     deploy_token: str = Field(min_length=1, repr=False)
     boxie_url: str
     boxie_credential_file: Path
-    boxie_profile: str = "playground"
+    boxie_profile: str = "cli-playground"
     preview_domain: str | None = None
     cleanup_interval_seconds: float = Field(default=60, gt=0, allow_inf_nan=False)
     max_binary_bytes: int = Field(default=MAX_BINARY, gt=0, le=MAX_BINARY)
@@ -74,7 +74,9 @@ class Settings(BaseSettings):
                 or parsed.scheme != "https"
                 or parsed.netloc != self.preview_domain
             ):
-                raise ValueError("PLAYGROUND_PREVIEW_DOMAIN must match the HTTPS control hostname")
+                raise ValueError(
+                    "CLI_PLAYGROUND_PREVIEW_DOMAIN must match the HTTPS control hostname"
+                )
         return self
 
     def preview_url(self, identifier: str, pr: int | None = None) -> str:

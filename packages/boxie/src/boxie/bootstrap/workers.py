@@ -1,4 +1,4 @@
-"""SDK workers embedded in the orchestrator, with isolated maintenance capacity."""
+"""SDK workers embedded in the supervisor, with isolated maintenance capacity."""
 
 import asyncio
 from collections.abc import AsyncIterator
@@ -9,11 +9,11 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from boxie.bootstrap.schedules import ensure_schedules
-from boxie.domain.lifecycle import OrchestratorObservation
+from boxie.domain.lifecycle import SupervisorObservation
 from boxie.persistence.outbox import PostgresOutbox
 from boxie.persistence.postgres import PostgresLifecycle
 from boxie.persistence.postgres_artifacts import PostgresArtifactStore
-from boxie.sandbox.execution.orchestrator import Orchestrator
+from boxie.sandbox.execution.supervisor import Supervisor
 from boxie.temporal.activities import LifecycleActivities, SafeActivityErrors
 from boxie.temporal.contracts import TASK_QUEUE, lifecycle_queue, maintenance_queue
 from boxie.temporal.dispatcher import CommandDelivery
@@ -39,17 +39,17 @@ def lifecycle_worker(
 async def embedded_workers(
     client: Client,
     repository: PostgresLifecycle,
-    orchestrator: Orchestrator,
+    supervisor: Supervisor,
     artifacts: PostgresArtifactStore,
 ) -> AsyncIterator[None]:
-    identity = orchestrator.config.identity
-    activities = LifecycleActivities(repository, orchestrator)
+    identity = supervisor.config.identity
+    activities = LifecycleActivities(repository, supervisor)
     delivery = CommandDelivery(
         PostgresOutbox(repository.sessions, identity), client, lifecycle_queue(identity)
     )
-    maintenance = MaintenanceActivities(delivery, repository, orchestrator, artifacts)
+    maintenance = MaintenanceActivities(delivery, repository, supervisor, artifacts)
 
-    async def project(observation: OrchestratorObservation) -> None:
+    async def project(observation: SupervisorObservation) -> None:
         before = await repository.get(observation.principal, observation.sandbox_id)
         accepted = await repository.record_observation(observation)
         request = await repository.load_request(observation.sandbox_id)
@@ -59,7 +59,7 @@ async def embedded_workers(
             SandboxLifecycle.reconcile, str(observation.event_version)
         )
 
-    orchestrator.observer = project
+    supervisor.observer = project
     try:
         async with (
             lifecycle_worker(client, activities, task_queue=lifecycle_queue(identity)),
@@ -74,7 +74,7 @@ async def embedded_workers(
             ),
         ):
             await ensure_schedules(client, identity)
-            await orchestrator.compact()
+            await supervisor.compact()
             async with asyncio.TaskGroup() as recovery:
                 relay = recovery.create_task(delivery.run())
                 try:
@@ -82,4 +82,4 @@ async def embedded_workers(
                 finally:
                     relay.cancel()
     finally:
-        orchestrator.observer = None
+        supervisor.observer = None

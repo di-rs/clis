@@ -19,10 +19,10 @@ from boxie.temporal.contracts import lifecycle_queue, maintenance_queue
 if TYPE_CHECKING:
     from temporalio.client import Client
 
-    from boxie.domain.models import OrchestratorIdentity
+    from boxie.domain.models import SupervisorIdentity
     from boxie.persistence.database import SessionFactory
-    from boxie.sandbox.execution.orchestrator import Orchestrator
-    from boxie.sandbox.transport.client import OrchestratorClient
+    from boxie.sandbox.execution.supervisor import Supervisor
+    from boxie.sandbox.transport.client import SupervisorClient
 
 
 def run_metrics_process(logs: LogDispatcher, role: str, run: Callable[[Metrics], None]) -> None:
@@ -36,7 +36,7 @@ def run_metrics_process(logs: LogDispatcher, role: str, run: Callable[[Metrics],
             listener = MetricsListener(
                 metrics,
                 os.environ.get("BOXIE_METRICS_HOST", "127.0.0.1"),
-                {"api": 9101, "orchestrator": 9103}[role],
+                {"api": 9101, "supervisor": 9103}[role],
             )
         except ValueError:
             logs.configuration_error()
@@ -69,9 +69,9 @@ async def sql_ready(sessions: SessionFactory) -> bool:
 
 async def api_dependencies(
     metrics: Metrics,
-    orchestrator: OrchestratorClient,
+    supervisor: SupervisorClient,
     temporal: Client,
-    identity: OrchestratorIdentity,
+    identity: SupervisorIdentity,
 ) -> None:
     async def namespace() -> bool:
         await temporal.workflow_service.describe_namespace(
@@ -109,7 +109,7 @@ async def api_dependencies(
         return await poller(TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY, maintenance_queue(identity))
 
     checks = (
-        ("orchestrator", orchestrator.ready),
+        ("supervisor", supervisor.ready),
         ("temporal", temporal.service_client.check_health),
         ("namespace", namespace),
         ("workflow_poller", workflow),
@@ -126,23 +126,22 @@ async def api_dependencies(
         await asyncio.sleep(15)
 
 
-async def orchestrator_cache(metrics: Metrics, orchestrator: Orchestrator) -> None:
+async def supervisor_cache(metrics: Metrics, supervisor: Supervisor) -> None:
     while True:
         remaining = [
-            max(0, execution.deadlines.lease - orchestrator.monotonic())
-            for identifier, execution in orchestrator.executions.items()
+            max(0, execution.deadlines.lease - supervisor.monotonic())
+            for identifier, execution in supervisor.executions.items()
             if execution.deadlines is not None
-            and identifier in orchestrator.records
-            and orchestrator.records[identifier].state.value
-            in ("accepted", "provisioning", "ready")
+            and identifier in supervisor.records
+            and supervisor.records[identifier].state.value in ("accepted", "provisioning", "ready")
         ]
         metrics.refresh_lease(len(remaining), min(remaining) if remaining else None)
-        metrics.dependency("execution", orchestrator.execution_ready)
+        metrics.dependency("execution", supervisor.execution_ready)
         await asyncio.sleep(1)
 
 
-async def orchestrator_dependencies(
-    metrics: Metrics, orchestrator: Orchestrator, sessions: SessionFactory
+async def supervisor_dependencies(
+    metrics: Metrics, supervisor: Supervisor, sessions: SessionFactory
 ) -> None:
     async def postgres() -> bool:
         return await sql_ready(sessions)
@@ -152,7 +151,7 @@ async def orchestrator_dependencies(
             async with asyncio.timeout(5):
                 await asyncio.gather(
                     _probe(metrics, "postgres", postgres),
-                    _probe(metrics, "docker", orchestrator.docker.ready),
+                    _probe(metrics, "docker", supervisor.docker.ready),
                 )
         except TimeoutError:
             pass

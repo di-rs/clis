@@ -65,7 +65,7 @@ def test_start_fault_matches_exact_route_and_restores_forwarding(
 
 
 @pytest.mark.parametrize("boundary", ["create", "start"])
-def test_injection_boundary_determines_real_orchestrator_finality(
+def test_injection_boundary_determines_real_supervisor_finality(
     tmp_path: Path, boundary: str
 ) -> None:
     async def exercise() -> None:

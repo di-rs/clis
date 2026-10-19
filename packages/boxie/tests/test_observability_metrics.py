@@ -46,21 +46,21 @@ def test_authoritative_snapshot_is_atomic_stale_and_restartable() -> None:
     assert b'boxie_provisioning_total{outcome="ready"} 0.0' in restarted.render()
     restarted.refresh(sample.model_copy(update={"cleanup_unknown": 1}))
     assert b"boxie_cleanup_oldest_age_seconds " not in restarted.render()
-    assert b"boxie_capacity_reserved " not in Metrics("orchestrator").render()
+    assert b"boxie_capacity_reserved " not in Metrics("supervisor").render()
 
 
 def test_bounded_labels_and_lease_unknown_empty_expired() -> None:
     Metrics, _ = metrics_type()
     now = [10.0]
-    metrics = Metrics("orchestrator", clock=lambda: now[0])
+    metrics = Metrics("supervisor", clock=lambda: now[0])
     metrics.refresh_lease(0, None)
-    assert b"boxie_orchestrator_control_lease_active 0.0" in metrics.render()
-    assert b"boxie_orchestrator_control_lease_remaining_seconds " not in metrics.render()
+    assert b"boxie_supervisor_control_lease_active 0.0" in metrics.render()
+    assert b"boxie_supervisor_control_lease_remaining_seconds " not in metrics.render()
     metrics.refresh_lease(2, 3)
     now[0] = 14
-    assert b"boxie_orchestrator_control_lease_remaining_seconds 0.0" in metrics.render()
+    assert b"boxie_supervisor_control_lease_remaining_seconds 0.0" in metrics.render()
     now[0] = 16
-    assert b"boxie_orchestrator_control_lease_active " not in metrics.render()
+    assert b"boxie_supervisor_control_lease_active " not in metrics.render()
     for identifier in ("sandbox-secret", "request-secret", "/v1/sandboxes/secret"):
         metrics.http_completed(identifier, identifier, "200", 0.1)
     body = metrics.render()
@@ -116,7 +116,7 @@ def test_private_listener_collision_recovers_and_closes() -> None:
         occupied.bind(("127.0.0.1", 0))
         occupied.listen()
         port = occupied.getsockname()[1]
-        listener = MetricsListener(Metrics("orchestrator"), "127.0.0.1", port, retry_seconds=0.02)
+        listener = MetricsListener(Metrics("supervisor"), "127.0.0.1", port, retry_seconds=0.02)
         listener.start()
         assert listener.address is None
     try:
@@ -128,7 +128,7 @@ def test_private_listener_collision_recovers_and_closes() -> None:
             assert b"boxie_provisioning_total" in response.read()
     finally:
         listener.close()
-    replacement = MetricsListener(Metrics("orchestrator"), "127.0.0.1", port)
+    replacement = MetricsListener(Metrics("supervisor"), "127.0.0.1", port)
     replacement.start()
     try:
         deadline = time.monotonic() + 2
@@ -240,7 +240,7 @@ def test_dependency_probes_follow_configured_namespace_and_owned_queues() -> Non
     from types import SimpleNamespace
     from uuid import uuid4
 
-    from boxie.domain.models import OrchestratorIdentity
+    from boxie.domain.models import SupervisorIdentity
     from boxie.observability.metrics import Metrics
     from boxie.observability.process import api_dependencies
     from boxie.temporal.contracts import lifecycle_queue, maintenance_queue
@@ -254,7 +254,7 @@ def test_dependency_probes_follow_configured_namespace_and_owned_queues() -> Non
     )
 
     async def exercise() -> None:
-        identity = OrchestratorIdentity(uuid4(), "configured host")
+        identity = SupervisorIdentity(uuid4(), "configured host")
         seen: list[tuple[str, str, int]] = []
         observed = asyncio.Event()
 
@@ -284,9 +284,9 @@ def test_dependency_probes_follow_configured_namespace_and_owned_queues() -> Non
                 describe_namespace=namespace, describe_task_queue=queue
             ),
         )
-        orchestrator: Any = SimpleNamespace(ready=ready)
+        supervisor: Any = SimpleNamespace(ready=ready)
         metrics = Metrics("api")
-        task = asyncio.create_task(api_dependencies(metrics, orchestrator, temporal, identity))
+        task = asyncio.create_task(api_dependencies(metrics, supervisor, temporal, identity))
         try:
             await asyncio.wait_for(observed.wait(), 1)
             await asyncio.sleep(0)

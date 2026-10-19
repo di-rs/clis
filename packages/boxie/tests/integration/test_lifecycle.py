@@ -16,12 +16,12 @@ import pytest
 from boxie.persistence.models import (
     Artifact,
     CapacitySlot,
-    OrchestratorObservationRecord,
     Sandbox,
     SandboxArtifactRef,
+    SupervisorObservationRecord,
 )
 from boxie.temporal.workflows import SandboxLifecycle
-from boxie_test_support.orchestrator import bundle
+from boxie_test_support.supervisor import bundle
 from sqlalchemy import and_, func
 from sqlmodel import col, select
 from temporal_support import tls
@@ -39,11 +39,11 @@ def assert_journal_failure(logs: str) -> None:
     assert any(
         event.get("schema_version") == 1
         and event.get("service") == "boxie"
-        and event.get("role") == "orchestrator"
+        and event.get("role") == "supervisor"
         and event.get("level") == "ERROR"
         and event.get("event") == "journal_failed"
         for event in events
-    ), "structured orchestrator journal failure event missing"
+    ), "structured supervisor journal failure event missing"
 
 
 @pytest.fixture
@@ -116,7 +116,7 @@ async def accounting(stack: LifecycleStack, identifier: str, count: int) -> None
 async def pending_after_restart(
     stack: LifecycleStack, client: httpx.AsyncClient, identifier: str
 ) -> None:
-    boot = await asyncio.to_thread(stack.orchestrator_boot)
+    boot = await asyncio.to_thread(stack.supervisor_boot)
     # Failed journal saves deliberately suppress push reports. The workflow's
     # 30s authenticated inspection (or cleanup retry) binds the new boot and
     # repairs SQL; startup or a fixed 3s delay is not a projection barrier.
@@ -127,22 +127,21 @@ async def pending_after_restart(
             await accounting(stack, identifier, 1)
             rows = await stack.rows(
                 select(
-                    Sandbox.orchestrator_boot_id,
+                    Sandbox.supervisor_boot_id,
                     Sandbox.state,
                     Sandbox.cleanup_pending,
-                    OrchestratorObservationRecord.removal_confirmed,
+                    SupervisorObservationRecord.removal_confirmed,
                 )
                 .outerjoin(
-                    OrchestratorObservationRecord,
+                    SupervisorObservationRecord,
                     and_(
-                        col(OrchestratorObservationRecord.sandbox_id) == col(Sandbox.id),
-                        col(OrchestratorObservationRecord.boot_id)
-                        == col(Sandbox.orchestrator_boot_id),
+                        col(SupervisorObservationRecord.sandbox_id) == col(Sandbox.id),
+                        col(SupervisorObservationRecord.boot_id) == col(Sandbox.supervisor_boot_id),
                     ),
                 )
                 .where(col(Sandbox.id) == UUID(identifier))
             )
-            if rows and rows[0]["orchestrator_boot_id"] == boot:
+            if rows and rows[0]["supervisor_boot_id"] == boot:
                 assert not rows[0]["removal_confirmed"]
                 if rows[0]["state"] != "terminating" or not rows[0]["cleanup_pending"]:
                     await asyncio.sleep(0.2)
@@ -168,7 +167,7 @@ def test_process_loss_failed_delete_and_history_replay(lifecycle_stack: Lifecycl
             timeout=30,
         ) as client:
             artifact = await publish(client)
-            for service in ("api", "temporal", "orchestrator"):
+            for service in ("api", "temporal", "supervisor"):
                 key = uuid4().hex
                 identifier = await create(client, artifact, key)
                 original = await until(client, identifier, "ready")
@@ -213,7 +212,7 @@ def test_process_loss_failed_delete_and_history_replay(lifecycle_stack: Lifecycl
     asyncio.run(exercise())
 
 
-def test_successful_artifact_commit_lost_ack_collector_overlap_and_orchestrator_restart(
+def test_successful_artifact_commit_lost_ack_collector_overlap_and_supervisor_restart(
     lifecycle_stack: LifecycleStack,
 ) -> None:
     async def exercise() -> None:
@@ -270,9 +269,9 @@ def test_successful_artifact_commit_lost_ack_collector_overlap_and_orchestrator_
                 assert not upload.done() and storage.exists()
                 # Entry without completion proves the real collector waits behind
                 # the publication still awaiting its successful COMMIT response.
-                await asyncio.to_thread(stack.process, "orchestrator", "kill")
+                await asyncio.to_thread(stack.process, "supervisor", "kill")
                 stack.fault("hold_commit", False)
-                await asyncio.to_thread(stack.process, "orchestrator", "start")
+                await asyncio.to_thread(stack.process, "supervisor", "start")
                 await asyncio.to_thread(stack.wait_ready)
                 response = await upload
                 assert response.status_code == 503
@@ -306,7 +305,7 @@ def test_successful_artifact_commit_lost_ack_collector_overlap_and_orchestrator_
 
 
 @pytest.mark.parametrize("unknown_create", [False, True])
-def test_sustained_journal_failure_across_orchestrator_restart(
+def test_sustained_journal_failure_across_supervisor_restart(
     lifecycle_stack: LifecycleStack,
     unknown_create: bool,
 ) -> None:
@@ -329,7 +328,7 @@ def test_sustained_journal_failure_across_orchestrator_restart(
                 await until(client, identifier, "ready")
             await accounting(stack, identifier, 1)
             assert stack.children()
-            await asyncio.to_thread(stack.process, "orchestrator", "kill")
+            await asyncio.to_thread(stack.process, "supervisor", "kill")
             stack.env["BOXIE_TEST_DATA_MODE"] = "ro"
             stack.fault("hold_create", False)
             await asyncio.to_thread(
@@ -338,7 +337,7 @@ def test_sustained_journal_failure_across_orchestrator_restart(
                 "--detach",
                 "--no-deps",
                 "--force-recreate",
-                "orchestrator",
+                "supervisor",
             )
             async with asyncio.timeout(40):
                 while stack.children():
@@ -346,11 +345,11 @@ def test_sustained_journal_failure_across_orchestrator_restart(
             # Profiles alone remain writable for bootstrap; execution.json and its
             # parent stay read-only. Physical deletion proves startup reached cleanup.
             logs = await asyncio.to_thread(
-                stack.runtime_command, "logs", "--no-color", "--no-log-prefix", "orchestrator"
+                stack.runtime_command, "logs", "--no-color", "--no-log-prefix", "supervisor"
             )
             assert_journal_failure(logs)
-            await asyncio.to_thread(stack.process, "orchestrator", "kill")
-            await asyncio.to_thread(stack.process, "orchestrator", "start")
+            await asyncio.to_thread(stack.process, "supervisor", "kill")
+            await asyncio.to_thread(stack.process, "supervisor", "start")
             await pending_after_restart(stack, client, identifier)
             assert (await client.get("/readyz")).status_code == 503
             stack.env["BOXIE_TEST_DATA_MODE"] = "rw"
@@ -360,7 +359,7 @@ def test_sustained_journal_failure_across_orchestrator_restart(
                 "--detach",
                 "--no-deps",
                 "--force-recreate",
-                "orchestrator",
+                "supervisor",
             )
             if unknown_create:
                 # Discovery/deletion during a failed save was never saved to the journal. A new
@@ -397,9 +396,9 @@ def test_unknown_create_ack_loss_recovers_with_persisted_discovery(
                     await asyncio.sleep(0.1)
             await accounting(stack, identifier, 1)
             assert stack.children()
-            await asyncio.to_thread(stack.process, "orchestrator", "kill")
+            await asyncio.to_thread(stack.process, "supervisor", "kill")
             stack.fault("hold_create", False)
-            await asyncio.to_thread(stack.process, "orchestrator", "start")
+            await asyncio.to_thread(stack.process, "supervisor", "start")
             await until(client, identifier, "terminated")
             await accounting(stack, identifier, 0)
             assert not stack.children()

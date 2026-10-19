@@ -17,9 +17,9 @@ from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from boxie.domain.errors import BoxieError
 from boxie.domain.models import (
-    OrchestratorIdentity,
     Principal,
     SandboxState,
+    SupervisorIdentity,
     TerminationReason,
 )
 from boxie.persistence.database import database as session_database
@@ -32,7 +32,7 @@ from boxie.persistence.models import (
 )
 from boxie.persistence.postgres import PostgresLifecycle
 from boxie_test_support.execution import launch_execution
-from boxie_test_support.orchestrator import Clock, bundle
+from boxie_test_support.supervisor import Clock, bundle
 from boxie_test_support.terminal_network import network
 from database_support import add_check
 from database_support import counts as counts
@@ -91,13 +91,13 @@ def test_identical_retries_old_snapshot_and_conflicting_key(
             data["shell"]["image_digest"] = "example.org/shell@sha256:" + "4" * 64
             config.profiles_file.write_text(json.dumps(data))
             # A fresh trusted resolver reads the operator's new profile file.
-            from boxie.sandbox.transport.client import OrchestratorClient
+            from boxie.sandbox.transport.client import SupervisorClient
 
             async with network(tmp_path / "reloaded-resolver") as harness:
                 harness.config.profiles_file.write_text(config.profiles_file.read_text())
-                harness.orchestrator.profiles.reload()
-                async with OrchestratorClient(
-                    harness.orchestrator_url, b"orchestrator-test-secret"
+                harness.supervisor.profiles.reload()
+                async with SupervisorClient(
+                    harness.supervisor_url, b"supervisor-test-secret"
                 ) as resolver:
                     life.resolver = resolver
                     retry = await life.submit(OWNER, "same", spec)
@@ -195,7 +195,7 @@ def test_alembic_upgrades_are_idempotent_and_failed_revision_is_atomic(
                 "capacity_slots",
                 "sandbox_artifact_refs",
                 "outbox",
-                "orchestrator_observations",
+                "supervisor_observations",
             } <= set(inspect(connection).get_table_names())
         (migrations / "versions" / "failed_revision.py").write_text(
             "from alembic import op\n"
@@ -223,15 +223,15 @@ def test_only_fenced_confirmed_removal_releases_capacity_and_references(
     postgres_dsn: str, tmp_path: Path
 ) -> None:
     async def exercise() -> None:
-        from boxie.domain.lifecycle import OrchestratorObservation
+        from boxie.domain.lifecycle import SupervisorObservation
 
         async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
             view = await life.submit(OWNER, "fence", await upload(artifacts))
             assert not view.cleanup_pending
             boot = uuid4()
-            assert hasattr(life, "bind_orchestrator_boot"), "authenticated boot binding missing"
-            assert await life.bind_orchestrator_boot(OWNER, config.identity, view.id, 1, None, boot)
-            observation = OrchestratorObservation(
+            assert hasattr(life, "bind_supervisor_boot"), "authenticated boot binding missing"
+            assert await life.bind_supervisor_boot(OWNER, config.identity, view.id, 1, None, boot)
+            observation = SupervisorObservation(
                 view.id,
                 OWNER,
                 config.identity,
@@ -252,7 +252,7 @@ def test_only_fenced_confirmed_removal_releases_capacity_and_references(
                 replace(confirmed, boot_id=uuid4()),
                 replace(confirmed, generation=2),
                 replace(confirmed, principal=Principal("other")),
-                replace(confirmed, identity=OrchestratorIdentity(uuid4(), config.identity.host_id)),
+                replace(confirmed, identity=SupervisorIdentity(uuid4(), config.identity.host_id)),
                 replace(confirmed, event_version=1),
             ):
                 assert not await life.confirm_removed(bad)
@@ -274,7 +274,7 @@ def test_retention_never_ages_out_pending_cleanup_or_undelivered_commands(
     postgres_dsn: str, tmp_path: Path
 ) -> None:
     async def exercise() -> None:
-        from boxie.domain.lifecycle import OrchestratorObservation
+        from boxie.domain.lifecycle import SupervisorObservation
 
         async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
             spec = await upload(artifacts)
@@ -283,9 +283,9 @@ def test_retention_never_ages_out_pending_cleanup_or_undelivered_commands(
             await life.terminate(OWNER, pending.id, TerminationReason.REQUESTED)
             boot = uuid4()
             assert hasattr(life, "purge_retained"), "safe retention missing"
-            await life.bind_orchestrator_boot(OWNER, config.identity, cleaned.id, 1, None, boot)
+            await life.bind_supervisor_boot(OWNER, config.identity, cleaned.id, 1, None, boot)
             await life.confirm_removed(
-                OrchestratorObservation(
+                SupervisorObservation(
                     cleaned.id,
                     OWNER,
                     config.identity,
@@ -535,7 +535,7 @@ def test_final_start_guard_serializes_stop_and_validates_stored_request(
 
             view = await life.submit(OWNER, "guard", await upload(artifacts))
             boot = uuid4()
-            await life.bind_orchestrator_boot(OWNER, config.identity, view.id, 1, None, boot)
+            await life.bind_supervisor_boot(OWNER, config.identity, view.id, 1, None, boot)
             request = EnsureRequest.from_request(await life.load_request(view.id))
             guard = PostgresStartGuard(sessions, timeout=1)
             entered, release = asyncio.Event(), asyncio.Event()
@@ -581,7 +581,7 @@ def test_start_guard_timeout_and_lost_connection_retain_reservations(
         async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
             view = await life.submit(OWNER, "timeout", await upload(artifacts))
             boot = uuid4()
-            await life.bind_orchestrator_boot(OWNER, config.identity, view.id, 1, None, boot)
+            await life.bind_supervisor_boot(OWNER, config.identity, view.id, 1, None, boot)
             request = EnsureRequest.from_request(await life.load_request(view.id))
             guard = PostgresStartGuard(sessions, timeout=0.05)
 
@@ -625,13 +625,13 @@ def test_start_guard_timeout_and_lost_connection_retain_reservations(
     asyncio.run(exercise())
 
 
-def test_orchestrator_and_postgres_release_only_after_reconciled_absence(
+def test_supervisor_and_postgres_release_only_after_reconciled_absence(
     postgres_dsn: str, tmp_path: Path
 ) -> None:
     async def exercise() -> None:
         from boxie.domain.lifecycle import EnsureRequest
         from boxie.persistence.start_guard import PostgresStartGuard
-        from boxie.sandbox.execution.orchestrator import Orchestrator
+        from boxie.sandbox.execution.supervisor import Supervisor
         from boxie_test_support.execution import Daemon
         from lifecycle_support import settled
 
@@ -640,29 +640,29 @@ def test_orchestrator_and_postgres_release_only_after_reconciled_absence(
             clock = Clock()
             clock.now = datetime.now(UTC)
             daemon = Daemon()
-            orchestrator = Orchestrator(
+            supervisor = Supervisor(
                 config, daemon, artifacts.path, PostgresStartGuard(sessions), clock, clock.monotonic
             )
-            await life.bind_orchestrator_boot(
-                OWNER, config.identity, view.id, 1, None, orchestrator.boot_id
+            await life.bind_supervisor_boot(
+                OWNER, config.identity, view.id, 1, None, supervisor.boot_id
             )
             request = EnsureRequest.from_request(await life.load_request(view.id))
-            await launch_execution(orchestrator, request)
-            observation = await settled(orchestrator, request.ref, SandboxState.READY)
+            await launch_execution(supervisor, request)
+            observation = await settled(supervisor, request.ref, SandboxState.READY)
             assert await life.record_observation(observation)
             assert await counts(sessions) == (1, 1, 1, 1)
             daemon.unreachable = True
-            pending = await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
+            pending = await supervisor.remove(request.ref, TerminationReason.REQUESTED)
             assert pending.cleanup_pending
             assert await life.record_observation(pending)
             assert await counts(sessions) == (1, 1, 1, 1)
             daemon.unreachable = False
-            await orchestrator.reconcile()
-            removed = await orchestrator.inspect(request.ref)
+            await supervisor.reconcile()
+            removed = await supervisor.inspect(request.ref)
             assert removed.removal_confirmed
             assert await life.confirm_removed(removed)
             assert await counts(sessions) == (1, 0, 0, 1)
-            await orchestrator.close()
+            await supervisor.close()
 
     asyncio.run(exercise())
 
@@ -677,7 +677,7 @@ def test_start_guard_requires_retained_artifact_reference(
         async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
             view = await life.submit(OWNER, "reference", await upload(artifacts))
             boot = uuid4()
-            await life.bind_orchestrator_boot(OWNER, config.identity, view.id, 1, None, boot)
+            await life.bind_supervisor_boot(OWNER, config.identity, view.id, 1, None, boot)
             request = EnsureRequest.from_request(await life.load_request(view.id))
             guard = PostgresStartGuard(sessions)
             assert await guard.start_allowed(request, boot)
@@ -702,7 +702,7 @@ def test_journal_outage_expires_container_but_retains_sql_accounting_until_journ
     async def exercise() -> None:
         from boxie.domain.lifecycle import EnsureRequest
         from boxie.persistence.start_guard import PostgresStartGuard
-        from boxie.sandbox.execution.orchestrator import Orchestrator
+        from boxie.sandbox.execution.supervisor import Supervisor
         from boxie_test_support.execution import Daemon
         from lifecycle_support import settled
 
@@ -711,23 +711,23 @@ def test_journal_outage_expires_container_but_retains_sql_accounting_until_journ
             clock = Clock()
             clock.now = datetime.now(UTC)
             daemon = Daemon()
-            orchestrator = Orchestrator(
+            supervisor = Supervisor(
                 config, daemon, artifacts.path, PostgresStartGuard(sessions), clock, clock.monotonic
             )
-            await life.bind_orchestrator_boot(
-                OWNER, config.identity, view.id, 1, None, orchestrator.boot_id
+            await life.bind_supervisor_boot(
+                OWNER, config.identity, view.id, 1, None, supervisor.boot_id
             )
             request = EnsureRequest.from_request(await life.load_request(view.id))
-            await launch_execution(orchestrator, request)
-            ready = await settled(orchestrator, request.ref, SandboxState.READY)
+            await launch_execution(supervisor, request)
+            ready = await settled(supervisor, request.ref, SandboxState.READY)
             assert await life.record_observation(ready)
-            await orchestrator.start()
-            original_save = orchestrator.journal.save
+            await supervisor.start()
+            original_save = supervisor.journal.save
 
             def unavailable() -> None:
                 raise OSError("persistent journal storage outage")
 
-            monkeypatch.setattr(orchestrator.journal, "save", unavailable)
+            monkeypatch.setattr(supervisor.journal, "save", unavailable)
             try:
                 clock.advance(90)
                 for _ in range(200):
@@ -735,21 +735,21 @@ def test_journal_outage_expires_container_but_retains_sql_accounting_until_journ
                         break
                     await asyncio.sleep(0.001)
                 assert daemon.deleted_ids == [ready.container_id]
-                pending = await orchestrator.inspect(request.ref)
+                pending = await supervisor.inspect(request.ref)
                 assert pending.cleanup_pending and not pending.removal_confirmed
-                assert not orchestrator.execution_ready
+                assert not supervisor.execution_ready
                 assert await life.record_observation(pending)
                 assert await counts(sessions) == (1, 1, 1, 1)
                 with pytest.raises(ValueError, match="explicit physical removal"):
                     await life.confirm_removed(pending)
-                monkeypatch.setattr(orchestrator.journal, "save", original_save)
-                removed = await settled(orchestrator, request.ref, SandboxState.TERMINATED)
+                monkeypatch.setattr(supervisor.journal, "save", original_save)
+                removed = await settled(supervisor, request.ref, SandboxState.TERMINATED)
                 assert removed.removal_confirmed and not removed.cleanup_pending
                 assert await life.confirm_removed(removed)
                 assert await counts(sessions) == (1, 0, 0, 1)
             finally:
-                monkeypatch.setattr(orchestrator.journal, "save", original_save)
-                await orchestrator.close()
+                monkeypatch.setattr(supervisor.journal, "save", original_save)
+                await supervisor.close()
 
     asyncio.run(exercise())
 
@@ -762,7 +762,7 @@ def test_terminal_receipt_survives_prior_boot_and_retry_row_purge(
 
     from boxie.domain.lifecycle import EnsureRequest
     from boxie.persistence.start_guard import PostgresStartGuard
-    from boxie.sandbox.execution.orchestrator import Orchestrator
+    from boxie.sandbox.execution.supervisor import Supervisor
     from boxie_test_support.execution import Daemon
     from lifecycle_support import settled
 
@@ -772,17 +772,15 @@ def test_terminal_receipt_survives_prior_boot_and_retry_row_purge(
             clock, daemon = Clock(), Daemon()
             clock.now = datetime.now(UTC)
             guard = PostgresStartGuard(sessions)
-            orchestrator = Orchestrator(
-                config, daemon, artifacts.path, guard, clock, clock.monotonic
-            )
-            await life.bind_orchestrator_boot(
-                OWNER, config.identity, view.id, 1, None, orchestrator.boot_id
+            supervisor = Supervisor(config, daemon, artifacts.path, guard, clock, clock.monotonic)
+            await life.bind_supervisor_boot(
+                OWNER, config.identity, view.id, 1, None, supervisor.boot_id
             )
             request = EnsureRequest.from_request(await life.load_request(view.id))
-            await launch_execution(orchestrator, request)
-            await settled(orchestrator, request.ref, SandboxState.READY)
+            await launch_execution(supervisor, request)
+            await settled(supervisor, request.ref, SandboxState.READY)
             await life.terminate(OWNER, view.id, TerminationReason.REQUESTED)
-            observation = await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
+            observation = await supervisor.remove(request.ref, TerminationReason.REQUESTED)
             assert await life.record_observation(observation)
             assert await guard.terminal_receipt(request)
 
@@ -792,8 +790,8 @@ def test_terminal_receipt_survives_prior_boot_and_retry_row_purge(
             assert not await guard.terminal_receipt(
                 replace(request, absolute_deadline=request.absolute_deadline + timedelta(seconds=1))
             )
-            assert await guard.initialization(request, orchestrator.boot_id) is None
-            await orchestrator.close()
+            assert await guard.initialization(request, supervisor.boot_id) is None
+            await supervisor.close()
             if purged:
                 async with sessions.begin() as session:
                     await session.exec(
@@ -807,8 +805,8 @@ def test_terminal_receipt_survives_prior_boot_and_retry_row_purge(
                         .values(cleaned_at=func.clock_timestamp() - timedelta(days=8))
                     )
                 await life.purge_retained()
-            restarted = Orchestrator(config, daemon, artifacts.path, guard, clock, clock.monotonic)
-            assert restarted.boot_id != orchestrator.boot_id
+            restarted = Supervisor(config, daemon, artifacts.path, guard, clock, clock.monotonic)
+            assert restarted.boot_id != supervisor.boot_id
             await restarted.compact()
             assert not restarted.records
             with pytest.raises(BoxieError):
@@ -824,7 +822,7 @@ def test_failed_restart_journal_projection_waits_for_local_inspection(
 ) -> None:
     from boxie.domain.lifecycle import EnsureRequest
     from boxie.persistence.start_guard import PostgresStartGuard
-    from boxie.sandbox.execution.orchestrator import Orchestrator
+    from boxie.sandbox.execution.supervisor import Supervisor
     from boxie.temporal.activities import LifecycleActivities
     from boxie_test_support.execution import Daemon
     from temporalio.exceptions import ApplicationError
@@ -835,15 +833,13 @@ def test_failed_restart_journal_projection_waits_for_local_inspection(
             clock, daemon = Clock(), Daemon()
             clock.now = datetime.now(UTC)
             guard = PostgresStartGuard(sessions)
-            original = Orchestrator(config, daemon, artifacts.path, guard, clock, clock.monotonic)
+            original = Supervisor(config, daemon, artifacts.path, guard, clock, clock.monotonic)
             first = LifecycleActivities(life, original)
             await first.ensure_sandbox(str(view.id))
             old = await original.inspect(
                 EnsureRequest.from_request(await life.load_request(view.id)).ref
             )
-            replacement = Orchestrator(
-                config, daemon, artifacts.path, guard, clock, clock.monotonic
-            )
+            replacement = Supervisor(config, daemon, artifacts.path, guard, clock, clock.monotonic)
             save = replacement.journal.save
 
             def unavailable() -> None:
