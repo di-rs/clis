@@ -51,6 +51,18 @@ class Repository:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content)
 
+    def lock(self, packages: dict[str, list[str]]) -> None:
+        packages = {"cli-log": []} | packages
+        self.write(
+            "Cargo.lock",
+            "version = 4\n"
+            + "".join(
+                f'[[package]]\nname = "{name}"\nversion = "0.1.0"\n'
+                f"dependencies = {json.dumps(dependencies)}\n"
+                for name, dependencies in packages.items()
+            ),
+        )
+
     def write_suite(self, directory: str, binary: str, *, generate: bool = False) -> None:
         self.write(
             f"{directory}/benches/cli-bench.toml",
@@ -128,6 +140,9 @@ def repo(tmp_path: Path) -> Repository:
         repository.write_suite(directory, name, generate=name == "tailr")
     repository.write("utils/cli-log/Cargo.toml", '[package]\nname = "cli-log"\n')
     repository.write("utils/cli-log/src/lib.rs", "// logging\n")
+    repository.lock(
+        {name: ["cli-log"] for name in ("biggie", "echor", "tailr", "wcr")} | {"cli-log": []}
+    )
     repository.write("outside/benches/cli-bench.toml", 'binary = "outside"\n')
     repository.git("init", "-b", "main")
     repository.git("config", "user.name", "Selector Tests")

@@ -138,7 +138,9 @@ The [workflow](../.github/workflows/cli-bench.yml) runs for pull requests target
 or adding the override label starts selection. There are no benchmark runs on
 pushes, merges, or a schedule. A small selection job examines the whole PR's diff
 from its merge base, then Linux and
-macOS jobs build only the selected CLI packages (plus Biggie when needed).
+macOS jobs build only the selected CLI packages from the PR head commit
+(plus Biggie when needed). Selection reads manifests and the lockfile from that
+same commit, even if the target branch has added packages since the PR branched.
 An empty selection skips both benchmark jobs.
 
 | Changed files | Automatic selection |
@@ -146,15 +148,20 @@ An empty selection skips both benchmark jobs.
 | CLI source, manifest, or build script | That package's suites. |
 | Suite TOML | That suite. |
 | Biggie implementation | Biggie and suites using generated input. |
-| Shared Rust implementations, including CLI logging | All suites, conservatively. |
-| Root Cargo manifest/lockfile, Rust toolchain, or `.cargo/` configuration | All suites, conservatively. |
+| Shared Rust implementations, including CLI logging | Suites whose packages depend on the changed library, directly or transitively. |
+| Cargo lockfile | Suites whose packages have changed resolved dependencies. |
+| Root Cargo manifest, Rust toolchain, or `.cargo/` configuration | All suites, conservatively. |
 | Benchmark runner, selector, benchmark workflow, or Python version pin | All suites. |
 | Documentation, correctness tests, or Python development-tool configuration | No native benchmarks. Ordinary CI checks still run. |
 
-Global Rust changes deliberately over-select: a dev-only lockfile edit can run
-all suites. This keeps selection simple without pretending that unchanged CLI
-source means unchanged dependencies. Removed suites are not run; renamed source
-files count on both sides of the rename.
+Lockfile selection compares each package's dependency graph at the PR merge base
+and head. Adding a dependency for one CLI does not select unrelated CLIs. Version,
+source, checksum and transitive dependency changes count; comments and Cargo's
+dependency-name disambiguation do not. The lockfile does not distinguish active
+features, target platforms or development dependencies, so a change within a
+CLI's graph can still select it even if that dependency is unused by its release
+build. Biggie dependency changes also select suites that generate inputs.
+Removed suites are not run; renamed source files count on both sides of the rename.
 
 Automatic checks use one measurement and no warmup. To request full measurements
 for specific CLIs, put this standalone line in the PR description:
