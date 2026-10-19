@@ -9,13 +9,13 @@ import sys
 from pathlib import Path
 from typing import TypedDict, cast
 
+from cli_check.affected import affected_packages, changed_paths
 from cli_check.workspace import discover, load_toml
 from pydantic import BaseModel, ConfigDict, Field
 
 ROOT = Path(__file__).resolve().parents[2]
 GLOBAL_PATHS = {
     "Cargo.toml",
-    "Cargo.lock",
     "rust-toolchain.toml",
     ".python-version",
     "tools/cli-bench/bench.py",
@@ -85,39 +85,18 @@ def parse_request(body: object) -> frozenset[str] | None:
     return names
 
 
-def production_change(path: str, directory: str) -> bool:
-    prefix = "" if directory == "." else directory + "/"
-    if not path.startswith(prefix):
-        return False
-    relative = path.removeprefix(prefix)
-    return relative in {"Cargo.toml", "build.rs"} or relative.startswith("src/")
-
-
 def affected_suites(suites: list[Suite], base: str, head: str) -> list[Suite]:
-    diff = subprocess.run(
-        ["git", "diff", "--name-only", "--no-renames", "-z", f"{base}...{head}", "--"],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-    )
-    paths = [os.fsdecode(path) for path in diff.stdout.split(b"\0") if path]
+    paths = changed_paths(ROOT, base, head)
     for path in paths:
         if path in GLOBAL_PATHS or path.startswith((".cargo/", "tools/cli-check/src/")):
             return suites
-        parts = path.split("/")
-        if len(parts) > 2 and parts[0] == "utils" and production_change(path, f"utils/{parts[1]}"):
-            return suites
-    generator_changed = any(
-        production_change(path, suite.directory)
-        for suite in suites
-        if suite.package == "biggie"
-        for path in paths
-    )
+    affected = affected_packages(ROOT, base, head, paths)
     return [
         suite
         for suite in suites
-        if (generator_changed and (suite.package == "biggie" or suite.generate))
-        or any(path == suite.path or production_change(path, suite.directory) for path in paths)
+        if ("biggie" in affected and suite.generate)
+        or suite.package in affected
+        or suite.path in paths
     ]
 
 
