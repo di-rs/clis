@@ -417,7 +417,7 @@ class PostgresLifecycle:
             raise ValueError("explicit physical removal confirmation required")
         return await self.record_observation(observation)
 
-    async def purge_retained(self) -> None:
+    async def purge_retained(self) -> int:
         """Keep retry identity seven days after cleanup; never age out ownership."""
         async with self.sessions() as session, session.begin():
             cutoff = func.clock_timestamp() - timedelta(days=7)
@@ -444,3 +444,4 @@ class PostgresLifecycle:
                     await session.delete(observation)
                     await session.flush()
                 await session.delete(row)
+        return len(rows)

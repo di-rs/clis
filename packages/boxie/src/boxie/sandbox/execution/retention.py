@@ -10,7 +10,12 @@ MAX_RECORDS = 128
 
 async def compact(orchestrator: Orchestrator) -> None:
     for record in list(orchestrator.records.values()):
-        if not orchestrator.runtimes[record.id].settled:
+        runtime = orchestrator.runtimes.get(record.id)
+        if (
+            runtime is None
+            or orchestrator.records.get(record.id) is not record
+            or not runtime.settled
+        ):
             continue
         version = record.event_version
         try:
