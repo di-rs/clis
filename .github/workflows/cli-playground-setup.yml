@@ -86,154 +86,154 @@ jobs:
       SINGLE_HOST_CONFIG: ${{ vars.SINGLE_HOST_CONFIG }}
       CLOUDFLARE_DNS_API_TOKEN: ${{ secrets.CLOUDFLARE_DNS_API_TOKEN }}
     steps:
-      - name: 🔎 Require a complete workflow retry
-        env:
-          SOURCE_ATTEMPT: ${{ needs.source.outputs.attempt }}
-        run: |
-          if [[ -z $SOURCE_ATTEMPT || $SOURCE_ATTEMPT != "$GITHUB_RUN_ATTEMPT" ]]; then
-            echo 'Use Re-run all jobs or start a new workflow run to select current master.' >&2
-            exit 1
-          fi
-      - name: 📥 Check out reviewed infrastructure source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: ${{ needs.source.outputs.sha }}
-          persist-credentials: 'false'
-      - name: 🐍 Set up uv and Python
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
-        with:
-          version: 0.13.1
-          enable-cache: 'false'
-      - name: 📍 Resolve workspace packages
-        id: projects
-        run: |
-          set -euo pipefail
-          boxie=$(uv workspace dir --package boxie)
-          playground=$(uv workspace dir --package cli-playground)
-          printf 'boxie=%s\nplayground=%s\n' "$boxie" "$playground" >> "$GITHUB_OUTPUT"
-      - name: 📦 Install locked Python workspace dependencies
-        run: uv sync --locked --all-packages
-      - name: ☁️ Set up Pulumi infrastructure tooling
-        uses: pulumi/setup-pulumi@b374ceb6168550de27c6eba92e01c1a774040e11
-        with:
-          pulumi-version: 3.268.0
-      - name: 📦 Prepare committed installation files
-        env:
-          SOURCE_SHA: ${{ needs.source.outputs.sha }}
-          BOXIE_SOURCE_SHA: ${{ needs.boxie.outputs.source_sha }}
-          GATEWAY_SOURCE_SHA: ${{ needs.gateway.outputs.source_sha }}
-          SANDBOX_SOURCE_SHA: ${{ needs.sandbox.outputs.source_sha }}
-          COLLECTOR_SOURCE_SHA: ${{ needs.collector.outputs.source_sha }}
-          BOXIE_RUNTIME_IMAGE: ${{ needs.boxie.outputs.image }}
-          PLAYGROUND_IMAGE: ${{ needs.gateway.outputs.image }}
-          PLAYGROUND_SANDBOX_IMAGE: ${{ needs.sandbox.outputs.image }}
-          OBS_COLLECTOR_IMAGE: ${{ needs.collector.outputs.image }}
-          BOXIE_DIR: ${{ steps.projects.outputs.boxie }}
-          PLAYGROUND_DIR: ${{ steps.projects.outputs.playground }}
-        run: |
-          set -euo pipefail
-          umask 077
-          for source in "$BOXIE_SOURCE_SHA" "$GATEWAY_SOURCE_SHA" "$SANDBOX_SOURCE_SHA" "$COLLECTOR_SOURCE_SHA"; do
-              [[ $source == "$SOURCE_SHA" ]]
-          done
-          [[ $(git rev-parse HEAD) == "$SOURCE_SHA" ]]
-          mkdir -p .installation/environment .installation/boxie .installation/playground
-          cp -a infra/environments/single-host/. .installation/environment/
-          cp -a "$BOXIE_DIR/infra/." .installation/boxie/
-          cp -a "$PLAYGROUND_DIR/infra/." .installation/playground/
-          printf '%s\n' "$SOURCE_SHA" > .installation/revision
-          for key in BOXIE_RUNTIME_IMAGE PLAYGROUND_IMAGE PLAYGROUND_SANDBOX_IMAGE OBS_COLLECTOR_IMAGE; do
-              value=${!key}
-              [[ $value =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
-          done
-          printf 'BOXIE_RUNTIME_IMAGE=%s\nOBS_COLLECTOR_IMAGE=%s\n' "$BOXIE_RUNTIME_IMAGE" "$OBS_COLLECTOR_IMAGE" > .installation/boxie-image.env
-          printf 'PLAYGROUND_IMAGE=%s\nPLAYGROUND_SANDBOX_IMAGE=%s\n' "$PLAYGROUND_IMAGE" "$PLAYGROUND_SANDBOX_IMAGE" > .installation/playground-image.env
-      - name: ☁️ Provision shared infrastructure
-        working-directory: infra/environments/single-host
-        run: |
-          set -euo pipefail
-          umask 077
-          pulumi login "$PULUMI_BACKEND_URL" --non-interactive
-          pulumi stack select production --create --secrets-provider passphrase --non-interactive
-          uv run --locked python - <<'PYCODE'
-          import json
-          import os
-          from pathlib import Path
-          import yaml
-          path = Path('Pulumi.production.yaml')
-          data = yaml.safe_load(path.read_text()) if path.exists() else {}
-          config = data.setdefault('config', {})
-          settings = json.loads(os.environ['SINGLE_HOST_CONFIG'])
-          allowed = {'domain', 'cloudflareZoneId', 'cloudflareAccountId', 'grafanaHostname', 'temporalHostname', 'operatorTeamName', 'operatorEmails', 'sshCidrs', 'sshPublicKey', 'location', 'serverType', 'diskSize', 'protect', 'acmeEmail'}
-          if not isinstance(settings, dict) or set(settings) - allowed:
-              raise SystemExit('Invalid platform configuration keys')
-          config.update({'clis:' + key: value for key, value in settings.items() if key != 'acmeEmail'})
-          path.write_text(yaml.safe_dump(data))
-          PYCODE
-          pulumi preview --refresh --non-interactive --diff --suppress-outputs
-          pulumi up --yes --refresh --non-interactive --suppress-outputs
-      - name: 🔐 Render private setup inputs and install over pinned SSH
-        env:
-          REGISTRY_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          umask 077
-          private=$(mktemp -d)
-          trap 'rm -rf "$private" .installation' EXIT
-          (cd infra/environments/single-host && pulumi stack output --json --show-secrets) > "$private/outputs.json"
-          uv run --locked python - "$private/outputs.json" .installation "$private" <<'PYCODE'
-          import ipaddress
-          import json
-          import os
-          import runpy
-          import sys
-          from pathlib import Path
-          output = json.loads(Path(sys.argv[1]).read_text())
-          target = Path(sys.argv[2])
-          private = Path(sys.argv[3])
-          settings = json.loads(os.environ['SINGLE_HOST_CONFIG'])
-          host = str(ipaddress.ip_address(output['ipv4']))
-          host_key = output['sshHostPublicKey']
-          if not host_key.startswith('ssh-ed25519 '):
-              raise SystemExit('Expected a pinned Ed25519 host key')
-          render = runpy.run_path('infra/environments/single-host/installation.py')['render_inputs']
-          render({
-              'PLAYGROUND_DOMAIN': settings['domain'],
-              'ACME_EMAIL': settings['acmeEmail'],
-              'CLOUDFLARE_DNS_API_TOKEN': os.environ['CLOUDFLARE_DNS_API_TOKEN'],
-              'OPERATOR_GRAFANA_HOSTNAME': settings['grafanaHostname'],
-              'OPERATOR_TEMPORAL_HOSTNAME': settings['temporalHostname'],
-              'OPERATOR_TEAM_NAME': settings['operatorTeamName'],
-              'OPERATOR_GRAFANA_AUDIENCE': output['grafanaAudience'],
-              'OPERATOR_TEMPORAL_AUDIENCE': output['temporalAudience'],
-              'OPERATOR_TUNNEL_ID': output['operatorTunnelId'],
-          }, output['operatorTunnelCredentials'], target)
-          for name, value in (
-              ('host', host),
-              ('key', output['sshPrivateKey']),
-              ('known_hosts', f'{host} {host_key}'),
-          ):
-              path = private / name
-              path.write_text(value + '\n')
-              path.chmod(0o600)
-          PYCODE
-          mkdir -m 0700 .installation/registry
-          printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$(printf '%s:%s' "$GITHUB_ACTOR" "$REGISTRY_TOKEN" | base64 -w0)" > .installation/registry/config.json
-          [[ $GITHUB_RUN_ID =~ ^[0-9]+$ && $GITHUB_RUN_ATTEMPT =~ ^[0-9]+$ ]]
-          host=$(cat "$private/host")
-          cat > "$private/config" <<SSH
-          Host deployment
-            HostName $host
-            User root
-            IdentityFile $private/key
-            IdentitiesOnly yes
-            UserKnownHostsFile $private/known_hosts
-            StrictHostKeyChecking yes
-            BatchMode yes
-            ConnectTimeout 15
-          SSH
-          remote="/run/clis-setup-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          ssh -F "$private/config" deployment 'cloud-init status --wait >/dev/null'
-          ssh -F "$private/config" deployment "install -d -m 0700 $remote"
-          scp -F "$private/config" -r .installation/. deployment:"$remote/"
-          ssh -F "$private/config" deployment "set -e; trap 'rm -rf $remote' EXIT; DOCKER_CONFIG=$remote/registry bash $remote/environment/install.sh $remote"
+    - name: 🔎 Require a complete workflow retry
+      env:
+        SOURCE_ATTEMPT: ${{ needs.source.outputs.attempt }}
+      run: |
+        if [[ -z $SOURCE_ATTEMPT || $SOURCE_ATTEMPT != "$GITHUB_RUN_ATTEMPT" ]]; then
+          echo 'Use Re-run all jobs or start a new workflow run to select current master.' >&2
+          exit 1
+        fi
+    - name: 📥 Check out reviewed infrastructure source
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ needs.source.outputs.sha }}
+        persist-credentials: 'false'
+    - name: 🐍 Set up uv and Python
+      uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+      with:
+        version: 0.13.1
+        enable-cache: 'false'
+    - name: 📍 Resolve workspace packages
+      id: projects
+      run: |
+        set -euo pipefail
+        boxie=$(uv workspace dir --package boxie)
+        playground=$(uv workspace dir --package cli-playground)
+        printf 'boxie=%s\nplayground=%s\n' "$boxie" "$playground" >> "$GITHUB_OUTPUT"
+    - name: 📦 Install locked Python workspace dependencies
+      run: uv sync --locked --all-packages
+    - name: ☁️ Set up Pulumi infrastructure tooling
+      uses: pulumi/setup-pulumi@b374ceb6168550de27c6eba92e01c1a774040e11
+      with:
+        pulumi-version: 3.268.0
+    - name: 📦 Prepare committed installation files
+      env:
+        SOURCE_SHA: ${{ needs.source.outputs.sha }}
+        BOXIE_SOURCE_SHA: ${{ needs.boxie.outputs.source_sha }}
+        GATEWAY_SOURCE_SHA: ${{ needs.gateway.outputs.source_sha }}
+        SANDBOX_SOURCE_SHA: ${{ needs.sandbox.outputs.source_sha }}
+        COLLECTOR_SOURCE_SHA: ${{ needs.collector.outputs.source_sha }}
+        BOXIE_RUNTIME_IMAGE: ${{ needs.boxie.outputs.image }}
+        PLAYGROUND_IMAGE: ${{ needs.gateway.outputs.image }}
+        PLAYGROUND_SANDBOX_IMAGE: ${{ needs.sandbox.outputs.image }}
+        OBS_COLLECTOR_IMAGE: ${{ needs.collector.outputs.image }}
+        BOXIE_DIR: ${{ steps.projects.outputs.boxie }}
+        PLAYGROUND_DIR: ${{ steps.projects.outputs.playground }}
+      run: |
+        set -euo pipefail
+        umask 077
+        for source in "$BOXIE_SOURCE_SHA" "$GATEWAY_SOURCE_SHA" "$SANDBOX_SOURCE_SHA" "$COLLECTOR_SOURCE_SHA"; do
+            [[ $source == "$SOURCE_SHA" ]]
+        done
+        [[ $(git rev-parse HEAD) == "$SOURCE_SHA" ]]
+        mkdir -p .installation/environment .installation/boxie .installation/playground
+        cp -a infra/environments/single-host/. .installation/environment/
+        cp -a "$BOXIE_DIR/infra/." .installation/boxie/
+        cp -a "$PLAYGROUND_DIR/infra/." .installation/playground/
+        printf '%s\n' "$SOURCE_SHA" > .installation/revision
+        for key in BOXIE_RUNTIME_IMAGE PLAYGROUND_IMAGE PLAYGROUND_SANDBOX_IMAGE OBS_COLLECTOR_IMAGE; do
+            value=${!key}
+            [[ $value =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
+        done
+        printf 'BOXIE_RUNTIME_IMAGE=%s\nOBS_COLLECTOR_IMAGE=%s\n' "$BOXIE_RUNTIME_IMAGE" "$OBS_COLLECTOR_IMAGE" > .installation/boxie-image.env
+        printf 'PLAYGROUND_IMAGE=%s\nPLAYGROUND_SANDBOX_IMAGE=%s\n' "$PLAYGROUND_IMAGE" "$PLAYGROUND_SANDBOX_IMAGE" > .installation/playground-image.env
+    - name: ☁️ Provision shared infrastructure
+      working-directory: infra/environments/single-host
+      run: |
+        set -euo pipefail
+        umask 077
+        pulumi login "$PULUMI_BACKEND_URL" --non-interactive
+        pulumi stack select production --create --secrets-provider passphrase --non-interactive
+        uv run --locked python - <<'PYCODE'
+        import json
+        import os
+        from pathlib import Path
+        import yaml
+        path = Path('Pulumi.production.yaml')
+        data = yaml.safe_load(path.read_text()) if path.exists() else {}
+        config = data.setdefault('config', {})
+        settings = json.loads(os.environ['SINGLE_HOST_CONFIG'])
+        allowed = {'domain', 'cloudflareZoneId', 'cloudflareAccountId', 'grafanaHostname', 'temporalHostname', 'operatorTeamName', 'operatorEmails', 'sshCidrs', 'sshPublicKey', 'location', 'serverType', 'diskSize', 'protect', 'acmeEmail'}
+        if not isinstance(settings, dict) or set(settings) - allowed:
+            raise SystemExit('Invalid platform configuration keys')
+        config.update({'clis:' + key: value for key, value in settings.items() if key != 'acmeEmail'})
+        path.write_text(yaml.safe_dump(data))
+        PYCODE
+        pulumi preview --refresh --non-interactive --diff --suppress-outputs
+        pulumi up --yes --refresh --non-interactive --suppress-outputs
+    - name: 🔐 Render private setup inputs and install over pinned SSH
+      env:
+        REGISTRY_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        umask 077
+        private=$(mktemp -d)
+        trap 'rm -rf "$private" .installation' EXIT
+        (cd infra/environments/single-host && pulumi stack output --json --show-secrets) > "$private/outputs.json"
+        uv run --locked python - "$private/outputs.json" .installation "$private" <<'PYCODE'
+        import ipaddress
+        import json
+        import os
+        import runpy
+        import sys
+        from pathlib import Path
+        output = json.loads(Path(sys.argv[1]).read_text())
+        target = Path(sys.argv[2])
+        private = Path(sys.argv[3])
+        settings = json.loads(os.environ['SINGLE_HOST_CONFIG'])
+        host = str(ipaddress.ip_address(output['ipv4']))
+        host_key = output['sshHostPublicKey']
+        if not host_key.startswith('ssh-ed25519 '):
+            raise SystemExit('Expected a pinned Ed25519 host key')
+        render = runpy.run_path('infra/environments/single-host/installation.py')['render_inputs']
+        render({
+            'PLAYGROUND_DOMAIN': settings['domain'],
+            'ACME_EMAIL': settings['acmeEmail'],
+            'CLOUDFLARE_DNS_API_TOKEN': os.environ['CLOUDFLARE_DNS_API_TOKEN'],
+            'OPERATOR_GRAFANA_HOSTNAME': settings['grafanaHostname'],
+            'OPERATOR_TEMPORAL_HOSTNAME': settings['temporalHostname'],
+            'OPERATOR_TEAM_NAME': settings['operatorTeamName'],
+            'OPERATOR_GRAFANA_AUDIENCE': output['grafanaAudience'],
+            'OPERATOR_TEMPORAL_AUDIENCE': output['temporalAudience'],
+            'OPERATOR_TUNNEL_ID': output['operatorTunnelId'],
+        }, output['operatorTunnelCredentials'], target)
+        for name, value in (
+            ('host', host),
+            ('key', output['sshPrivateKey']),
+            ('known_hosts', f'{host} {host_key}'),
+        ):
+            path = private / name
+            path.write_text(value + '\n')
+            path.chmod(0o600)
+        PYCODE
+        mkdir -m 0700 .installation/registry
+        printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$(printf '%s:%s' "$GITHUB_ACTOR" "$REGISTRY_TOKEN" | base64 -w0)" > .installation/registry/config.json
+        [[ $GITHUB_RUN_ID =~ ^[0-9]+$ && $GITHUB_RUN_ATTEMPT =~ ^[0-9]+$ ]]
+        host=$(cat "$private/host")
+        cat > "$private/config" <<SSH
+        Host deployment
+          HostName $host
+          User root
+          IdentityFile $private/key
+          IdentitiesOnly yes
+          UserKnownHostsFile $private/known_hosts
+          StrictHostKeyChecking yes
+          BatchMode yes
+          ConnectTimeout 15
+        SSH
+        remote="/run/clis-setup-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+        ssh -F "$private/config" deployment 'cloud-init status --wait >/dev/null'
+        ssh -F "$private/config" deployment "install -d -m 0700 $remote"
+        scp -F "$private/config" -r .installation/. deployment:"$remote/"
+        ssh -F "$private/config" deployment "set -e; trap 'rm -rf $remote' EXIT; DOCKER_CONFIG=$remote/registry bash $remote/environment/install.sh $remote"

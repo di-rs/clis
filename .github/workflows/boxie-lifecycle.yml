@@ -174,42 +174,19 @@ jobs:
         with:
           version: 0.13.1
           enable-cache: false
-      - name: 📍 Resolve workspace packages
-        id: projects
-        run: |
-          set -euo pipefail
-          boxie=$(uv workspace dir --package boxie)
-          playground=$(uv workspace dir --package cli-playground)
-          printf 'boxie=%s\nplayground=%s\n' "$boxie" "$playground" >> "$GITHUB_OUTPUT"
       - name: 🔎 Check changed inputs
         id: selection
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          python3 - <<'PYSELECT'
-          import json
-          import os
-          import pathlib
-          import subprocess
-
-          with open(os.environ["GITHUB_EVENT_PATH"]) as source:
-              event = json.load(source)
-          base = event.get("pull_request", {}).get("base", {}).get("sha") or event.get("before")
-          head = os.environ.get("SELECTED_SHA") or os.environ["GITHUB_SHA"]
-          changed = True
-          if base and set(base) != {"0"}:
-              comparison = f"{base}...{head}" if "pull_request" in event else f"{base}..{head}"
-              result = subprocess.run(["git", "diff", "--name-only", "--no-renames", "-z", comparison], check=True, capture_output=True)
-              paths = [os.fsdecode(value) for value in result.stdout.split(b"\0") if value]
-              root = pathlib.Path.cwd().resolve()
-              packages = [pathlib.Path(os.environ[name]).resolve().relative_to(root).as_posix() for name in ("BOXIE_DIR", "PLAYGROUND_DIR")]
-              owner = os.environ.get("OWNER_PACKAGE")
-              if owner:
-                  packages = packages[:1] if owner == "boxie" else packages[1:]
-              global_inputs = {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "pyproject.toml", "uv.lock", ".python-version", ".dockerignore"}
-              changed = any(path in global_inputs or path.startswith(".github/workflows/") or (not owner and path.endswith(".rs")) or any(path.startswith(directory + "/") for directory in packages) for path in paths)
-          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-              print(f"changed={str(changed).lower()}", file=output)
-          PYSELECT
-        env:
-          BOXIE_DIR: ${{ steps.projects.outputs.boxie }}
-          PLAYGROUND_DIR: ${{ steps.projects.outputs.playground }}
+          changed=true
+          if [[ -n "$BASE_SHA" ]]; then
+            boxie=$(uv workspace dir --package boxie)
+            playground=$(uv workspace dir --package cli-playground)
+            changes=$(git diff --name-only --no-renames "$BASE_SHA...$GITHUB_SHA" -- \
+              Cargo.toml Cargo.lock rust-toolchain.toml pyproject.toml uv.lock .python-version .dockerignore .github/workflows \
+              ':(glob)**/*.rs' "$boxie" "$playground")
+            [[ -n "$changes" ]] || changed=false
+          fi
+          printf 'changed=%s\n' "$changed" >> "$GITHUB_OUTPUT"

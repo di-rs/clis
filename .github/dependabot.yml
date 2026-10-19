@@ -1,9 +1,7 @@
 version: 2
 updates:
   - package-ecosystem: cargo
-    directories:
-      - /
-      - /tests/consumers
+    directories: [/, /tests/consumers]
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
@@ -13,14 +11,10 @@ updates:
     groups:
       security-updates:
         applies-to: security-updates
-        patterns:
-          - '*'
+        patterns: ['*']
       rust-dependencies:
-        patterns:
-          - '*'
-        update-types:
-          - minor
-          - patch
+        patterns: ['*']
+        update-types: [minor, patch]
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -40,15 +34,12 @@ updates:
     groups:
       security-updates:
         applies-to: security-updates
-        patterns:
-          - '*'
+        patterns: ['*']
       python-dependencies:
-        patterns:
-          - '*'
-        update-types:
-          - minor
-          - patch
+        patterns: ['*']
+        update-types: [minor, patch]
   - package-ecosystem: npm
+    directories: ['**/*']
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
@@ -58,13 +49,7 @@ updates:
     groups:
       security-updates:
         applies-to: security-updates
-        patterns:
-          - '*'
+        patterns: ['*']
       frontend-dependencies:
-        patterns:
-          - '*'
-        update-types:
-          - minor
-          - patch
-    directories:
-      - '**/*'
+        patterns: ['*']
+        update-types: [minor, patch]

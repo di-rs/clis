@@ -1,6 +1,5 @@
 """Workflow contracts for privileged setup and ordinary Compose releases."""
 
-import json
 import os
 import subprocess
 import sys
@@ -127,14 +126,6 @@ def test_release_uses_one_queue_current_master_and_direct_ssh(filename: str, app
 def test_gateway_release_does_not_build_sandbox() -> None:
     gateway = workflow("release")
     assert "sandbox" not in gateway["jobs"]
-    assert "Sandbox.Dockerfile*" not in str(
-        gateway["jobs"]["source"]["steps"][-1]["env"]["OWNER_INPUTS"]
-    )
-    sandbox = workflow("sandbox-release")
-    assert "Sandbox.Dockerfile*" in str(
-        sandbox["jobs"]["source"]["steps"][-1]["env"]["OWNER_INPUTS"]
-    )
-    assert "fixtures/" in str(sandbox["jobs"]["source"]["steps"][-1]["env"]["OWNER_INPUTS"])
 
 
 @pytest.mark.parametrize(
@@ -147,6 +138,8 @@ def test_gateway_release_does_not_build_sandbox() -> None:
         ("cli-playground-sandbox-release.yml", "fixtures/help.md", True),
         ("cli-playground-sandbox-release.yml", "README.md", False),
         ("cli-playground-sandbox-release.yml", "frontend/src/help.md", False),
+        ("cli-playground-sandbox-release.yml", "Sandbox.Dockerfile", True),
+        ("cli-playground-release.yml", "Sandbox.Dockerfile", False),
         ("boxie-lifecycle.yml", "fixtures/help.md", True),
     ],
 )
@@ -166,12 +159,19 @@ def test_runtime_selection_follows_component_inputs(
 
     git("init", "-q")
     (tmp_path / "README.md").write_text("workspace\n")
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.uv]\npreview-features = ["workspace-dir"]\n'
+        '[tool.uv.workspace]\nmembers = ["services/boxie", "apps/playground"]\n'
+    )
+    boxie, playground = tmp_path / "services/boxie", tmp_path / "apps/playground"
+    for name, directory in (("boxie", boxie), ("cli-playground", playground)):
+        directory.mkdir(parents=True)
+        (directory / "pyproject.toml").write_text(
+            f'[project]\nname = "{name}"\nversion = "0.0.0"\n[tool.uv]\npackage = false\n'
+        )
     git("add", ".")
     git_commit(tmp_path)
     base = git("rev-parse", "HEAD")
-    boxie, playground = tmp_path / "services/boxie", tmp_path / "apps/playground"
-    boxie.mkdir(parents=True)
-    playground.mkdir(parents=True)
     owner = boxie if filename == "boxie-release.yml" else playground
     path = owner / relative_path
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -179,8 +179,6 @@ def test_runtime_selection_follows_component_inputs(
     git("add", ".")
     git_commit(tmp_path)
     head = git("rev-parse", "HEAD")
-    event = tmp_path / "event.json"
-    event.write_text(json.dumps({"before": base}))
     output = tmp_path / "output"
     result = subprocess.run(
         ["bash", "-euo", "pipefail", "-c", selection["run"]],
@@ -188,11 +186,9 @@ def test_runtime_selection_follows_component_inputs(
         env=env
         | selection["env"]
         | {
-            "BOXIE_DIR": str(boxie),
-            "PLAYGROUND_DIR": str(playground),
+            "BASE_SHA": base,
             "SELECTED_SHA": head,
             "GITHUB_SHA": head,
-            "GITHUB_EVENT_PATH": str(event),
             "GITHUB_OUTPUT": str(output),
         },
         text=True,

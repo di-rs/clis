@@ -37,49 +37,24 @@ jobs:
         with:
           version: 0.13.1
           enable-cache: false
-      - name: 📍 Resolve workspace packages
-        id: projects
-        run: |
-          set -euo pipefail
-          boxie=$(uv workspace dir --package boxie)
-          playground=$(uv workspace dir --package cli-playground)
-          printf 'boxie=%s\nplayground=%s\n' "$boxie" "$playground" >> "$GITHUB_OUTPUT"
       - name: 🔎 Select affected runtime component
         id: selection
         env:
-          OWNER_PACKAGE: cli-playground
+          BASE_SHA: ${{ github.event.before }}
           SELECTED_SHA: ${{ steps.revision.outputs.sha }}
-          BOXIE_DIR: ${{ steps.projects.outputs.boxie }}
-          PLAYGROUND_DIR: ${{ steps.projects.outputs.playground }}
-          OWNER_INPUTS: '["Sandbox.Dockerfile*", "shell.sh", "fixtures/**", "infra/profiles/playground.json", "infra/playground_infra/installation.py", "infra/sandbox-release.sh"]'
         run: |
           set -euo pipefail
-          python3 - <<'PYSELECT'
-          import json
-          import fnmatch
-          import os
-          import pathlib
-          import subprocess
-
-          with open(os.environ["GITHUB_EVENT_PATH"]) as source:
-              event = json.load(source)
-          base = event.get("pull_request", {}).get("base", {}).get("sha") or event.get("before")
-          head = os.environ.get("SELECTED_SHA") or os.environ["GITHUB_SHA"]
-          changed = True
-          if base and set(base) != {"0"}:
-              comparison = f"{base}...{head}" if "pull_request" in event else f"{base}..{head}"
-              result = subprocess.run(["git", "diff", "--name-only", "--no-renames", "-z", comparison], check=True, capture_output=True)
-              paths = [os.fsdecode(value) for value in result.stdout.split(b"\0") if value]
-              root = pathlib.Path.cwd().resolve()
-              packages = [pathlib.Path(os.environ[name]).resolve().relative_to(root).as_posix() for name in ("BOXIE_DIR", "PLAYGROUND_DIR")]
-              owner = os.environ.get("OWNER_PACKAGE")
-              if owner:
-                  packages = packages[:1] if owner == "boxie" else packages[1:]
-              global_inputs = {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "pyproject.toml", "uv.lock", ".python-version", ".dockerignore"}
-              changed = any(path in global_inputs or path.startswith(".github/workflows/") or (not owner and path.endswith(".rs")) or any(path.startswith(directory + "/") and (not owner or any(fnmatch.fnmatchcase(path[len(directory) + 1:], pattern) for pattern in json.loads(os.environ["OWNER_INPUTS"]))) for directory in packages) for path in paths)
-          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-              print(f"changed={str(changed).lower()}", file=output)
-          PYSELECT
+          changed=true
+          if [[ -n "$BASE_SHA" && ! "$BASE_SHA" =~ ^0+$ ]]; then
+            package=$(uv workspace dir --package cli-playground)
+            changes=$(git diff --name-only --no-renames "$BASE_SHA..$SELECTED_SHA" -- \
+              Cargo.toml Cargo.lock rust-toolchain.toml pyproject.toml uv.lock .python-version .dockerignore .github/workflows \
+              "$package/Sandbox.Dockerfile*" "$package/shell.sh" \
+              "$package/fixtures" "$package/infra/profiles/playground.json" \
+              "$package/infra/playground_infra/installation.py" "$package/infra/sandbox-release.sh")
+            [[ -n "$changes" ]] || changed=false
+          fi
+          printf 'changed=%s\n' "$changed" >> "$GITHUB_OUTPUT"
   build:
     needs: source
     uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
@@ -119,13 +94,6 @@ jobs:
         with:
           version: 0.13.1
           enable-cache: false
-      - name: 📍 Resolve workspace packages
-        id: projects
-        run: |
-          set -euo pipefail
-          boxie=$(uv workspace dir --package boxie)
-          playground=$(uv workspace dir --package cli-playground)
-          printf 'boxie=%s\nplayground=%s\n' "$boxie" "$playground" >> "$GITHUB_OUTPUT"
       - name: 🚀 Copy profile files and recreate the orchestrator
         env:
           SOURCE_SHA: ${{ needs.source.outputs.sha }}
@@ -135,10 +103,9 @@ jobs:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           GHCR_TOKEN: ${{ github.token }}
-          BOXIE_DIR: ${{ steps.projects.outputs.boxie }}
-          PLAYGROUND_DIR: ${{ steps.projects.outputs.playground }}
         run: |
           set -euo pipefail
+          playground=$(uv workspace dir --package cli-playground)
           umask 077
           [[ $SOURCE_SHA =~ ^[a-f0-9]{40}$ && $BUILT_SHA == "$SOURCE_SHA" ]]
           [[ $(git rev-parse HEAD) == "$SOURCE_SHA" ]]
@@ -162,7 +129,7 @@ jobs:
           SSH
           remote="/run/clis-sandbox-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           ssh -F "$private/config" deployment "install -d -m 0700 /opt/clis/playground $remote"
-          scp -F "$private/config" -r "${PLAYGROUND_DIR}/infra/." deployment:/opt/clis/playground/
+          scp -F "$private/config" -r "${playground}/infra/." deployment:/opt/clis/playground/
           gateway=$(ssh -F "$private/config" deployment "sed -n 's/^PLAYGROUND_IMAGE=//p' /etc/clis/playground-image.env")
           [[ $gateway =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
           printf 'PLAYGROUND_IMAGE=%s\nPLAYGROUND_SANDBOX_IMAGE=%s\n' "$gateway" "$SANDBOX_IMAGE" > "$private/image.env"
