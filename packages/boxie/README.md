@@ -243,7 +243,7 @@ starts a separate two-minute deadline. Cleanup operations are bounded and run
 independently so an unresponsive container does not block other deadlines.
 Terminals close when termination begins; slots and artifacts remain reserved
 until Docker deletion is confirmed. The supervisor survives consumer API restarts;
-an supervisor restart may end terminals.
+a supervisor restart may end terminals.
 
 Local intent records are written with file and directory fsync before Docker
 creation. Deterministic
@@ -350,7 +350,7 @@ to relays, which serialize them for the next connection.
 
 Boxie runs two processes: API and supervisor. The supervisor embeds SDK
 workers on installation/host-specific lifecycle and maintenance queues. Its OS
-owner lock excludes a second process using the same data directory. An
+owner lock excludes a second process using the same data directory. A
 supervisor restart also restarts its workers and ends existing terminals.
 
 Provisioning activities await the local execution. Normal cleanup retries,
@@ -370,4 +370,4 @@ or application retry clocks.
 
 Boxie owns bounded JSON logging, private metrics and the [operator stack](infra/observability/README.md). Its service code, PostgreSQL migration, Temporal instrumentation and infrastructure all live under this directory. The API and supervisor have separate registries; the supervisor embeds lifecycle and maintenance workers. Domain and consumer contracts remain independent of telemetry.
 
-CLI cli-playground keeps its existing lightweight logging. It does not install Boxie, share its telemetry implementation, join its metrics network or add dashboards. A shared library would add a cross-service release boundary without a current second long-lived consumer.
+cli-playground keeps its existing lightweight logging. It does not install Boxie, share its telemetry implementation, join its metrics network or add dashboards. A shared library would add a cross-service release boundary without a current second long-lived consumer.

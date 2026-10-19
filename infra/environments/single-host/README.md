@@ -127,7 +127,7 @@ Run either release manually from Actions on `master`:
 
 - [🚀 cli-playground Release](../../../.github/workflows/cli-playground-release.yml)
   builds and deploys the cli-playground backend and frontend together in the backend image.
-- [🚀 Boxie and Sandbox Release](../../../.github/workflows/boxie-release.yml)
+- [🚀 Boxie and cli-playground Sandbox Release](../../../.github/workflows/boxie-release.yml)
   builds the Boxie image and sandbox from one commit, then updates Boxie followed
   by the sandbox profile. It does not release the cli-playground application.
 
