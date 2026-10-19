@@ -214,8 +214,12 @@ class FakeGitHub(GitHub[TokenAuthStrategy]):
         return json.dumps(response).encode()
 
 
-def test_unconfigured_publish_reports_artifact_links_without_fake_live_url() -> None:
+@pytest.mark.parametrize(
+    "name", ["🏗️ Playground PR binary builds", "🏗️ Playground CLI builds for PR #7"]
+)
+def test_unconfigured_publish_reports_artifact_links_without_fake_live_url(name: str) -> None:
     github = FakeGitHub()
+    github.run["name"] = name
     body = preview_ci.publish(github, REPO, 500, "", "")
     assert body is not None
     assert "Configuration needed" in body
@@ -264,8 +268,12 @@ def test_pr_closure_during_batch_upload_stops_github_writes() -> None:
     assert github.writes == []
 
 
-def test_batch_uses_one_upload_one_preview_and_constant_github_requests() -> None:
+@pytest.mark.parametrize(
+    "name", ["🏗️ Playground PR binary builds", "🏗️ Playground CLI builds for PR #7"]
+)
+def test_batch_uses_one_upload_one_preview_and_constant_github_requests(name: str) -> None:
     github = FakeGitHub()
+    github.run["name"] = name
     github.payload = archive([f"cli{index:04}" for index in range(1024)])
     identifier = "a" * 32
     url = f"https://{identifier}.play.example/p/{identifier}"
@@ -280,6 +288,7 @@ def test_batch_uses_one_upload_one_preview_and_constant_github_requests() -> Non
     )
     assert len(github.requests) <= 15
     assert body is not None and body.count(url) == 1 and len(body) < 1000
+    assert (f"repos/{REPO}/issues/7/comments", {"body": body}) in github.writes
     assert "| CLI |" not in body
     deployments = [value for path, value in github.writes if path.endswith("/deployments")]
     assert len(deployments) == 1

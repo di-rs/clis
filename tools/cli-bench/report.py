@@ -455,7 +455,6 @@ def generate(
         or run.get("status") != "completed"
         or run.get("conclusion") in ("cancelled", "skipped")
         or run.get("path") != WORKFLOW
-        or run.get("name") != "⏱️ CLI benchmark execution"
         or table(run.get("repository")).get("full_name") != repo
     ):
         return None
