@@ -170,9 +170,11 @@ uv run --locked pytest packages/boxie/tests/test_packaging.py -m integration
 
 These checks build each service sdist/wheel, install it with only locked runtime
 dependencies into a fresh environment, import outside the checkout, serve actual
-installed UI assets, and resolve all four Compose manifests. Missing prerequisites
-fail. The PR frontend job runs this gate. Image builds and native Linux/gVisor
-smoke are separate checks; ordinary Docker/runc is not gVisor evidence.
+installed UI assets, and resolve all four Compose manifests. They also require a
+running Docker daemon to verify that build contexts exclude locally generated
+frontend assets. Missing prerequisites fail. The PR frontend job runs this gate.
+Full service image builds and native Linux/gVisor smoke are separate checks;
+ordinary Docker/runc is not gVisor evidence.
 
 Unprivileged PR quality, frontend, sandbox, binary-build and affected benchmark
 checks target `master`. Benchmark selection runs only affected or explicitly

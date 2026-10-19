@@ -15,7 +15,7 @@ target
 **/*.env
 **/Pulumi.*.yaml
 
-**/playground/static
+**/cli_playground/static
 **/*.secret
 **/secrets
 **/Pulumi.*.json

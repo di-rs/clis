@@ -8,7 +8,7 @@ from uuid import uuid4
 from boxie.observability.telemetry.context import bind_context
 from boxie.observability.telemetry.logging import configured_dispatcher
 
-# ASGI's callable contract, without a dispatcher web-framework dependency.
+# ASGI's callable contract, without a web-framework dependency.
 type Scope = MutableMapping[str, Any]
 type Message = MutableMapping[str, Any]
 type Receive = Callable[[], Awaitable[Message]]

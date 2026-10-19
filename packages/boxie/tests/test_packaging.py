@@ -22,6 +22,46 @@ def test_operations_manifest_keeps_docker_socket_out_of_operator_jobs() -> None:
 
 @pytest.mark.integration
 @pytest.mark.parametrize(
+    "dockerfile",
+    ["packages/boxie/infra/Runtime.Dockerfile", "tools/cli-playground/infra/Playground.Dockerfile"],
+)
+def test_docker_context_excludes_generated_frontend_assets(tmp_path: Path, dockerfile: str) -> None:
+    import subprocess
+
+    context = tmp_path / "context"
+    source = Path("tools/cli-playground/src/cli_playground")
+    assets = context / source / "static"
+    assets.mkdir(parents=True)
+    (assets / "stale.js").write_text("stale local frontend")
+    (context / source / "__init__.py").write_text("# backend source\n")
+    recipe = context / dockerfile
+    recipe.parent.mkdir(parents=True, exist_ok=True)
+    recipe.write_text("FROM scratch\nCOPY . /\n")
+    recipe.with_suffix(".Dockerfile.dockerignore").write_bytes(
+        (ROOT / (dockerfile + ".dockerignore")).read_bytes()
+    )
+    output = tmp_path / "output"
+    subprocess.run(
+        [
+            "docker",
+            "build",
+            "-f",
+            str(recipe),
+            "--output",
+            f"type=local,dest={output}",
+            str(context),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert (output / source / "__init__.py").read_text() == "# backend source\n"
+    assert not (output / source / "static").exists()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
     "package,module,forbidden",
     [("boxie", "boxie", "cli_playground"), ("cli-playground", "cli_playground", "boxie")],
 )
