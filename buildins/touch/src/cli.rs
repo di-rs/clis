@@ -21,10 +21,10 @@ use std::path::{Path, PathBuf};
 #[command(arg(Arg::new("help").long("help").action(ArgAction::Help).help("Print help")))]
 pub struct Cli {
     /// Change only the access time (combine with -m for both)
-    #[arg(short = 'a')]
+    #[arg(short = 'a', long)]
     pub access: bool,
     /// Change only the modification time (combine with -a for both)
-    #[arg(short = 'm')]
+    #[arg(short = 'm', long)]
     pub modify: bool,
     /// Do not create missing files
     #[arg(short = 'c', long = "no-create")]
@@ -32,11 +32,8 @@ pub struct Cli {
     /// Change symbolic links themselves; implies -c
     #[arg(short = 'h', long = "no-dereference")]
     pub no_dereference: bool,
-    /// Accepted for compatibility; ignored
-    #[arg(short = 'f')]
-    pub force: bool,
     /// Set local year, month, day, hour, minute and optional .seconds, e.g. 200001011200.30
-    #[arg(short = 't', value_parser = parse_timestamp, overrides_with_all = ["date", "reference"])]
+    #[arg(short = 't', long, value_parser = parse_timestamp, overrides_with_all = ["date", "reference"])]
     pub timestamp: Option<Timespec>,
     /// Set a date/time ("2000-01-01 12:00:00"), relative time ("1 hour"), or epoch seconds ("@946684800")
     #[arg(short = 'd', long, overrides_with = "timestamp")]
@@ -45,7 +42,7 @@ pub struct Cli {
     #[arg(short = 'r', long, overrides_with = "timestamp", value_name = "FILE")]
     pub reference: Option<PathBuf>,
     /// Add or subtract [-][[hh]mm]SS, e.g. -0130 subtracts 90 seconds; skips missing files
-    #[arg(short = 'A', value_parser = parse_adjustment, allow_hyphen_values = true)]
+    #[arg(short = 'A', long, value_parser = parse_adjustment, allow_hyphen_values = true)]
     pub adjustment: Option<i64>,
     /// Select access (access, atime, use) or modification (modify, mtime) time
     #[arg(long = "time", value_parser = ["access", "atime", "use", "modify", "mtime"])]
@@ -216,11 +213,12 @@ pub fn date_times(value: &str, reference: Option<&Timestamps>) -> Result<Timesta
         })
     };
     let access = parse(reference.map(|r| r.last_access))?;
-    let modified = if let Some(reference) = reference {
-        parse(Some(reference.last_modification))?
-    } else {
-        access
-    };
+    let modified =
+        if let Some(reference) = reference.filter(|r| r.last_modification != r.last_access) {
+            parse(Some(reference.last_modification))?
+        } else {
+            access
+        };
     Ok(Timestamps {
         last_access: access,
         last_modification: modified,

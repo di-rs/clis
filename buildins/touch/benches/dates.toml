@@ -1,0 +1,26 @@
+binary = "touch"
+env = { TZ = "UTC" }
+
+[[cases]]
+name = "local-date"
+args = ["-d", "2024-01-02T03:04:05", "work/file"]
+prepare = "rm -rf work && mkdir work && touch -t 202401020304.05 work/expected"
+check = "test -f work/file && test ! work/file -nt work/expected && test ! work/file -ot work/expected"
+
+[[cases]]
+name = "epoch-date"
+args = ["-d", "@1704164645", "work/file"]
+prepare = "rm -rf work && mkdir work && touch -t 202401020304.05 work/expected"
+check = "test -f work/file && test ! work/file -nt work/expected && test ! work/file -ot work/expected"
+
+[[cases]]
+name = "reference-relative-date"
+args = ["-r", "work/reference", "-d", "1 hour", "work/file"]
+prepare = "rm -rf work && mkdir work && touch -t 202401020304.05 work/reference && touch -t 202401020404.05 work/expected"
+check = "test -f work/file && test ! work/file -nt work/expected && test ! work/file -ot work/expected"
+
+[[cases]]
+name = "adjust-existing"
+args = ["-A", "010000", "work/file"]
+prepare = "rm -rf work && mkdir work && touch -t 202401020304.05 work/file && touch -t 202401020404.05 work/expected"
+check = "test -f work/file && test ! work/file -nt work/expected && test ! work/file -ot work/expected"

@@ -220,7 +220,9 @@ fn selects_access_and_modification_times() -> Result<()> {
     for (flags, access, modified) in [
         (vec![], 946_684_807, 946_684_807),
         (vec!["-a"], 946_684_807, 200),
+        (vec!["--access"], 946_684_807, 200),
         (vec!["-m"], 100, 946_684_807),
+        (vec!["--modify"], 100, 946_684_807),
         (vec!["-am"], 946_684_807, 946_684_807),
         (vec!["--time=atime"], 946_684_807, 200),
         (vec!["--time=use"], 946_684_807, 200),
@@ -392,10 +394,14 @@ fn updates_symlink_without_touching_target_or_creating_files() -> Result<()> {
 fn reference_plus_date_offsets_both_times_in_either_order() -> Result<()> {
     let dir = TempDir::new()?;
     existing(&dir)?;
-    for flags in [
-        ["-r", "existing", "-d", "1 second"],
-        ["-d", "1 second", "-r", "existing"],
+    for (flags, modified) in [
+        (["-r", "existing", "-d", "1 second"], 200),
+        (["-d", "1 second", "-r", "existing"], 200),
+        (["-r", "existing", "-d", "1 second"], 100),
+        (["-d", "1 second", "-r", "existing"], 100),
     ] {
+        fs::File::open(dir.child("existing").path())?
+            .set_modified(UNIX_EPOCH + Duration::from_secs(modified))?;
         command(&dir)
             .args(flags)
             .arg("new")
@@ -403,7 +409,7 @@ fn reference_plus_date_offsets_both_times_in_either_order() -> Result<()> {
             .code(0)
             .stdout("")
             .stderr("");
-        assert_times(dir.child("new").path(), 101, 201)?;
+        assert_times(dir.child("new").path(), 101, modified + 1)?;
     }
     Ok(())
 }
@@ -477,6 +483,8 @@ fn rejects_invalid_dates_adjustments_and_missing_references_before_changes() -> 
     let dir = TempDir::new()?;
     for (flags, status) in [
         (vec!["-d", "nonsense"], 1),
+        (vec!["-f"], 2),
+        (vec!["--force"], 2),
         (vec!["-d", "2024-02-30T00:00:00Z"], 1),
         (vec!["-d", "2024-03-10T02:30:00"], 1),
         (vec!["-d", "2024-03-10T02:30"], 1),
@@ -505,23 +513,29 @@ fn rejects_invalid_dates_adjustments_and_missing_references_before_changes() -> 
 }
 
 #[test]
-fn long_no_create_and_ignored_force() -> Result<()> {
+fn long_options() -> Result<()> {
     let dir = TempDir::new()?;
     command(&dir)
-        .args(["-f", "--no-create", "missing"])
+        .args(["--no-create", "missing"])
         .assert()
         .code(0)
         .stdout("")
         .stderr("");
     dir.child("missing").assert(predicate::path::missing());
     command(&dir)
-        .args(["-ff", "new"])
+        .args(["--timestamp", "200001010000", "new"])
         .assert()
         .code(0)
         .stdout("")
         .stderr("");
-    dir.child("new").assert("");
-    Ok(())
+    assert_times(dir.child("new").path(), 946_684_800, 946_684_800)?;
+    command(&dir)
+        .args(["--adjustment=-0130", "new"])
+        .assert()
+        .code(0)
+        .stdout("")
+        .stderr("");
+    assert_times(dir.child("new").path(), 946_684_710, 946_684_710)
 }
 
 #[cfg(unix)]

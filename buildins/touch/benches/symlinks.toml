@@ -1,0 +1,15 @@
+binary = "touch"
+reference = "touch"
+env = { TZ = "UTC" }
+
+[[cases]]
+name = "follow-symlink"
+args = ["-t", "202401020304.05", "work/link"]
+prepare = "rm -rf work && mkdir work && touch -t 200001010000 work/target && ln -s target work/link && touch -t 202401020304.05 work/expected"
+check = "test -L work/link && test ! work/target -nt work/expected && test ! work/target -ot work/expected"
+
+[[cases]]
+name = "update-symlink-only"
+args = ["-h", "-t", "202401020304.05", "work/link"]
+prepare = "rm -rf work && mkdir work && touch -t 200001010000 work/target work/unchanged && ln -s target work/link"
+check = "test -L work/link && test ! work/target -nt work/unchanged && test ! work/target -ot work/unchanged && if test $(uname) = Darwin; then test $(stat -f %m work/link) = 1704164645; else test $(stat -c %Y work/link) = 1704164645; fi"

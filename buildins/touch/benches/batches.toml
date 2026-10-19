@@ -1,0 +1,51 @@
+binary = "touch"
+reference = "touch"
+env = { TZ = "UTC" }
+
+[[cases]]
+name = "create-64-files"
+args = [
+  "-t", "202401020304.05", "work/f0", "work/f1", "work/f2", "work/f3", "work/f4", "work/f5",
+  "work/f6", "work/f7", "work/f8", "work/f9", "work/f10", "work/f11", "work/f12", "work/f13",
+  "work/f14", "work/f15", "work/f16", "work/f17", "work/f18", "work/f19", "work/f20", "work/f21",
+  "work/f22", "work/f23", "work/f24", "work/f25", "work/f26", "work/f27", "work/f28", "work/f29",
+  "work/f30", "work/f31", "work/f32", "work/f33", "work/f34", "work/f35", "work/f36", "work/f37",
+  "work/f38", "work/f39", "work/f40", "work/f41", "work/f42", "work/f43", "work/f44", "work/f45",
+  "work/f46", "work/f47", "work/f48", "work/f49", "work/f50", "work/f51", "work/f52", "work/f53",
+  "work/f54", "work/f55", "work/f56", "work/f57", "work/f58", "work/f59", "work/f60", "work/f61",
+  "work/f62", "work/f63",
+]
+prepare = "rm -rf work && mkdir work && touch -t 202401020304.05 expected"
+check = "for f in work/f*; do test -f \"$f\" && test ! -s \"$f\" && test ! \"$f\" -nt expected && test ! \"$f\" -ot expected || exit 1; done; test \"$(find work -type f | wc -l | tr -d ' ')\" = 64"
+
+[[cases]]
+name = "update-64-files"
+args = [
+  "-t", "202401020304.05", "work/f0", "work/f1", "work/f2", "work/f3", "work/f4", "work/f5",
+  "work/f6", "work/f7", "work/f8", "work/f9", "work/f10", "work/f11", "work/f12", "work/f13",
+  "work/f14", "work/f15", "work/f16", "work/f17", "work/f18", "work/f19", "work/f20", "work/f21",
+  "work/f22", "work/f23", "work/f24", "work/f25", "work/f26", "work/f27", "work/f28", "work/f29",
+  "work/f30", "work/f31", "work/f32", "work/f33", "work/f34", "work/f35", "work/f36", "work/f37",
+  "work/f38", "work/f39", "work/f40", "work/f41", "work/f42", "work/f43", "work/f44", "work/f45",
+  "work/f46", "work/f47", "work/f48", "work/f49", "work/f50", "work/f51", "work/f52", "work/f53",
+  "work/f54", "work/f55", "work/f56", "work/f57", "work/f58", "work/f59", "work/f60", "work/f61",
+  "work/f62", "work/f63",
+]
+prepare = "rm -rf work && mkdir work && i=0; while test \"$i\" -lt 64; do printf keep > \"work/f$i\"; i=$((i+1)); done; touch -t 202401020304.05 expected"
+check = "for f in work/f*; do test \"$(cat \"$f\")\" = keep && test ! \"$f\" -nt expected && test ! \"$f\" -ot expected || exit 1; done"
+
+[[cases]]
+name = "skip-64-missing-files"
+args = [
+  "-c", "work/f0", "work/f1", "work/f2", "work/f3", "work/f4", "work/f5", "work/f6",
+  "work/f7", "work/f8", "work/f9", "work/f10", "work/f11", "work/f12", "work/f13", "work/f14",
+  "work/f15", "work/f16", "work/f17", "work/f18", "work/f19", "work/f20", "work/f21", "work/f22",
+  "work/f23", "work/f24", "work/f25", "work/f26", "work/f27", "work/f28", "work/f29", "work/f30",
+  "work/f31", "work/f32", "work/f33", "work/f34", "work/f35", "work/f36", "work/f37", "work/f38",
+  "work/f39", "work/f40", "work/f41", "work/f42", "work/f43", "work/f44", "work/f45", "work/f46",
+  "work/f47", "work/f48", "work/f49", "work/f50", "work/f51", "work/f52", "work/f53", "work/f54",
+  "work/f55", "work/f56", "work/f57", "work/f58", "work/f59", "work/f60", "work/f61", "work/f62",
+  "work/f63",
+]
+prepare = "rm -rf work && mkdir work"
+check = "test -z \"$(ls -A work)\""

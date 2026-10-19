@@ -18,15 +18,15 @@ January 2, 2026 at 12:34:56, and copy each reference time plus one hour.
 
 | Option | Effect |
 | --- | --- |
-| `-a` / `-m` | Change only access / modification time. Combine for both. |
+| `-a`, `--access` | Change only access time. |
+| `-m`, `--modify` | Change only modification time. Combine with `-a` for both. |
 | `-c`, `--no-create` | Skip missing files. |
 | `-h`, `--no-dereference` | Update symlinks themselves; skip missing files. Also read reference symlinks themselves. |
 | `-r FILE`, `--reference=FILE` | Copy each timestamp from `FILE`. Combine with `-d` to adjust it. |
-| `-t TIME` | Set local time as `[[CC]YY]MMDDhhmm[.SS]`, for example `202601021234.56`. Omitted year means this year; omitted seconds mean zero. |
+| `-t TIME`, `--timestamp=TIME` | Set local time as `[[CC]YY]MMDDhhmm[.SS]`, for example `202601021234.56`. Omitted year means this year; omitted seconds mean zero. |
 | `-d DATE`, `--date=DATE` | Set a date/time such as `2026-01-02 12:34:56`, a relative time such as `1 hour ago`, or epoch seconds such as `@946684800`. |
-| `-A OFFSET` | Adjust existing times by `[-][[hh]mm]SS`; `-0130` subtracts 90 seconds. Skip missing files. |
+| `-A OFFSET`, `--adjustment=OFFSET` | Adjust existing times by `[-][[hh]mm]SS`; `-0130` subtracts 90 seconds. Skip missing files. |
 | `--time=WORD` | Select `access`, `atime`, or `use` for access time; `modify` or `mtime` for modification time. |
-| `-f` | Accepted and ignored. |
 | `--help` / `--version` | Show help / version. |
 
 Dates use the local zone, configurable with `TZ`; append `Z` for UTC or an offset
@@ -44,5 +44,12 @@ Success is silent. Errors go to stderr, and later files are still processed.
 Exit status is `0` on success, `1` for date or filesystem errors, and `2` for
 argument errors. Timestamp precision depends on the filesystem; birth and
 status-change times cannot be set.
+
+## Benchmarks
+
+The suites in `benches/` cover creation, timestamp updates, date parsing, batches
+of 64 files, and symlinks. Run them with the [benchmark runner](../../docs/benchmarking.md).
+The date suite has no system reference because the supported expressions differ
+between platforms; use `--baseline /path/to/previous/touch` to compare versions.
 
 [Workspace README](../../README.md)
