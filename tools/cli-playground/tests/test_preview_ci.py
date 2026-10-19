@@ -102,7 +102,7 @@ def test_discovery_excludes_libraries_and_selection_uses_owning_packages(tmp_pat
 
 @pytest.mark.parametrize(
     "path",
-    ["rust-toolchain.toml", ".cargo/config.toml", "tools/cli-check/src/cli_check/affected.py"],
+    ["rust-toolchain.toml", ".cargo/config.toml"],
 )
 def test_global_build_changes_select_all_packages(path: str) -> None:
     assert preview_ci.select(
@@ -113,7 +113,9 @@ def test_global_build_changes_select_all_packages(path: str) -> None:
     ]
 
 
-@pytest.mark.parametrize("change", ["source", "library", "lock", "rename", "comment"])
+@pytest.mark.parametrize(
+    "change", ["source", "library", "lock", "rename", "comment", "tooling", "tooling-source"]
+)
 def test_build_packages_only_affected_clis(tmp_path: Path, change: str) -> None:
     workspace(tmp_path)
     lock = (
@@ -130,7 +132,22 @@ def test_build_packages_only_affected_clis(tmp_path: Path, change: str) -> None:
         ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], env=env, text=True
     ).strip()
     expected = ["echor"]
-    if change in {"source", "library"}:
+    if change.startswith("tooling"):
+        for name in (
+            "README.md",
+            "buildins/echor/README.md",
+            ".github/workflows/cli-playground.yml",
+            "tools/cli-playground/preview_ci.py",
+            "tools/cli-check/src/cli_check/affected.py",
+        ):
+            target = tmp_path / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("# tooling or documentation change\n")
+        expected = []
+        if change == "tooling-source":
+            (tmp_path / "buildins/echor/src/main.rs").write_text("// changed\n")
+            expected = ["echor"]
+    elif change in {"source", "library"}:
         path = "buildins/echor/src/main.rs" if change == "source" else "utils/shared/src/lib.rs"
         (tmp_path / path).write_text("// changed\n")
     elif change == "lock":
@@ -148,7 +165,7 @@ def test_build_packages_only_affected_clis(tmp_path: Path, change: str) -> None:
     subprocess.run(["git", "-C", str(tmp_path), "add", "."], env=env, check=True)
     git_commit(tmp_path)
     script = tmp_path / "tools/cli-playground/preview_ci.py"
-    script.parent.mkdir(parents=True)
+    script.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(preview_ci.__file__, script)
     commands = tmp_path / "commands"
     commands.mkdir()

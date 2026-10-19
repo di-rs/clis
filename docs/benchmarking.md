@@ -151,7 +151,7 @@ An empty selection skips both benchmark jobs.
 | Shared Rust implementations, including CLI logging | Suites whose packages depend on the changed library, directly or transitively. |
 | Cargo lockfile | Suites whose packages have changed resolved dependencies. |
 | Root Cargo manifest, Rust toolchain, or `.cargo/` configuration | All suites, conservatively. |
-| Benchmark runner, selector, benchmark workflow, or Python version pin | All suites. |
+| Benchmark runner, selector, workflows, shared Python tooling, or Python version pin | No additional suites. Use `Benchmark-CLIs` to request execution coverage for tooling changes. |
 | Documentation, correctness tests, or Python development-tool configuration | No native benchmarks. Ordinary CI checks still run. |
 
 Lockfile selection compares each package's dependency graph at the PR merge base

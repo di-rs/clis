@@ -17,10 +17,6 @@ ROOT = Path(__file__).resolve().parents[2]
 GLOBAL_PATHS = {
     "Cargo.toml",
     "rust-toolchain.toml",
-    ".python-version",
-    "tools/cli-bench/bench.py",
-    "tools/cli-bench/select_suites.py",
-    ".github/workflows/cli-bench.yml",
 }
 
 
@@ -88,7 +84,7 @@ def parse_request(body: object) -> frozenset[str] | None:
 def affected_suites(suites: list[Suite], base: str, head: str) -> list[Suite]:
     paths = changed_paths(ROOT, base, head)
     for path in paths:
-        if path in GLOBAL_PATHS or path.startswith((".cargo/", "tools/cli-check/src/")):
+        if path in GLOBAL_PATHS or path.startswith(".cargo/"):
             return suites
     affected = affected_packages(ROOT, base, head, paths)
     return [

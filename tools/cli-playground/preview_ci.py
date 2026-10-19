@@ -201,15 +201,8 @@ def select(
         "rust-toolchain.toml",
         "tools/cli-playground/Build.Dockerfile",
         "tools/cli-playground/Build.Dockerfile.dockerignore",
-        "tools/cli-playground/preview_ci.py",
-        WORKFLOW,
     }
-    if any(
-        path in global_paths
-        or path.startswith(".cargo/")
-        or path.startswith("tools/cli-check/src/")
-        for path in paths
-    ):
+    if any(path in global_paths or path.startswith(".cargo/") for path in paths):
         return sorted(packages)
     return sorted(packages.keys() & affected_packages(root, base, head, paths))
 

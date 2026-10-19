@@ -78,6 +78,11 @@ def test_deleted_suite_is_not_scheduled(repo: Repository) -> None:
     "path",
     [
         "README.md",
+        ".python-version",
+        ".github/workflows/cli-bench.yml",
+        "tools/cli-check/src/cli_check/workspace.py",
+        "tools/cli-bench/select_suites.py",
+        "tools/cli-bench/bench.py",
         "buildins/tailr/README.md",
         "buildins/tailr/tests/cli.rs",
         "utils/cli-log/tests/basic.rs",
@@ -91,14 +96,19 @@ def test_deleted_suite_is_not_scheduled(repo: Repository) -> None:
         "mypy.ini",
     ],
 )
-def test_docs_tests_and_python_tool_configuration_skip_native_suites(
-    repo: Repository, path: str
+@pytest.mark.parametrize("source_change", [False, True])
+def test_tooling_and_docs_preserve_affected_selection(
+    repo: Repository, path: str, source_change: bool
 ) -> None:
-    repo.write(path, "test or documentation change\n")
+    target = repo.root / path
+    previous = target.read_text() if target.exists() else ""
+    repo.write(path, previous + "\n# tooling or documentation change\n")
+    if source_change:
+        repo.write("buildins/echor/src/main.rs", "// changed\n")
     repo.commit()
     result = repo.selection()
-    assert result["suites"] == []
-    assert result["packages"] == []
+    assert result["suites"] == ([ALL_SUITES[0]] if source_change else [])
+    assert result["packages"] == (["echor"] if source_change else [])
 
 
 @pytest.mark.parametrize(
@@ -107,11 +117,6 @@ def test_docs_tests_and_python_tool_configuration_skip_native_suites(
         "Cargo.toml",
         "rust-toolchain.toml",
         ".cargo/config.toml",
-        "tools/cli-bench/bench.py",
-        "tools/cli-bench/select_suites.py",
-        "tools/cli-check/src/cli_check/workspace.py",
-        ".github/workflows/cli-bench.yml",
-        ".python-version",
     ],
 )
 def test_global_build_and_runner_changes_select_all_workspace_suites(
