@@ -1,0 +1,92 @@
+name: 🔥 Reset Sanctuary infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Permanently delete production infrastructure and all application data: type destroy-production'
+        required: true
+        type: string
+
+permissions: {}
+concurrency:
+  group: sanctuary-production
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  reset:
+    name: 🔥 Destroy the existing production resources
+    if: ${{ github.ref == 'refs/heads/master' }}
+    environment: sanctuary
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    env:
+      PULUMI_SKIP_UPDATE_CHECK: 'true'
+      PULUMI_BACKEND_URL: ${{ vars.PULUMI_BACKEND_URL }}
+      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_EC2_METADATA_DISABLED: 'true'
+      HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: 🔎 Confirm destructive reset and disabled releases
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          ACCEPTANCE: ${{ vars.DEPLOYMENT_ACCEPTANCE_PASSED }}
+          DRIFT_CHECK: ${{ vars.SANCTUARY_INFRA_DRIFT_CHECK }}
+        run: |
+          set -euo pipefail
+          if [[ $CONFIRMATION != destroy-production || $ACCEPTANCE != false || $DRIFT_CHECK == true ]]; then
+            echo '::error::Type destroy-production, set DEPLOYMENT_ACCEPTANCE_PASSED=false, and disable SANCTUARY_INFRA_DRIFT_CHECK.'
+            exit 1
+          fi
+      - name: 📥 Check out trusted reset source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: 🐍 Install pinned uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: '0.13.0'
+          enable-cache: false
+      - name: 📦 Install locked workspace dependencies
+        run: uv sync --locked --all-packages
+      - name: ☁️ Install pinned Pulumi CLI
+        uses: pulumi/setup-pulumi@b374ceb6168550de27c6eba92e01c1a774040e11 # v2
+        with:
+          pulumi-version: '3.268.0'
+      - name: 🔥 Remove protection and destroy existing resources
+        working-directory: infra/environments/single-host
+        run: |
+          set -euo pipefail
+          umask 077
+          pulumi login "$PULUMI_BACKEND_URL" --non-interactive
+          pulumi stack select production --non-interactive
+          pulumi config refresh --force --non-interactive
+          pulumi config set sanctuary:protect false --non-interactive
+          pulumi refresh --yes --non-interactive --suppress-outputs
+          # Update only the existing protected resources before destruction.
+          urns=$(pulumi stack export | jq -r '.deployment.resources[].urn')
+          targets=()
+          for resource in \
+            'tls:index/privateKey:PrivateKey::deployment-key' \
+            'tls:index/privateKey:PrivateKey::host-key' \
+            'hcloud:index/primaryIp:PrimaryIp::sanctuary-ipv4' \
+            'hcloud:index/volume:Volume::sanctuary-data' \
+            'hcloud:index/server:Server::sanctuary'; do
+            urn="urn:pulumi:production::sanctuary::$resource"
+            if grep -Fxq "$urn" <<< "$urns"; then
+              targets+=(--target "$urn")
+            fi
+          done
+          if (( ${#targets[@]} )); then
+            pulumi up --yes --non-interactive --suppress-outputs "${targets[@]}"
+          fi
+          pulumi destroy --yes --refresh --non-interactive --suppress-outputs
+          pulumi config set sanctuary:protect true --non-interactive
+          printf 'Production resources deleted. The empty stack and backend remain. Run Single-host Sanctuary setup next.\n' >> "$GITHUB_STEP_SUMMARY"
