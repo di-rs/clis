@@ -224,7 +224,19 @@ jobs:
           ConnectTimeout 15
         SSH
         remote="/run/sanctuary-setup-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-        ssh -F "$private/config" deployment 'cloud-init status --wait >/dev/null'
+        echo 'Waiting for host bootstrap'
+        ssh -F "$private/config" deployment 'bash -se' <<'BOOTSTRAP'
+        if cloud-init status --wait --long; then
+          exit 0
+        else
+          status=$?
+          # Bootstrap output contains package/storage diagnostics, not application credentials.
+          tail -n 150 /var/log/cloud-init-output.log || true
+          exit "$status"
+        fi
+        BOOTSTRAP
+        echo 'Uploading installation inputs'
         ssh -F "$private/config" deployment "install -d -m 0700 $remote"
         scp -F "$private/config" -r .installation/. deployment:"$remote/"
+        echo 'Installing application services'
         ssh -F "$private/config" deployment "set -e; trap 'rm -rf $remote' EXIT; DOCKER_CONFIG=$remote/registry bash $remote/infra/environments/single-host/install.sh $remote"
