@@ -189,7 +189,14 @@ import asyncio, json, re
 from cli_playground.app import create_app, STATIC_DIR
 from cli_playground.config import Settings
 secret = pathlib.Path('consumer.secret'); secret.write_text('isolated-consumer-secret'); secret.chmod(0o600)
-app = create_app(Settings(data_dir=pathlib.Path.cwd()/'data', public_url='http://localhost', deploy_token='local-token', boxie_url='http://127.0.0.1:1', boxie_credential_file=secret.absolute()))
+from alembic.config import Config
+from alembic import command
+from io import StringIO
+config = Config(); config.set_main_option('script_location', 'cli_playground:alembic')
+config.set_main_option('sqlalchemy.url', 'postgresql+psycopg://localhost/cli_playground'); config.output_buffer = StringIO()
+command.upgrade(config, 'head', sql=True)
+assert 'CREATE TABLE preview' in config.output_buffer.getvalue()
+app = create_app(Settings(database_url="postgresql+psycopg://localhost/cli_playground", data_dir=pathlib.Path.cwd()/'data', public_url='http://localhost', deploy_token='local-token', boxie_url='http://127.0.0.1:1', boxie_credential_file=secret.absolute()))
 async def request(path):
     sent = []
     received = False
@@ -246,6 +253,8 @@ def test_resolved_compose_isolated_topology(
         "BOXIE_CONSUMER_NETWORK": "test-consumers",
         "BOXIE_CONTROL_NETWORK": "test-control",
         "CLI_PLAYGROUND_IMAGE": "cli-playground:test",
+        "CLI_PLAYGROUND_DATABASE_URL_FILE": str(tmp_path / "playground-dsn.secret"),
+        "CLI_PLAYGROUND_DATABASE_NETWORK": "test-database",
         "CLI_PLAYGROUND_BOXIE_URL": "http://independent-boxie:8090",
         "CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE": str(tmp_path / "consumer.secret"),
         "CLI_PLAYGROUND_CONSUMER_NETWORK": "test-consumers",
@@ -308,6 +317,12 @@ def test_resolved_compose_isolated_topology(
         if name == "api":
             assert not any(v["target"] == values["BOXIE_DATA_DIR"] for v in entry["volumes"])
         if name == "backend":
+            assert set(entry["networks"]) == (
+                {"consumer", "database", "proxy"}
+                if manifest == "compose.production.yml"
+                else {"consumer", "database"}
+            )
+            assert config["networks"]["database"]["name"] == "test-database"
             assert not entry.get("depends_on")
             assert (
                 entry["environment"]["CLI_PLAYGROUND_BOXIE_URL"]
@@ -389,3 +404,36 @@ def test_supervisor_configuration_rejects_unsupported_capacity(
     )
     with pytest.raises(ValueError, match="extra_forbidden"):
         SupervisorConfig.from_file(config)
+
+
+@pytest.mark.integration
+def test_postgres_exposes_only_database_on_playground_network(tmp_path: Path) -> None:
+    import os
+    import subprocess
+
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(ROOT / "packages/boxie/infra/postgres/compose.yml"),
+            "config",
+            "--format",
+            "json",
+        ],
+        env={
+            **os.environ,
+            "BOXIE_CONTROL_NETWORK": "test-control",
+            "POSTGRES_PASSWORD": "test",
+            "BOXIE_DB_PASSWORD": "test",
+            "TEMPORAL_DB_PASSWORD": "test",
+            "VISIBILITY_DB_PASSWORD": "test",
+        },
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    config = json.loads(result.stdout)
+    assert config["networks"]["playground"]["internal"] is True
+    assert set(config["services"]) == {"postgres"}
+    assert set(config["services"]["postgres"]["networks"]) == {"control", "playground"}

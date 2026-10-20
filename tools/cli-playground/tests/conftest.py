@@ -78,6 +78,7 @@ def configured_environment(
 ) -> None:
     for name, value in {
         "CLI_PLAYGROUND_DATA_DIR": str(tmp_path / "data"),
+        "CLI_PLAYGROUND_DATABASE_URL": "postgresql+psycopg://localhost/playground",
         "CLI_PLAYGROUND_PUBLIC_URL": "https://play.example/",
         "CLI_PLAYGROUND_DEPLOY_TOKEN": "private-deployment-token",
         "CLI_PLAYGROUND_BOXIE_URL": "http://boxie.internal",
@@ -92,3 +93,61 @@ def service(api_client: TestClient) -> CliPlaygroundService:
     service = api_client.app.state.service
     assert isinstance(service, CliPlaygroundService)
     return service
+
+
+DATABASE_TESTS = {
+    "test_api.py",
+    "test_sessions.py",
+    "test_service.py",
+    "test_stop_cleanup.py",
+    "test_terminal_limits.py",
+    "test_reconnect.py",
+    "test_boxie_integration.py",
+    "test_boxie_recovery.py",
+    "test_correlation_network.py",
+}
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    for item in items:
+        if item.path.parent == Path(__file__).parent and (
+            item.path.name in DATABASE_TESTS
+            or isinstance(item, pytest.Function)
+            and "api_client" in item.fixturenames
+        ):
+            item.add_marker(pytest.mark.integration)
+
+
+@pytest.fixture(autouse=True)
+def playground_database(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    if request.node.path.name not in DATABASE_TESTS and "api_client" not in request.fixturenames:
+        return
+    from .helpers import migrate
+
+    dsn: str = request.getfixturevalue("postgres_dsn")
+    migrate(dsn)
+    monkeypatch.setenv("CLI_PLAYGROUND_DATABASE_URL", dsn)
+
+
+@pytest.fixture
+def postgres_dsn(postgres_dsn: str) -> str:
+    """Adapt the shared libpq fixture to Playground's SQLAlchemy URL setting."""
+    from psycopg.conninfo import conninfo_to_dict
+    from sqlalchemy import URL
+
+    values = {
+        key: str(value)
+        for key, value in conninfo_to_dict(postgres_dsn).items()
+        if value is not None
+    }
+    return URL.create(
+        "postgresql+psycopg",
+        host=values.pop("host", None),
+        port=int(values.pop("port", "5432")),
+        username=values.pop("user", None),
+        password=values.pop("password", None),
+        database=values.pop("dbname", None),
+        query=values,
+    ).render_as_string(hide_password=False)

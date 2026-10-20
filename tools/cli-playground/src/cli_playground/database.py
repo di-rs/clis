@@ -1,0 +1,48 @@
+"""PostgreSQL adapter lifecycle; application ports never expose SQL sessions."""
+
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from cli_playground.ports import PersistenceUnavailable
+
+SessionFactory = async_sessionmaker[AsyncSession]
+
+
+def session_factory(url: str) -> SessionFactory:
+    engine = create_async_engine(
+        url,
+        pool_pre_ping=True,
+        hide_parameters=True,
+        connect_args={
+            "connect_timeout": 5,
+            "options": "-c lock_timeout=10000 -c statement_timeout=30000",
+        },
+    )
+    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+async def check_schema(sessions: SessionFactory) -> None:
+    async with sessions() as session:
+        version = await session.scalar(text("SELECT version_num FROM alembic_version"))
+        if version != "0002_request_correlation":
+            raise RuntimeError("Playground database needs an explicit schema upgrade")
+
+
+@asynccontextmanager
+async def connection(
+    sessions: SessionFactory, *, write: bool = False
+) -> AsyncIterator[AsyncSession]:
+    try:
+        async with sessions() as session:
+            if write:
+                async with session.begin():
+                    yield session
+            else:
+                yield session
+    except SQLAlchemyError as error:
+        raise PersistenceUnavailable("playground database unavailable") from error

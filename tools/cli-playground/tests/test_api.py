@@ -7,6 +7,7 @@ from pathlib import Path
 import httpx
 import pytest
 from cli_playground.app import create_app
+from cli_playground.service import CliPlaygroundService
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
@@ -227,13 +228,21 @@ def test_unknown_preview_does_not_launch_terminal(api_client: TestClient) -> Non
 
 
 def test_expired_previews_are_unavailable_before_the_periodic_sweep(
-    api_client: TestClient, clock: MutableClock, tmp_path: Path
+    api_client: TestClient, clock: MutableClock, tmp_path: Path, service: CliPlaygroundService
 ) -> None:
     deployed = upload(api_client)
     clock.now = 10**12
     response = api_client.get(f"/api/environments/{deployed['id']}")
     assert response.status_code == 404
-    assert (tmp_path / "data" / deployed["id"]).exists()
+    from .helpers import call
+
+    assert (
+        call(
+            api_client,
+            lambda: service.store.record(deployed["id"], include_inactive=True),
+        )
+        is not None
+    )
 
 
 def test_preview_resolves_built_assets_under_static_prefix(api_client: TestClient) -> None:
@@ -373,10 +382,10 @@ def test_pr_close_rejects_an_upload_that_started_before_closure(tmp_path: Path) 
             await started.wait()
             closing = asyncio.create_task(client.delete("/api/pull-requests/123"))
             for _ in range(100):
-                if app.state.store.is_closed(123):
+                if await app.state.store.is_closed(123):
                     break
                 await asyncio.sleep(0.001)
-            assert app.state.store.is_closed(123)
+            assert await app.state.store.is_closed(123)
             release.set()
             assert (await deploying).status_code == 409
             assert (await closing).json() == {"deleted": 0}
@@ -437,3 +446,23 @@ def test_identical_binary_retry_ignores_original_zip_timestamps(api_client: Test
     )
     assert response.status_code == 201
     assert response.json() == first
+
+
+def test_database_failure_is_unavailable_and_preserves_preview(
+    api_client: TestClient,
+    postgres_dsn: str,
+) -> None:
+    import psycopg
+
+    preview = upload(api_client)
+    with psycopg.connect(
+        postgres_dsn.replace("postgresql+psycopg://", "postgresql://", 1), autocommit=True
+    ) as connection:
+        connection.execute("ALTER TABLE preview RENAME TO unavailable_preview")
+        try:
+            response = api_client.get(f"/api/environments/{preview['id']}")
+            assert response.status_code == 503
+            assert response.json() == {"detail": "playground database unavailable"}
+        finally:
+            connection.execute("ALTER TABLE unavailable_preview RENAME TO preview")
+    assert api_client.get(f"/api/environments/{preview['id']}").status_code == 200

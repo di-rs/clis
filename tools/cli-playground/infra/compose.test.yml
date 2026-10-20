@@ -10,9 +10,14 @@ services:
       CLI_PLAYGROUND_BOXIE_URL: http://api:8090
       CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE: /run/secrets/consumer
     volumes:
+      - ${BOXIE_TEST_ROOT}/playground-dsn:/run/secrets/CLI_PLAYGROUND_DATABASE_URL:ro
       - cli-playground:/data
       - ${BOXIE_CONSUMER_CREDENTIAL_FILE}:/run/secrets/consumer:ro
-    networks: [consumer]
+    networks: [consumer, database]
     restart: "no"
 volumes:
   cli-playground: {}
+networks:
+  database:
+    external: true
+    name: ${CLI_PLAYGROUND_DATABASE_NETWORK}

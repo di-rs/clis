@@ -68,9 +68,12 @@ def test_response_id_finds_three_service_logs(tmp_path: Path) -> None:
                 stderr=subprocess.PIPE,
                 text=True,
                 env={
-                    key: value
-                    for key, value in os.environ.items()
-                    if not key.startswith("CLI_PLAYGROUND_")
+                    **{
+                        key: value
+                        for key, value in os.environ.items()
+                        if not key.startswith("CLI_PLAYGROUND_")
+                    },
+                    "CLI_PLAYGROUND_DATABASE_URL": os.environ["CLI_PLAYGROUND_DATABASE_URL"],
                 },
             )
             processes.append((role, process))

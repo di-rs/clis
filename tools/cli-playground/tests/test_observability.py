@@ -7,9 +7,14 @@ from pathlib import Path
 
 import pytest
 from cli_playground.service import CliPlaygroundService
+from fastapi.testclient import TestClient
 
 
-def test_public_context_and_uvicorn_factory_logging(tmp_path: Path) -> None:
+@pytest.mark.integration
+def test_public_context_and_uvicorn_factory_logging(tmp_path: Path, postgres_dsn: str) -> None:
+    from .helpers import migrate
+
+    migrate(postgres_dsn)
     code = """
 import asyncio, json, logging, socket, sys
 from pathlib import Path
@@ -26,7 +31,7 @@ async def run():
         sock.bind(("127.0.0.1", 0))
         origin = f"http://127.0.0.1:{sock.getsockname()[1]}"
         def factory():
-            app = create_app(Settings(data_dir=Path(sys.argv[1]), public_url=origin, deploy_token="private-token", boxie_url="http://127.0.0.1:1", boxie_credential_file=Path(sys.argv[1])/"unused"), boxie=Client())
+            app = create_app(Settings(database_url=sys.argv[2], data_dir=Path(sys.argv[1]), public_url=origin, deploy_token="private-token", boxie_url="http://127.0.0.1:1", boxie_credential_file=Path(sys.argv[1])/"unused"), boxie=Client())
             @app.get("/fail")
             async def fail():
                 logging.getLogger("unknown").error("PRIVATE_SENTINEL %s", "credentials")
@@ -61,7 +66,7 @@ async def run():
                 assert ws.response.headers["x-request-id"] == await ws.recv()
                 expected[ws.response.headers["x-request-id"]] = "INFO"
             assert current_request_id() is None
-            print(json.dumps(expected), file=sys.stderr)
+            (Path(sys.argv[1]) / "expected-levels.json").write_text(json.dumps(expected))
         finally:
             server.should_exit = True
             await task
@@ -69,7 +74,10 @@ asyncio.run(run())
 shutdown_logging()
 """
     result = subprocess.run(
-        [sys.executable, "-c", code, str(tmp_path)], capture_output=True, text=True, timeout=10
+        [sys.executable, "-c", code, str(tmp_path), postgres_dsn],
+        capture_output=True,
+        text=True,
+        timeout=10,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "PRIVATE_SENTINEL" not in result.stdout + result.stderr
@@ -77,7 +85,9 @@ shutdown_logging()
     assert events and all(event["service"] == "cli-playground" for event in events)
     completed = [event for event in events if event["event"] == "request.completed"]
     assert len(completed) == 4
-    assert {event["request_id"]: event["level"] for event in completed} == json.loads(result.stderr)
+    assert {event["request_id"]: event["level"] for event in completed} == json.loads(
+        (tmp_path / "expected-levels.json").read_text()
+    )
     assert all(len(line.encode()) + 1 <= 8192 for line in result.stdout.splitlines())
 
 
@@ -126,17 +136,16 @@ for _ in range(20000):
 
 
 def test_failed_upload_recovery_logs_saved_origin(
-    service: CliPlaygroundService, monkeypatch: pytest.MonkeyPatch
+    service: CliPlaygroundService, api_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import asyncio
     import logging
     from collections.abc import AsyncIterator
     from uuid import UUID
 
-    from cli_playground.boxie_client import BoxieUnavailable
     from cli_playground.observability import current_request_id, request_context
+    from cli_playground.sandbox import BoxieUnavailable
 
-    from .helpers import binary_bundle, elf_binary
+    from .helpers import binary_bundle, call, elf_binary
 
     origins: list[str | None] = []
 
@@ -167,16 +176,18 @@ def test_failed_upload_recovery_logs_saved_origin(
             logger.removeHandler(handler)
         assert origins == ["11111111-1111-1111-1111-111111111111"]
 
-    asyncio.run(exercise())
+    call(api_client, exercise)
 
 
 def test_periodic_cleanup_failure_keeps_its_action_id(
-    service: CliPlaygroundService, monkeypatch: pytest.MonkeyPatch
+    service: CliPlaygroundService, api_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import asyncio
     import logging
 
     from cli_playground.observability import current_request_id, request_context
+
+    from .helpers import call
 
     service.settings = service.settings.model_copy(update={"cleanup_interval_seconds": 0})
     actions: list[str | None] = []
@@ -214,4 +225,4 @@ def test_periodic_cleanup_failure_keeps_its_action_id(
             identity is not None and identity != inherited for identity in actions
         )
 
-    asyncio.run(exercise())
+    call(api_client, exercise)

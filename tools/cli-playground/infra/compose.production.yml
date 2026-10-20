@@ -11,10 +11,12 @@ services:
       CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE: /run/secrets/consumer
       CLI_PLAYGROUND_PREVIEW_DOMAIN: ${CLI_PLAYGROUND_DOMAIN}
     volumes:
+    - ${CLI_PLAYGROUND_DATABASE_URL_FILE:?Set Playground database URL file}:/run/secrets/CLI_PLAYGROUND_DATABASE_URL:ro
     - data:/var/lib/cli-playground
     - ${CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE:?Set consumer credential file}:/run/secrets/consumer:ro
     networks:
     - consumer
+    - database
     - proxy
     read_only: true
     tmpfs:
@@ -103,3 +105,6 @@ networks:
   proxy:
     external: true
     name: ${CLI_PLAYGROUND_PROXY_NETWORK:?Set proxy network}
+  database:
+    external: true
+    name: ${CLI_PLAYGROUND_DATABASE_NETWORK:?Set private PostgreSQL network}

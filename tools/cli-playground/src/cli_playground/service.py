@@ -10,21 +10,16 @@ import zipfile
 import zlib
 from asyncio import timeout
 from collections.abc import AsyncIterable, Callable
-from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from uuid import UUID, uuid4
 
 from anyio import CancelScope
 
+from cli_playground import domain
 from cli_playground.artifacts import canonical_archive, stage_archive
-from cli_playground.boxie_client import (
-    BoxieClient,
-    BoxieUnavailable,
-    SandboxRequest,
-    SandboxView,
-    validate_sandbox,
-)
 from cli_playground.config import Settings
+from cli_playground.domain import ArtifactConflictError, CreateIntent, SessionBinding, UploadIntent
 from cli_playground.models import (
     ArtifactIdentity,
     ArtifactMetadata,
@@ -34,8 +29,14 @@ from cli_playground.models import (
     EnvironmentMetadata,
 )
 from cli_playground.observability import current_request_id, request_context, sandbox_context
-from cli_playground.session_store import CreateIntent, SessionBinding, SessionStore, UploadIntent
-from cli_playground.storage import ArtifactConflictError, EnvironmentStore
+from cli_playground.ports import EnvironmentStore, SessionStore
+from cli_playground.sandbox import (
+    BoxieClient,
+    BoxieUnavailable,
+    SandboxRequest,
+    SandboxView,
+)
+from cli_playground.upload_staging import UploadStaging, run_staging
 
 logger = logging.getLogger(__name__)
 
@@ -60,114 +61,76 @@ class CliPlaygroundService:
     ) -> None:
         self.settings, self.store, self.sessions, self.boxie = settings, store, sessions, boxie
         self.clock = clock
+        self.staging = UploadStaging(settings.data_dir)
         self.uploads = asyncio.Semaphore(1)
         self.active_creates: set[UUID] = set()
 
     async def retry_stops(self) -> None:
-        for binding in self.sessions.bindings():
-            if binding.pending_stop:
-                with (
-                    request_context(
-                        str(binding.stop_request_id) if binding.stop_request_id else None
-                    ),
-                    sandbox_context(binding.sandbox.id),
-                ):
-                    try:
-                        view = await self.boxie.terminate(binding.sandbox.id, binding.sandbox)
-                        validate_sandbox(view, binding.sandbox)
-                        binding.sandbox = view
-                        binding.attachment_deadline = None
-                        binding.pending_stop = (
-                            binding.sandbox.cleanup_pending
-                            or binding.sandbox.state not in {"terminated", "failed"}
-                        )
-                        self.sessions.save(binding)
-                        self.sessions.claimed(binding.id)
-                    except BoxieUnavailable:
-                        logger.warning("Sandbox stop remains pending")
-
-    def collect_artifacts(self) -> None:
-        pending = {intent.artifact.artifact_id for intent in self.sessions.uploads()}
-        for artifact in self.store.revisions():
-            current = self.store.get(self.store.identifier(artifact.pr))
-            if artifact.artifact_id not in pending and (
-                current is None or current.artifact_id != artifact.artifact_id
+        for binding in await self.sessions.pending_stops():
+            with (
+                request_context(str(binding.stop_request_id) if binding.stop_request_id else None),
+                sandbox_context(binding.sandbox.id),
             ):
-                self.sessions.retire(artifact.artifact_id)
+                try:
+                    view = await self.boxie.terminate(binding.sandbox.id, binding.sandbox)
+                    await self.sessions.change(
+                        binding.id,
+                        partial(domain.confirm_stop, view=view),
+                        claimed=True,
+                    )
+                except BoxieUnavailable:
+                    logger.warning("Sandbox stop remains pending")
+
+    async def collect_artifacts(self) -> None:
+        await self.store.collect_artifacts()
 
     async def retry_retirements(self) -> None:
-        for identifier in self.sessions.retirements():
-            origin = self.sessions.retirement_request_id(identifier)
+        for identifier in await self.sessions.retirements():
+            origin = await self.sessions.retirement_request_id(identifier)
             with request_context(str(origin) if origin else None):
                 try:
                     await self.boxie.retire(identifier)
-                    self.sessions.retired(identifier)
+                    await self.sessions.retired(identifier)
                 except BoxieUnavailable:
                     logger.warning("Artifact retirement remains pending")
 
     async def cleanup_inactive(self) -> None:
-        identifiers = self.store.inactive_identifiers()
-        identifiers.update(
-            binding.preview_id
-            for binding in self.sessions.bindings()
-            if self.store.record(binding.preview_id) is None
-        )
-        self.sessions.stop_environments(identifiers)
+        identifiers = await self.store.inactive_identifiers()
+        await self.sessions.stop_environments(identifiers)
         await self.retry_stops()
-        self.collect_artifacts()
-        self.store.remove(
-            {identifier for identifier in identifiers if self.store.record(identifier) is None}
-        )
+        await self.collect_artifacts()
+        await self.store.remove(identifiers)
         await self.retry_retirements()
 
-    def update_build(self, pr: int, update: BuildUpdate) -> EnvironmentMetadata:
-        metadata = self.store.update_build(pr, update)
-        self.collect_artifacts()
+    async def update_build(self, pr: int, update: BuildUpdate) -> EnvironmentMetadata:
+        metadata = await self.store.update_build(pr, update)
+        await self.collect_artifacts()
         return metadata
 
     async def finish_upload(self, intent: UploadIntent) -> Environment:
         with request_context(str(intent.request_id) if intent.request_id else None):
             artifact = intent.artifact
+            await self.boxie.upload(
+                artifact.artifact_id, artifact.sha256, self.staging.archive(artifact.artifact_id)
+            )
             try:
-                await self.boxie.upload(
-                    artifact.artifact_id,
-                    artifact.sha256,
-                    self.sessions.archive(artifact.artifact_id),
-                )
-                # Closure cancellation is irreversible even if the PR has since reopened.
-                stored = next(
-                    item
-                    for item in self.sessions.uploads()
-                    if item.artifact.artifact_id == artifact.artifact_id
-                )
-                if stored.cancelled:
-                    raise ArtifactConflictError("publication was cancelled by PR closure")
-                current = self.store.get(self.store.identifier(artifact.pr))
-                if intent.build is None and (current.revision if current else None) not in {
-                    intent.previous_revision,
-                    artifact.revision,
-                }:
-                    raise ArtifactConflictError("a newer publication superseded this upload")
-                # No await between the final stale/closed check and atomic publication.
-                environment = self.store.publish(artifact, intent.build)
+                environment = await self.store.finish_upload(artifact, intent.build)
             except ArtifactConflictError:
-                self.sessions.retire(artifact.artifact_id)
-                self.sessions.uploaded(artifact.artifact_id)
+                self.staging.remove(artifact.artifact_id)
                 raise
-            self.sessions.uploaded(artifact.artifact_id)
-            self.collect_artifacts()
+            self.staging.remove(artifact.artifact_id)
+            await self.collect_artifacts()
             return environment
 
     async def recover(self, *, startup: bool = True) -> None:
         # A restarted process cannot finish an in-flight terminal attachment.
-        for binding in self.sessions.bindings():
-            if binding.attachment_deadline is not None and (
-                startup or binding.attachment_deadline <= self.clock()
-            ):
-                self.cancel_attachment(binding.id)
+        for binding in await self.sessions.pending_attachments(
+            before=None if startup else self.clock()
+        ):
+            await self.cancel_attachment(binding.id, claim=binding.attachment_claim)
         # A restarted process cannot return an old page's one-time credential.
-        for intent in self.sessions.creates():
-            saved = self.sessions.get(intent.id)
+        for intent in await self.sessions.creates():
+            saved = await self.sessions.get(intent.id)
             if saved is not None and (
                 saved.attached or saved.attachment_deadline is not None or saved.pending_stop
             ):
@@ -179,24 +142,10 @@ class CliPlaygroundService:
             with request_context(str(intent.request_id) if intent.request_id else None):
                 try:
                     sandbox = await self.boxie.create(str(intent.id), intent.spec)
-                    if saved is not None:
-                        validate_sandbox(sandbox, saved.sandbox)
-                    if not any(current.id == intent.id for current in self.sessions.creates()):
-                        continue  # Authentication claimed the binding while recovery yielded.
-                    self.sessions.save(
-                        SessionBinding(
-                            id=intent.id,
-                            preview_id=intent.preview_id,
-                            revision=intent.revision,
-                            credential_hash=intent.credential_hash,
-                            sandbox=sandbox,
-                            pending_stop=True,
-                            stop_request_id=uuid4(),
-                        )
-                    )
+                    await self.sessions.recover_creation(intent, sandbox)
                 except BoxieUnavailable:
                     logger.warning("Sandbox admission recovery remains pending")
-        for upload_intent in self.sessions.uploads():
+        for upload_intent in await self.sessions.uploads():
             with request_context(
                 str(upload_intent.request_id) if upload_intent.request_id else None
             ):
@@ -206,40 +155,39 @@ class CliPlaygroundService:
                     logger.warning("Artifact publication recovery deferred or abandoned")
         await self.cleanup_inactive()
 
-    def binding(
+    async def binding(
         self, preview_id: str, identifier: UUID, revision: str, credential: str
     ) -> SessionBinding:
-        binding = self.sessions.get(identifier)
-        if (
-            binding is None
-            or binding.preview_id != preview_id
-            or binding.revision != revision
-            or not binding.authenticates(credential)
-            or binding.pending_stop
-            or binding.sandbox.state in {"terminating", "terminated", "failed"}
-            or binding.sandbox.absolute_deadline <= datetime.fromtimestamp(self.clock(), UTC)
-            or self.store.record(preview_id) is None
-        ):
+        binding = await self.sessions.get(identifier)
+        if binding is None or await self.store.record(preview_id) is None:
+            raise LookupError("session not found")
+        domain.authenticate_binding(binding, preview_id, revision, credential, self.clock())
+        return binding
+
+    async def claim_attachment(
+        self, preview_id: str, identifier: UUID, revision: str, credential: str
+    ) -> SessionBinding:
+        if await self.store.record(preview_id) is None:
+            raise LookupError("session not found")
+
+        def change(binding: SessionBinding) -> None:
+            domain.authenticate_binding(binding, preview_id, revision, credential, self.clock())
+            domain.claim_attachment(binding, self.clock())
+
+        binding = await self.sessions.change(identifier, change, claimed=True)
+        if binding is None:
             raise LookupError("session not found")
         return binding
 
-    def claim_attachment(
-        self, preview_id: str, identifier: UUID, revision: str, credential: str
-    ) -> SessionBinding:
-        binding = self.binding(preview_id, identifier, revision, credential)
-        binding.attachment_claim += 1
-        binding.attachment_deadline = self.clock() + 40
-        self.sessions.save(binding)
-        self.sessions.claimed(identifier)
-        return binding
-
-    def check_attachment_claim(
+    async def check_attachment_claim(
         self, preview_id: str, identifier: UUID, revision: str, credential: str, claim: int
     ) -> None:
-        if self.binding(preview_id, identifier, revision, credential).attachment_claim != claim:
+        if (
+            await self.binding(preview_id, identifier, revision, credential)
+        ).attachment_claim != claim:
             raise LookupError("attachment superseded")
 
-    def complete_attachment(
+    async def complete_attachment(
         self,
         preview_id: str,
         identifier: UUID,
@@ -249,28 +197,28 @@ class CliPlaygroundService:
         *,
         claim: int | None = None,
     ) -> None:
-        binding = self.binding(preview_id, identifier, revision, credential)
-        if claim is not None and claim != binding.attachment_claim:
-            raise LookupError("attachment superseded")
-        validate_sandbox(view, binding.sandbox)
-        binding.sandbox = view
-        binding.attachment_deadline = None
-        binding.attached = True
-        self.sessions.save(binding)
+        if await self.store.record(preview_id) is None:
+            raise LookupError("session not found")
 
-    def cancel_attachment(self, identifier: UUID, *, claim: int | None = None) -> None:
-        binding = self.sessions.get(identifier)
-        if binding is not None and binding.attachment_deadline is not None:
-            if claim is not None and claim != binding.attachment_claim:
-                return
-            if not binding.attached and not binding.pending_stop:
-                binding.stop_request_id = UUID(current_request_id() or str(uuid4()))
-            binding.pending_stop = not binding.attached
-            binding.attachment_deadline = None
-            self.sessions.save(binding)
+        def change(binding: SessionBinding) -> None:
+            domain.authenticate_binding(binding, preview_id, revision, credential, self.clock())
+            domain.complete_attachment(binding, view, claim)
+
+        if await self.sessions.change(identifier, change) is None:
+            raise LookupError("session not found")
+
+    async def cancel_attachment(self, identifier: UUID, *, claim: int | None = None) -> None:
+        await self.sessions.change(
+            identifier,
+            partial(
+                domain.cancel_attachment,
+                claim=claim,
+                request_id=UUID(current_request_id() or str(uuid4())),
+            ),
+        )
 
     async def create_session(self, preview_id: str, revision: str) -> tuple[SessionBinding, str]:
-        environment = self.store.get(preview_id)
+        environment = await self.store.get(preview_id)
         if environment is None:
             raise LookupError("preview not found")
         if environment.revision != revision:
@@ -285,7 +233,7 @@ class CliPlaygroundService:
             claim_until=self.clock() + 30,
             spec=SandboxRequest(artifact_id=environment.artifact_id),
         )
-        self.sessions.create_intent(intent)
+        await self.sessions.create_intent(intent)
         self.active_creates.add(intent.id)
         try:
             with request_context(str(intent.request_id)):
@@ -297,47 +245,44 @@ class CliPlaygroundService:
                 credential_hash=intent.credential_hash,
                 sandbox=sandbox,
             )
-            self.sessions.save(binding)
-            current = self.store.get(preview_id)
+            await self.sessions.save(binding)
+            current = await self.store.get(preview_id)
             if current is None or current.revision != revision:
-                if not binding.pending_stop:
-                    binding.stop_request_id = UUID(current_request_id() or str(uuid4()))
-                binding.pending_stop = True
-                self.sessions.save(binding)
+                domain.request_stop(binding, UUID(current_request_id() or str(uuid4())))
+                await self.sessions.save(binding)
                 await self.retry_stops()
                 raise ArtifactConflictError("preview revision changed")
             intent.claim_until = self.clock() + 30
-            self.sessions.create_intent(intent)
+            await self.sessions.create_intent(intent)
             return binding, credential
         except BaseException:
             # The persisted idempotency key resolves ambiguous/cancelled admissions on recovery.
-            saved = self.sessions.get(intent.id)
-            if (
-                saved is None
-                or saved.sandbox.cleanup_pending
-                or saved.sandbox.state not in {"terminated", "failed"}
-            ):
-                intent.abandoned = True
-                self.sessions.create_intent(intent)
-                if saved is not None:
-                    if not saved.pending_stop:
-                        saved.stop_request_id = UUID(current_request_id() or str(uuid4()))
-                    saved.pending_stop = True
-                    self.sessions.save(saved)
+            with CancelScope(shield=True):
+                saved = await self.sessions.get(intent.id)
+                if (
+                    saved is None
+                    or saved.sandbox.cleanup_pending
+                    or saved.sandbox.state not in {"terminated", "failed"}
+                ):
+                    intent.abandoned = True
+                    await self.sessions.create_intent(intent)
+                    if saved is not None:
+                        await self.sessions.change(
+                            saved.id,
+                            partial(
+                                domain.request_stop,
+                                request_id=UUID(current_request_id() or str(uuid4())),
+                            ),
+                        )
             raise
         finally:
             self.active_creates.discard(intent.id)
 
     async def stop_session(self, binding: SessionBinding) -> None:
-        if (
-            binding.sandbox.state in {"terminated", "failed"}
-            and not binding.sandbox.cleanup_pending
-        ):
-            return
-        if not binding.pending_stop:
-            binding.stop_request_id = UUID(current_request_id() or str(uuid4()))
-        binding.pending_stop = True
-        self.sessions.save(binding)
+        await self.sessions.change(
+            binding.id,
+            partial(domain.request_stop, request_id=UUID(current_request_id() or str(uuid4()))),
+        )
         await self.retry_stops()
 
     async def cleanup_periodically(self) -> None:
@@ -358,7 +303,7 @@ class CliPlaygroundService:
         build: BuildIdentity | None = None,
     ) -> Environment:
         ArtifactIdentity(sha=sha, pr=pr)
-        self.store.check_build(pr, build)
+        await self.store.check_build(pr, build)
         try:
             await asyncio.wait_for(self.uploads.acquire(), timeout=1)
         except TimeoutError as error:
@@ -367,7 +312,7 @@ class CliPlaygroundService:
         try:
             async with timeout(60):
                 await self.cleanup_inactive()
-                temporary = self.store.temporary_directory()
+                temporary = self.staging.temporary_directory()
                 size = 0
                 archive = temporary / "bundle.zip"
                 with archive.open("wb") as binary:
@@ -384,40 +329,27 @@ class CliPlaygroundService:
                     return clis, canonical_archive(staged, clis, canonical)
 
                 try:
-                    staging = asyncio.create_task(asyncio.to_thread(prepare))
-                    try:
-                        clis, digest = await asyncio.shield(staging)
-                    except asyncio.CancelledError:
-                        # Threads cannot be cancelled. Keep their files and upload slot
-                        # until they finish, even if cancellation is requested again.
-                        finished = asyncio.gather(staging, return_exceptions=True)
-                        with CancelScope(shield=True):
-                            while not finished.done():
-                                try:
-                                    await asyncio.shield(finished)
-                                except asyncio.CancelledError:
-                                    pass
-                        raise
+                    clis, digest = await run_staging(prepare)
                 except OverflowError as error:
                     raise UploadTooLargeError from error
                 except (zipfile.BadZipFile, zlib.error, RuntimeError) as error:
                     raise ValueError("invalid binary bundle") from error
                 # Revisions may expire while the upload body is streaming.
                 await self.cleanup_inactive()
-                self.store.check_build(pr, build)
+                await self.store.check_build(pr, build)
                 revision = sha if build is None else f"{sha}-{build.run_number}-{build.run_attempt}"
-                existing = self.store.revision(pr, revision)
+                existing = await self.store.revision(pr, revision)
                 if existing is not None and (existing.sha256 != digest or existing.clis != clis):
                     raise ArtifactConflictError(
                         "this revision already has different binaries or CLI set"
                     )
-                current = self.store.get(self.store.identifier(pr))
+                current = await self.store.get(domain.identifier(pr))
                 if current is not None and current.revision == revision:
                     return current
                 pending = next(
                     (
                         item
-                        for item in self.sessions.uploads()
+                        for item in (await self.sessions.uploads())
                         if item.artifact.pr == pr and item.artifact.revision == revision
                     ),
                     None,
@@ -441,7 +373,12 @@ class CliPlaygroundService:
                     build=build,
                     previous_revision=current.revision if current else None,
                 )
-                self.sessions.upload_intent(intent, canonical)
+                await run_staging(partial(self.staging.stage, metadata.artifact_id, canonical))
+                try:
+                    await self.sessions.upload_intent(intent)
+                except ArtifactConflictError:
+                    await run_staging(partial(self.staging.remove, metadata.artifact_id))
+                    raise
                 return await self.finish_upload(intent)
         finally:
             if temporary is not None:
@@ -450,24 +387,19 @@ class CliPlaygroundService:
 
     async def close_pull_request(self, pr: int) -> int:
         # Publish must see the tombstone even while we wait for its upload lock.
-        self.store.close_pull_request(pr)
-        self.sessions.cancel_uploads(pr)
+        await self.store.close_pull_request(pr)
         async with self.uploads:
-            identifiers = self.store.for_pull_request(pr)
-            identifiers.add(self.store.identifier(pr))
-            self.sessions.stop_environments(identifiers)
-            self.collect_artifacts()
+            identifiers = {domain.identifier(pr)}
+            await self.sessions.stop_environments(identifiers)
+            await self.collect_artifacts()
             await self.retry_stops()
-            removed = self.store.remove(identifiers)
+            removed = await self.store.remove(identifiers)
             await self.retry_retirements()
             return removed
 
     async def reopen_pull_request(self, pr: int) -> None:
         async with self.uploads:
-            if self.store.is_closed(pr):
-                # Also completes invalidation if close was interrupted after its tombstone.
-                self.sessions.cancel_uploads(pr)
-            self.store.reopen_pull_request(pr)
+            await self.store.reopen_pull_request(pr)
 
     async def metadata(self, identifier: str) -> EnvironmentMetadata | None:
-        return self.store.metadata(identifier)
+        return await self.store.metadata(identifier)

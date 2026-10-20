@@ -6,12 +6,16 @@ import struct
 import subprocess
 import time
 import zipfile
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import httpx
 from cli_playground.config import Settings as EnvironmentSettings
+from cli_playground.database import SessionFactory, session_factory
 from fastapi.testclient import TestClient
+from pydantic import Field, PostgresDsn
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 from starlette.testclient import WebSocketTestSession
 
@@ -97,6 +101,12 @@ def git_commit(root: Path) -> None:
 
 class Settings(EnvironmentSettings):
     """Validate explicit test configuration without reading the host environment."""
+
+    database_url: PostgresDsn = Field(
+        default_factory=lambda: PostgresDsn(
+            os.environ.get("CLI_PLAYGROUND_DATABASE_URL", "postgresql+psycopg://localhost/unused")
+        )
+    )
 
     @classmethod
     def settings_customise_sources(
@@ -189,3 +199,26 @@ def admission(client: TestClient, identifier: str, revision: str) -> dict[str, s
 
 def socket_url(binding: dict[str, str]) -> str:
     return f"wss://play.example/ws/{binding['preview_id']}?session_id={binding['id']}&revision={binding['revision']}"
+
+
+def call[T](client: TestClient, operation: Callable[[], Awaitable[T]]) -> T:
+    assert client.portal is not None
+    return client.portal.call(operation)
+
+
+def migrate(url: str) -> None:
+    from alembic import command
+    from alembic.config import Config
+
+    config = Config(str(Path(__file__).parents[1] / "alembic.ini"))
+    config.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
+    command.upgrade(config, "head")
+
+
+@asynccontextmanager
+async def database(url: str) -> AsyncIterator[SessionFactory]:
+    sessions = session_factory(url)
+    try:
+        yield sessions
+    finally:
+        await sessions.kw["bind"].dispose()

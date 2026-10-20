@@ -13,9 +13,10 @@ services:
       CLI_PLAYGROUND_BOXIE_URL: ${CLI_PLAYGROUND_BOXIE_URL:?Set private Boxie endpoint}
       CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE: /run/secrets/consumer
     volumes:
+      - ${CLI_PLAYGROUND_DATABASE_URL_FILE:?Set Playground database URL file}:/run/secrets/CLI_PLAYGROUND_DATABASE_URL:ro
       - data:/var/lib/cli-playground
       - ${CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE:?Set consumer credential file}:/run/secrets/consumer:ro
-    networks: [consumer]
+    networks: [consumer, database]
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
@@ -30,3 +31,6 @@ networks:
   consumer:
     external: true
     name: ${CLI_PLAYGROUND_CONSUMER_NETWORK:?Set private consumer network}
+  database:
+    external: true
+    name: ${CLI_PLAYGROUND_DATABASE_NETWORK:?Set private PostgreSQL network}

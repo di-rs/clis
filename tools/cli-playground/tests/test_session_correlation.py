@@ -1,11 +1,11 @@
 """Optional diagnostics must never invalidate a saved cleanup obligation."""
 
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from uuid import uuid4
 
-from cli_playground.boxie_client import SandboxView
-from cli_playground.session_store import SessionBinding
+import pytest
+from cli_playground.domain import SessionBinding
+from cli_playground.sandbox import SandboxView
 
 
 def test_binding_reader_accepts_optional_and_invalid_correlation() -> None:
@@ -33,18 +33,36 @@ def test_binding_reader_accepts_optional_and_invalid_correlation() -> None:
         assert restored.stop_request_id == expected
 
 
-def test_retirement_marker_preserves_first_origin(tmp_path: Path) -> None:
-    from cli_playground.session_store import SessionStore
+@pytest.mark.integration
+def test_retirement_marker_preserves_first_origin(postgres_dsn: str) -> None:
+    import asyncio
 
-    store = SessionStore(tmp_path)
+    from cli_playground.session_store import SessionStore
+    from cli_playground.tables import Retirement
+
+    from .helpers import database, migrate
+
+    migrate(postgres_dsn)
     artifact, first = uuid4(), uuid4()
-    store.retire(artifact, request_id=first)
-    store.retire(artifact, request_id=uuid4())
-    assert store.retirement_request_id(artifact) == first
-    path = store.root / "retirements" / str(artifact)
-    assert path.read_text() == str(first)
-    path.write_text("malformed metadata")
-    assert store.retirements() == [artifact]
-    assert store.retirement_request_id(artifact) is None
-    path.write_bytes(b"")
-    assert store.retirement_request_id(artifact) is None
+
+    async def exercise() -> None:
+        async with database(postgres_dsn) as sessions:
+            store = SessionStore(sessions)
+            await store.retire(artifact, request_id=first)
+            await store.retire(artifact, request_id=uuid4())
+        async with database(postgres_dsn) as sessions:
+            store = SessionStore(sessions)
+            assert await store.retirement_request_id(artifact) == first
+            assert await store.retirements() == [artifact]
+            async with sessions.begin() as session:
+                row = await session.get(Retirement, artifact)
+                assert row is not None
+                row.request_id = None
+            assert await store.retirements() == [artifact]
+            assert await store.retirement_request_id(artifact) is None
+            await store.retired(artifact)
+            await store.retire(artifact, request_id=uuid4())
+            assert await store.retirements() == []
+            assert await store.retirement_request_id(artifact) is None
+
+    asyncio.run(exercise())

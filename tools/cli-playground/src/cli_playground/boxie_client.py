@@ -2,81 +2,27 @@
 
 import asyncio
 from collections.abc import AsyncIterator
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal, Protocol
 from uuid import UUID
 
 import aiohttp
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
+from pydantic import ValidationError
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosedOK, WebSocketException
 
 from cli_playground.observability import current_request_id
+from cli_playground.sandbox import (
+    ArtifactReply,
+    BoxieUnavailable,
+    SandboxRequest,
+    SandboxView,
+    TerminalPort,
+    TerminalWriteClosed,
+    validate_sandbox,
+)
 from cli_playground.terminal_protocol import TerminalEvent
 from cli_playground.terminal_protocol import response as terminal_response
-
-
-class BoxieUnavailable(RuntimeError):
-    """A bounded private service call failed; credentials never enter public errors."""
-
-
-class TerminalWriteClosed(BoxieUnavailable):
-    """Boxie closed normally while its final response may still be buffered."""
-
-
-SandboxState = Literal["accepted", "provisioning", "ready", "terminating", "terminated", "failed"]
-TerminationReason = Literal[
-    "requested",
-    "expired",
-    "idle",
-    "disconnected",
-    "output_limit",
-    "exited",
-    "provisioning_failed",
-    "supervisor_restart",
-    "supervisor_shutdown",
-    "control_plane_lost",
-]
-
-
-class SandboxView(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    id: UUID
-    state: SandboxState
-    created_at: AwareDatetime
-    absolute_deadline: AwareDatetime
-    reason: TerminationReason | None
-    cleanup_pending: bool
-
-
-class ArtifactReply(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    id: UUID
-    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    retired: bool
-
-
-class SandboxRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    artifact_id: UUID
-
-
-class TerminalPort(Protocol):
-    async def receive(self) -> bytes | TerminalEvent | None: ...
-    async def send(self, message: str) -> None: ...
-
-
-class BoxieClient(Protocol):
-    async def upload(self, identifier: UUID, digest: str, archive: Path) -> None: ...
-    async def retire(self, identifier: UUID) -> None: ...
-    async def create(self, key: str, spec: SandboxRequest) -> SandboxView: ...
-    async def get(self, identifier: UUID, previous: SandboxView | None = None) -> SandboxView: ...
-    async def terminate(
-        self, identifier: UUID, previous: SandboxView | None = None
-    ) -> SandboxView: ...
-    def terminal(self, identifier: UUID) -> AbstractAsyncContextManager[TerminalPort]: ...
-    async def close(self) -> None: ...
 
 
 class NoRedirectConnect(connect):
@@ -114,18 +60,18 @@ class HttpBoxieClient:
         self.headers = {"Authorization": f"Bearer {credential}"}
         self._session: aiohttp.ClientSession | None = None
 
+    def _headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
+        result = self.headers | (extra or {})
+        if request_id := current_request_id():
+            result["X-Request-ID"] = request_id
+        return result
+
     def _http(self) -> aiohttp.ClientSession:
         if self._session is None:
             self._session = aiohttp.ClientSession(
                 headers=self.headers, timeout=aiohttp.ClientTimeout(total=30)
             )
         return self._session
-
-    def _headers(self, headers: dict[str, str] | None = None) -> dict[str, str]:
-        result = {**self.headers, **(headers or {})}
-        if request_id := current_request_id():
-            result["X-Request-ID"] = request_id
-        return result
 
     async def _request(
         self,
@@ -242,25 +188,3 @@ def parse_sandbox(data: bytes) -> SandboxView:
         return view
     except ValidationError as error:
         raise BoxieUnavailable("invalid sandbox response") from error
-
-
-def validate_sandbox(
-    view: SandboxView,
-    previous: SandboxView | None = None,
-    *,
-    identifier: UUID | None = None,
-) -> None:
-    lifetime = (view.absolute_deadline - view.created_at).total_seconds()
-    if (
-        not 0 < lifetime <= 3600
-        or (identifier is not None and view.id != identifier)
-        or (
-            previous is not None
-            and (
-                view.id != previous.id
-                or view.created_at != previous.created_at
-                or view.absolute_deadline != previous.absolute_deadline
-            )
-        )
-    ):
-        raise BoxieUnavailable("invalid sandbox response")

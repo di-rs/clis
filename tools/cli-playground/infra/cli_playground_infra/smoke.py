@@ -16,8 +16,9 @@ from pathlib import Path
 
 from boxie_infra.smoke import inspect_sandbox, verify_deleted
 from boxie_infra.terminal import Session
-from cli_playground.boxie_client import HttpBoxieClient, SandboxRequest
-from cli_playground.storage import validate_elf
+from cli_playground.artifacts import validate_elf_header
+from cli_playground.boxie_client import HttpBoxieClient
+from cli_playground.sandbox import SandboxRequest
 
 PROMPT = b"__CLI_PLAYGROUND_SMOKE_PROMPT__ "
 ANSI = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
@@ -74,7 +75,8 @@ class Shell:
 
 async def exercise(binary: Path, url: str, credential_file: Path) -> None:
     binary = binary.resolve(strict=True)
-    validate_elf(binary)
+    with binary.open("rb") as stream:
+        validate_elf_header(stream.read(64))
     client = HttpBoxieClient(url, credential_file.read_text().strip())
     artifact_id = uuid.uuid4()
     sandbox_id = None
