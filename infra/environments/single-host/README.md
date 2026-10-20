@@ -5,10 +5,6 @@ inspect a failed release. Pulumi creates the host, disk, DNS and operator Access
 applications. The setup workflow copies the Compose projects and starts them.
 Routine releases run over pinned SSH from GitHub Actions.
 
-Replace the previous disposable installation using the
-[reset procedure](../../../docs/component-naming-cutover.md) before setup. This
-release changes the consumer API as well as component names.
-
 ## Prepare the Sanctuary environment
 
 Create GitHub environments `sanctuary`, `boxie`, `cli-playground` and
