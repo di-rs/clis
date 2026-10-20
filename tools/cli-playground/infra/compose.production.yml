@@ -51,6 +51,8 @@ services:
       contact email}
     - --certificatesresolvers.preview.acme.storage=/certificates/acme.json
     - --certificatesresolvers.preview.acme.dnschallenge.provider=cloudflare
+    # Let public DNS caches catch up before the CA validates the wildcard challenge.
+    - --certificatesresolvers.preview.acme.dnschallenge.propagation.delaybeforechecks=120s
     environment:
       CLI_PLAYGROUND_DOMAIN: ${CLI_PLAYGROUND_DOMAIN}
       CF_DNS_API_TOKEN: ${CLOUDFLARE_DNS_API_TOKEN:?Set the certificate DNS token}

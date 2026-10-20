@@ -11,7 +11,7 @@ compose() {
 compose config --quiet
 compose pull backend
 compose up -d --no-build --pull never --no-deps --wait --wait-timeout 180 backend
-compose exec -T backend /app/.venv/bin/python - <<'PY'
+if compose exec -T backend /app/.venv/bin/python - <<'PY'
 import os
 import time
 from urllib.error import URLError
@@ -36,5 +36,13 @@ while True:
     except (URLError, OSError, ValueError) as error:
         if time.monotonic() >= deadline:
             raise SystemExit(f'{stage} failed after 300 seconds: {error}') from error
+        print(f'Waiting for {stage}: {error}', flush=True)
         time.sleep(5)
 PY
+then
+    :
+else
+    status=$?
+    compose logs --tail 80 proxy >&2 || true
+    exit "$status"
+fi
