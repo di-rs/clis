@@ -117,7 +117,11 @@ def python_packages(root: Path, paths: list[str], *, dependents: bool) -> list[s
 
 def commands(root: Path, hook: str, paths: list[str]) -> list[list[str]]:
     if hook.startswith("cargo-") or hook == "cli-check":
-        if hook == "cli-check" and "README.md" in paths:
+        if hook == "cli-check" and any(
+            path in {"README.md", "pyproject.toml", "uv.lock"}
+            or path.startswith("tools/cli-check/")
+            for path in paths
+        ):
             paths = [*paths, "Cargo.toml"]
         names = rust_packages(root, paths, dependents=hook in {"cargo-clippy", "cargo-nexttest"})
         if not names:

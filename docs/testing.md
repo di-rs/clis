@@ -103,8 +103,18 @@ settings live in [pyproject.toml](../pyproject.toml); dependencies are pinned in
 uv sync --locked --all-packages
 uv run --locked ruff check PACKAGE_PATH
 uv run --locked ruff format --check PACKAGE_PATH
-uv run --locked mypy PACKAGE_PATH
 uv run --locked pytest PACKAGE_PATH/tests
+```
+
+For mypy, reuse the hook's workspace import paths so scoped checks can resolve
+local dependencies without adding them as check targets:
+
+```sh
+MYPYPATH="$(uv run --locked python -c '
+from pathlib import Path
+from cli_check.hooks import mypy_environment
+print(mypy_environment(Path.cwd())["MYPYPATH"])
+')" uv run --locked mypy PACKAGE_PATH
 ```
 
 Keep tests beside their package under `packages/NAME/tests/`, `tools/NAME/tests/`,

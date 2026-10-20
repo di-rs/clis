@@ -122,6 +122,24 @@ def test_real_repository_reset_test_is_isolated() -> None:
     assert plan(ROOT, "cargo-clippy", path) == []
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "README.md",
+        "pyproject.toml",
+        "uv.lock",
+        "tools/cli-check/src/cli_check/workspace.py",
+        "tools/cli-check/tests/test_hooks.py",
+    ],
+)
+def test_checker_changes_select_structural_checks_only(workspace: Path, path: str) -> None:
+    assert plan(workspace, "cli-check", path) == [
+        ["uv", "run", "--locked", "cli-check", "-p", "one", "-p", "shared", "-p", "two"]
+    ]
+    for hook in ("cargo-fmt", "cargo-clippy", "cargo-nexttest"):
+        assert plan(workspace, hook, path) == []
+
+
 def test_repository_tooling_and_shared_test_support_include_consumers() -> None:
     command = plan(ROOT, "python-tests", "tools/cli-check/src/cli_check/workspace.py")[0]
     assert "tools/cli-bench/tests" in command
