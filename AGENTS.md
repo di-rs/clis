@@ -61,9 +61,15 @@ repository-local Git environment variables in their child processes (see
 inspect configuration origins and the intended repository type before changing
 `core.bare`; restore only verified accidental changes.
 
-Run benchmarks for pull requests only, selecting affected suites or the CLIs
-explicitly requested by the contributor. Do not add benchmark runs on pushes or
-merges to `master`. Treat automatic one-sample runs as execution smoke checks;
+Run CI benchmarks for pull requests only. Select a CLI if and only if its own
+`src/**/*.rs` or `build.rs` changed in the whole PR diff from the merge base and
+it has a benchmark suite. Never select unchanged CLIs because of shared-library,
+manifest, lockfile, toolchain, benchmark-suite, runner, workflow, documentation,
+or test changes. Changes to Biggie select only Biggie, not consumers of its
+generated inputs. PR-body fields, labels and manual overrides must never bypass
+this code-change requirement. Do not add benchmark runs on pushes or merges to
+`master`, or rerun them for PR-title or description edits.
+Treat automatic one-sample runs as execution smoke checks;
 report measurements and CI duration without claiming statistically significant
 performance changes from those samples.
 

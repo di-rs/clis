@@ -187,8 +187,9 @@ Full service image builds and native Linux/gVisor smoke are separate checks;
 ordinary Docker/runc is not gVisor evidence.
 
 Unprivileged PR quality, frontend, sandbox, binary-build and affected benchmark
-checks target `master`. Benchmark selection runs only affected or explicitly
-requested suites. Privileged publication and deployment retain their trusted
+checks target `master`. Benchmark selection requires changes to the owning CLI's
+Rust source or build script; PR-body requests cannot override it. Privileged
+publication and deployment retain their trusted
 default-branch boundaries.
 
 Boxie has only the PostgreSQL/Temporal lifecycle. Default pytest excludes live
