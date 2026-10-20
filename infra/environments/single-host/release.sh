@@ -53,6 +53,8 @@ Host deployment
   StrictHostKeyChecking yes
   BatchMode yes
   ConnectTimeout 15
+  ServerAliveInterval 30
+  ServerAliveCountMax 6
 SSH
 ssh -F "$private/config" deployment "install -d -m 0700 /opt/sanctuary/$owner $remote"
 remote_created=true

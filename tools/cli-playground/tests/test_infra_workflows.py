@@ -59,9 +59,6 @@ def test_deployment_rejects_partial_workflow_retry(
 
 def test_setup_queues_before_selecting_master_and_builds_all_images() -> None:
     setup = workflow("setup")
-    repair = setup["on"]["workflow_dispatch"]["inputs"]["repair_bootstrap"]
-    assert repair["type"] == "boolean"
-    assert repair["default"] == "false"
     assert setup["concurrency"] == QUEUE
     jobs = setup["jobs"]
     assert jobs["source"]["steps"][0]["with"]["ref"] == "master"
@@ -171,6 +168,28 @@ def test_only_manual_setup_can_provision_cloud_resources() -> None:
     assert "submit-release.sh" not in commands
 
 
+@pytest.mark.parametrize("transport", ["setup", "release"])
+def test_deployment_ssh_keeps_silent_readiness_checks_connected(
+    transport: str, tmp_path: Path
+) -> None:
+    if transport == "setup":
+        script = workflow("setup")["jobs"]["provision"]["steps"][-1]["run"]
+    else:
+        script = (WORKFLOWS.parent.parent / "infra/environments/single-host/release.sh").read_text()
+    config = tmp_path / "ssh_config"
+    config.write_text(script.split("<<SSH\n", 1)[1].split("\nSSH", 1)[0])
+    result = subprocess.run(
+        ["ssh", "-G", "-F", str(config), "deployment"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    settings = dict(line.split(" ", 1) for line in result.stdout.splitlines())
+    assert 0 < int(settings["serveraliveinterval"]) <= 60
+    assert int(settings["serveralivecountmax"]) >= 3
+    assert settings["stricthostkeychecking"] == "true"
+
+
 @pytest.mark.parametrize("status", [0, 1, 2])
 def test_setup_reports_bootstrap_failure_without_ignoring_it(status: int) -> None:
     commands = "\n".join(
@@ -197,42 +216,25 @@ def test_setup_reports_bootstrap_failure_without_ignoring_it(status: int) -> Non
     assert ("bootstrap-diagnostics" in result.stdout) == (status != 0)
 
 
-@pytest.mark.parametrize(
-    "bootstrap_status,repair,repair_status,expected",
-    [(0, "false", 0, 0), (1, "false", 0, 1), (1, "true", 0, 0), (1, "true", 3, 3)],
-)
-def test_setup_repairs_bootstrap_only_when_requested(
-    bootstrap_status: int, repair: str, repair_status: int, expected: int
-) -> None:
-    steps = workflow("setup")["jobs"]["provision"]["steps"]
-    step = next(step for step in steps if "REPAIR_BOOTSTRAP" in step.get("env", {}))
-    assert step["env"]["REPAIR_BOOTSTRAP"] == "${{ inputs.repair_bootstrap }}"
-    script = "if ssh" + step["run"].split("if ssh", 1)[1]
-    script = script.split("echo 'Uploading installation inputs'", 1)[0]
+@pytest.mark.parametrize("status", [0, 1, 2])
+def test_setup_stops_before_upload_when_bootstrap_fails(status: int) -> None:
+    script = workflow("setup")["jobs"]["provision"]["steps"][-1]["run"]
+    script = script[script.index("echo 'Waiting for host bootstrap'") :]
     result = subprocess.run(
         [
             "bash",
             "-euo",
             "pipefail",
             "-c",
-            (
-                "private=/unused\n"
-                f"REPAIR_BOOTSTRAP={repair}\n"
-                "ssh() {\n"
-                "  if [[ $* == *'bash -se'* ]]; then\n"
-                f"    cat >/dev/null; return {bootstrap_status}\n"
-                "  fi\n"
-                f"  echo repaired; return {repair_status}\n"
-                "}\n"
-                "scp() { echo uploaded; }\n" + script
-            ),
+            "private=/unused\nremote=/unused\n"
+            f"ssh() {{ cat >/dev/null; return {status}; }}\n"
+            "scp() { echo uploaded; }\n" + script,
         ],
         text=True,
         capture_output=True,
     )
-    assert result.returncode == expected
-    assert ("repaired" in result.stdout) == (bootstrap_status != 0 and repair == "true")
-    assert ("uploaded" in result.stdout) == (bootstrap_status != 0 and repair == "true")
+    assert result.returncode == status
+    assert ("uploaded" in result.stdout) == (status == 0)
 
 
 def test_setup_pulls_all_images_before_starting_boxie() -> None:

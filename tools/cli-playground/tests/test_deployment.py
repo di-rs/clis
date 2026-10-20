@@ -11,11 +11,14 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def test_backend_release_targets_only_backend(tmp_path: Path) -> None:
+@pytest.mark.parametrize("readiness_status", [0, 7])
+def test_backend_release_targets_only_backend(tmp_path: Path, readiness_status: int) -> None:
     log = tmp_path / "calls"
     docker = tmp_path / "docker"
     docker.write_text(
         f"#!{sys.executable}\nimport json, os, sys\nwith open(os.environ['CALLS'], 'a') as f: f.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        f"if 'exec' in sys.argv: sys.exit({readiness_status})\n"
+        "if 'logs' in sys.argv: sys.exit(9)\n"
     )
     docker.chmod(0o755)
     config = tmp_path / "config"
@@ -37,16 +40,22 @@ def test_backend_release_targets_only_backend(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == readiness_status, result.stderr
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     updates = [call for call in calls if "up" in call]
     assert len(updates) == 1
     assert updates[0][-1] == "backend"
     assert "--no-deps" in updates[0]
-    assert not any("proxy" in call or "down" in call for call in calls)
+    assert not any("proxy" in call or "down" in call for call in calls if "logs" not in call)
+    diagnostics = [call for call in calls if "logs" in call]
+    assert len(diagnostics) == (1 if readiness_status else 0)
+    if diagnostics:
+        assert diagnostics[0][-4:] == ["logs", "--tail", "80", "proxy"]
 
 
-def test_readiness_waits_for_public_tls(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_readiness_waits_for_public_tls(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     from unittest.mock import MagicMock
     from urllib.error import URLError
 
@@ -59,7 +68,13 @@ def test_readiness_waits_for_public_tls(monkeypatch: pytest.MonkeyPatch, tmp_pat
     response.__enter__.return_value.status = 200
     request = MagicMock(side_effect=[response, URLError("certificate pending"), response, response])
     monkeypatch.setattr("urllib.request.urlopen", request)
-    monkeypatch.setattr("time.sleep", lambda _: None)
+
+    def before_retry(_: float) -> None:
+        output = capsys.readouterr().out
+        assert "public HTTPS readiness" in output
+        assert "certificate pending" in output
+
+    monkeypatch.setattr("time.sleep", before_retry)
     script = (
         (ROOT / "tools/cli-playground/infra/deploy.sh")
         .read_text()
