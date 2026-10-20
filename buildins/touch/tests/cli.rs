@@ -513,6 +513,28 @@ fn rejects_invalid_dates_adjustments_and_missing_references_before_changes() -> 
 }
 
 #[test]
+fn reports_paths_when_reading_timestamps_fails() -> Result<()> {
+    let dir = TempDir::new()?;
+    dir.child("blocked").write_str("keep me")?;
+    for (flags, path) in [
+        (vec!["-c", "-r", "missing", "new"], "missing"),
+        (vec!["-A", "01", "blocked/child"], "blocked/child"),
+    ] {
+        command(&dir)
+            .args(flags)
+            .assert()
+            .code(1)
+            .stdout("")
+            .stderr(predicate::str::contains(format!(
+                "failed to read timestamps for {path}"
+            )));
+        dir.child("new").assert(predicate::path::missing());
+        dir.child("blocked").assert("keep me");
+    }
+    Ok(())
+}
+
+#[test]
 fn long_options() -> Result<()> {
     let dir = TempDir::new()?;
     command(&dir)

@@ -1,4 +1,4 @@
-use color_eyre::Result;
+use color_eyre::{Result, eyre::Context};
 use rustix::fs::Timestamps;
 use touch::{Options, reference_times};
 
@@ -19,7 +19,10 @@ fn run(mut cli: Cli) -> Result<i32> {
     let mut times = cli
         .reference
         .as_deref()
-        .map(|path| reference_times(path, cli.no_dereference))
+        .map(|path| {
+            reference_times(path, cli.no_dereference)
+                .wrap_err_with(|| format!("failed to read timestamps for {}", path.display()))
+        })
         .transpose()?;
     if let Some(date) = &cli.date {
         times = Some(date_times(date, times.as_ref())?);

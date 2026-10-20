@@ -33,13 +33,12 @@ pub struct Options {
 ///
 /// # Errors
 /// Returns the filesystem error if the reference cannot be inspected.
-pub fn reference_times(path: &Path, no_dereference: bool) -> Result<Timestamps> {
+pub fn reference_times(path: &Path, no_dereference: bool) -> std::io::Result<Timestamps> {
     let stat = if no_dereference {
         std::fs::symlink_metadata(path)
     } else {
         std::fs::metadata(path)
-    }
-    .wrap_err_with(|| format!("failed to read timestamps for {}", path.display()))?;
+    }?;
     Ok(Timestamps {
         last_access: Timespec {
             tv_sec: stat.atime(),
@@ -71,15 +70,14 @@ impl Options {
         } else if self.adjustment != 0 {
             match reference_times(path, self.no_dereference) {
                 Ok(times) => times,
-                Err(error)
-                    if self.no_create
-                        && error
-                            .downcast_ref::<std::io::Error>()
-                            .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) =>
-                {
+                Err(error) if self.no_create && error.kind() == std::io::ErrorKind::NotFound => {
                     return Ok(());
                 }
-                Err(error) => return Err(error),
+                Err(error) => {
+                    return Err(error).wrap_err_with(|| {
+                        format!("failed to read timestamps for {}", path.display())
+                    });
+                }
             }
         } else {
             Timestamps {
