@@ -7,7 +7,8 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from cli_playground.boxie_client import BoxieUnavailable, HttpBoxieClient, SandboxRequest
+from cli_playground.boxie_client import HttpBoxieClient
+from cli_playground.sandbox import BoxieUnavailable, SandboxRequest
 from fastapi import FastAPI, Request
 from pydantic import ValidationError
 

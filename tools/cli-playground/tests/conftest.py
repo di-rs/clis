@@ -78,7 +78,7 @@ def configured_environment(
 ) -> None:
     for name, value in {
         "CLI_PLAYGROUND_DATA_DIR": str(tmp_path / "data"),
-        "CLI_PLAYGROUND_POSTGRES_DSN_FILE": str(tmp_path / "postgres-dsn"),
+        "CLI_PLAYGROUND_DATABASE_URL": "postgresql+psycopg://localhost/playground",
         "CLI_PLAYGROUND_PUBLIC_URL": "https://play.example/",
         "CLI_PLAYGROUND_DEPLOY_TOKEN": "private-deployment-token",
         "CLI_PLAYGROUND_BOXIE_URL": "http://boxie.internal",
@@ -119,11 +119,30 @@ def playground_database(
 ) -> None:
     if request.node.path.name not in DATABASE_TESTS:
         return
-    from cli_playground.migrate import migrate
-
-    from .helpers import protected
+    from .helpers import migrate
 
     dsn: str = request.getfixturevalue("postgres_dsn")
     migrate(dsn)
-    secret = protected(tmp_path / "postgres-dsn", dsn.encode())
-    monkeypatch.setenv("CLI_PLAYGROUND_POSTGRES_DSN_FILE", str(secret))
+    monkeypatch.setenv("CLI_PLAYGROUND_DATABASE_URL", dsn)
+
+
+@pytest.fixture
+def postgres_dsn(postgres_dsn: str) -> str:
+    """Adapt the shared libpq fixture to Playground's SQLAlchemy URL setting."""
+    from psycopg.conninfo import conninfo_to_dict
+    from sqlalchemy import URL
+
+    values = {
+        key: str(value)
+        for key, value in conninfo_to_dict(postgres_dsn).items()
+        if value is not None
+    }
+    return URL.create(
+        "postgresql+psycopg",
+        host=values.pop("host", None),
+        port=int(values.pop("port", "5432")),
+        username=values.pop("user", None),
+        password=values.pop("password", None),
+        database=values.pop("dbname", None),
+        query=values,
+    ).render_as_string(hide_password=False)

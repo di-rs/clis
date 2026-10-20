@@ -53,24 +53,24 @@ def render(root: Path) -> None:
     password = password_file.read_text().strip()
     if len(password) != 64 or any(char not in "0123456789abcdef" for char in password):
         raise ValueError("Invalid Playground PostgreSQL password")
-    dsn_file = token.parent / "postgres-dsn.secret"
+    url_file = token.parent / "database-url.secret"
     # Replace rather than follow a stale symlink when rendering credentials.
     with tempfile.NamedTemporaryFile(mode="w", dir=token.parent, delete=False) as output:
         temporary = Path(output.name)
         try:
             output.write(
-                f"host=postgres dbname=cli_playground user=cli_playground password={password} sslmode=disable\n"
+                f"postgresql+psycopg://cli_playground:{password}@postgres/cli_playground\n"
             )
             output.flush()
             os.fsync(output.fileno())
-            temporary.replace(dsn_file)
+            temporary.replace(url_file)
         finally:
             temporary.unlink(missing_ok=True)
 
     write_environment(
         root / "cli-playground.env",
         {
-            "CLI_PLAYGROUND_POSTGRES_DSN_FILE": str(dsn_file),
+            "CLI_PLAYGROUND_DATABASE_URL_FILE": str(url_file),
             "CLI_PLAYGROUND_DATABASE_NETWORK": "boxie-postgres_playground",
             "CLI_PLAYGROUND_IMAGE": os.environ["CLI_PLAYGROUND_IMAGE"],
             "CLI_PLAYGROUND_DOMAIN": os.environ["CLI_PLAYGROUND_DOMAIN"],

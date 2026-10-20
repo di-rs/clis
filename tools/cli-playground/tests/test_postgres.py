@@ -1,10 +1,14 @@
 """Real PostgreSQL persistence and transaction boundaries."""
 
 import asyncio
+import os
+import subprocess
+from functools import partial
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from cli_playground.database import adapt_store
 from cli_playground.models import ArtifactMetadata
 
 pytestmark = pytest.mark.integration
@@ -13,11 +17,16 @@ pytestmark = pytest.mark.integration
 def test_publication_survives_new_engine_without_metadata_files(
     postgres_dsn: str, tmp_path: Path
 ) -> None:
-    from cli_playground.database import database
-    from cli_playground.migrate import migrate
     from cli_playground.storage import EnvironmentStore
 
-    migrate(postgres_dsn)
+    from .helpers import database, migrate
+
+    subprocess.run(
+        ["alembic", "-c", str(Path(__file__).parents[1] / "alembic.ini"), "upgrade", "head"],
+        env={**os.environ, "CLI_PLAYGROUND_DATABASE_URL": postgres_dsn},
+        check=True,
+        capture_output=True,
+    )
     migrate(postgres_dsn)
     artifact = ArtifactMetadata(
         pr=123,
@@ -31,26 +40,32 @@ def test_publication_survives_new_engine_without_metadata_files(
 
     async def exercise() -> None:
         async with database(postgres_dsn) as sessions:
-            store = EnvironmentStore(sessions, preview_seconds=100, clock=lambda: 1)
-            saved = await store.publish(artifact, None)
+            store = adapt_store(
+                sessions,
+                lambda session: EnvironmentStore(session, preview_seconds=100, clock=lambda: 1),
+            )
+            saved = await store(partial(EnvironmentStore.publish, artifact=artifact, build=None))
         async with database(postgres_dsn) as sessions:
-            store = EnvironmentStore(sessions, preview_seconds=100, clock=lambda: 1)
-            assert await store.get(saved.id) == saved
-            await store.close_pull_request(123)
-            assert await store.get(saved.id) is None
-            await store.reopen_pull_request(123)
-            assert await store.get(saved.id) == saved
+            store = adapt_store(
+                sessions,
+                lambda session: EnvironmentStore(session, preview_seconds=100, clock=lambda: 1),
+            )
+            assert await store(lambda repository: repository.get(saved.id)) == saved
+            await store(lambda repository: repository.close_pull_request(123))
+            assert await store(lambda repository: repository.get(saved.id)) is None
+            await store(lambda repository: repository.reopen_pull_request(123))
+            assert await store(lambda repository: repository.get(saved.id)) == saved
         assert not list(tmp_path.rglob("*.json"))
 
     asyncio.run(exercise())
 
 
 def test_cancelled_upload_stays_cancelled_after_reopen(postgres_dsn: str) -> None:
-    from cli_playground.database import database
     from cli_playground.domain import ArtifactConflictError, UploadIntent
-    from cli_playground.migrate import migrate
     from cli_playground.session_store import SessionStore
     from cli_playground.storage import EnvironmentStore
+
+    from .helpers import database, migrate
 
     migrate(postgres_dsn)
     artifact = ArtifactMetadata(
@@ -65,18 +80,28 @@ def test_cancelled_upload_stays_cancelled_after_reopen(postgres_dsn: str) -> Non
 
     async def exercise() -> None:
         async with database(postgres_dsn) as sessions:
-            store = EnvironmentStore(sessions, preview_seconds=100, clock=lambda: 1)
-            operations = SessionStore(sessions)
-            await operations.upload_intent(
-                UploadIntent(artifact=artifact, build=None, previous_revision=None)
+            store = adapt_store(
+                sessions,
+                lambda session: EnvironmentStore(session, preview_seconds=100, clock=lambda: 1),
             )
-            await store.close_pull_request(123)
-            await store.reopen_pull_request(123)
+            operations = adapt_store(sessions, SessionStore)
+            await operations(
+                lambda repository: repository.upload_intent(
+                    UploadIntent(artifact=artifact, build=None, previous_revision=None)
+                )
+            )
+            await store(lambda repository: repository.close_pull_request(123))
+            await store(lambda repository: repository.reopen_pull_request(123))
             with pytest.raises(ArtifactConflictError, match="cancelled"):
-                await store.finish_upload(artifact, None)
-            assert await store.get(store.identifier(123)) is None
-            assert await operations.uploads() == []
-            assert await operations.retirements() == [artifact.artifact_id]
+                await store(lambda repository: repository.finish_upload(artifact, None))
+            assert (
+                await store(lambda repository: repository.get(EnvironmentStore.identifier(123)))
+                is None
+            )
+            assert await operations(lambda repository: repository.uploads()) == []
+            assert await operations(lambda repository: repository.retirements()) == [
+                artifact.artifact_id
+            ]
 
     asyncio.run(exercise())
 
@@ -84,11 +109,11 @@ def test_cancelled_upload_stays_cancelled_after_reopen(postgres_dsn: str) -> Non
 def test_failed_transaction_keeps_pending_upload_and_previous_revision(
     postgres_dsn: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cli_playground.database import database
     from cli_playground.domain import UploadIntent
-    from cli_playground.migrate import migrate
     from cli_playground.session_store import SessionStore
     from cli_playground.storage import EnvironmentStore
+
+    from .helpers import database, migrate
 
     migrate(postgres_dsn)
     first = ArtifactMetadata(
@@ -106,30 +131,35 @@ def test_failed_transaction_keeps_pending_upload_and_previous_revision(
 
     async def exercise() -> None:
         async with database(postgres_dsn) as sessions:
-            store = EnvironmentStore(sessions, preview_seconds=100, clock=lambda: 1)
-            operations = SessionStore(sessions)
-            before = await store.publish(first, None)
-            await operations.upload_intent(
-                UploadIntent(artifact=second, build=None, previous_revision=first.revision)
+            store = adapt_store(
+                sessions,
+                lambda session: EnvironmentStore(session, preview_seconds=100, clock=lambda: 1),
             )
-            publish = store._publish
+            operations = adapt_store(sessions, SessionStore)
+            before = await store(lambda repository: repository.publish(first, None))
+            await operations(
+                lambda repository: repository.upload_intent(
+                    UploadIntent(artifact=second, build=None, previous_revision=first.revision)
+                )
+            )
+            publish = EnvironmentStore._publish
 
-            async def failed(*args: object) -> None:
-                await publish(*args)  # type: ignore[arg-type]
+            def failed(*args: object) -> None:
+                publish(*args)  # type: ignore[arg-type]
                 raise OSError("commit interrupted")
 
             with monkeypatch.context() as fault:
-                fault.setattr(store, "_publish", failed)
+                fault.setattr(EnvironmentStore, "_publish", failed)
                 with pytest.raises(OSError, match="interrupted"):
-                    await store.finish_upload(second, None)
-            assert await store.get(before.id) == before
-            assert await store.revision(123, second.revision) is None
-            assert len(await operations.uploads()) == 1
-            after = await store.finish_upload(second, None)
+                    await store(lambda repository: repository.finish_upload(second, None))
+            assert await store(lambda repository: repository.get(before.id)) == before
+            assert await store(lambda repository: repository.revision(123, second.revision)) is None
+            assert len(await operations(lambda repository: repository.uploads())) == 1
+            after = await store(lambda repository: repository.finish_upload(second, None))
             assert after.artifact_id == second.artifact_id
-            assert await operations.uploads() == []
+            assert await operations(lambda repository: repository.uploads()) == []
             # Replaying after a lost commit acknowledgement preserves the committed UUID.
-            assert await store.finish_upload(second, None) == after
+            assert await store(lambda repository: repository.finish_upload(second, None)) == after
 
     asyncio.run(exercise())
 
@@ -137,13 +167,13 @@ def test_failed_transaction_keeps_pending_upload_and_previous_revision(
 def test_alembic_matches_only_playground_tables(postgres_dsn: str) -> None:
     from alembic.autogenerate import compare_metadata
     from alembic.migration import MigrationContext
-    from cli_playground.database import database_url
-    from cli_playground.migrate import migrate
     from cli_playground.tables import Table
     from sqlalchemy import create_engine
 
+    from .helpers import migrate
+
     migrate(postgres_dsn)
-    engine = create_engine(database_url(postgres_dsn))
+    engine = create_engine(postgres_dsn)
     try:
         with engine.connect() as connection:
             assert compare_metadata(MigrationContext.configure(connection), Table.metadata) == []
@@ -152,20 +182,24 @@ def test_alembic_matches_only_playground_tables(postgres_dsn: str) -> None:
 
 
 def test_cleanup_skips_tombstones_and_collects_without_locking_previews(postgres_dsn: str) -> None:
-    from cli_playground.database import connection, database
+    from cli_playground.database import adapt_store
     from cli_playground.domain import UploadIntent
-    from cli_playground.migrate import migrate
     from cli_playground.session_store import SessionStore
     from cli_playground.storage import EnvironmentStore
     from cli_playground.tables import Preview
     from sqlmodel import select
 
+    from .helpers import database, migrate
+
     migrate(postgres_dsn)
 
     async def exercise() -> None:
         async with database(postgres_dsn) as sessions:
-            store = EnvironmentStore(sessions, preview_seconds=100, clock=lambda: 1)
-            operations = SessionStore(sessions)
+            store = adapt_store(
+                sessions,
+                lambda session: EnvironmentStore(session, preview_seconds=100, clock=lambda: 1),
+            )
+            operations = adapt_store(sessions, SessionStore)
             artifacts = [
                 ArtifactMetadata(
                     pr=pr,
@@ -179,27 +213,77 @@ def test_cleanup_skips_tombstones_and_collects_without_locking_previews(postgres
                 for pr in range(1, 5)
             ]
             for artifact in artifacts:
-                await store.publish(artifact, None)
+                await store(partial(EnvironmentStore.publish, artifact=artifact, build=None))
             for pr in (1, 2, 3):
-                await store.close_pull_request(pr)
-            await store.reopen_pull_request(2)
-            await operations.upload_intent(
-                UploadIntent(artifact=artifacts[1], build=None, previous_revision=None)
+                await store(partial(EnvironmentStore.close_pull_request, pr=pr))
+            await store(lambda repository: repository.reopen_pull_request(2))
+            await operations(
+                lambda repository: repository.upload_intent(
+                    UploadIntent(artifact=artifacts[1], build=None, previous_revision=None)
+                )
             )
-            await store.close_pull_request(2)
-            await operations.retire(artifacts[2].artifact_id)
-            await operations.retired(artifacts[2].artifact_id)
-            inactive = await store.inactive_identifiers()
-            assert inactive == {store.identifier(pr) for pr in (1, 2, 3)}
-            assert await store.remove(inactive) == 3
-            assert await store.inactive_identifiers() == set()
-            assert await store.is_closed(1)
+            await store(lambda repository: repository.close_pull_request(2))
+            await operations(lambda repository: repository.retire(artifacts[2].artifact_id))
+            await operations(lambda repository: repository.retired(artifacts[2].artifact_id))
+            inactive = await store(lambda repository: repository.inactive_identifiers())
+            assert inactive == {EnvironmentStore.identifier(pr) for pr in (1, 2, 3)}
+            assert await store(lambda repository: repository.remove(inactive)) == 3
+            assert await store(lambda repository: repository.inactive_identifiers()) == set()
+            assert await store(lambda repository: repository.is_closed(1))
             # Collection must not wait for an unrelated preview mutation.
-            async with connection(sessions, write=True) as session:
+            async with sessions.begin() as session:
                 await session.exec(select(Preview).where(Preview.pr == 4).with_for_update())
-                await asyncio.wait_for(store.collect_artifacts(), timeout=1)
-            assert await operations.retirements() == [artifacts[0].artifact_id]
-            await store.collect_artifacts()
-            assert await operations.retirements() == [artifacts[0].artifact_id]
+                await asyncio.wait_for(
+                    store(lambda repository: repository.collect_artifacts()), timeout=1
+                )
+            assert await operations(lambda repository: repository.retirements()) == [
+                artifacts[0].artifact_id
+            ]
+            await store(lambda repository: repository.collect_artifacts())
+            assert await operations(lambda repository: repository.retirements()) == [
+                artifacts[0].artifact_id
+            ]
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+def test_sync_operation_yields_to_event_loop_during_database_io(
+    postgres_dsn: str, cancel: bool
+) -> None:
+    from cli_playground.database import connection
+    from cli_playground.tables import Preview
+    from sqlalchemy import text
+    from sqlmodel import Session
+
+    from .helpers import database, migrate
+
+    migrate(postgres_dsn)
+
+    async def exercise() -> None:
+        async with database(postgres_dsn) as sessions:
+            run = adapt_store(sessions, lambda session: session)
+            entered = asyncio.Event()
+
+            def operation(session: Session) -> int:
+                with connection(session, write=True):
+                    session.add(Preview(pr=1, id="preview"))
+                    session.flush()
+                    entered.set()
+                    session.execute(text("SELECT pg_sleep(0.2)"))
+                return 42
+
+            pending = asyncio.ensure_future(run(operation))
+            await entered.wait()
+            await asyncio.sleep(0.02)
+            assert not pending.done(), "database I/O blocked the event loop"
+            if cancel:
+                pending.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await pending
+                assert await run(lambda session: session.get(Preview, 1)) is None
+            else:
+                assert await pending == 42
+                assert await run(lambda session: session.get(Preview, 1)) is not None
 
     asyncio.run(exercise())

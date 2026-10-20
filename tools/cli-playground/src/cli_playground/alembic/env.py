@@ -1,18 +1,14 @@
 """Alembic entry point using only Playground's metadata."""
 
-import os
-from pathlib import Path
-
 from alembic import context
-from cli_playground.database import database_url, read_dsn
+from cli_playground.config import DatabaseSettings
 from cli_playground.tables import Table
 from sqlalchemy import engine_from_config, pool
 
 config = context.config
 if not config.get_main_option("sqlalchemy.url"):
-    dsn = read_dsn(Path(os.environ["CLI_PLAYGROUND_POSTGRES_DSN_FILE"]))
     config.set_main_option(
-        "sqlalchemy.url", database_url(dsn).render_as_string(hide_password=False).replace("%", "%%")
+        "sqlalchemy.url", str(DatabaseSettings().database_url).replace("%", "%%")
     )
 if context.is_offline_mode():
     context.configure(

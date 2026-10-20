@@ -1,71 +1,31 @@
 """PostgreSQL adapter lifecycle; application ports never expose SQL sessions."""
 
-import os
-import stat
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
-from pathlib import Path
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from typing import cast
 
-from psycopg import Error as PsycopgError
-from psycopg.conninfo import conninfo_to_dict
-from sqlalchemy import URL, text
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlmodel import Session
 from sqlmodel.ext.asyncio.session import AsyncSession
+
+from cli_playground.ports import PersistenceUnavailable, StoreRunner
 
 SessionFactory = async_sessionmaker[AsyncSession]
 
 
-def database_url(dsn: str) -> URL:
-    try:
-        parameters = {
-            key: str(value) for key, value in conninfo_to_dict(dsn).items() if value is not None
-        }
-    except PsycopgError, ValueError:
-        raise ValueError("invalid PostgreSQL DSN") from None
-    return URL.create(
-        "postgresql+psycopg",
-        username=parameters.pop("user", None),
-        password=parameters.pop("password", None),
-        database=parameters.pop("dbname", None),
-        query=parameters,
-    )
-
-
-def read_dsn(path: Path) -> str:
-    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), "r") as stream:
-        info = os.fstat(stream.fileno())
-        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
-            raise ValueError("PostgreSQL DSN must be a private regular file")
-        dsn = stream.read(4097).strip()
-    if not dsn or len(dsn) > 4096:
-        raise ValueError("invalid PostgreSQL DSN file")
-    return dsn
-
-
-def session_factory(dsn: str) -> SessionFactory:
-    url = database_url(dsn)
-    options = (
-        str(url.query.get("options", "")) + " -c lock_timeout=10000 -c statement_timeout=30000"
-    )
+def session_factory(url: str) -> SessionFactory:
     engine = create_async_engine(
-        url.update_query_dict({"options": options}),
+        url,
         pool_pre_ping=True,
-        pool_size=5,
-        max_overflow=0,
-        pool_timeout=5,
-        connect_args={"connect_timeout": 5},
         hide_parameters=True,
+        connect_args={
+            "connect_timeout": 5,
+            "options": "-c lock_timeout=10000 -c statement_timeout=30000",
+        },
     )
     return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-
-@asynccontextmanager
-async def database(dsn: str) -> AsyncIterator[SessionFactory]:
-    sessions = session_factory(dsn)
-    try:
-        yield sessions
-    finally:
-        await sessions.kw["bind"].dispose()
 
 
 async def check_schema(sessions: SessionFactory) -> None:
@@ -75,18 +35,22 @@ async def check_schema(sessions: SessionFactory) -> None:
             raise RuntimeError("Playground database needs an explicit schema upgrade")
 
 
-@asynccontextmanager
-async def connection(
-    sessions: SessionFactory, *, write: bool = False
-) -> AsyncIterator[AsyncSession]:
-    from sqlalchemy.exc import SQLAlchemyError
-
-    from cli_playground.ports import PersistenceUnavailable
-
-    try:
+def adapt_store[Store](
+    sessions: SessionFactory, factory: Callable[[Session], Store]
+) -> StoreRunner[Store]:
+    async def run[Result](operation: Callable[[Store], Result]) -> Result:
         async with sessions() as session:
+            return await session.run_sync(lambda sync: operation(factory(cast(Session, sync))))
+
+    return run
+
+
+@contextmanager
+def connection(session: Session, *, write: bool = False) -> Iterator[Session]:
+    try:
+        with session:
             if write:
-                async with session.begin():
+                with session.begin():
                     yield session
             else:
                 yield session

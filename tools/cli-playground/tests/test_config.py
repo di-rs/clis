@@ -83,16 +83,25 @@ def test_composition_root_rejects_symlinked_consumer_credentials(tmp_path: Path)
         create_app(Settings(boxie_credential_file=link))
 
 
-@pytest.mark.parametrize("invalid", ["public", "symlink", "empty"])
-def test_database_secret_rejects_invalid_file(tmp_path: Path, invalid: str) -> None:
-    from cli_playground.database import read_dsn
+def test_database_url_uses_settings_secrets_and_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clean_settings_environment: None
+) -> None:
+    from cli_playground.config import DatabaseSettings
 
-    secret = tmp_path / "database"
-    secret.write_text("" if invalid == "empty" else "host=localhost dbname=cli_playground")
-    secret.chmod(0o644 if invalid == "public" else 0o600)
-    if invalid == "symlink":
-        link = tmp_path / "link"
-        link.symlink_to(secret)
-        secret = link
-    with pytest.raises((ValueError, OSError)):
-        read_dsn(secret)
+    url = "postgresql+psycopg://playground:private-password@postgres/playground"
+    secret = tmp_path / "CLI_PLAYGROUND_DATABASE_URL"
+    secret.write_text(url)
+    secret.chmod(0o600)
+    settings = DatabaseSettings(_secrets_dir=tmp_path)
+    assert str(settings.database_url) == url
+    assert "private-password" not in repr(settings)
+    monkeypatch.setenv("CLI_PLAYGROUND_DATABASE_URL", "postgresql+psycopg://localhost/override")
+    assert str(DatabaseSettings(_secrets_dir=tmp_path).database_url).endswith("/override")
+
+
+@pytest.mark.parametrize("url", ["", "host=localhost dbname=playground", "https://localhost/db"])
+def test_database_url_rejects_invalid_values(url: str) -> None:
+    from cli_playground.config import DatabaseSettings
+
+    with pytest.raises(ValidationError):
+        DatabaseSettings(database_url=url)

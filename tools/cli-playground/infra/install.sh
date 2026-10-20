@@ -9,6 +9,6 @@ for volume in cli-playground-data cli-playground-certificates; do
 done
 bash "$owner/provision.sh"
 timeout 180 docker compose --env-file "$config/cli-playground.env" --env-file "$config/cli-playground-image.env" \
-    -f "$owner/compose.production.yml" run --rm --no-deps backend python -m cli_playground.migrate --dsn-file /run/secrets/postgres-dsn
+    -f "$owner/compose.production.yml" run --rm --no-deps backend alembic upgrade head
 timeout 180 docker compose --env-file "$config/cli-playground.env" --env-file "$config/cli-playground-image.env" \
     -f "$owner/compose.production.yml" up -d --no-build --wait --wait-timeout 150

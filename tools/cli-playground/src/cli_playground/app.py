@@ -12,11 +12,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from cli_playground.boxie_client import BoxieClient, HttpBoxieClient
+from cli_playground.boxie_client import HttpBoxieClient
 from cli_playground.config import Settings
-from cli_playground.database import check_schema, read_dsn, session_factory
+from cli_playground.database import adapt_store, check_schema, session_factory
 from cli_playground.ports import PersistenceUnavailable
 from cli_playground.routes import create_router
+from cli_playground.sandbox import BoxieClient
 from cli_playground.service import CliPlaygroundService
 from cli_playground.session_store import SessionStore
 from cli_playground.storage import EnvironmentStore
@@ -42,11 +43,16 @@ def create_app(
         if not 16 <= len(credential) <= 4096 or any(not 33 <= ord(c) <= 126 for c in credential):
             raise ValueError("invalid Boxie credential file")
         boxie = HttpBoxieClient(settings.boxie_url, credential)
-    sessions = session_factory(read_dsn(settings.postgres_dsn_file))
+    sessions = session_factory(str(settings.database_url))
     service = CliPlaygroundService(
         settings,
-        EnvironmentStore(sessions, preview_seconds=settings.preview_seconds, clock=clock),
-        SessionStore(sessions),
+        adapt_store(
+            sessions,
+            lambda session: EnvironmentStore(
+                session, preview_seconds=settings.preview_seconds, clock=clock
+            ),
+        ),
+        adapt_store(sessions, SessionStore),
         boxie,
         clock=clock,
     )
@@ -57,7 +63,10 @@ def create_app(
         try:
             await check_schema(sessions)
             service.staging.recover(
-                {intent.artifact.artifact_id for intent in await service.sessions.uploads()}
+                {
+                    intent.artifact.artifact_id
+                    for intent in await service.sessions(lambda repository: repository.uploads())
+                }
             )
             await service.recover()
             cleanup = asyncio.create_task(service.cleanup_periodically())

@@ -17,7 +17,8 @@ from pathlib import Path
 from boxie_infra.smoke import inspect_sandbox, verify_deleted
 from boxie_infra.terminal import Session
 from cli_playground.artifacts import validate_elf_header
-from cli_playground.boxie_client import HttpBoxieClient, SandboxRequest
+from cli_playground.boxie_client import HttpBoxieClient
+from cli_playground.sandbox import SandboxRequest
 
 PROMPT = b"__CLI_PLAYGROUND_SMOKE_PROMPT__ "
 ANSI = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")

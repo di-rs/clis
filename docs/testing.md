@@ -166,7 +166,7 @@ sandbox boundary. Run them explicitly with Docker available:
 uv run --locked python tools/cli-playground/tests/run_integration.py
 ```
 
-The browser test above provisions its own PostgreSQL database and passes the DSN
+The browser test above provisions its own PostgreSQL database and passes the database URL
 to Playwright. Both product tiers run in the PR frontend job. The [Boxie infrastructure guide](../packages/boxie/infra/README.md)
 covers the separate native Linux/gVisor smoke; Playground consumes Boxie's private
 HTTP/WebSocket API and owns no Docker access.

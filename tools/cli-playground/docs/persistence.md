@@ -13,12 +13,18 @@ and an explicit time, and performs no database, filesystem or network operations
 [Sandbox contracts](../src/cli_playground/sandbox.py) likewise have no transport
 implementation.
 
-The async [application service](../src/cli_playground/service.py) coordinates those
-decisions with the [persistence ports](../src/cli_playground/ports.py) and Boxie.
-The PostgreSQL adapters in [storage.py](../src/cli_playground/storage.py) and
-[session_store.py](../src/cli_playground/session_store.py) load values, apply domain
-rules and commit them. Domain code does not receive SQL sessions. HTTP and
-WebSocket routes call the application service.
+The [persistence ports](../src/cli_playground/ports.py) use synchronous methods
+returning plain values. The SQLModel stores in [storage.py](../src/cli_playground/storage.py)
+and [session_store.py](../src/cli_playground/session_store.py) implement those
+contracts with synchronous session operations. Domain code does not receive SQL
+sessions or await database calls.
+
+The async [application service](../src/cli_playground/service.py) submits a store
+operation to the [database adapter](../src/cli_playground/database.py), for example
+`await self.store(lambda store: store.get(preview_id))`. The adapter uses
+`AsyncSession.run_sync` to execute it over the async psycopg driver. SQL I/O yields
+to the event loop; it does not run a blocking database client or start another
+event loop. HTTP/WebSocket and Boxie transport remain asynchronous.
 
 Publication locks the PR row while checking build order, closure and immutable
 binary identity. It commits the revision, current preview and upload-intent
@@ -47,19 +53,22 @@ PostgreSQL alone does not make replicas safe.
 
 ## Schema changes
 
-Use a private, non-symlink `CLI_PLAYGROUND_POSTGRES_DSN_FILE` with mode `0600`.
-The DSN accepts PostgreSQL URI or libpq syntax. For example, a local service on the
-same private network can use `host=postgres dbname=cli_playground
-user=cli_playground password=YOUR_SECRET`. Never reuse Boxie's database login.
+Set `CLI_PLAYGROUND_DATABASE_URL` to a PostgreSQL URL using the psycopg driver,
+for example `postgresql+psycopg://cli_playground:YOUR_SECRET@postgres/cli_playground`.
+Pydantic Settings validates the URL and can load it from
+`/run/secrets/CLI_PLAYGROUND_DATABASE_URL` instead of the environment. Keep that
+file private with mode `0600`. Environment values take precedence over secret
+files. Never reuse Boxie's database login.
 
 Run upgrades before starting the gateway:
 
 ```sh
-uv run --locked --package cli-playground python -m cli_playground.migrate \
-  --dsn-file "$CLI_PLAYGROUND_POSTGRES_DSN_FILE"
+uv run --locked --package cli-playground alembic \
+  -c tools/cli-playground/alembic.ini upgrade head
 ```
 
-The installed wheel includes migration scripts. Startup checks the schema version
+The installed wheel includes Alembic scripts; the container includes `alembic.ini`
+and runs the standard `alembic upgrade head` command. Startup checks the schema version
 and fails if it is missing or incompatible. It does not create or upgrade tables.
 To author a later revision from the repository root, use:
 

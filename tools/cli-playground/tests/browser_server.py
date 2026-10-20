@@ -49,7 +49,9 @@ async def main() -> None:
 
                 @product.app.get("/__test__/state")
                 async def state() -> dict[str, Any]:
-                    bindings = await product.service.sessions.bindings()
+                    bindings = await product.service.sessions(
+                        lambda repository: repository.bindings()
+                    )
                     sandboxes = []
                     for record in network.supervisor.records.values():
                         stream = (

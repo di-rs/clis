@@ -23,12 +23,7 @@ from fastapi import Path as PathParameter
 from fastapi.responses import FileResponse
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
-from cli_playground.boxie_client import (
-    BoxieUnavailable,
-    SandboxState,
-    TerminationReason,
-    validate_sandbox,
-)
+from cli_playground.domain import ArtifactConflictError
 from cli_playground.models import (
     ID_PATTERN,
     SHA_PATTERN,
@@ -40,8 +35,13 @@ from cli_playground.models import (
     EnvironmentMetadata,
 )
 from cli_playground.ports import PersistenceUnavailable
+from cli_playground.sandbox import (
+    BoxieUnavailable,
+    SandboxState,
+    TerminationReason,
+    validate_sandbox,
+)
 from cli_playground.service import CliPlaygroundService, UploadBusyError, UploadTooLargeError
-from cli_playground.storage import ArtifactConflictError
 from cli_playground.terminal_protocol import (
     AttachRequest,
     UpstreamAttach,
@@ -176,7 +176,7 @@ def create_router(service: CliPlaygroundService, static_dir: Path) -> APIRouter:
     @router.delete("/api/environments/{identifier}/sessions/{session_id}")
     async def stop_session(request: Request, identifier: str, session_id: UUID) -> dict[str, str]:
         check_origin(request)
-        binding = await service.sessions.get(session_id)
+        binding = await service.sessions(lambda repository: repository.get(session_id))
         credentials = request.headers.getlist("authorization")
         credential = (
             credentials[0][7:]
@@ -200,7 +200,7 @@ def create_router(service: CliPlaygroundService, static_dir: Path) -> APIRouter:
         if websocket.headers.getlist("origin") != [expected_origin]:
             await close_terminal(websocket, 1008)
             return
-        binding = await service.sessions.get(session_id)
+        binding = await service.sessions(lambda repository: repository.get(session_id))
         if binding is None or binding.preview_id != identifier or binding.revision != revision:
             await close_terminal(websocket, 1008)
             return

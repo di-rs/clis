@@ -193,7 +193,7 @@ def test_closed_product_control_drain_keeps_abort_and_error_boundaries(
 ) -> None:
     from boxie_test_support.terminal_completion import failed_drain
     from cli_playground import transport
-    from cli_playground.boxie_client import BoxieUnavailable, TerminalWriteClosed
+    from cli_playground.sandbox import BoxieUnavailable, TerminalWriteClosed
     from cli_playground.terminal_protocol import response
 
     async def exercise() -> None:
