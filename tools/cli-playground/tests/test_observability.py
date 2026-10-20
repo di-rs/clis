@@ -21,6 +21,7 @@ from pathlib import Path
 import httpx, uvicorn
 from fastapi import HTTPException, WebSocket
 from websockets.asyncio.client import connect
+from websockets.exceptions import InvalidStatus
 from cli_playground.app import create_app
 from cli_playground.config import Settings
 from cli_playground.observability import current_request_id, request_context, shutdown_logging
@@ -65,6 +66,17 @@ async def run():
             async with connect(origin.replace("http:","ws:")+"/probe") as ws:
                 assert ws.response.headers["x-request-id"] == await ws.recv()
                 expected[ws.response.headers["x-request-id"]] = "INFO"
+            for base, path in (
+                (origin, "/missing"),
+                (origin, "/ws/missing?session_id=11111111-1111-1111-1111-111111111111&revision=" + "a" * 40),
+                (origin.replace("127.0.0.1", "localhost"), "/probe"),
+            ):
+                try:
+                    async with connect(base.replace("http:", "ws:") + path, proxy=None):
+                        raise AssertionError("rejected WebSocket was accepted")
+                except InvalidStatus as denied:
+                    assert denied.response.status_code == 403
+                    expected[denied.response.headers["x-request-id"]] = "ERROR"
             assert current_request_id() is None
             (Path(sys.argv[1]) / "expected-levels.json").write_text(json.dumps(expected))
         finally:
@@ -84,11 +96,44 @@ shutdown_logging()
     events = [json.loads(line) for line in result.stdout.splitlines()]
     assert events and all(event["service"] == "cli-playground" for event in events)
     completed = [event for event in events if event["event"] == "request.completed"]
-    assert len(completed) == 4
+    assert len(completed) == 7
     assert {event["request_id"]: event["level"] for event in completed} == json.loads(
         (tmp_path / "expected-levels.json").read_text()
     )
     assert all(len(line.encode()) + 1 <= 8192 for line in result.stdout.splitlines())
+
+
+@pytest.mark.parametrize("accepted", [False, True])
+def test_websocket_close_without_denial_extension(
+    caplog: pytest.LogCaptureFixture, accepted: bool
+) -> None:
+    import asyncio
+    import logging
+
+    from cli_playground.observability import RequestContext
+    from starlette.types import Message, Receive, Scope, Send
+
+    close: Message = {"type": "websocket.close", "code": 1008, "reason": "policy"}
+    sent: list[Message] = []
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        if accepted:
+            await send({"type": "websocket.accept"})
+        await send(close)
+
+    async def receive() -> Message:
+        return {"type": "websocket.connect"}
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    with caplog.at_level(logging.INFO, logger="cli_playground.observability"):
+        asyncio.run(RequestContext(app)({"type": "websocket", "path": "/probe"}, receive, send))
+    assert sent[-1] == close
+    assert len(sent) == (2 if accepted else 1)
+    assert [(record.message, record.levelno) for record in caplog.records] == [
+        ("Request completed", logging.INFO if accepted else logging.ERROR)
+    ]
 
 
 def test_native_log_check_waits_for_delayed_output() -> None:

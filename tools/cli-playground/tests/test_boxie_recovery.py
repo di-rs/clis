@@ -102,8 +102,14 @@ def test_capability_failures_and_restart_preserve_claimed_session_while_cleaning
                 identifier, other = first.json()["id"], sibling.json()["id"]
                 stopped = await admit(product, identifier, "a" * 40)
                 healthy = await admit(product, other, "b" * 40)
-                abandoned = await admit(product, other, "b" * 40)
                 origin = str(product.http.base_url).rstrip("/")
+                abandoned_response = await product.http.post(
+                    f"/api/environments/{other}/sessions",
+                    headers={"Origin": origin},
+                    json={"revision": "b" * 40},
+                )
+                assert abandoned_response.status_code == 201
+                abandoned = abandoned_response.json()
                 # A copied UUID or credential from another preview cannot authorize it.
                 for owner, credential in [
                     (identifier, "wrong-credential"),
@@ -157,6 +163,9 @@ def test_capability_failures_and_restart_preserve_claimed_session_while_cleaning
                 assert response.json()["absolute_deadline"] == healthy["absolute_deadline"]
                 retained = await restarted.service.sessions.get(UUID(healthy["id"]))
                 assert retained is not None and retained.attached and not retained.pending_stop
+                recovered = await restarted.service.sessions.get(UUID(abandoned["id"]))
+                assert recovered is not None and not recovered.pending_stop
+                assert recovered.stop_request_id == UUID(abandoned_response.headers["x-request-id"])
                 assert (
                     sum(
                         r.state.value not in {"terminated", "failed"}

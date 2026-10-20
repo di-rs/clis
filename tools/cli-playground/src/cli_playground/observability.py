@@ -79,10 +79,20 @@ class RequestContext:
             return
         selected = str(uuid4())
         scope.setdefault("state", {})["request_id"] = selected
-        failed = False
+        failed, accepted = False, False
 
         async def respond(message: Message) -> None:
-            nonlocal failed
+            nonlocal failed, accepted
+            if message["type"] == "websocket.close" and not accepted:
+                failed = True
+                if "websocket.http.response" in scope.get("extensions", {}):
+                    await respond(
+                        {"type": "websocket.http.response.start", "status": 403, "headers": []}
+                    )
+                    await respond({"type": "websocket.http.response.body", "body": b""})
+                    return
+            elif message["type"] == "websocket.accept":
+                accepted = True
             if message["type"] in {"http.response.start", "websocket.http.response.start"}:
                 failed = message["status"] >= 400
             if message["type"] in {

@@ -198,6 +198,6 @@ class SessionStore:
                 credential_hash=intent.credential_hash,
                 sandbox=sandbox,
                 pending_stop=True,
-                stop_request_id=uuid4(),
+                stop_request_id=UUID(current_request_id() or str(uuid4())),
             )
             await session.merge(Binding.model_validate(binding.model_dump(mode="json")))

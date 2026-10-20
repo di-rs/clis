@@ -9,13 +9,14 @@ import pytest
 from cli_playground.app import create_app
 from cli_playground.service import CliPlaygroundService
 from fastapi.testclient import TestClient
-from starlette.websockets import WebSocketDisconnect
+from starlette.testclient import WebSocketDenialResponse
 
 from .boxie_fake import FakeBoxie
 from .helpers import (
     AUTH,
     MutableClock,
     Settings,
+    admission,
     binary_bundle,
     build_event,
     build_upload,
@@ -208,23 +209,29 @@ def test_streamed_upload_enforces_limit_and_removes_partial_files(
 
 def test_websocket_rejects_a_foreign_origin(api_client: TestClient) -> None:
     deployed = upload(api_client)
+    binding = admission(api_client, deployed["id"], "a" * 40)
     headers = {"Origin": "https://evil.example"}
-    with pytest.raises(WebSocketDisconnect) as error:
+    with pytest.raises(WebSocketDenialResponse) as error:
         with api_client.websocket_connect(
-            f"wss://play.example/ws/{deployed['id']}?sha={'a' * 40}", headers=headers
+            f"wss://play.example/ws/{deployed['id']}"
+            f"?session_id={binding['id']}&revision={'a' * 40}",
+            headers=headers,
         ):
             pytest.fail("an unauthorized origin opened a terminal")
-    assert error.value.code == 1008
+    assert error.value.status_code == 403
+    assert error.value.headers["x-request-id"]
 
 
 def test_unknown_preview_does_not_launch_terminal(api_client: TestClient) -> None:
-    with pytest.raises(WebSocketDisconnect) as error:
+    with pytest.raises(WebSocketDenialResponse) as error:
         with api_client.websocket_connect(
-            "wss://play.example/ws/" + "f" * 32 + "?sha=" + "a" * 40,
+            f"wss://play.example/ws/{'f' * 32}"
+            f"?session_id=11111111-1111-1111-1111-111111111111&revision={'a' * 40}",
             headers={"Origin": "https://play.example"},
         ):
             pytest.fail("unknown environment opened a terminal")
-    assert error.value.code == 1008
+    assert error.value.status_code == 403
+    assert error.value.headers["x-request-id"]
 
 
 def test_expired_previews_are_unavailable_before_the_periodic_sweep(
@@ -295,13 +302,16 @@ def test_subdomain_urls_bind_http_and_websocket_to_the_same_preview(
         assert (
             client.get(f"https://{authority}/api/environments/{sibling['id']}").status_code == 404
         )
-        with pytest.raises(WebSocketDisconnect) as error:
+        sibling_session = admission(client, sibling["id"], "a" * 40)
+        with pytest.raises(WebSocketDenialResponse) as error:
             with client.websocket_connect(
-                f"wss://{authority}/ws/{sibling['id']}?sha={'a' * 40}",
+                f"wss://{authority}/ws/{sibling['id']}"
+                f"?session_id={sibling_session['id']}&revision={'a' * 40}",
                 headers={"Origin": f"https://{authority}"},
             ):
                 pytest.fail("cross-preview terminal was accepted")
-        assert error.value.code == 1008
+        assert error.value.status_code == 403
+        assert error.value.headers["x-request-id"]
 
 
 def test_forwarded_headers_cannot_spoof_the_control_host(api_client: TestClient) -> None:
