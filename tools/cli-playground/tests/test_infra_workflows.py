@@ -169,6 +169,31 @@ def test_only_manual_setup_can_provision_cloud_resources() -> None:
     assert "submit-release.sh" not in commands
 
 
+@pytest.mark.parametrize("status", [0, 1, 2])
+def test_setup_reports_bootstrap_failure_without_ignoring_it(status: int) -> None:
+    commands = "\n".join(
+        step.get("run", "") for step in workflow("setup")["jobs"]["provision"]["steps"]
+    )
+    remote = commands.split("<<'BOOTSTRAP'\n", 1)[1].split("\nBOOTSTRAP", 1)[0]
+    result = subprocess.run(
+        [
+            "bash",
+            "-euo",
+            "pipefail",
+            "-c",
+            (
+                f"cloud-init() {{ echo bootstrap-status; return {status}; }}\n"
+                "tail() { echo bootstrap-diagnostics; return 1; }\n" + remote
+            ),
+        ],
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == status
+    assert "bootstrap-status" in result.stdout
+    assert ("bootstrap-diagnostics" in result.stdout) == (status != 0)
+
+
 def test_setup_pulls_all_images_before_starting_boxie() -> None:
     installer = (WORKFLOWS.parent.parent / "infra/environments/single-host/install.sh").read_text()
     assert "BOXIE_SANDBOX_IMAGE" in installer
