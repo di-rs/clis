@@ -158,6 +158,39 @@ def test_alembic_matches_only_playground_tables(postgres_dsn: str) -> None:
         engine.dispose()
 
 
+def test_correlation_upgrade_preserves_pending_legacy_retirements(postgres_dsn: str) -> None:
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, text
+
+    config = Config(str(Path(__file__).parents[1] / "alembic.ini"))
+    config.set_main_option("sqlalchemy.url", postgres_dsn.replace("%", "%%"))
+    command.upgrade(config, "0001_metadata")
+    artifact = uuid4()
+    engine = create_engine(postgres_dsn)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO artifact_retirement (artifact_id, completed) VALUES (:id, false)"
+                ),
+                {"id": artifact},
+            )
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("SELECT artifact_id, completed, request_id FROM artifact_retirement")
+            ).one() == (artifact, False, None)
+        command.downgrade(config, "0001_metadata")
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("SELECT artifact_id, completed FROM artifact_retirement")
+            ).one() == (artifact, False)
+        command.upgrade(config, "head")
+    finally:
+        engine.dispose()
+
+
 def test_cleanup_skips_tombstones_and_collects_without_locking_previews(postgres_dsn: str) -> None:
     from cli_playground.domain import UploadIntent
     from cli_playground.session_store import SessionStore

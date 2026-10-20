@@ -82,6 +82,8 @@ class Sandbox(SQLModel, table=True):
     id: UUID = Field(primary_key=True)
     consumer_id: str
     idempotency_key: str
+    creation_request_id: UUID | None = None
+    stop_request_id: UUID | None = None
     request_hash: str
     spec: dict[str, Any] = Field(sa_column=Column(JSONB, nullable=False))
     snapshot: dict[str, Any] = Field(sa_column=Column(JSONB, nullable=False))
@@ -131,6 +133,7 @@ class Outbox(SQLModel, table=True):
     deduplication_key: str = Field(unique=True)
     sandbox_id: UUID = Field(foreign_key="sandboxes.id", ondelete="RESTRICT")
     kind: str
+    request_id: UUID | None = None
     created_at: datetime = Field(
         default=None,
         nullable=False,

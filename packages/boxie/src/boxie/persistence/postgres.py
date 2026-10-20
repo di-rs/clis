@@ -33,6 +33,7 @@ from boxie.domain.models import (
     TerminationReason,
 )
 from boxie.observability.events import DiagnosticSink, Transition, deliver, emit
+from boxie.observability.telemetry.context import current_request_id
 from boxie.persistence.database import SessionFactory
 from boxie.persistence.models import (
     Artifact,
@@ -178,6 +179,7 @@ class PostgresLifecycle:
                     consumer_id=principal.consumer_id,
                     idempotency_key=idempotency_key,
                     request_hash=digest,
+                    creation_request_id=UUID(current_request_id() or str(uuid4())),
                     spec=normalized,
                     snapshot=SnapshotWire.from_domain(snapshot).model_dump(mode="json"),
                     installation_id=self.identity.installation_id,
@@ -189,15 +191,29 @@ class PostgresLifecycle:
                 await session.flush()
                 slot.sandbox_id = identifier
                 session.add(SandboxArtifactRef(sandbox_id=identifier, artifact_id=spec.artifact_id))
-                await self._enqueue(session, identifier, "start")
-            deliver(self.diagnostics, Transition(event="sandbox.accepted", sandbox_id=identifier))
+                await self._enqueue(
+                    session, identifier, "start", request_id=row.creation_request_id
+                )
+            deliver(
+                self.diagnostics,
+                Transition(
+                    event="sandbox.accepted",
+                    sandbox_id=identifier,
+                    request_id=row.creation_request_id,
+                ),
+            )
             return view(row)
         except TimeoutError:
             raise BoxieError(503, "admission dependency timeout") from None
 
     @staticmethod
     async def _enqueue(
-        session: AsyncSession, identifier: UUID, kind: str, *, key: str | None = None
+        session: AsyncSession,
+        identifier: UUID,
+        kind: str,
+        *,
+        request_id: UUID | None,
+        key: str | None = None,
     ) -> None:
         # Callers hold the sandbox row/admission lock, serializing the unique key.
         deduplication_key = key or f"{identifier}:{kind}"
@@ -212,6 +228,7 @@ class PostgresLifecycle:
                     deduplication_key=deduplication_key,
                     sandbox_id=identifier,
                     kind=kind,
+                    request_id=request_id,
                 )
             )
 
@@ -238,17 +255,28 @@ class PostgresLifecycle:
             if row.cleaned_at is not None or row.desired_stop:
                 return view(row)
             was_pending = row.cleanup_pending
-            row.desired_stop = True
             row.reason = row.reason or reason.value
+            if row.stop_request_id is None:
+                row.stop_request_id = (
+                    row.creation_request_id
+                    if row.reason == TerminationReason.PROVISIONING_FAILED.value
+                    else UUID(current_request_id() or str(uuid4()))
+                )
+            row.desired_stop = True
             row.state, row.cleanup_pending = "terminating", True
             if not was_pending:
                 row.cleanup_pending_since = cast(
                     datetime, await session.scalar(select(func.clock_timestamp()))
                 )
-            await self._enqueue(session, sandbox_id, "stop")
+            await self._enqueue(session, sandbox_id, "stop", request_id=row.stop_request_id)
         deliver(
             self.diagnostics,
-            Transition(event="termination.requested", sandbox_id=sandbox_id, reason=row.reason),
+            Transition(
+                event="termination.requested",
+                sandbox_id=sandbox_id,
+                reason=row.reason,
+                request_id=row.stop_request_id,
+            ),
         )
         return view(row)
 
@@ -357,6 +385,13 @@ class PostgresLifecycle:
                 else item.state.value
             )
             row.reason = row.reason or (item.reason.value if item.reason else None)
+            # The supervisor can finish autonomous removal before SQL receives a stop command.
+            if not row.desired_stop and row.stop_request_id is None and item.reason is not None:
+                row.stop_request_id = (
+                    row.creation_request_id
+                    if row.reason == TerminationReason.PROVISIONING_FAILED.value
+                    else UUID(current_request_id() or str(uuid4()))
+                )
             was_pending = row.cleanup_pending
             row.cleanup_pending = not item.removal_confirmed and (
                 item.cleanup_pending
@@ -390,13 +425,20 @@ class PostgresLifecycle:
                     events.append(
                         Transition(
                             event="provisioning.completed",
+                            request_id=row.creation_request_id,
                             sandbox_id=item.sandbox_id,
                             outcome=outcome,
                             duration_seconds=duration,
                         )
                     )
                     if outcome == "ready":
-                        events.append(Transition(event="sandbox.ready", sandbox_id=item.sandbox_id))
+                        events.append(
+                            Transition(
+                                event="sandbox.ready",
+                                sandbox_id=item.sandbox_id,
+                                request_id=row.creation_request_id,
+                            )
+                        )
             if item.removal_confirmed:
                 slot = (
                     await session.exec(
@@ -408,7 +450,13 @@ class PostgresLifecycle:
                 reference = await session.get(SandboxArtifactRef, item.sandbox_id)
                 if reference is not None:
                     await session.delete(reference)
-                events.append(Transition(event="cleanup.completed", sandbox_id=item.sandbox_id))
+                events.append(
+                    Transition(
+                        event="cleanup.completed",
+                        sandbox_id=item.sandbox_id,
+                        request_id=row.stop_request_id,
+                    )
+                )
         deliver(self.diagnostics, *events)
         return True
 

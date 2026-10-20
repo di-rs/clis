@@ -104,12 +104,17 @@ DATABASE_TESTS = {
     "test_reconnect.py",
     "test_boxie_integration.py",
     "test_boxie_recovery.py",
+    "test_correlation_network.py",
 }
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     for item in items:
-        if item.path.parent == Path(__file__).parent and item.path.name in DATABASE_TESTS:
+        if item.path.parent == Path(__file__).parent and (
+            item.path.name in DATABASE_TESTS
+            or isinstance(item, pytest.Function)
+            and "api_client" in item.fixturenames
+        ):
             item.add_marker(pytest.mark.integration)
 
 
@@ -117,7 +122,7 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 def playground_database(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    if request.node.path.name not in DATABASE_TESTS:
+    if request.node.path.name not in DATABASE_TESTS and "api_client" not in request.fixturenames:
         return
     from .helpers import migrate
 

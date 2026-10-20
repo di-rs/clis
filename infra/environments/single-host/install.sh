@@ -8,9 +8,10 @@ install -d -m 0700 /etc/sanctuary
 for file in settings.env tunnel.json boxie-image.env cli-playground-image.env; do
     install -m 0600 "$source/$file" "/etc/sanctuary/$file"
 done
-install -d -m 0755 /opt/sanctuary/boxie /opt/sanctuary/cli-playground
+install -d -m 0755 /opt/sanctuary/boxie /opt/sanctuary/cli-playground /opt/sanctuary/observability
 cp -a "$source/packages/boxie/infra/." /opt/sanctuary/boxie/
 cp -a "$source/tools/cli-playground/infra/." /opt/sanctuary/cli-playground/
+install -m 0644 "$source/infra/environments/single-host/observability/compose.yml" /opt/sanctuary/observability/compose.yml
 set -a
 # shellcheck disable=SC1091
 source /etc/sanctuary/settings.env
@@ -29,3 +30,7 @@ python3 /opt/sanctuary/cli-playground/cli_playground_infra/installation.py
 bash /opt/sanctuary/boxie/install.sh "$source" "$(cat "$source/revision")" cli-playground
 bash /opt/sanctuary/cli-playground/install.sh
 bash /opt/sanctuary/cli-playground/deploy.sh
+timeout 180 docker compose --env-file /etc/sanctuary/boxie.env \
+    -f /opt/sanctuary/boxie/observability/compose.yml \
+    -f /opt/sanctuary/observability/compose.yml \
+    up -d --no-build --no-deps --wait --wait-timeout 150 vector

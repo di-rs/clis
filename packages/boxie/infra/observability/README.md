@@ -126,12 +126,7 @@ The default Python suite checks privacy, context, bounded queues, HTTP/PTY
 progress, stale SQL state, Compose isolation and ingress configuration. Existing
 lifecycle CI also runs real PostgreSQL/Temporal telemetry checks, native Vector
 privacy tests, Prometheus config/rule validation and a short Linux journal →
-Vector → VictoriaLogs → Grafana datasource smoke. No separate fault framework or
-observability-only workflow is needed. The focused tests/fixtures are about
-1,450 lines, plus retained lifecycle SQL coverage. This exceeds the approximate
-1,000-line target to retain real Temporal history/privacy, full request-context
-isolation, four-poller identity checks, and fresh-volume permission tests; no
-framework fixtures or generated metric snapshots remain.
+Vector → VictoriaLogs → Grafana datasource smoke.
 
 Before production activation:
 
@@ -151,3 +146,23 @@ Before production activation:
 
 Live Access, whole-host/storage pressure and power-loss recovery require the
 actual Linux deployment. Ordinary tests do not establish those activation claims.
+
+## Request correlation
+
+For a failed authenticated request, copy its `X-Request-ID` response header and
+search `request_id:="<UUID>"` in Grafana Explore's VictoriaLogs datasource. The
+[consumer contract](../../README.md#follow-a-request-through-logs) describes
+accepted IDs and separate creation, stop and connection actions. Use `sandbox_id`
+to inspect a sandbox across all of those actions.
+
+Provisioning and cleanup result events restore the committed creation and stop
+origins, even when one observation reports both results. Activity lookups use a
+separate one-connection telemetry pool with a 100 ms deadline. When that lookup
+fails, lifecycle work continues with resource/workflow fields and an unknown
+origin. Old records retain unknown historical origins.
+
+This collector remains Boxie-only by default. A host may add a consumer-owned
+configuration with a second `--config` argument; the
+[shared-host guide](../../../../infra/environments/single-host/README.md#search-across-services)
+shows the composed deployment. Its common-field search omits the Boxie service
+filter. The Boxie dashboard retains its existing default scope.

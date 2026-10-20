@@ -10,6 +10,7 @@ from temporalio.worker import Worker
 
 from boxie.bootstrap.schedules import ensure_schedules
 from boxie.domain.lifecycle import SupervisorObservation
+from boxie.observability.activity_context import ActivityContextResolver
 from boxie.persistence.outbox import PostgresOutbox
 from boxie.persistence.postgres import PostgresLifecycle
 from boxie.persistence.postgres_artifacts import PostgresArtifactStore
@@ -22,14 +23,18 @@ from boxie.temporal.workflows import SandboxLifecycle
 
 
 def lifecycle_worker(
-    client: Client, activities: LifecycleActivities, *, task_queue: str = TASK_QUEUE
+    client: Client,
+    activities: LifecycleActivities,
+    *,
+    task_queue: str = TASK_QUEUE,
+    context_resolver: ActivityContextResolver | None = None,
 ) -> Worker:
     return Worker(
         client,
         task_queue=task_queue,
         workflows=[SandboxLifecycle],
         activities=activities.registered(),
-        interceptors=[SafeActivityErrors()],
+        interceptors=[SafeActivityErrors(context_resolver=context_resolver)],
         max_concurrent_activities=32,
         graceful_shutdown_timeout=timedelta(seconds=25),
     )
@@ -41,6 +46,8 @@ async def embedded_workers(
     repository: PostgresLifecycle,
     supervisor: Supervisor,
     artifacts: PostgresArtifactStore,
+    *,
+    context_resolver: ActivityContextResolver | None = None,
 ) -> AsyncIterator[None]:
     identity = supervisor.config.identity
     activities = LifecycleActivities(repository, supervisor)
@@ -62,13 +69,18 @@ async def embedded_workers(
     supervisor.observer = project
     try:
         async with (
-            lifecycle_worker(client, activities, task_queue=lifecycle_queue(identity)),
+            lifecycle_worker(
+                client,
+                activities,
+                task_queue=lifecycle_queue(identity),
+                context_resolver=context_resolver,
+            ),
             Worker(
                 client,
                 task_queue=maintenance_queue(identity),
                 workflows=[Maintenance],
                 activities=[maintenance.maintain],
-                interceptors=[SafeActivityErrors()],
+                interceptors=[SafeActivityErrors(context_resolver=context_resolver)],
                 max_concurrent_activities=4,
                 graceful_shutdown_timeout=timedelta(seconds=25),
             ),

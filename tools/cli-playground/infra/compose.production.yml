@@ -27,6 +27,12 @@ services:
     - no-new-privileges:true
     init: true
     restart: unless-stopped
+    logging:
+      driver: journald
+      options:
+        mode: non-blocking
+        max-buffer-size: 4m
+        tag: cli-playground-api
     healthcheck:
       test:
       - CMD

@@ -16,6 +16,7 @@ class OutboxEvent(BaseModel):
 
     id: UUID
     sandbox_id: UUID
+    request_id: UUID | None = None
 
 
 class PostgresOutbox:
@@ -37,7 +38,10 @@ class PostgresOutbox:
             rows = (
                 await session.exec(query.order_by(col(Outbox.created_at), col(Outbox.id)).limit(32))
             ).all()
-            return [OutboxEvent(id=row.id, sandbox_id=row.sandbox_id) for row in rows]
+            return [
+                OutboxEvent(id=row.id, sandbox_id=row.sandbox_id, request_id=row.request_id)
+                for row in rows
+            ]
 
     async def acknowledge(self, event: OutboxEvent) -> bool:
         async with self.sessions() as session, session.begin():

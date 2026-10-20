@@ -9,6 +9,7 @@ from temporalio.client import Client
 from temporalio.common import WorkflowIDConflictPolicy, WorkflowIDReusePolicy
 from temporalio.exceptions import WorkflowAlreadyStartedError
 
+from boxie.observability.telemetry.context import request_context
 from boxie.persistence.outbox import OutboxEvent, PostgresOutbox
 from boxie.temporal.contracts import TASK_QUEUE
 from boxie.temporal.workflows import SandboxLifecycle
@@ -43,6 +44,10 @@ class CommandDelivery:
 
     async def _one(self, event: OutboxEvent, semaphore: asyncio.Semaphore) -> None:
         async with semaphore:
+            await self._bound(event)
+
+    async def _bound(self, event: OutboxEvent) -> None:
+        with request_context(str(event.request_id) if event.request_id else None):
             try:
                 await self.deliver(event)
                 await self.store.acknowledge(event)
@@ -69,7 +74,6 @@ class CommandDelivery:
         try:
             async with asyncio.timeout(1):
                 for event in await self.store.pending(sandbox_id):
-                    await self.deliver(event)
-                    await self.store.acknowledge(event)
+                    await self._bound(event)
         except Exception:
             pass  # Acceptance is already committed to SQL; the recovery loop repairs delivery.

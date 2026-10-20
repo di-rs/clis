@@ -15,6 +15,9 @@ TESTS = (
     "test_reconnect.py",
     "test_boxie_integration.py",
     "test_boxie_recovery.py",
+    "test_correlation_network.py",
+    "test_observability.py",
+    "test_session_correlation.py",
 )
 
 if __name__ == "__main__":

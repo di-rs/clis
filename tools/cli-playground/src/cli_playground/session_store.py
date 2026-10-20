@@ -1,7 +1,7 @@
 """SQLModel adapter for bindings and replayable remote-operation intents."""
 
 from collections.abc import Callable
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import col, delete, select, update
@@ -9,6 +9,7 @@ from sqlmodel import col, delete, select, update
 from cli_playground.database import SessionFactory, connection
 from cli_playground.domain import CreateIntent, SessionBinding, UploadIntent, check_build
 from cli_playground.models import BuildIdentity
+from cli_playground.observability import current_request_id
 from cli_playground.sandbox import SandboxView, validate_sandbox
 from cli_playground.storage import artifact_value, locked_preview, preview_value
 from cli_playground.tables import Binding, Creation, Retirement, Upload
@@ -20,7 +21,7 @@ class SessionStore:
 
     async def save(self, binding: SessionBinding) -> None:
         async with connection(self.sessions, write=True) as session:
-            await session.merge(Binding(**(binding.model_dump(mode="json") | {"id": binding.id})))
+            await session.merge(Binding.model_validate(binding.model_dump(mode="json")))
 
     async def change(
         self, identifier: UUID, change: Callable[[SessionBinding], None], *, claimed: bool = False
@@ -35,7 +36,8 @@ class SessionStore:
                 return None
             binding = SessionBinding.model_validate(row.model_dump())
             change(binding)
-            for name, value in binding.model_dump(mode="json", exclude={"id"}).items():
+            updated = Binding.model_validate(binding.model_dump(mode="json"))
+            for name, value in updated.model_dump(exclude={"id"}).items():
                 setattr(row, name, value)
             if claimed:
                 await session.exec(delete(Creation).where(col(Creation.id) == identifier))
@@ -73,7 +75,7 @@ class SessionStore:
 
     async def create_intent(self, intent: CreateIntent) -> None:
         async with connection(self.sessions, write=True) as session:
-            await session.merge(Creation(**(intent.model_dump(mode="json") | {"id": intent.id})))
+            await session.merge(Creation.model_validate(intent.model_dump(mode="json")))
 
     async def creates(self) -> list[CreateIntent]:
         async with connection(self.sessions) as session:
@@ -92,6 +94,7 @@ class SessionStore:
             check_build(await preview_value(session, row), row.closed, intent.build)
             session.add(
                 Upload(
+                    request_id=intent.request_id,
                     **intent.artifact.model_dump(),
                     build_sha=intent.build.sha if intent.build else None,
                     run_id=intent.build.run_id if intent.build else None,
@@ -106,6 +109,7 @@ class SessionStore:
         async with connection(self.sessions) as session:
             return [
                 UploadIntent(
+                    request_id=row.request_id,
                     artifact=artifact_value(row),
                     build=BuildIdentity.model_validate(
                         dict(
@@ -123,13 +127,22 @@ class SessionStore:
                 for row in await session.exec(select(Upload))
             ]
 
-    async def retire(self, identifier: UUID) -> None:
+    async def retire(self, identifier: UUID, *, request_id: UUID | None = None) -> None:
         async with connection(self.sessions, write=True) as session:
             await session.exec(
                 insert(Retirement)
-                .values(artifact_id=identifier, completed=False)
+                .values(
+                    artifact_id=identifier,
+                    completed=False,
+                    request_id=request_id or UUID(current_request_id() or str(uuid4())),
+                )
                 .on_conflict_do_nothing()
             )
+
+    async def retirement_request_id(self, identifier: UUID) -> UUID | None:
+        async with connection(self.sessions) as session:
+            row = await session.get(Retirement, identifier)
+            return row.request_id if row else None
 
     async def retirements(self) -> list[UUID]:
         async with connection(self.sessions) as session:
@@ -161,6 +174,8 @@ class SessionStore:
                     "terminated",
                     "failed",
                 }:
+                    if not row.pending_stop:
+                        row.stop_request_id = UUID(current_request_id() or str(uuid4()))
                     row.pending_stop = True
 
     async def recover_creation(self, intent: CreateIntent, sandbox: SandboxView) -> None:
@@ -183,5 +198,6 @@ class SessionStore:
                 credential_hash=intent.credential_hash,
                 sandbox=sandbox,
                 pending_stop=True,
+                stop_request_id=UUID(current_request_id() or str(uuid4())),
             )
-            await session.merge(Binding(**(binding.model_dump(mode="json") | {"id": binding.id})))
+            await session.merge(Binding.model_validate(binding.model_dump(mode="json")))

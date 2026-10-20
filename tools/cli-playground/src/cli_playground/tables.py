@@ -75,6 +75,7 @@ class Binding(Table, table=True):
     credential_hash: str
     sandbox: dict[str, Any] = Field(sa_column=Column(JSONB, nullable=False))
     pending_stop: bool = Field(default=False, index=True)
+    stop_request_id: UUID | None = None
     attachment_deadline: float | None = None
     attached: bool = False
     attachment_claim: int = Field(default=0, sa_type=BigInteger)
@@ -82,6 +83,7 @@ class Binding(Table, table=True):
 
 class Creation(Table, table=True):
     __tablename__ = "create_intent"
+    request_id: UUID | None = None
     id: UUID = Field(primary_key=True)
     preview_id: str = Field(foreign_key="preview.id")
     revision: str
@@ -93,6 +95,7 @@ class Creation(Table, table=True):
 
 class Upload(Table, table=True):
     __tablename__ = "upload_intent"
+    request_id: UUID | None = None
     __table_args__ = (UniqueConstraint("pr", "revision"),)
     artifact_id: UUID = Field(primary_key=True)
     pr: int = Field(foreign_key="preview.pr", sa_type=BigInteger)
@@ -111,5 +114,6 @@ class Upload(Table, table=True):
 
 class Retirement(Table, table=True):
     __tablename__ = "artifact_retirement"
+    request_id: UUID | None = None
     artifact_id: UUID = Field(primary_key=True)
     completed: bool = False

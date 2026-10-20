@@ -2,9 +2,10 @@
 
 import hashlib
 import secrets
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, BeforeValidator, ConfigDict
 
 from cli_playground.models import (
     ArtifactMetadata,
@@ -14,6 +15,21 @@ from cli_playground.models import (
     PreviewRecord,
 )
 from cli_playground.sandbox import SandboxRequest, SandboxView
+
+
+def optional_request_id(value: object) -> UUID | None:
+    if isinstance(value, UUID):
+        return value
+    if not isinstance(value, str) or len(value) != 36:
+        return None
+    try:
+        parsed = UUID(value)
+        return parsed if str(parsed) == value else None
+    except ValueError:
+        return None
+
+
+type RequestId = Annotated[UUID | None, BeforeValidator(optional_request_id)]
 
 
 class ArtifactConflictError(ValueError):
@@ -74,6 +90,7 @@ class SessionBinding(BaseModel):
     sandbox: SandboxView
     credential_hash: str
     pending_stop: bool = False
+    stop_request_id: RequestId = None
     attachment_deadline: float | None = None
     attached: bool = False
     attachment_claim: int = 0
@@ -85,6 +102,7 @@ class SessionBinding(BaseModel):
 
 
 class CreateIntent(BaseModel):
+    request_id: RequestId = None
     id: UUID
     preview_id: str
     revision: str
@@ -95,6 +113,7 @@ class CreateIntent(BaseModel):
 
 
 class UploadIntent(BaseModel):
+    request_id: RequestId = None
     artifact: ArtifactMetadata
     build: BuildIdentity | None
     previous_revision: str | None
@@ -133,15 +152,24 @@ def complete_attachment(binding: SessionBinding, view: SandboxView, claim: int |
     binding.attached = True
 
 
-def cancel_attachment(binding: SessionBinding, claim: int | None) -> None:
+def cancel_attachment(
+    binding: SessionBinding, claim: int | None, request_id: UUID | None = None
+) -> None:
     if binding.attachment_deadline is not None and (
         claim is None or claim == binding.attachment_claim
     ):
-        binding.pending_stop = not binding.attached
+        if not binding.attached:
+            request_stop(binding, request_id)
+        else:
+            binding.pending_stop = False
         binding.attachment_deadline = None
 
 
-def request_stop(binding: SessionBinding) -> None:
+def request_stop(binding: SessionBinding, request_id: UUID | None = None) -> None:
+    if binding.sandbox.state in {"terminated", "failed"} and not binding.sandbox.cleanup_pending:
+        return
+    if not binding.pending_stop:
+        binding.stop_request_id = request_id
     binding.pending_stop = True
 
 

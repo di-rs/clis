@@ -1,0 +1,9 @@
+services:
+  vector:
+    command:
+    - --config
+    - /etc/vector/vector.yaml
+    - --config
+    - /etc/vector/cli-playground.yaml
+    volumes:
+    - ${SANCTUARY_CLI_PLAYGROUND_DIR:-/opt/sanctuary/cli-playground}/observability/vector.yaml:/etc/vector/cli-playground.yaml:ro

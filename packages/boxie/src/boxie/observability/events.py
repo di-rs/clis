@@ -1,10 +1,12 @@
 """Bounded lifecycle diagnostics, invoked only after acknowledged durable writes."""
 
 from collections.abc import Callable
+from contextlib import nullcontext
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from boxie.observability.telemetry.context import request_context
 from boxie.observability.telemetry.logging import configured_dispatcher
 
 EVENTS = {
@@ -26,6 +28,7 @@ class Transition(BaseModel):
 
     event: str = Field(min_length=1)
     sandbox_id: UUID | None = None
+    request_id: UUID | None = None
     outcome: str | None = None
     reason: str | None = None
     duration_seconds: float | None = None
@@ -51,6 +54,13 @@ def emit(event: Transition) -> None:
 def deliver(sink: DiagnosticSink, *events: Transition) -> None:
     for event in events:
         try:
-            sink(event)
+            # Durable results explicitly carry even an unknown origin; transient
+            # events retain their connection/activity context.
+            with (
+                request_context(str(event.request_id) if event.request_id else None)
+                if "request_id" in event.model_fields_set
+                else nullcontext()
+            ):
+                sink(event)
         except Exception:
             pass  # Diagnostics never change a committed lifecycle result.

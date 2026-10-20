@@ -77,7 +77,7 @@ uv run --locked --package cli-playground alembic \
   -c tools/cli-playground/alembic.ini revision --autogenerate -m "Describe the change"
 ```
 
-Review the generated script before applying it. The initial migration is tested
+Review the generated script before applying it. The migrated schema is tested
 against the SQLModel metadata to catch schema drift. See the
 [infrastructure guide](../infra/README.md#database-and-cutover) for provisioning,
 backup and the deliberate fresh-state cutover.

@@ -26,6 +26,7 @@ from boxie.domain.models import (
 )
 from boxie.domain.policy import validate_policy
 from boxie.observability.events import DiagnosticSink, Transition, deliver, emit
+from boxie.observability.telemetry.context import bind_context, request_context
 from boxie.sandbox.docker import ExecutionDocker
 from boxie.sandbox.execution.journal import ExecutionJournal, ExecutionRecord
 from boxie.sandbox.execution.reconcile import reconcile_removal
@@ -511,9 +512,13 @@ class Supervisor:
                 ),
             )
 
+    async def _autonomous_reconcile(self, record: ExecutionRecord) -> None:
+        with request_context(str(uuid4())), bind_context(sandbox_id=str(record.id)):
+            await self._supervised_reconcile(record)
+
     async def reconcile(self) -> None:
         await asyncio.gather(
-            *(self._supervised_reconcile(record) for record in list(self.records.values()))
+            *(self._autonomous_reconcile(record) for record in list(self.records.values()))
         )
 
     async def start(self) -> None:

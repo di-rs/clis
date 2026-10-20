@@ -231,10 +231,11 @@ def test_real_sql_http_worker_history_replay_does_not_emit(
     from uuid import UUID
 
     from boxie.bootstrap.workers import embedded_workers
+    from boxie.observability.activity_context import build_activity_context_resolver
     from boxie.observability.metrics import Metrics
     from boxie.observability.snapshot import operational_snapshot
     from boxie.temporal.workflows import SandboxLifecycle
-    from boxie_test_support.api import artifact, create, ready
+    from boxie_test_support.api import artifact, ready
     from temporal_support import lifecycle_stack, tls
     from temporalio.client import Client
     from temporalio.contrib.pydantic import pydantic_data_converter
@@ -257,11 +258,28 @@ def test_real_sql_http_worker_history_replay_does_not_emit(
                 metrics.transition(event)
 
             stack.life.diagnostics = sink
-            async with embedded_workers(client, stack.life, stack.supervisor, stack.artifacts):
-                identifier = await create(stack.http, await artifact(stack.http))
+            async with embedded_workers(
+                client,
+                stack.life,
+                stack.supervisor,
+                stack.artifacts,
+                context_resolver=build_activity_context_resolver(stack.sessions),
+            ):
+                creation, stop = uuid4(), uuid4()
+                response = await stack.http.post(
+                    "/v1/sandboxes",
+                    json={"artifact_id": await artifact(stack.http)},
+                    headers={"Idempotency-Key": "correlation", "X-Request-ID": str(creation)},
+                )
+                assert response.status_code == 202
+                identifier = response.json()["id"]
                 await ready(stack.http, identifier)
                 stack.daemon.unreachable = True
-                assert (await stack.http.delete("/v1/sandboxes/" + identifier)).status_code == 200
+                assert (
+                    await stack.http.delete(
+                        "/v1/sandboxes/" + identifier, headers={"X-Request-ID": str(stop)}
+                    )
+                ).status_code == 200
                 metrics.refresh(await operational_snapshot(stack.sessions))
                 assert b"boxie_capacity_reserved 1.0" in metrics.render()
                 assert b"boxie_cleanup_pending 1.0" in metrics.render()
@@ -277,6 +295,16 @@ def test_real_sql_http_worker_history_replay_does_not_emit(
                 assert [(e.event, e.outcome) for e in events] == before
                 assert metrics.provisioning.labels("ready")._value.get() == 1
                 assert sum(e.event == "cleanup.completed" for e in events) == 1
+                assert all(
+                    e.request_id == creation
+                    for e in events
+                    if e.event in {"sandbox.accepted", "provisioning.completed", "sandbox.ready"}
+                )
+                assert all(
+                    e.request_id == stop
+                    for e in events
+                    if e.event in {"termination.requested", "cleanup.completed"}
+                )
                 restarted = Metrics("api")
                 restarted.refresh(await operational_snapshot(stack.sessions))
                 assert b"boxie_capacity_reserved 0.0" in restarted.render()
@@ -390,5 +418,172 @@ def test_existing_unknown_cleanup_age_stays_unknown(
             async with sessions() as session:
                 row = await session.get(Sandbox, view.id)
                 assert row is not None and row.cleanup_pending_since is None
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.integration
+def test_admission_retry_and_first_stop_preserve_origins(postgres_dsn: str, tmp_path: Path) -> None:
+    from boxie.observability.telemetry.context import request_context
+    from boxie.persistence.models import Outbox, Sandbox
+    from sqlmodel import select
+
+    async def exercise() -> None:
+        creation, stop, retry = uuid4(), uuid4(), uuid4()
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, _):
+            spec = await upload(artifacts)
+            with request_context(str(creation)):
+                view = await life.submit(OWNER, "origin", spec)
+            with request_context(str(retry)):
+                assert (await life.submit(OWNER, "origin", spec)).id == view.id
+            with request_context(str(stop)):
+                await life.terminate(OWNER, view.id, TerminationReason.REQUESTED)
+            with request_context(str(retry)):
+                await life.terminate(OWNER, view.id, TerminationReason.PROVISIONING_FAILED)
+            async with sessions() as session:
+                row = await session.get(Sandbox, view.id)
+                assert row is not None
+                assert row.creation_request_id == creation
+                assert row.stop_request_id == stop
+                commands = (
+                    await session.exec(select(Outbox).where(Outbox.sandbox_id == view.id))
+                ).all()
+                assert {command.kind: command.request_id for command in commands} == {
+                    "start": creation,
+                    "stop": stop,
+                }
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.integration
+def test_coalesced_observation_keeps_distinct_action_origins(
+    postgres_dsn: str, tmp_path: Path
+) -> None:
+    from boxie.observability.telemetry.context import current_request_id, request_context
+    from boxie.persistence.models import Outbox
+    from sqlalchemy import delete
+
+    async def exercise() -> None:
+        creation, stop = uuid4(), uuid4()
+        events: list[tuple[str, str | None]] = []
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
+            life.diagnostics = lambda event: events.append((event.event, current_request_id()))
+            with request_context(str(creation)):
+                view = await life.submit(OWNER, "coalesced", await upload(artifacts))
+            with request_context(str(stop)):
+                await life.terminate(OWNER, view.id, TerminationReason.REQUESTED)
+            async with sessions() as session, session.begin():
+                await session.exec(delete(Outbox))
+            boot = uuid4()
+            await life.bind_supervisor_boot(OWNER, config.identity, view.id, 1, None, boot)
+            with request_context(str(uuid4())):
+                await life.record_observation(
+                    SupervisorObservation(
+                        view.id,
+                        OWNER,
+                        config.identity,
+                        1,
+                        boot,
+                        1,
+                        datetime.now(UTC),
+                        SandboxState.TERMINATED,
+                        False,
+                        ready_at=datetime.now(UTC),
+                        removal_confirmed=True,
+                    )
+                )
+            assert ("provisioning.completed", str(creation)) in events
+            assert ("sandbox.ready", str(creation)) in events
+            assert ("cleanup.completed", str(stop)) in events
+
+    asyncio.run(exercise())
+
+
+def test_autonomous_reconciliation_drops_inherited_request(tmp_path: Path) -> None:
+    from boxie.observability.telemetry.context import current_request_id, request_context
+    from lifecycle_support import settled, setup
+
+    async def exercise() -> None:
+        supervisor, request, daemon, _, _ = await setup(tmp_path)
+        origins: list[str | None] = []
+        try:
+            await settled(supervisor, request.ref, SandboxState.READY)
+            supervisor.diagnostics = lambda event: origins.append(current_request_id())
+            daemon.unreachable = True
+            inherited = str(uuid4())
+            with request_context(inherited):
+                await supervisor.remove(request.ref, TerminationReason.REQUESTED)
+                assert origins[-1] == inherited
+                await supervisor.reconcile()
+                assert origins[-1] is not None and origins[-1] != inherited
+                assert current_request_id() == inherited
+        finally:
+            daemon.unreachable = False
+            await supervisor.close()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "reason", [TerminationReason.PROVISIONING_FAILED, TerminationReason.EXPIRED]
+)
+@pytest.mark.parametrize("removed", [False, True])
+def test_autonomous_cleanup_commits_origin_before_termination(
+    postgres_dsn: str, tmp_path: Path, reason: TerminationReason, removed: bool
+) -> None:
+    from boxie.observability.telemetry.context import current_request_id, request_context
+    from boxie.persistence.models import Sandbox
+
+    async def exercise() -> None:
+        creation, autonomous, later = uuid4(), uuid4(), uuid4()
+        events: list[tuple[str, str | None]] = []
+        async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
+            life.diagnostics = lambda event: events.append((event.event, current_request_id()))
+            with request_context(str(creation)):
+                view = await life.submit(OWNER, "autonomous-origin", await upload(artifacts))
+            boot = uuid4()
+            await life.bind_supervisor_boot(OWNER, config.identity, view.id, 1, None, boot)
+            expected = creation if reason == TerminationReason.PROVISIONING_FAILED else autonomous
+            with request_context(str(autonomous)):
+                await life.record_observation(
+                    SupervisorObservation(
+                        view.id,
+                        OWNER,
+                        config.identity,
+                        1,
+                        boot,
+                        1,
+                        datetime.now(UTC),
+                        SandboxState.TERMINATED if removed else SandboxState.TERMINATING,
+                        not removed,
+                        cleanup_pending=not removed,
+                        removal_confirmed=removed,
+                        reason=reason,
+                    )
+                )
+            with request_context(str(later)):
+                await life.terminate(OWNER, view.id, TerminationReason.REQUESTED)
+            with request_context(str(uuid4())):
+                await life.record_observation(
+                    SupervisorObservation(
+                        view.id,
+                        OWNER,
+                        config.identity,
+                        1,
+                        boot,
+                        2,
+                        datetime.now(UTC),
+                        SandboxState.TERMINATED,
+                        False,
+                        removal_confirmed=True,
+                        reason=reason,
+                    )
+                )
+            async with sessions() as session:
+                row = await session.get(Sandbox, view.id)
+                assert row is not None and row.stop_request_id == expected
+            assert ("cleanup.completed", str(expected)) in events
 
     asyncio.run(exercise())

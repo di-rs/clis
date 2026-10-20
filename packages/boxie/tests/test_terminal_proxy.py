@@ -29,7 +29,10 @@ def test_terminal_authentication_replay_and_unicode_through_api(tmp_path: Path) 
                     async with connect(url, additional_headers=headers):
                         pytest.fail("unauthorized terminal opened")
                 assert error.value.response.status_code == status
+                assert error.value.response.headers["x-request-id"]
             async with connect(url, additional_headers=CONSUMER_AUTH) as old:
+                assert old.response is not None
+                old_id = old.response.headers["x-request-id"]
                 epoch, payload = await attach(old, order=1)
                 assert payload == b"ready\n"
                 await old.send(
@@ -37,6 +40,8 @@ def test_terminal_authentication_replay_and_unicode_through_api(tmp_path: Path) 
                 )
                 assert await old.recv() == (2).to_bytes(8, "big") + "é漢🙂".encode()
                 async with connect(url, additional_headers=CONSUMER_AUTH) as new:
+                    assert new.response is not None
+                    assert new.response.headers["x-request-id"] != old_id
                     successor, replay = await attach(new, cursor=1, cols=100, rows=30, order=2)
                     assert replay == "é漢🙂".encode() and successor > epoch
                     await old.close()

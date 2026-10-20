@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosedOK, WebSocketException
 
+from cli_playground.observability import current_request_id
 from cli_playground.sandbox import (
     ArtifactReply,
     BoxieUnavailable,
@@ -59,6 +60,12 @@ class HttpBoxieClient:
         self.headers = {"Authorization": f"Bearer {credential}"}
         self._session: aiohttp.ClientSession | None = None
 
+    def _headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
+        result = self.headers | (extra or {})
+        if request_id := current_request_id():
+            result["X-Request-ID"] = request_id
+        return result
+
     def _http(self) -> aiohttp.ClientSession:
         if self._session is None:
             self._session = aiohttp.ClientSession(
@@ -76,7 +83,11 @@ class HttpBoxieClient:
     ) -> bytes:
         try:
             async with self._http().request(
-                method, self.url + path, data=body, headers=headers, allow_redirects=False
+                method,
+                self.url + path,
+                data=body,
+                headers=self._headers(headers),
+                allow_redirects=False,
             ) as response:
                 data = await bounded_response(response)
                 if response.status not in {200, 201, 202, 204} or len(data) > 65536:
@@ -96,7 +107,7 @@ class HttpBoxieClient:
             async with self._http().put(
                 self.url + f"/v1/artifacts/{identifier}",
                 data=chunks(),
-                headers={"X-Content-SHA256": digest},
+                headers=self._headers({"X-Content-SHA256": digest}),
                 allow_redirects=False,
             ) as response:
                 if response.status not in {200, 201}:
@@ -142,7 +153,7 @@ class HttpBoxieClient:
             async with NoRedirectConnect(
                 self.url.replace("http:", "ws:").replace("https:", "wss:")
                 + f"/v1/sandboxes/{identifier}/terminal",
-                additional_headers=self.headers,
+                additional_headers=self._headers(),
                 proxy=None,
                 max_size=65536,
                 max_queue=4,

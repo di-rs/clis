@@ -28,6 +28,7 @@ from cli_playground.models import (
     Environment,
     EnvironmentMetadata,
 )
+from cli_playground.observability import current_request_id, request_context, sandbox_context
 from cli_playground.ports import EnvironmentStore, SessionStore
 from cli_playground.sandbox import (
     BoxieClient,
@@ -66,26 +67,32 @@ class CliPlaygroundService:
 
     async def retry_stops(self) -> None:
         for binding in await self.sessions.pending_stops():
-            try:
-                view = await self.boxie.terminate(binding.sandbox.id, binding.sandbox)
-                await self.sessions.change(
-                    binding.id,
-                    partial(domain.confirm_stop, view=view),
-                    claimed=True,
-                )
-            except BoxieUnavailable:
-                logger.warning("Sandbox stop remains pending")
+            with (
+                request_context(str(binding.stop_request_id) if binding.stop_request_id else None),
+                sandbox_context(binding.sandbox.id),
+            ):
+                try:
+                    view = await self.boxie.terminate(binding.sandbox.id, binding.sandbox)
+                    await self.sessions.change(
+                        binding.id,
+                        partial(domain.confirm_stop, view=view),
+                        claimed=True,
+                    )
+                except BoxieUnavailable:
+                    logger.warning("Sandbox stop remains pending")
 
     async def collect_artifacts(self) -> None:
         await self.store.collect_artifacts()
 
     async def retry_retirements(self) -> None:
         for identifier in await self.sessions.retirements():
-            try:
-                await self.boxie.retire(identifier)
-                await self.sessions.retired(identifier)
-            except BoxieUnavailable:
-                logger.warning("Artifact retirement remains pending")
+            origin = await self.sessions.retirement_request_id(identifier)
+            with request_context(str(origin) if origin else None):
+                try:
+                    await self.boxie.retire(identifier)
+                    await self.sessions.retired(identifier)
+                except BoxieUnavailable:
+                    logger.warning("Artifact retirement remains pending")
 
     async def cleanup_inactive(self) -> None:
         identifiers = await self.store.inactive_identifiers()
@@ -101,18 +108,19 @@ class CliPlaygroundService:
         return metadata
 
     async def finish_upload(self, intent: UploadIntent) -> Environment:
-        artifact = intent.artifact
-        await self.boxie.upload(
-            artifact.artifact_id, artifact.sha256, self.staging.archive(artifact.artifact_id)
-        )
-        try:
-            environment = await self.store.finish_upload(artifact, intent.build)
-        except ArtifactConflictError:
+        with request_context(str(intent.request_id) if intent.request_id else None):
+            artifact = intent.artifact
+            await self.boxie.upload(
+                artifact.artifact_id, artifact.sha256, self.staging.archive(artifact.artifact_id)
+            )
+            try:
+                environment = await self.store.finish_upload(artifact, intent.build)
+            except ArtifactConflictError:
+                self.staging.remove(artifact.artifact_id)
+                raise
             self.staging.remove(artifact.artifact_id)
-            raise
-        self.staging.remove(artifact.artifact_id)
-        await self.collect_artifacts()
-        return environment
+            await self.collect_artifacts()
+            return environment
 
     async def recover(self, *, startup: bool = True) -> None:
         # A restarted process cannot finish an in-flight terminal attachment.
@@ -131,16 +139,20 @@ class CliPlaygroundService:
                 not startup and not intent.abandoned and intent.claim_until > self.clock()
             ):
                 continue
-            try:
-                sandbox = await self.boxie.create(str(intent.id), intent.spec)
-                await self.sessions.recover_creation(intent, sandbox)
-            except BoxieUnavailable:
-                logger.warning("Sandbox admission recovery remains pending")
+            with request_context(str(intent.request_id) if intent.request_id else None):
+                try:
+                    sandbox = await self.boxie.create(str(intent.id), intent.spec)
+                    await self.sessions.recover_creation(intent, sandbox)
+                except BoxieUnavailable:
+                    logger.warning("Sandbox admission recovery remains pending")
         for upload_intent in await self.sessions.uploads():
-            try:
-                await self.finish_upload(upload_intent)
-            except BoxieUnavailable, ArtifactConflictError:
-                logger.warning("Artifact publication recovery deferred or abandoned")
+            with request_context(
+                str(upload_intent.request_id) if upload_intent.request_id else None
+            ):
+                try:
+                    await self.finish_upload(upload_intent)
+                except BoxieUnavailable, ArtifactConflictError:
+                    logger.warning("Artifact publication recovery deferred or abandoned")
         await self.cleanup_inactive()
 
     async def binding(
@@ -197,7 +209,12 @@ class CliPlaygroundService:
 
     async def cancel_attachment(self, identifier: UUID, *, claim: int | None = None) -> None:
         await self.sessions.change(
-            identifier, lambda binding: domain.cancel_attachment(binding, claim)
+            identifier,
+            partial(
+                domain.cancel_attachment,
+                claim=claim,
+                request_id=UUID(current_request_id() or str(uuid4())),
+            ),
         )
 
     async def create_session(self, preview_id: str, revision: str) -> tuple[SessionBinding, str]:
@@ -208,6 +225,7 @@ class CliPlaygroundService:
             raise ArtifactConflictError("preview revision changed")
         credential = secrets.token_urlsafe(32)
         intent = CreateIntent(
+            request_id=UUID(current_request_id() or str(uuid4())),
             id=uuid4(),
             preview_id=preview_id,
             revision=revision,
@@ -218,7 +236,8 @@ class CliPlaygroundService:
         await self.sessions.create_intent(intent)
         self.active_creates.add(intent.id)
         try:
-            sandbox = await self.boxie.create(str(intent.id), intent.spec)
+            with request_context(str(intent.request_id)):
+                sandbox = await self.boxie.create(str(intent.id), intent.spec)
             binding = SessionBinding(
                 id=intent.id,
                 preview_id=preview_id,
@@ -229,7 +248,7 @@ class CliPlaygroundService:
             await self.sessions.save(binding)
             current = await self.store.get(preview_id)
             if current is None or current.revision != revision:
-                binding.pending_stop = True
+                domain.request_stop(binding, UUID(current_request_id() or str(uuid4())))
                 await self.sessions.save(binding)
                 await self.retry_stops()
                 raise ArtifactConflictError("preview revision changed")
@@ -248,23 +267,33 @@ class CliPlaygroundService:
                     intent.abandoned = True
                     await self.sessions.create_intent(intent)
                     if saved is not None:
-                        await self.sessions.change(saved.id, domain.request_stop)
+                        await self.sessions.change(
+                            saved.id,
+                            partial(
+                                domain.request_stop,
+                                request_id=UUID(current_request_id() or str(uuid4())),
+                            ),
+                        )
             raise
         finally:
             self.active_creates.discard(intent.id)
 
     async def stop_session(self, binding: SessionBinding) -> None:
-        await self.sessions.change(binding.id, domain.request_stop)
+        await self.sessions.change(
+            binding.id,
+            partial(domain.request_stop, request_id=UUID(current_request_id() or str(uuid4()))),
+        )
         await self.retry_stops()
 
     async def cleanup_periodically(self) -> None:
         while True:
             await asyncio.sleep(self.settings.cleanup_interval_seconds)
-            try:
-                async with self.uploads:
-                    await self.recover(startup=False)
-            except OSError, RuntimeError, TimeoutError:
-                logger.exception("Failed to expire playground environments")
+            with request_context(str(uuid4())):
+                try:
+                    async with self.uploads:
+                        await self.recover(startup=False)
+                except OSError, RuntimeError, TimeoutError:
+                    logger.exception("Failed to expire playground environments")
 
     async def deploy(
         self,
@@ -339,6 +368,7 @@ class CliPlaygroundService:
                     expires_at=self.clock() + self.settings.preview_seconds,
                 )
                 intent = UploadIntent(
+                    request_id=UUID(current_request_id() or str(uuid4())),
                     artifact=metadata,
                     build=build,
                     previous_revision=current.revision if current else None,

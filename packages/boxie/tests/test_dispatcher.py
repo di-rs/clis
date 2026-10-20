@@ -40,3 +40,34 @@ def test_failed_delivery_stays_pending_while_other_commands_complete() -> None:
         assert pending == []
 
     asyncio.run(exercise())
+
+
+def test_outbox_restart_restores_each_origin() -> None:
+    from boxie.observability.telemetry.context import current_request_id, request_context
+
+    async def exercise() -> None:
+        origins = [uuid4(), uuid4(), None]
+        events = [
+            OutboxEvent(id=uuid4(), sandbox_id=uuid4(), request_id=origin) for origin in origins
+        ]
+        seen: list[str | None] = []
+
+        class Store:
+            async def pending(self, *args: Any) -> list[OutboxEvent]:
+                return events
+
+            async def confirmed_terminal(self, *args: Any) -> bool:
+                return False
+
+            async def acknowledge(self, event: OutboxEvent) -> bool:
+                return True
+
+        class RPC:
+            async def start_workflow(self, *args: Any, **kwargs: Any) -> None:
+                seen.append(current_request_id())
+
+        with request_context(str(uuid4())):
+            await CommandDelivery(cast(PostgresOutbox, Store()), cast(Client, RPC())).recover_once()
+        assert seen == [str(origin) if origin else None for origin in origins]
+
+    asyncio.run(exercise())

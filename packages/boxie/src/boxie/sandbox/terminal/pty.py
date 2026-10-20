@@ -2,9 +2,11 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from uuid import uuid4
 
 from boxie.domain.lifecycle import SupervisorObservation
 from boxie.domain.models import TerminationReason
+from boxie.observability.telemetry.context import request_context
 from boxie.sandbox.docker import TerminalPort
 from boxie.sandbox.terminal.replay import ReplayBuffer
 
@@ -24,7 +26,8 @@ class ExecutionTerminal:
         self.reader: asyncio.Task[None] | None = None
 
     def start(self) -> None:
-        self.reader = asyncio.create_task(self._read())
+        with request_context(str(uuid4())):
+            self.reader = asyncio.create_task(self._read())
 
     async def _read(self) -> None:
         reason = TerminationReason.EXITED

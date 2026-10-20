@@ -1,17 +1,39 @@
 """Application-owned browser proof against the independently usable Boxie stack."""
 
+import json
 import os
 import secrets
 import socket
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 
+import httpx
 import pytest
 from integration.stack import LifecycleStack
 
+from .helpers import binary_bundle
+
 ROOT = Path(__file__).resolve().parents[3]
 pytestmark = pytest.mark.integration
+
+
+def wait_for_request_log(
+    runtime_command: Callable[[str, str, str, str], str],
+    service: str,
+    request_id: str,
+    *,
+    timeout: float = 10,
+) -> None:
+    deadline = time.monotonic() + timeout
+    while True:
+        logs = runtime_command("logs", "--no-color", "--no-log-prefix", service)
+        events = [json.loads(line) for line in logs.splitlines() if line.startswith("{")]
+        if any(event.get("request_id") == request_id for event in events):
+            return
+        assert time.monotonic() < deadline, service
+        time.sleep(0.2)
 
 
 def test_native_application_and_browser(tmp_path: Path) -> None:
@@ -63,6 +85,17 @@ def test_native_application_and_browser(tmp_path: Path) -> None:
         secret.write_text(f"postgresql+psycopg://cli_playground:{password}@postgres/cli_playground")
         secret.chmod(0o600)
         stack.runtime_command("up", "--detach", "cli-playground")
+        with httpx.Client(base_url=origin, timeout=30) as public:
+            response = public.post(
+                "/api/environments",
+                params={"sha": "c" * 40, "pr": 987654},
+                headers={"Authorization": "Bearer " + token},
+                content=binary_bundle({binary.name: binary.read_bytes()}),
+            )
+            assert response.status_code == 201, response.text
+            request_id = response.headers["x-request-id"]
+        for service in ("cli-playground", "api", "supervisor"):
+            wait_for_request_log(stack.runtime_command, service, request_id)
         subprocess.run(
             [
                 "uv",

@@ -209,3 +209,67 @@ def test_terminal_adapter_validates_events_before_returning_them(valid: bool) ->
                 await client.close()
 
     asyncio.run(exercise())
+
+
+def test_pooled_client_forwards_context_for_all_transports(tmp_path: Path) -> None:
+    from cli_playground.observability import request_context
+    from fastapi import WebSocket
+
+    async def exercise() -> None:
+        peer = FastAPI()
+        expected: dict[str, str | None] = {}
+        now = datetime.now(UTC)
+        archive = tmp_path / "archive"
+        archive.write_bytes(b"streamed bytes")
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+
+        @peer.api_route("/v1/{path:path}", methods=["POST", "PUT", "GET", "DELETE"])
+        async def reply(request: Request, path: str) -> dict[str, object]:
+            identifier = path.split("/")[-1]
+            if request.method == "POST":
+                identifier = request.headers["Idempotency-Key"]
+            assert request.headers["authorization"] == "Bearer private-consumer-secret"
+            assert request.headers.get("x-request-id") == expected[identifier]
+            if path.startswith("artifacts/"):
+                if request.method == "PUT":
+                    assert await request.body() == b"streamed bytes"
+                    assert request.headers["x-content-sha256"] == digest
+                return {"id": identifier, "sha256": digest, "retired": False}
+            return {
+                "id": identifier,
+                "state": "ready",
+                "created_at": now.isoformat(),
+                "absolute_deadline": (now + timedelta(hours=1)).isoformat(),
+                "reason": None,
+                "cleanup_pending": False,
+            }
+
+        @peer.websocket("/v1/sandboxes/{identifier}/terminal")
+        async def terminal(ws: WebSocket, identifier: str) -> None:
+            assert ws.headers.get("x-request-id") == expected[identifier]
+            await ws.accept()
+            await ws.send_bytes(b"intact")
+            await ws.close()
+
+        async with serve(peer) as url:
+            client = HttpBoxieClient(url, "private-consumer-secret")
+
+            async def calls(identity: str | None) -> None:
+                identifier = uuid4()
+                expected[str(identifier)] = identity
+                with request_context(identity):
+                    await client.upload(identifier, digest, archive)
+                    await client.create(str(identifier), SandboxRequest(artifact_id=identifier))
+                    await client.get(identifier)
+                    await client.terminate(identifier)
+                    await client.retire(identifier)
+                    async with client.terminal(identifier) as terminal:
+                        assert await terminal.receive() == b"intact"
+
+            try:
+                await asyncio.gather(calls(str(uuid4())), calls(str(uuid4())))
+                await calls(None)
+            finally:
+                await client.close()
+
+    asyncio.run(exercise())

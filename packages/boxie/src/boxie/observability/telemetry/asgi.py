@@ -5,7 +5,7 @@ from collections.abc import Awaitable, Callable, MutableMapping
 from typing import Any
 from uuid import uuid4
 
-from boxie.observability.telemetry.context import bind_context
+from boxie.observability.telemetry.context import parse_request_id, request_context
 from boxie.observability.telemetry.logging import configured_dispatcher
 
 # ASGI's callable contract, without a web-framework dependency.
@@ -17,18 +17,37 @@ type ASGIApp = Callable[[Scope, Receive, Send], Awaitable[None]]
 
 
 class RequestLogging:
-    """One bounded request event; no client-supplied IDs, URL, headers or body."""
+    """One bounded request event with authenticated diagnostic correlation."""
 
     def __init__(
-        self, app: ASGIApp, *, completed: Callable[[str, str, str, float], None] | None = None
+        self,
+        app: ASGIApp,
+        *,
+        completed: Callable[[str, str, str, float], None] | None = None,
+        accept_incoming: Callable[[Scope], bool] | None = None,
     ) -> None:
         self.app = app
         self.completed = completed
+        self.accept_incoming = accept_incoming
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http":
+        if scope["type"] not in ("http", "websocket"):
             await self.app(scope, receive, send)
             return
+        values = [
+            value for key, value in scope.get("headers", ()) if key.lower() == b"x-request-id"
+        ]
+        incoming = (
+            parse_request_id(values[0].decode("ascii", errors="replace"))
+            if len(values) == 1
+            else None
+        )
+        selected = (
+            incoming
+            if incoming and self.accept_incoming and self.accept_incoming(scope)
+            else str(uuid4())
+        )
+        scope.setdefault("state", {})["request_id"] = selected
         started = time.monotonic()
         dispatcher = configured_dispatcher()
         status, finished, disconnected = "error", False, False
@@ -43,14 +62,42 @@ class RequestLogging:
 
         async def observed_send(message: Message) -> None:
             nonlocal status, finished
+            if (
+                message["type"] == "websocket.close"
+                and not finished
+                and "websocket.http.response" in scope.get("extensions", {})
+            ):
+                await observed_send(
+                    {"type": "websocket.http.response.start", "status": 403, "headers": []}
+                )
+                await observed_send({"type": "websocket.http.response.body", "body": b""})
+                return
+            if message["type"] in (
+                "http.response.start",
+                "websocket.accept",
+                "websocket.http.response.start",
+            ):
+                message = dict(message)
+                message["headers"] = [
+                    (k, v) for k, v in message.get("headers", ()) if k.lower() != b"x-request-id"
+                ] + [(b"x-request-id", selected.encode("ascii"))]
             await send(message)
-            if message["type"] == "http.response.start":
+            if message["type"] in ("http.response.start", "websocket.http.response.start"):
                 code = message.get("status", 500)
                 status = f"{code // 100}xx" if type(code) is int and 100 <= code < 600 else "error"
-            elif message["type"] == "http.response.body" and not message.get("more_body", False):
+            elif message["type"] == "websocket.accept":
+                status, finished = "2xx", True
+            elif message["type"] == "websocket.close":
+                if not finished:
+                    status = "4xx"
+                finished = True
+            elif message["type"] in (
+                "http.response.body",
+                "websocket.http.response.body",
+            ) and not message.get("more_body", False):
                 finished = True
 
-        with bind_context(request_id=str(uuid4())):
+        with request_context(selected):
             try:
                 await self.app(scope, observed_receive, observed_send)
             except BaseException as error:

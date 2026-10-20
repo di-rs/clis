@@ -77,10 +77,12 @@ async def publish(client: httpx.AsyncClient) -> str:
     return identifier
 
 
-async def create(client: httpx.AsyncClient, artifact: str, key: str) -> str:
+async def create(
+    client: httpx.AsyncClient, artifact: str, key: str, *, request_id: str | None = None
+) -> str:
     response = await client.post(
         "/v1/sandboxes",
-        headers={"Idempotency-Key": key},
+        headers={"Idempotency-Key": key, **({"X-Request-ID": request_id} if request_id else {})},
         json={"artifact_id": artifact},
     )
     assert response.status_code == 202, response.text
@@ -162,7 +164,8 @@ def test_process_loss_failed_delete_and_history_replay(lifecycle_stack: Lifecycl
             artifact = await publish(client)
             for service in ("api", "temporal", "supervisor"):
                 key = uuid4().hex
-                identifier = await create(client, artifact, key)
+                creation, termination = str(uuid4()), str(uuid4())
+                identifier = await create(client, artifact, key, request_id=creation)
                 original = await until(client, identifier, "ready")
                 await accounting(stack, identifier, 1)
                 assert stack.children()
@@ -172,7 +175,9 @@ def test_process_loss_failed_delete_and_history_replay(lifecycle_stack: Lifecycl
                     await asyncio.to_thread(stack.process, service, "start")
                     await asyncio.to_thread(stack.wait_ready)
                     assert await create(client, artifact, key) == identifier
-                stop = await client.delete(f"/v1/sandboxes/{identifier}")
+                stop = await client.delete(
+                    f"/v1/sandboxes/{identifier}", headers={"X-Request-ID": termination}
+                )
                 assert stop.status_code == 200
                 current = (await client.get(f"/v1/sandboxes/{identifier}")).json()
                 assert (
@@ -192,6 +197,11 @@ def test_process_loss_failed_delete_and_history_replay(lifecycle_stack: Lifecycl
                 await until(client, identifier, "terminated")
                 await accounting(stack, identifier, 0)
                 assert not stack.children()
+                assert await stack.rows(
+                    select(Sandbox.creation_request_id, Sandbox.stop_request_id).where(
+                        Sandbox.id == UUID(identifier)
+                    )
+                ) == [{"creation_request_id": UUID(creation), "stop_request_id": UUID(termination)}]
                 handle = temporal.get_workflow_handle("boxie/sandbox/" + identifier)
                 await asyncio.wait_for(handle.result(), 60)
                 history = await handle.fetch_history()

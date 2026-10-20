@@ -10,6 +10,8 @@ import aiohttp
 import pytest
 from boxie_test_support.terminal_network import attach
 from cli_playground import boxie_client as client_module
+from cli_playground.boxie_client import HttpBoxieClient
+from cli_playground.observability import current_request_id
 from cli_playground.sandbox import BoxieUnavailable
 from cli_playground.storage import EnvironmentStore
 from websockets.asyncio.client import connect
@@ -65,8 +67,18 @@ def test_failed_publication_preserves_ready_revision_and_recovers_exact_upload(
                     assert (await attach(ws))[1] == b"ready\n"
                 (pending,) = await product.service.sessions.uploads()
                 artifact_id = pending.artifact.artifact_id
+                assert pending.request_id == UUID(failed.headers["x-request-id"])
                 # Both failures occur after the real supervisor has accepted these bytes.
                 assert (network.config.data_dir / "artifacts" / str(artifact_id)).exists()
+            original_upload = HttpBoxieClient.upload
+
+            async def recovering_upload(
+                self: HttpBoxieClient, identifier: UUID, digest: str, archive: Path
+            ) -> None:
+                assert current_request_id() == str(pending.request_id)
+                await original_upload(self, identifier, digest, archive)
+
+            monkeypatch.setattr(HttpBoxieClient, "upload", recovering_upload)
             async with product_server(tmp_path / "product", str(network.api.base_url)) as restarted:
                 recovered = await restarted.service.store.get(identifier)
                 assert recovered is not None and recovered.revision == "b" * 40
@@ -90,8 +102,14 @@ def test_capability_failures_and_restart_preserve_claimed_session_while_cleaning
                 identifier, other = first.json()["id"], sibling.json()["id"]
                 stopped = await admit(product, identifier, "a" * 40)
                 healthy = await admit(product, other, "b" * 40)
-                abandoned = await admit(product, other, "b" * 40)
                 origin = str(product.http.base_url).rstrip("/")
+                abandoned_response = await product.http.post(
+                    f"/api/environments/{other}/sessions",
+                    headers={"Origin": origin},
+                    json={"revision": "b" * 40},
+                )
+                assert abandoned_response.status_code == 201
+                abandoned = abandoned_response.json()
                 # A copied UUID or credential from another preview cannot authorize it.
                 for owner, credential in [
                     (identifier, "wrong-credential"),
@@ -132,6 +150,7 @@ def test_capability_failures_and_restart_preserve_claimed_session_while_cleaning
                 pending = await product.service.sessions.get(UUID(stopped["id"]))
                 orphan = await product.service.sessions.get(UUID(abandoned["id"]))
                 assert pending is not None and pending.pending_stop
+                assert pending.stop_request_id == UUID(closed_pr.headers["x-request-id"])
                 assert orphan is not None
                 assert (await product.service.store.record(identifier)) is None
             network.daemon.unreachable = False
@@ -144,6 +163,9 @@ def test_capability_failures_and_restart_preserve_claimed_session_while_cleaning
                 assert response.json()["absolute_deadline"] == healthy["absolute_deadline"]
                 retained = await restarted.service.sessions.get(UUID(healthy["id"]))
                 assert retained is not None and retained.attached and not retained.pending_stop
+                recovered = await restarted.service.sessions.get(UUID(abandoned["id"]))
+                assert recovered is not None and not recovered.pending_stop
+                assert recovered.stop_request_id == UUID(abandoned_response.headers["x-request-id"])
                 assert (
                     sum(
                         r.state.value not in {"terminated", "failed"}

@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bounded Playground event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "timestamp",
+    "level",
+    "event",
+    "message",
+    "service",
+    "role",
+    "instance_id"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "level": {
+      "enum": [
+        "DEBUG",
+        "INFO",
+        "WARNING",
+        "ERROR",
+        "CRITICAL"
+      ]
+    },
+    "event": {
+      "enum": [
+        "request.completed",
+        "sandbox.stop_pending",
+        "artifact.retirement_pending",
+        "sandbox.admission_pending",
+        "artifact.publication_pending",
+        "cleanup.failed",
+        "foreign_log"
+      ]
+    },
+    "message": {
+      "enum": [
+        "Request completed",
+        "Sandbox stop remains pending",
+        "Artifact retirement remains pending",
+        "Sandbox admission recovery remains pending",
+        "Artifact publication remains pending",
+        "Environment cleanup failed",
+        "Dependency diagnostic"
+      ]
+    },
+    "service": {
+      "const": "cli-playground"
+    },
+    "role": {
+      "const": "api"
+    },
+    "instance_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "sandbox_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    }
+  }
+}

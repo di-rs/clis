@@ -3,8 +3,9 @@
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
-from sqlalchemy import false
+from sqlalchemy import false, literal
 from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import col, select, update
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -28,6 +29,7 @@ from cli_playground.models import (
     EnvironmentMetadata,
     PreviewRecord,
 )
+from cli_playground.observability import current_request_id
 from cli_playground.tables import Binding, Preview, Retirement, Revision, Upload
 
 
@@ -281,14 +283,22 @@ class EnvironmentStore:
                 if result.artifact_id != artifact.artifact_id:
                     await session.exec(
                         insert(Retirement)
-                        .values(artifact_id=artifact.artifact_id, completed=False)
+                        .values(
+                            artifact_id=artifact.artifact_id,
+                            completed=False,
+                            request_id=intent.request_id,
+                        )
                         .on_conflict_do_nothing()
                     )
             except ArtifactConflictError as error:
                 conflict = error
                 await session.exec(
                     insert(Retirement)
-                    .values(artifact_id=artifact.artifact_id, completed=False)
+                    .values(
+                        artifact_id=artifact.artifact_id,
+                        completed=False,
+                        request_id=intent.request_id,
+                    )
                     .on_conflict_do_nothing()
                 )
             await session.delete(intent)
@@ -314,13 +324,17 @@ class EnvironmentStore:
                 )
             )
             # One snapshot sees a completing upload as either pending or current.
-            stale = select(col(Revision.artifact_id), false()).where(
+            stale = select(
+                col(Revision.artifact_id),
+                false(),
+                literal(UUID(current_request_id() or str(uuid4()))),
+            ).where(
                 col(Revision.artifact_id).not_in(select(Upload.artifact_id)),
                 col(Revision.artifact_id).not_in(active),
                 col(Revision.artifact_id).not_in(select(Retirement.artifact_id)),
             )
             await session.exec(
                 insert(Retirement)
-                .from_select(["artifact_id", "completed"], stale)
+                .from_select(["artifact_id", "completed", "request_id"], stale)
                 .on_conflict_do_nothing()
             )

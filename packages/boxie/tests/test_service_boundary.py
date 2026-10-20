@@ -135,3 +135,38 @@ def test_supervisor_client_rejects_malformed_status_without_leaking_payload(fram
                 )
 
     asyncio.run(exercise())
+
+
+def test_pooled_supervisor_client_isolates_concurrent_contexts() -> None:
+    import httpx
+    from boxie.observability.telemetry.context import request_context
+    from boxie.sandbox.transport.client import SupervisorClient
+
+    async def exercise() -> None:
+        async def peer(request: httpx.Request) -> httpx.Response:
+            await asyncio.sleep(0)
+            assert request.headers["authorization"] == "Bearer secret"
+            assert request.headers.get("x-request-id") == request.url.params.get("expected")
+            assert request.headers["x-content-sha256"] == "digest"
+            return httpx.Response(204)
+
+        async with SupervisorClient(
+            "http://supervisor", b"secret", transport=httpx.MockTransport(peer)
+        ) as client:
+
+            async def call(identity: str | None) -> None:
+                with request_context(identity):
+                    await client._request(
+                        "PUT",
+                        "/artifact",
+                        params={"expected": identity} if identity else {},
+                        headers={"X-Content-SHA256": "digest"},
+                    )
+
+            await asyncio.gather(
+                call("11111111-1111-1111-1111-111111111111"),
+                call("22222222-2222-2222-2222-222222222222"),
+            )
+            await call(None)
+
+    asyncio.run(exercise())

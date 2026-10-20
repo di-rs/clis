@@ -474,9 +474,6 @@ async def downstream(scope, receive, send):
     assert scope["headers"] == [(b"x-request-id", secret.encode())]
     assert scope["query_string"] == secret.encode()
     identity = current_context().get("request_id")
-    if scope["type"] != "http":
-        assert identity == parent_id
-        return
     assert str(UUID(identity)) == identity and identity != parent_id
     await asyncio.sleep(.01)
     assert current_context()["request_id"] == identity
@@ -506,7 +503,7 @@ async def request(case):
     assert "request_id" not in current_context()
 async def run():
     await asyncio.gather(*(request(case) for case in ("success", "other", "failure", "cancelled", "websocket")))
-    assert len(set(seen.values())) == 4
+    assert len(set(seen.values())) == 5
 asyncio.run(run())
 dispatcher.emit("request.completed")
 dispatcher.close()
@@ -515,9 +512,9 @@ dispatcher.close()
     events = records(result)
     assert SECRET not in result.stdout
     assert all(event["service"] == service and event["role"] == role for event in events)
-    assert len(events) == 5  # Successes, failure, cancellation, and an unbound event.
+    assert len(events) == 6  # HTTP/WebSocket successes, failure, cancellation, and unbound event.
     correlated = [event for event in events if "request_id" in event]
-    assert len(correlated) == len({event["request_id"] for event in correlated}) == 4
+    assert len(correlated) == len({event["request_id"] for event in correlated}) == 5
     assert "request_id" not in events[-1]
     failures = [event for event in events if event.get("outcome") == "failed"]
     assert len(failures) == 2
@@ -525,3 +522,128 @@ dispatcher.close()
     assert all(
         "duration_ms" in event for event in correlated if event["event"] == "request.completed"
     )
+
+
+def test_authenticated_request_id_round_trip_and_error_reset() -> None:
+    result = child("""
+import httpx
+from boxie.api.app import ApiConfig, create_app
+from boxie.observability.telemetry.context import current_context
+class Ports:
+    async def ready(self): return True
+ports = Ports()
+app = create_app(ApiConfig(release="test", consumers={"one": b"secret"}), ports, ports, ports)
+@app.get("/explode")
+async def explode(): raise RuntimeError("PRIVATE_SENTINEL")
+async def run():
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app, raise_app_exceptions=False), base_url="http://test") as client:
+        chosen = "11111111-1111-1111-1111-111111111111"
+        for path, status in (("/readyz", 200), ("/missing", 404), ("/v1/sandboxes/not-uuid", 422), ("/explode", 500)):
+            response = await client.get(path, headers={"Authorization": "Bearer secret", "X-Request-ID": chosen})
+            assert response.status_code == status
+            assert response.headers["x-request-id"] == chosen
+            assert "request_id" not in current_context()
+        for headers in (
+            [("Authorization", "Bearer secret")],
+            [("Authorization", "Bearer secret"), ("X-Request-ID", "PRIVATE_SENTINEL")],
+            [("Authorization", "Bearer secret"), ("X-Request-ID", chosen), ("X-Request-ID", chosen)],
+            [("Authorization", "Bearer wrong"), ("X-Request-ID", chosen)],
+        ):
+            response = await client.get("/readyz", headers=headers)
+            assert str(UUID(response.headers["x-request-id"])) == response.headers["x-request-id"] != chosen
+asyncio.run(run())
+dispatcher.close()
+""")
+    events = records(result)
+    assert "PRIVATE_SENTINEL" not in result.stdout + result.stderr
+    assert any(
+        event.get("request_id") == "11111111-1111-1111-1111-111111111111" for event in events
+    )
+
+
+def test_request_context_replaces_clears_and_restores() -> None:
+    from boxie.observability.telemetry import context
+
+    first = "11111111-1111-1111-1111-111111111111"
+    with context.bind_context(request_id=first, sandbox_id=first):
+        with context.request_context(None):
+            assert context.current_request_id() is None
+            assert context.current_context()["sandbox_id"] == first
+        assert context.current_request_id() == first
+    assert context.current_request_id() is None
+
+
+@pytest.mark.parametrize(
+    "case,status,outcome",
+    [
+        ("unauthorized", "4xx", "failed"),
+        ("invalid", "4xx", "failed"),
+        ("unmatched", "4xx", "failed"),
+        ("accepted", "2xx", "succeeded"),
+    ],
+)
+def test_websocket_completion_tracks_handshake_result(case: str, status: str, outcome: str) -> None:
+    result = child(f"""
+from boxie.api.app import ApiConfig, create_app
+from boxie_test_support.api import serve
+from fastapi import WebSocket
+from websockets.asyncio.client import connect
+from websockets.exceptions import InvalidStatus
+seen = []
+class Ports: pass
+ports = Ports()
+app = create_app(ApiConfig(release="test", consumers={{"one":b"consumer-one-secret"}}), ports, ports, ports,
+    request_completed=lambda method, route, status, duration: seen.append(status))
+@app.websocket("/accepted")
+async def accepted(ws: WebSocket):
+    await ws.accept()
+    await ws.close()
+async def run():
+    async with serve(app) as origin:
+        # Match the entry point's log_config=None after the socket helper configures Uvicorn.
+        for name in ("uvicorn", "uvicorn.error"):
+            logging.getLogger(name).handlers.clear()
+            logging.getLogger(name).propagate = True
+        path = "/accepted" if {case!r} == "accepted" else "/v1/sandboxes/" + ("not-a-uuid" if {case!r} == "invalid" else "11111111-1111-1111-1111-111111111111") + "/terminal"
+        if {case!r} == "unmatched": path = "/missing"
+        chosen = "22222222-2222-2222-2222-222222222222"
+        headers = {{}} if {case!r} == "unauthorized" else {{"Authorization":"Bearer consumer-one-secret"}}
+        headers["X-Request-ID"] = chosen
+        try:
+            async with connect(origin.replace("http:","ws:")+path, additional_headers=headers) as ws:
+                assert {case!r} == "accepted"
+                assert ws.response.headers["x-request-id"] == chosen
+                await ws.wait_closed()
+                assert ws.close_code == 1000
+        except InvalidStatus as error:
+            assert {case!r} != "accepted"
+            assert error.response.status_code == (401 if {case!r} == "unauthorized" else 403)
+            identity = error.response.headers["x-request-id"]
+            assert str(UUID(identity)) == identity
+            assert (identity == chosen) == ({case!r} != "unauthorized")
+asyncio.run(run())
+assert seen == [{status!r}], seen
+dispatcher.close()
+""")
+    events = [event for event in records(result) if event["event"] == "request.completed"]
+    assert len(events) == 1
+    assert events[0]["outcome"] == outcome
+
+
+def test_websocket_close_without_http_denial_extension() -> None:
+    result = child("""
+from boxie.observability.logging import RequestLogging
+close = {"type": "websocket.close", "code": 1008, "reason": "policy"}
+async def app(scope, receive, send): await send(close)
+async def run():
+    messages = []
+    async def receive(): return {"type": "websocket.connect"}
+    async def send(message): messages.append(message)
+    await RequestLogging(app)({"type": "websocket"}, receive, send)
+    assert messages == [close]
+asyncio.run(run())
+dispatcher.close()
+""")
+    events = records(result)
+    assert len(events) == 1
+    assert events[0]["outcome"] == "failed"
