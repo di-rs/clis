@@ -331,10 +331,14 @@ version = "0.1.0"
 source = { editable = "tools/cli-playground" }
 dependencies = [
     { name = "aiohttp" },
+    { name = "alembic" },
     { name = "anyio" },
     { name = "fastapi" },
+    { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "sqlmodel" },
     { name = "uvicorn" },
     { name = "websockets" },
 ]
@@ -342,10 +346,14 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.13,<4" },
+    { name = "alembic", specifier = ">=1.18,<2" },
     { name = "anyio", specifier = ">=4" },
     { name = "fastapi", specifier = ">=0.128" },
+    { name = "psycopg", extras = ["binary"], specifier = "==3.3.6" },
     { name = "pydantic", specifier = ">=2.14,<3" },
     { name = "pydantic-settings", specifier = ">=2,<3" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0,<2.1" },
+    { name = "sqlmodel", specifier = ">=0.0.37,<0.1" },
     { name = "uvicorn", specifier = ">=0.40" },
     { name = "websockets", specifier = ">=16" },
 ]

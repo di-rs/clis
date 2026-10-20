@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
+from anyio import CancelScope
 from fastapi import (
     APIRouter,
     HTTPException,
@@ -22,12 +23,7 @@ from fastapi import Path as PathParameter
 from fastapi.responses import FileResponse
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
-from cli_playground.boxie_client import (
-    BoxieUnavailable,
-    SandboxState,
-    TerminationReason,
-    validate_sandbox,
-)
+from cli_playground.domain import ArtifactConflictError
 from cli_playground.models import (
     ID_PATTERN,
     SHA_PATTERN,
@@ -38,8 +34,14 @@ from cli_playground.models import (
     DeploymentResult,
     EnvironmentMetadata,
 )
+from cli_playground.ports import PersistenceUnavailable
+from cli_playground.sandbox import (
+    BoxieUnavailable,
+    SandboxState,
+    TerminationReason,
+    validate_sandbox,
+)
 from cli_playground.service import CliPlaygroundService, UploadBusyError, UploadTooLargeError
-from cli_playground.storage import ArtifactConflictError
 from cli_playground.terminal_protocol import (
     AttachRequest,
     UpstreamAttach,
@@ -104,7 +106,7 @@ def create_router(service: CliPlaygroundService, static_dir: Path) -> APIRouter:
     ) -> BuildUpdateResult:
         authenticate(request)
         try:
-            metadata = service.update_build(pr, update)
+            metadata = await service.update_build(pr, update)
         except ArtifactConflictError as error:
             raise HTTPException(409, str(error)) from error
         return BuildUpdateResult(
@@ -174,7 +176,7 @@ def create_router(service: CliPlaygroundService, static_dir: Path) -> APIRouter:
     @router.delete("/api/environments/{identifier}/sessions/{session_id}")
     async def stop_session(request: Request, identifier: str, session_id: UUID) -> dict[str, str]:
         check_origin(request)
-        binding = service.sessions.get(session_id)
+        binding = await service.sessions.get(session_id)
         credentials = request.headers.getlist("authorization")
         credential = (
             credentials[0][7:]
@@ -198,7 +200,7 @@ def create_router(service: CliPlaygroundService, static_dir: Path) -> APIRouter:
         if websocket.headers.getlist("origin") != [expected_origin]:
             await close_terminal(websocket, 1008)
             return
-        binding = service.sessions.get(session_id)
+        binding = await service.sessions.get(session_id)
         if binding is None or binding.preview_id != identifier or binding.revision != revision:
             await close_terminal(websocket, 1008)
             return
@@ -211,7 +213,9 @@ def create_router(service: CliPlaygroundService, static_dir: Path) -> APIRouter:
                 if len(message.encode("utf-8")) > 1024:
                     raise ValueError("authentication frame too large")
                 auth = SessionAuth.model_validate_json(message)
-            binding = service.claim_attachment(identifier, session_id, revision, auth.credential)
+            binding = await service.claim_attachment(
+                identifier, session_id, revision, auth.credential
+            )
             claimed = True
             async with AsyncExitStack() as connections:
                 # One bounded transition includes readiness, connection, and acknowledgement.
@@ -220,14 +224,14 @@ def create_router(service: CliPlaygroundService, static_dir: Path) -> APIRouter:
                         view = await service.boxie.get(binding.sandbox.id, binding.sandbox)
                         validate_sandbox(view, binding.sandbox)
                         binding.sandbox = view
-                        service.binding(identifier, session_id, revision, auth.credential)
+                        await service.binding(identifier, session_id, revision, auth.credential)
                         if view.state in {"terminating", "terminated", "failed"}:
                             raise LookupError("session ended")
                         await asyncio.sleep(0.02)
                     upstream = await connections.enter_async_context(
                         service.boxie.terminal(binding.sandbox.id)
                     )
-                    service.binding(identifier, session_id, revision, auth.credential)
+                    await service.binding(identifier, session_id, revision, auth.credential)
                     await websocket.send_json(
                         {
                             "type": "authenticated",
@@ -239,9 +243,9 @@ def create_router(service: CliPlaygroundService, static_dir: Path) -> APIRouter:
                         }
                     )
 
-                def complete() -> None:
+                async def complete() -> None:
                     nonlocal attached
-                    service.complete_attachment(
+                    await service.complete_attachment(
                         identifier,
                         session_id,
                         revision,
@@ -251,8 +255,8 @@ def create_router(service: CliPlaygroundService, static_dir: Path) -> APIRouter:
                     )
                     attached = True
 
-                def prepare_attach(request: AttachRequest) -> str:
-                    service.check_attachment_claim(
+                async def prepare_attach(request: AttachRequest) -> str:
+                    await service.check_attachment_claim(
                         identifier, session_id, revision, auth.credential, binding.attachment_claim
                     )
                     # An upstream send may already be in flight when a newer claim
@@ -269,14 +273,16 @@ def create_router(service: CliPlaygroundService, static_dir: Path) -> APIRouter:
             with suppress(WebSocketDisconnect, RuntimeError):
                 await close_terminal(websocket, 1008)
             return
-        except BoxieUnavailable:
+        except BoxieUnavailable, PersistenceUnavailable:
             with suppress(WebSocketDisconnect, RuntimeError):
                 await close_terminal(websocket, 1011)
             return
         finally:
             if claimed and not attached:
-                # Synchronous persisted compensation also survives task cancellation.
-                service.cancel_attachment(session_id, claim=binding.attachment_claim)
+                # Persist compensation even when the WebSocket task was cancelled.
+                with CancelScope(shield=True):
+                    with suppress(PersistenceUnavailable):
+                        await service.cancel_attachment(session_id, claim=binding.attachment_claim)
         with suppress(WebSocketDisconnect, RuntimeError):
             await close_terminal(websocket)
 

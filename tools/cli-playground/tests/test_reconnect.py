@@ -44,7 +44,7 @@ def test_failed_resume_cannot_stop_healthy_successor_and_browser_loss_crosses_bo
                         )
                         with pytest.raises(ConnectionClosed):
                             await asyncio.wait_for(failed.recv(), 2)
-                    saved = product.service.sessions.get(UUID(binding["id"]))
+                    saved = await product.service.sessions.get(UUID(binding["id"]))
                     assert saved is not None and not saved.pending_stop and saved.attached
                     await old.send(
                         json.dumps(
@@ -173,7 +173,7 @@ def test_delayed_old_attach_cannot_replace_a_healthy_successor(
                             )
                             assert json.loads(await new.recv())["type"] == "authenticated"
                             epoch, _ = await attach(new)
-                            saved = product.service.sessions.get(UUID(binding["id"]))
+                            saved = await product.service.sessions.get(UUID(binding["id"]))
                             assert saved is not None
                             record = network.supervisor.records[saved.sandbox.id]
                             assert record.attachment_epoch == epoch and record.attached
@@ -224,7 +224,7 @@ def test_delayed_old_attach_cannot_replace_a_healthy_successor(
                                 == (2).to_bytes(8, "big") + b"still healthy"
                             )
                             await old.close()
-                            saved = product.service.sessions.get(UUID(binding["id"]))
+                            saved = await product.service.sessions.get(UUID(binding["id"]))
                             assert saved is not None and not saved.pending_stop and saved.attached
                     finally:
                         release.set()

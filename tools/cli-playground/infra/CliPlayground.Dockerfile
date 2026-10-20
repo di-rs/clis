@@ -24,6 +24,7 @@ RUN uv sync --locked --package cli-playground --no-dev --no-editable --no-python
 FROM python:3.15-slim
 WORKDIR /app
 COPY --from=build /app/.venv /app/.venv
+COPY tools/cli-playground/alembic.ini /app/alembic.ini
 ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8000
 CMD ["uvicorn", "cli_playground.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--ws-max-size", "65536", "--no-proxy-headers"]

@@ -3,20 +3,30 @@
 import hashlib
 import re
 from pathlib import Path
-from typing import Self
+from typing import Annotated, Self
 from urllib.parse import urlsplit
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, PostgresDsn, UrlConstraints, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cli_playground.artifacts import MAX_ARCHIVE, MAX_BINARY
 
 
-class Settings(BaseSettings):
+class DatabaseSettings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_prefix="CLI_PLAYGROUND_", frozen=True, populate_by_name=True, hide_input_in_errors=True
+        env_prefix="CLI_PLAYGROUND_",
+        secrets_dir="/run/secrets",
+        frozen=True,
+        populate_by_name=True,
+        hide_input_in_errors=True,
     )
 
+    database_url: Annotated[PostgresDsn, UrlConstraints(allowed_schemes=["postgresql+psycopg"])] = (
+        Field(repr=False)
+    )
+
+
+class Settings(DatabaseSettings):
     data_dir: Path
     public_url: str
     deploy_token: str = Field(min_length=1, repr=False)

@@ -1,19 +1,25 @@
-"""Atomic PR build state and immutable batches, retained while sessions reference them."""
+"""SQLModel adapter for previews and immutable revisions."""
 
-import hashlib
-import os
-import re
-import shutil
-import tempfile
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
-from pathlib import Path
 
-from cli_playground.artifacts import validate_elf_header
-from cli_playground.config import Settings
+from sqlalchemy import false
+from sqlalchemy.dialects.postgresql import insert
+from sqlmodel import col, select, update
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from cli_playground.database import SessionFactory, connection
+from cli_playground.domain import (
+    ArtifactConflictError,
+    UploadIntent,
+    check_build,
+    check_upload,
+    identifier,
+    next_build,
+    publication,
+)
 from cli_playground.models import (
-    ID_PATTERN,
     ArtifactMetadata,
     BuildIdentity,
     BuildStatus,
@@ -22,204 +28,299 @@ from cli_playground.models import (
     EnvironmentMetadata,
     PreviewRecord,
 )
+from cli_playground.tables import Binding, Preview, Retirement, Revision, Upload
 
 
-class ArtifactConflictError(ValueError):
-    """A stale build or immutable revision cannot replace the current preview."""
+async def locked_preview(session: AsyncSession, pr: int) -> Preview:
+    await session.exec(
+        insert(Preview).values(pr=pr, id=identifier(pr), closed=False).on_conflict_do_nothing()
+    )
+    row = (await session.exec(select(Preview).where(Preview.pr == pr).with_for_update())).one()
+    return row
 
 
-def validate_elf(path: Path) -> None:
-    with path.open("rb") as stream:
-        validate_elf_header(stream.read(64))
+def artifact_value(row: Revision | Upload) -> ArtifactMetadata:
+    return ArtifactMetadata.model_validate(
+        {name: getattr(row, name) for name in ArtifactMetadata.model_fields}
+    )
+
+
+async def preview_value(session: AsyncSession, row: Preview) -> PreviewRecord | None:
+    if row.expires_at is None:
+        return None
+    revision = (
+        await session.get(Revision, (row.pr, row.current_revision))
+        if row.current_revision
+        else None
+    )
+    build = (
+        BuildStatus.model_validate(
+            dict(
+                sha=row.build_sha,
+                run_id=row.run_id,
+                run_number=row.run_number,
+                run_attempt=row.run_attempt,
+                state=row.build_state,
+            )
+        )
+        if row.build_state
+        else None
+    )
+    return PreviewRecord(
+        pr=row.pr,
+        expires_at=row.expires_at,
+        build=build,
+        artifact=artifact_value(revision) if revision else None,
+    )
+
+
+def assign_record(row: Preview, record: PreviewRecord) -> None:
+    row.expires_at = record.expires_at
+    row.current_revision = record.artifact.revision if record.artifact else None
+    row.build_sha = record.build.sha if record.build else None
+    row.run_id = record.build.run_id if record.build else None
+    row.run_number = record.build.run_number if record.build else None
+    row.run_attempt = record.build.run_attempt if record.build else None
+    row.build_state = record.build.state if record.build else None
 
 
 class EnvironmentStore:
-    def __init__(self, settings: Settings, *, clock: Callable[[], float] = time.time) -> None:
-        self.clock = clock
-        self.settings = settings
-        self.root = settings.data_dir
-        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.closed = self.root / ".closed-pull-requests"
-        self.closed.mkdir(exist_ok=True, mode=0o700)
-
     @staticmethod
     def identifier(pr: int) -> str:
-        return hashlib.sha256(f"pull-request:{pr}".encode()).hexdigest()[:32]
+        return identifier(pr)
 
-    def temporary_directory(self) -> Path:
-        return Path(tempfile.mkdtemp(prefix=".upload-", dir=self.root))
+    def __init__(
+        self,
+        sessions: SessionFactory,
+        *,
+        preview_seconds: float,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        self.sessions, self.preview_seconds, self.clock = sessions, preview_seconds, clock
 
-    def remove_abandoned_uploads(self) -> None:
-        for directory in self.root.glob(".upload-*"):
-            shutil.rmtree(directory)
+    async def is_closed(self, pr: int) -> bool:
+        async with connection(self.sessions) as session:
+            row = await session.get(Preview, pr)
+            return row is not None and row.closed
 
-    def is_closed(self, pr: int) -> bool:
-        return (self.closed / str(pr)).exists()
+    async def close_pull_request(self, pr: int) -> None:
+        async with connection(self.sessions, write=True) as session:
+            row = await locked_preview(session, pr)
+            row.closed = True
+            await session.exec(update(Upload).where(col(Upload.pr) == pr).values(cancelled=True))
 
-    def close_pull_request(self, pr: int) -> None:
-        from cli_playground.session_store import atomic_write
+    async def reopen_pull_request(self, pr: int) -> None:
+        async with connection(self.sessions, write=True) as session:
+            row = await locked_preview(session, pr)
+            if row.closed:
+                await session.exec(
+                    update(Upload).where(col(Upload.pr) == pr).values(cancelled=True)
+                )
+            row.closed = False
 
-        atomic_write(self.closed / str(pr), b"")
-
-    def reopen_pull_request(self, pr: int) -> None:
-        from cli_playground.session_store import unlink_and_sync
-
-        unlink_and_sync(self.closed / str(pr))
-
-    def record(self, identifier: str, *, include_inactive: bool = False) -> PreviewRecord | None:
-        if re.fullmatch(ID_PATTERN, identifier) is None:
-            return None
-        try:
-            data = (self.root / identifier / "metadata.json").read_text(encoding="utf-8")
-            record = PreviewRecord.model_validate_json(data)
-            if self.identifier(record.pr) != identifier:
-                return None
-            if record.artifact is not None and record.artifact.pr != record.pr:
-                return None
-            if not include_inactive and (
-                record.expires_at <= self.clock() or self.is_closed(record.pr)
+    async def record(
+        self, identifier: str, *, include_inactive: bool = False
+    ) -> PreviewRecord | None:
+        async with connection(self.sessions) as session:
+            row = (await session.exec(select(Preview).where(Preview.id == identifier))).first()
+            if row is None or (
+                not include_inactive
+                and (row.closed or row.expires_at is None or row.expires_at <= self.clock())
             ):
                 return None
-            return record
-        except OSError, ValueError, TypeError:
-            return None
+            return await preview_value(session, row)
 
-    def get(self, identifier: str, *, include_inactive: bool = False) -> Environment | None:
-        record = self.record(identifier, include_inactive=include_inactive)
-        if record is None or record.artifact is None:
+    async def get(self, identifier: str, *, include_inactive: bool = False) -> Environment | None:
+        record = await self.record(identifier, include_inactive=include_inactive)
+        if (
+            record is None
+            or record.artifact is None
+            or (not include_inactive and record.artifact.expires_at <= self.clock())
+        ):
             return None
-        artifact = record.artifact
-        if not include_inactive and artifact.expires_at <= self.clock():
-            return None
-        return Environment(id=identifier, **artifact.model_dump())
+        return Environment(id=identifier, **record.artifact.model_dump())
 
-    def metadata(self, identifier: str) -> EnvironmentMetadata | None:
-        record = self.record(identifier)
+    async def metadata(self, identifier: str) -> EnvironmentMetadata | None:
+        record = await self.record(identifier)
         if record is None:
             return None
-        environment = self.get(identifier)
+        artifact = (
+            record.artifact
+            if record.artifact and record.artifact.expires_at > self.clock()
+            else None
+        )
         return EnvironmentMetadata(
             id=identifier,
             pr=record.pr,
-            sha=environment.sha if environment else None,
-            revision=environment.revision if environment else None,
-            clis=environment.clis if environment else [],
+            sha=artifact.sha if artifact else None,
+            revision=artifact.revision if artifact else None,
+            clis=artifact.clis if artifact else [],
             expires_at=datetime.fromtimestamp(
-                environment.expires_at if environment else record.expires_at, UTC
+                artifact.expires_at if artifact else record.expires_at, UTC
             ).isoformat(),
             build=record.build,
         )
 
-    def inactive_identifiers(self) -> set[str]:
-        return {
-            directory.name
-            for directory in self.root.iterdir()
-            if directory.is_dir()
-            and re.fullmatch(ID_PATTERN, directory.name)
-            and self.record(directory.name) is None
-        }
+    async def inactive_identifiers(self) -> set[str]:
+        async with connection(self.sessions) as session:
+            needs_stop = select(Binding.preview_id).where(
+                col(Binding.pending_stop)
+                | col(Binding.sandbox)["cleanup_pending"].as_boolean()
+                | col(Binding.sandbox)["state"].as_string().not_in(["terminated", "failed"])
+            )
+            return set(
+                await session.exec(
+                    select(Preview.id).where(
+                        (
+                            (col(Preview.expires_at) <= self.clock())
+                            | col(Preview.closed)
+                            | col(Preview.expires_at).is_(None)
+                        )
+                        & (col(Preview.expires_at).is_not(None) | col(Preview.id).in_(needs_stop))
+                    )
+                )
+            )
 
-    def remove(self, identifiers: set[str]) -> int:
-        deleted = 0
-        for identifier in identifiers:
-            directory = self.root / identifier
-            if re.fullmatch(ID_PATTERN, identifier) and directory.is_dir():
-                shutil.rmtree(directory)
-                deleted += 1
-        return deleted
+    async def remove(self, identifiers: set[str]) -> int:
+        count = 0
+        async with connection(self.sessions, write=True) as session:
+            rows = await session.exec(
+                select(Preview)
+                .where(col(Preview.id).in_(identifiers))
+                .order_by(col(Preview.pr))
+                .with_for_update()
+            )
+            for row in rows:
+                if row.expires_at is not None and (row.closed or row.expires_at <= self.clock()):
+                    row.expires_at = None
+                    row.current_revision = None
+                    row.build_sha = row.run_id = row.run_number = row.run_attempt = (
+                        row.build_state
+                    ) = None
+                    count += 1
+        return count
 
-    def for_pull_request(self, pr: int) -> set[str]:
-        identifier = self.identifier(pr)
-        return {identifier} if (self.root / identifier).is_dir() else set()
+    async def check_build(self, pr: int, build: BuildIdentity | None) -> PreviewRecord | None:
+        async with connection(self.sessions, write=True) as session:
+            row = await locked_preview(session, pr)
+            record = await preview_value(session, row)
+            check_build(record, row.closed, build)
+            return record
 
-    def check_build(self, pr: int, build: BuildIdentity | None) -> PreviewRecord | None:
-        if self.is_closed(pr):
-            raise ArtifactConflictError("this pull request is closed")
-        record = self.record(self.identifier(pr), include_inactive=True)
-        current = record.build if record else None
-        if current is not None:
-            if build is None:
-                raise ArtifactConflictError("build identity is required")
-            if build.order < current.order:
-                raise ArtifactConflictError("stale build")
-            if build.order == current.order and (
-                build.sha != current.sha or build.run_id != current.run_id
-            ):
-                raise ArtifactConflictError("build identity conflict")
-        return record
+    async def update_build(self, pr: int, update: BuildUpdate) -> EnvironmentMetadata:
+        async with connection(self.sessions, write=True) as session:
+            row = await locked_preview(session, pr)
+            record = await preview_value(session, row)
+            check_build(record, row.closed, update)
+            assign_record(row, next_build(record, pr, update, self.clock() + self.preview_seconds))
+        result = await self.metadata(identifier(pr))
+        if result is None:
+            raise ArtifactConflictError("preview is no longer active")
+        return result
 
-    def _write_record(self, record: PreviewRecord) -> None:
-        directory = self.root / self.identifier(record.pr)
-        directory.mkdir(exist_ok=True)
-        manifest = directory / ".metadata-upload"
-        try:
-            with manifest.open("w", encoding="utf-8") as stream:
-                stream.write(record.model_dump_json())
-                stream.flush()
-                os.fsync(stream.fileno())
-            manifest.replace(directory / "metadata.json")
-            descriptor = os.open(directory, os.O_RDONLY)
-            try:
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
-        finally:
-            manifest.unlink(missing_ok=True)
+    async def revision(self, pr: int, revision: str) -> ArtifactMetadata | None:
+        async with connection(self.sessions) as session:
+            row = await session.get(Revision, (pr, revision))
+            return artifact_value(row) if row else None
 
-    def update_build(self, pr: int, update: BuildUpdate) -> EnvironmentMetadata:
-        record = self.check_build(pr, update)
-        if record is not None and record.build is not None and update.order == record.build.order:
-            # A delayed start/failure event must not undo a terminal result or publication.
-            if record.build.state == "ready" or (
-                record.build.state != "building" and update.state == "building"
-            ):
-                result = self.metadata(self.identifier(pr))
-                if result is not None:
-                    return result
-        next_record = PreviewRecord(
-            pr=pr,
-            expires_at=self.clock() + self.settings.preview_seconds,
-            build=BuildStatus(**update.model_dump()),
-            artifact=record.artifact if record is not None and update.state != "empty" else None,
+    async def publish(self, artifact: ArtifactMetadata, build: BuildIdentity | None) -> Environment:
+        async with connection(self.sessions, write=True) as session:
+            row = await locked_preview(session, artifact.pr)
+            return await self._publish(session, row, artifact, build)
+
+    async def _publish(
+        self,
+        session: AsyncSession,
+        row: Preview,
+        artifact: ArtifactMetadata,
+        build: BuildIdentity | None,
+    ) -> Environment:
+        record = await preview_value(session, row)
+        previous = await session.get(Revision, (artifact.pr, artifact.revision))
+        result = publication(
+            record,
+            row.closed,
+            artifact_value(previous) if previous else None,
+            artifact,
+            build,
+            self.clock(),
         )
-        self._write_record(next_record)
-        result = self.metadata(self.identifier(pr))
+        assert result.artifact is not None
+        await session.merge(Revision(**result.artifact.model_dump()))
+        await session.flush()
+        assign_record(row, result)
+        return Environment(id=row.id, **result.artifact.model_dump())
+
+    async def finish_upload(
+        self, artifact: ArtifactMetadata, build: BuildIdentity | None
+    ) -> Environment:
+        conflict: ArtifactConflictError | None = None
+        result: Environment | None = None
+        async with connection(self.sessions, write=True) as session:
+            row = await locked_preview(session, artifact.pr)
+            intent = await session.get(Upload, artifact.artifact_id)
+            if intent is None:
+                previous = await session.get(Revision, (artifact.pr, artifact.revision))
+                if previous and previous.artifact_id == artifact.artifact_id:
+                    return Environment(id=row.id, **artifact_value(previous).model_dump())
+                raise ArtifactConflictError("upload is no longer pending")
+            try:
+                current = await preview_value(session, row)
+                check_upload(
+                    UploadIntent(
+                        artifact=artifact,
+                        build=build,
+                        previous_revision=intent.previous_revision,
+                        cancelled=intent.cancelled,
+                    ),
+                    current,
+                    row.closed,
+                    self.clock(),
+                )
+                result = await self._publish(session, row, artifact, build)
+                if result.artifact_id != artifact.artifact_id:
+                    await session.exec(
+                        insert(Retirement)
+                        .values(artifact_id=artifact.artifact_id, completed=False)
+                        .on_conflict_do_nothing()
+                    )
+            except ArtifactConflictError as error:
+                conflict = error
+                await session.exec(
+                    insert(Retirement)
+                    .values(artifact_id=artifact.artifact_id, completed=False)
+                    .on_conflict_do_nothing()
+                )
+            await session.delete(intent)
+        if conflict is not None:
+            raise conflict
         assert result is not None
         return result
 
-    def revisions(self) -> list[ArtifactMetadata]:
-        return [
-            ArtifactMetadata.model_validate_json(path.read_bytes())
-            for path in self.root.glob("*/revisions/*.json")
-        ]
-
-    def revision(self, pr: int, revision: str) -> ArtifactMetadata | None:
-        path = self.root / self.identifier(pr) / "revisions" / f"{revision}.json"
-        return ArtifactMetadata.model_validate_json(path.read_bytes()) if path.exists() else None
-
-    def publish(self, artifact: ArtifactMetadata, build: BuildIdentity | None) -> Environment:
-        from cli_playground.session_store import atomic_write
-
-        self.check_build(artifact.pr, build)
-        if build is not None and build.sha != artifact.sha:
-            raise ArtifactConflictError("build identity conflict")
-        previous = self.revision(artifact.pr, artifact.revision)
-        if previous is not None and (
-            previous.sha256 != artifact.sha256 or previous.clis != artifact.clis
-        ):
-            raise ArtifactConflictError("this revision already has different binaries or CLI set")
-        existing = self.get(self.identifier(artifact.pr))
-        if existing is not None and existing.revision == artifact.revision:
-            return existing
-        directory = self.root / self.identifier(artifact.pr) / "revisions"
-        directory.mkdir(parents=True, exist_ok=True)
-        atomic_write(directory / f"{artifact.revision}.json", artifact.model_dump_json().encode())
-        self._write_record(
-            PreviewRecord(
-                pr=artifact.pr,
-                expires_at=artifact.expires_at,
-                artifact=artifact,
-                build=BuildStatus(**build.model_dump(), state="ready") if build else None,
+    async def collect_artifacts(self) -> None:
+        async with connection(self.sessions, write=True) as session:
+            now = self.clock()
+            active = (
+                select(Revision.artifact_id)
+                .join(
+                    Preview,
+                    (col(Preview.pr) == col(Revision.pr))
+                    & (col(Preview.current_revision) == col(Revision.revision)),
+                )
+                .where(
+                    ~col(Preview.closed),
+                    col(Preview.expires_at) > now,
+                    col(Revision.expires_at) > now,
+                )
             )
-        )
-        return Environment(id=self.identifier(artifact.pr), **artifact.model_dump())
+            # One snapshot sees a completing upload as either pending or current.
+            stale = select(col(Revision.artifact_id), false()).where(
+                col(Revision.artifact_id).not_in(select(Upload.artifact_id)),
+                col(Revision.artifact_id).not_in(active),
+                col(Revision.artifact_id).not_in(select(Retirement.artifact_id)),
+            )
+            await session.exec(
+                insert(Retirement)
+                .from_select(["artifact_id", "completed"], stale)
+                .on_conflict_do_nothing()
+            )

@@ -49,6 +49,7 @@ async def main() -> None:
 
                 @product.app.get("/__test__/state")
                 async def state() -> dict[str, Any]:
+                    bindings = await product.service.sessions.bindings()
                     sandboxes = []
                     for record in network.supervisor.records.values():
                         stream = (
@@ -61,7 +62,7 @@ async def main() -> None:
                                 "id": str(record.id),
                                 "page_session_ids": [
                                     str(binding.id)
-                                    for binding in product.service.sessions.bindings()
+                                    for binding in bindings
                                     if binding.sandbox.id == record.id
                                 ],
                                 "epoch": record.attachment_epoch,

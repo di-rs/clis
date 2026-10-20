@@ -154,12 +154,20 @@ pnpm --dir tools/cli-playground/frontend check
 pnpm --dir tools/cli-playground/frontend test
 pnpm --dir tools/cli-playground/frontend build
 pnpm --dir tools/cli-playground/frontend exec playwright install chromium
-pnpm --dir tools/cli-playground/frontend test:browser
+uv run --locked pytest -m integration tools/cli-playground/tests/test_browser.py
 ```
 
-Playground product tests, Boxie service tests and both infrastructure packages run
-with the shared Python suite. Default tests replace the Docker boundary and need
-no Docker daemon. The [Boxie infrastructure guide](../packages/boxie/infra/README.md)
+Playground domain/configuration tests, Boxie service tests and both infrastructure
+packages run with the shared Python suite. Default tests need no Docker daemon.
+Playground API, session and recovery tests use real PostgreSQL and a substituted
+sandbox boundary. Run them explicitly with Docker available:
+
+```sh
+uv run --locked python tools/cli-playground/tests/run_integration.py
+```
+
+The browser test above provisions its own PostgreSQL database and passes the database URL
+to Playwright. Both product tiers run in the PR frontend job. The [Boxie infrastructure guide](../packages/boxie/infra/README.md)
 covers the separate native Linux/gVisor smoke; Playground consumes Boxie's private
 HTTP/WebSocket API and owns no Docker access.
 

@@ -10,7 +10,8 @@ import aiohttp
 import pytest
 from boxie_test_support.terminal_network import attach
 from cli_playground import boxie_client as client_module
-from cli_playground.boxie_client import BoxieUnavailable
+from cli_playground.sandbox import BoxieUnavailable
+from cli_playground.storage import EnvironmentStore
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosedError, InvalidStatus
 from websockets.typing import Origin
@@ -30,7 +31,7 @@ def test_failed_publication_preserves_ready_revision_and_recovers_exact_upload(
                 first = await publish(product, "a" * 40)
                 assert first.status_code == 201
                 identifier = first.json()["id"]
-                original = product.service.store.get(identifier)
+                original = await product.service.store.get(identifier)
                 assert original is not None
                 read = client_module.bounded_response
                 with monkeypatch.context() as fault:
@@ -45,13 +46,13 @@ def test_failed_publication_preserves_ready_revision_and_recovers_exact_upload(
                         fault.setattr(client_module, "bounded_response", lose_reply)
                     else:
 
-                        def fail_commit(*args: object) -> None:
+                        async def fail_commit(*args: object) -> None:
                             raise OSError("injected metadata commit failure")
 
-                        fault.setattr(product.service.store, "_write_record", fail_commit)
+                        fault.setattr(EnvironmentStore, "_publish", fail_commit)
                     failed = await publish(product, "b" * 40)
                     assert failed.status_code == (503 if failure == "reply" else 500)
-                assert product.service.store.get(identifier) == original
+                assert (await product.service.store.get(identifier)) == original
                 old_page = await admit(product, identifier, "a" * 40)
                 origin = str(product.http.base_url).rstrip("/")
                 async with connect(
@@ -62,19 +63,18 @@ def test_failed_publication_preserves_ready_revision_and_recovers_exact_upload(
                     )
                     assert json.loads(await ws.recv())["type"] == "authenticated"
                     assert (await attach(ws))[1] == b"ready\n"
-                (pending,) = product.service.sessions.uploads()
+                (pending,) = await product.service.sessions.uploads()
                 artifact_id = pending.artifact.artifact_id
                 # Both failures occur after the real supervisor has accepted these bytes.
                 assert (network.config.data_dir / "artifacts" / str(artifact_id)).exists()
             async with product_server(tmp_path / "product", str(network.api.base_url)) as restarted:
-                recovered = restarted.service.store.get(identifier)
+                recovered = await restarted.service.store.get(identifier)
                 assert recovered is not None and recovered.revision == "b" * 40
                 assert recovered.artifact_id == artifact_id
-                assert not restarted.service.sessions.uploads()
-                assert not restarted.service.sessions.retirements()
-                assert (
-                    restarted.service.sessions.root / "retirements" / f"{original.artifact_id}.done"
-                ).exists()
+                assert not (await restarted.service.sessions.uploads())
+                assert not (await restarted.service.sessions.retirements())
+                await restarted.service.sessions.retire(original.artifact_id)
+                assert not await restarted.service.sessions.retirements()
 
     asyncio.run(exercise())
 
@@ -120,7 +120,7 @@ def test_capability_failures_and_restart_preserve_claimed_session_while_cleaning
                     await ws.send(json.dumps({"type": "auth", "credential": healthy["credential"]}))
                     assert json.loads(await ws.recv())["type"] == "authenticated"
                     assert (await attach(ws))[1] == b"ready\n"
-                saved = product.service.sessions.get(UUID(healthy["id"]))
+                saved = await product.service.sessions.get(UUID(healthy["id"]))
                 assert saved is not None and saved.attached
                 healthy_view = saved.sandbox
                 network.daemon.unreachable = True
@@ -129,11 +129,11 @@ def test_capability_failures_and_restart_preserve_claimed_session_while_cleaning
                     headers={"Authorization": "Bearer test-deployment-token"},
                 )
                 assert closed_pr.status_code == 200
-                pending = product.service.sessions.get(UUID(stopped["id"]))
-                orphan = product.service.sessions.get(UUID(abandoned["id"]))
+                pending = await product.service.sessions.get(UUID(stopped["id"]))
+                orphan = await product.service.sessions.get(UUID(abandoned["id"]))
                 assert pending is not None and pending.pending_stop
                 assert orphan is not None
-                assert product.service.store.record(identifier) is None
+                assert (await product.service.store.record(identifier)) is None
             network.daemon.unreachable = False
             async with product_server(tmp_path / "product", str(network.api.base_url)) as restarted:
                 for sandbox_id in (pending.sandbox.id, orphan.sandbox.id):
@@ -142,7 +142,7 @@ def test_capability_failures_and_restart_preserve_claimed_session_while_cleaning
                 response = await network.api.get(f"/v1/sandboxes/{healthy_view.id}")
                 assert response.json()["state"] == "ready"
                 assert response.json()["absolute_deadline"] == healthy["absolute_deadline"]
-                retained = restarted.service.sessions.get(UUID(healthy["id"]))
+                retained = await restarted.service.sessions.get(UUID(healthy["id"]))
                 assert retained is not None and retained.attached and not retained.pending_stop
                 assert (
                     sum(
@@ -164,7 +164,7 @@ def test_malformed_stop_reply_keeps_the_original_persisted_binding_for_restart(
             async with product_server(tmp_path / "product", str(network.api.base_url)) as product:
                 identifier = (await publish(product, "a" * 40)).json()["id"]
                 admitted = await admit(product, identifier, "a" * 40)
-                binding = product.service.sessions.get(UUID(admitted["id"]))
+                binding = await product.service.sessions.get(UUID(admitted["id"]))
                 assert binding is not None
                 origin = str(product.http.base_url).rstrip("/")
                 async with connect(
@@ -178,7 +178,7 @@ def test_malformed_stop_reply_keeps_the_original_persisted_binding_for_restart(
             # A fresh HTTP adapter has no in-memory response history. The saved binding
             # must still reject a different but otherwise valid lifetime.
             async with product_server(tmp_path / "product", str(network.api.base_url)) as product:
-                binding = product.service.sessions.get(UUID(admitted["id"]))
+                binding = await product.service.sessions.get(UUID(admitted["id"]))
                 assert binding is not None
                 read = client_module.bounded_response
 
@@ -202,14 +202,14 @@ def test_malformed_stop_reply_keeps_the_original_persisted_binding_for_restart(
                         },
                     )
                     assert response.status_code == 200
-                saved = product.service.sessions.get(binding.id)
+                saved = await product.service.sessions.get(binding.id)
                 assert saved is not None and saved.pending_stop and saved.sandbox == binding.sandbox
                 await product.service.retry_stops()
-                retried = product.service.sessions.get(binding.id)
+                retried = await product.service.sessions.get(binding.id)
                 assert retried is not None and not retried.pending_stop
                 assert retried.sandbox.absolute_deadline == binding.sandbox.absolute_deadline
             async with product_server(tmp_path / "product", str(network.api.base_url)) as restarted:
-                saved = restarted.service.sessions.get(binding.id)
+                saved = await restarted.service.sessions.get(binding.id)
                 assert saved is not None and not saved.pending_stop
                 assert saved.sandbox.id == binding.sandbox.id
                 assert saved.sandbox.absolute_deadline == binding.sandbox.absolute_deadline

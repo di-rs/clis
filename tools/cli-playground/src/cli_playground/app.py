@@ -8,12 +8,16 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from cli_playground.boxie_client import BoxieClient, HttpBoxieClient
+from cli_playground.boxie_client import HttpBoxieClient
 from cli_playground.config import Settings
+from cli_playground.database import check_schema, session_factory
+from cli_playground.ports import PersistenceUnavailable
 from cli_playground.routes import create_router
+from cli_playground.sandbox import BoxieClient
 from cli_playground.service import CliPlaygroundService
 from cli_playground.session_store import SessionStore
 from cli_playground.storage import EnvironmentStore
@@ -39,27 +43,41 @@ def create_app(
         if not 16 <= len(credential) <= 4096 or any(not 33 <= ord(c) <= 126 for c in credential):
             raise ValueError("invalid Boxie credential file")
         boxie = HttpBoxieClient(settings.boxie_url, credential)
+    sessions = session_factory(str(settings.database_url))
     service = CliPlaygroundService(
         settings,
-        EnvironmentStore(settings, clock=clock),
-        SessionStore(settings.data_dir),
+        EnvironmentStore(sessions, preview_seconds=settings.preview_seconds, clock=clock),
+        SessionStore(sessions),
         boxie,
         clock=clock,
     )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        service.store.remove_abandoned_uploads()
-        await service.recover()
-        cleanup = asyncio.create_task(service.cleanup_periodically())
+        cleanup: asyncio.Task[None] | None = None
         try:
+            await check_schema(sessions)
+            service.staging.recover(
+                {intent.artifact.artifact_id for intent in await service.sessions.uploads()}
+            )
+            await service.recover()
+            cleanup = asyncio.create_task(service.cleanup_periodically())
             yield
         finally:
-            cleanup.cancel()
-            await asyncio.gather(cleanup, return_exceptions=True)
+            if cleanup is not None:
+                cleanup.cancel()
+                await asyncio.gather(cleanup, return_exceptions=True)
             await service.boxie.close()
+            await sessions.kw["bind"].dispose()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+
+    @app.exception_handler(PersistenceUnavailable)
+    async def database_unavailable(
+        _request: Request, _error: PersistenceUnavailable
+    ) -> JSONResponse:
+        return JSONResponse({"detail": "playground database unavailable"}, status_code=503)
+
     app.add_middleware(RequestHostBoundary, settings=service.settings)
     app.state.service = service
     app.state.settings = service.settings

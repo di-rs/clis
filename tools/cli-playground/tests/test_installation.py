@@ -72,6 +72,7 @@ def test_owner_settings_use_private_credentials_and_preserve_profiles(
         "commands"
     ] == [["custom"]]
     product = (tmp_path / "cli-playground.env").read_text()
+    assert "CLI_PLAYGROUND_DATABASE_NETWORK='boxie-postgres_playground'" in product
     assert "CLI_PLAYGROUND_BOXIE_URL='http://boxie-api:8090'" in product
     assert "CLI_PLAYGROUND_DEPLOY_TOKEN='" + token.read_text().strip() + "'" in product
     assert (tmp_path / "cli-playground.env").stat().st_mode & 0o077 == 0
