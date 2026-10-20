@@ -1,4 +1,4 @@
-name: 📜 Commit and PR title policy
+name: 📜 PR title policy
 
 on:
   pull_request:
@@ -18,10 +18,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: 📥 Check out full Git history
+      - name: 📥 Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
           persist-credentials: false
       - name: 🛠️ Install Git policy hooks
         uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
@@ -36,16 +35,9 @@ jobs:
           git fetch --no-tags origin "$POLICY_COMMIT"
           mkdir -p "$RUNNER_TEMP/git-policy"
           git show "$POLICY_COMMIT:prek.toml" > "$RUNNER_TEMP/git-policy/prek.toml"
-      - name: ✅ Validate commit subjects and squash title
+      - name: ✅ Validate PR squash title
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           printf '%s\n' "$PR_TITLE" > "$RUNNER_TEMP/COMMIT_EDITMSG"
           prek run --config "$RUNNER_TEMP/git-policy/prek.toml" require-pattern --hook-stage commit-msg --commit-msg-filename "$RUNNER_TEMP/COMMIT_EDITMSG"
-          git log --format=%s "$BASE_SHA..$HEAD_SHA" -- > "$RUNNER_TEMP/commit-subjects.txt"
-          while IFS= read -r subject; do
-            printf '%s\n' "$subject" > "$RUNNER_TEMP/COMMIT_EDITMSG"
-            prek run --config "$RUNNER_TEMP/git-policy/prek.toml" require-pattern --hook-stage commit-msg --commit-msg-filename "$RUNNER_TEMP/COMMIT_EDITMSG"
-          done < "$RUNNER_TEMP/commit-subjects.txt"
