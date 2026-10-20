@@ -22,30 +22,25 @@ Frontend and Backend. Only the Boxie release updates the sandbox image.
 
 ## Replace the old stack's resources
 
-Skip this section if no infrastructure has been provisioned. Otherwise, use a
-checkout of the reviewed revision and the existing Pulumi backend and production
-stack. Load `PULUMI_BACKEND_URL`, `PULUMI_CONFIG_PASSPHRASE`, `AWS_ACCESS_KEY_ID`
-(the R2 access key), `AWS_SECRET_ACCESS_KEY` (the R2 secret), `HCLOUD_TOKEN` and
-`CLOUDFLARE_API_TOKEN` from your secret manager without printing them.
+Skip this section if no infrastructure has been provisioned. Otherwise, run
+[Reset Sanctuary infrastructure](../.github/workflows/sanctuary-reset.yml) from
+GitHub Actions:
 
-Run from the repository root:
+1. Open **Actions → Reset Sanctuary infrastructure → Run workflow**.
+2. Select `master` and enter `destroy-production` in the confirmation field.
+3. Run the workflow and approve the `sanctuary` environment if requested.
+4. Wait for the reset to finish successfully before running setup.
 
-```sh
-uv sync --locked --all-packages
-pulumi login "$PULUMI_BACKEND_URL"
-pulumi -C infra/environments/single-host stack select production
-pulumi -C infra/environments/single-host config refresh --force
-pulumi -C infra/environments/single-host config set sanctuary:protect false
-pulumi -C infra/environments/single-host up --refresh --diff --suppress-outputs
-pulumi -C infra/environments/single-host destroy --refresh
-pulumi -C infra/environments/single-host config set sanctuary:protect true
-```
+The workflow uses the existing backend and `production` stack configured in
+`sanctuary`. It disables Pulumi and Hetzner deletion protection, then permanently
+deletes the server, data disk and the stack's other resources. It keeps the empty
+stack and R2 backend. No local Pulumi or SSH commands are needed for the reset.
+In GitHub's `SINGLE_HOST_CONFIG`, use `"protect": true` for the replacement
+installation.
 
-Review each preview and approve only the intended stack's operations. The update
-disables both Pulumi and Hetzner deletion protection; destruction removes the
-server, data disk and the stack's other resources. It permanently deletes
-application data. Keep the empty stack and R2 backend for setup. In GitHub's
-`SINGLE_HOST_CONFIG`, use `"protect": true` for the replacement installation.
+If reset fails, leave releases and previews disabled, inspect the failed step and
+rerun after correcting the cause. A failed reset can leave resources unprotected
+or partially deleted. Do not run setup until reset succeeds.
 
 ## Install and verify
 

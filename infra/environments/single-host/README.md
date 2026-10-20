@@ -51,6 +51,21 @@ host accepts public-key SSH and exposes only SSH, HTTP, HTTPS and ICMP. Boxie an
 Temporal stay on private Docker networks. Narrow `sshCidrs` only if both operators
 and Actions runners can reach the host.
 
+## Reset a disposable installation
+
+To replace the existing installation without retaining its data, use
+[Reset Sanctuary infrastructure](../../../.github/workflows/sanctuary-reset.yml)
+in GitHub Actions. Set repository variable `DEPLOYMENT_ACCEPTANCE_PASSED` to
+`false`, disable `SANCTUARY_INFRA_DRIFT_CHECK`, and disable preview publication
+before starting.
+
+Select **Run workflow**, choose `master`, and enter `destroy-production`. Approve
+the `sanctuary` environment if requested. This deletes the existing server, data
+disk and other stack resources permanently; the empty Pulumi stack and R2 backend
+remain. Wait for success, then run setup with `"protect": true` in
+`SINGLE_HOST_CONFIG`. If reset fails, keep automation disabled and inspect the
+failure before retrying; resources may be unprotected or partially deleted.
+
 ## Run setup
 
 Grant this repository Actions access to its private GHCR packages. Run
