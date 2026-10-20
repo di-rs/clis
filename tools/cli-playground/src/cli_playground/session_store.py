@@ -4,12 +4,28 @@ import hashlib
 import os
 import secrets
 from pathlib import Path
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, BeforeValidator, ConfigDict
 
 from cli_playground.boxie_client import SandboxRequest, SandboxView
 from cli_playground.models import ArtifactMetadata, BuildIdentity
+
+
+def optional_request_id(value: object) -> UUID | None:
+    if isinstance(value, UUID):
+        return value
+    if type(value) is str and len(value) == 36:
+        try:
+            parsed = UUID(value)
+            return parsed if str(parsed) == value else None
+        except ValueError:
+            pass
+    return None
+
+
+type RequestId = Annotated[UUID | None, BeforeValidator(optional_request_id)]
 
 
 def atomic_write(path: Path, data: bytes) -> None:
@@ -42,6 +58,7 @@ class SessionBinding(BaseModel):
     revision: str
     sandbox: SandboxView
     credential_hash: str
+    stop_request_id: RequestId = None
     pending_stop: bool = False
     attachment_deadline: float | None = None
     attached: bool = False
@@ -54,6 +71,7 @@ class SessionBinding(BaseModel):
 
 
 class CreateIntent(BaseModel):
+    request_id: RequestId = None
     id: UUID
     preview_id: str
     revision: str
@@ -64,6 +82,7 @@ class CreateIntent(BaseModel):
 
 
 class UploadIntent(BaseModel):
+    request_id: RequestId = None
     artifact: ArtifactMetadata
     build: BuildIdentity | None
     previous_revision: str | None
@@ -78,7 +97,8 @@ class SessionStore:
 
     def save(self, binding: SessionBinding) -> None:
         atomic_write(
-            self.root / "bindings" / f"{binding.id}.json", binding.model_dump_json().encode()
+            self.root / "bindings" / f"{binding.id}.json",
+            binding.model_dump_json(exclude={"stop_request_id"}).encode(),
         )
 
     def bindings(self) -> list[SessionBinding]:
@@ -92,7 +112,10 @@ class SessionStore:
         return SessionBinding.model_validate_json(path.read_bytes()) if path.exists() else None
 
     def create_intent(self, intent: CreateIntent) -> None:
-        atomic_write(self.root / "creates" / f"{intent.id}.json", intent.model_dump_json().encode())
+        atomic_write(
+            self.root / "creates" / f"{intent.id}.json",
+            intent.model_dump_json(exclude={"request_id"}).encode(),
+        )
 
     def creates(self) -> list[CreateIntent]:
         return [
@@ -118,7 +141,7 @@ class SessionStore:
     def save_upload(self, intent: UploadIntent) -> None:
         atomic_write(
             self.root / "uploads" / f"{intent.artifact.artifact_id}.json",
-            intent.model_dump_json().encode(),
+            intent.model_dump_json(exclude={"request_id"}).encode(),
         )
 
     def cancel_uploads(self, pr: int) -> None:
