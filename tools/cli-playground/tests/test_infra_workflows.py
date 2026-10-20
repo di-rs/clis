@@ -59,7 +59,9 @@ def test_deployment_rejects_partial_workflow_retry(
 
 def test_setup_queues_before_selecting_master_and_builds_all_images() -> None:
     setup = workflow("setup")
-    assert setup["on"]["workflow_dispatch"] == {}
+    repair = setup["on"]["workflow_dispatch"]["inputs"]["repair_bootstrap"]
+    assert repair["type"] == "boolean"
+    assert repair["default"] == "false"
     assert setup["concurrency"] == QUEUE
     jobs = setup["jobs"]
     assert jobs["source"]["steps"][0]["with"]["ref"] == "master"
@@ -183,7 +185,8 @@ def test_setup_reports_bootstrap_failure_without_ignoring_it(status: int) -> Non
             "-c",
             (
                 f"cloud-init() {{ echo bootstrap-status; return {status}; }}\n"
-                "tail() { echo bootstrap-diagnostics; return 1; }\n" + remote
+                "tail() { echo bootstrap-diagnostics; return 1; }\n"
+                "journalctl() { return 1; }\n" + remote
             ),
         ],
         text=True,
@@ -192,6 +195,44 @@ def test_setup_reports_bootstrap_failure_without_ignoring_it(status: int) -> Non
     assert result.returncode == status
     assert "bootstrap-status" in result.stdout
     assert ("bootstrap-diagnostics" in result.stdout) == (status != 0)
+
+
+@pytest.mark.parametrize(
+    "bootstrap_status,repair,repair_status,expected",
+    [(0, "false", 0, 0), (1, "false", 0, 1), (1, "true", 0, 0), (1, "true", 3, 3)],
+)
+def test_setup_repairs_bootstrap_only_when_requested(
+    bootstrap_status: int, repair: str, repair_status: int, expected: int
+) -> None:
+    steps = workflow("setup")["jobs"]["provision"]["steps"]
+    step = next(step for step in steps if "REPAIR_BOOTSTRAP" in step.get("env", {}))
+    assert step["env"]["REPAIR_BOOTSTRAP"] == "${{ inputs.repair_bootstrap }}"
+    script = "if ssh" + step["run"].split("if ssh", 1)[1]
+    script = script.split("echo 'Uploading installation inputs'", 1)[0]
+    result = subprocess.run(
+        [
+            "bash",
+            "-euo",
+            "pipefail",
+            "-c",
+            (
+                "private=/unused\n"
+                f"REPAIR_BOOTSTRAP={repair}\n"
+                "ssh() {\n"
+                "  if [[ $* == *'bash -se'* ]]; then\n"
+                f"    cat >/dev/null; return {bootstrap_status}\n"
+                "  fi\n"
+                f"  echo repaired; return {repair_status}\n"
+                "}\n"
+                "scp() { echo uploaded; }\n" + script
+            ),
+        ],
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == expected
+    assert ("repaired" in result.stdout) == (bootstrap_status != 0 and repair == "true")
+    assert ("uploaded" in result.stdout) == (bootstrap_status != 0 and repair == "true")
 
 
 def test_setup_pulls_all_images_before_starting_boxie() -> None:

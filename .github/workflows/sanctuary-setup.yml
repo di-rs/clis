@@ -1,6 +1,11 @@
 name: ☁️ Single-host Sanctuary setup
 'on':
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      repair_bootstrap:
+        description: Rerun committed host bootstrap if cloud-init failed (restarts Docker)
+        type: boolean
+        default: false
 permissions: {}
 concurrency:
   group: sanctuary-production
@@ -165,6 +170,7 @@ jobs:
         pulumi up --yes --refresh --non-interactive --suppress-outputs
     - name: 🔐 Render private setup inputs and install over pinned SSH
       env:
+        REPAIR_BOOTSTRAP: ${{ inputs.repair_bootstrap }}
         REGISTRY_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
@@ -225,16 +231,25 @@ jobs:
         SSH
         remote="/run/sanctuary-setup-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
         echo 'Waiting for host bootstrap'
-        ssh -F "$private/config" deployment 'bash -se' <<'BOOTSTRAP'
+        if ssh -F "$private/config" deployment 'bash -se' <<'BOOTSTRAP'
         if cloud-init status --wait --long; then
           exit 0
         else
           status=$?
           # Bootstrap output contains package/storage diagnostics, not application credentials.
           tail -n 150 /var/log/cloud-init-output.log || true
+          journalctl -u containerd -u docker -n 80 --no-pager || true
           exit "$status"
         fi
         BOOTSTRAP
+        then
+          :
+        else
+          [[ $REPAIR_BOOTSTRAP == true ]] || exit 1
+          echo 'Repairing host bootstrap from the selected source commit'
+          scp -F "$private/config" infra/host/bootstrap.sh deployment:/usr/local/sbin/sanctuary-bootstrap
+          ssh -F "$private/config" deployment 'bash /usr/local/sbin/sanctuary-bootstrap'
+        fi
         echo 'Uploading installation inputs'
         ssh -F "$private/config" deployment "install -d -m 0700 $remote"
         scp -F "$private/config" -r .installation/. deployment:"$remote/"

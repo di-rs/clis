@@ -72,7 +72,7 @@ PYTHON
 cat > /etc/containerd/config.toml <<'EOF'
 version = 2
 root = "/srv/sanctuary/containerd"
-disabled_plugins = ["cri"]
+disabled_plugins = ["io.containerd.grpc.v1.cri"]
 EOF
 for service in docker containerd; do
     cat > "/etc/systemd/system/$service.service.d/storage.conf" <<'EOF'
