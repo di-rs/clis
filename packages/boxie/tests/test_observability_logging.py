@@ -578,6 +578,7 @@ def test_request_context_replaces_clears_and_restores() -> None:
     [
         ("unauthorized", "4xx", "failed"),
         ("invalid", "4xx", "failed"),
+        ("unmatched", "4xx", "failed"),
         ("accepted", "2xx", "succeeded"),
     ],
 )
@@ -604,13 +605,22 @@ async def run():
             logging.getLogger(name).handlers.clear()
             logging.getLogger(name).propagate = True
         path = "/accepted" if {case!r} == "accepted" else "/v1/sandboxes/" + ("not-a-uuid" if {case!r} == "invalid" else "11111111-1111-1111-1111-111111111111") + "/terminal"
+        if {case!r} == "unmatched": path = "/missing"
+        chosen = "22222222-2222-2222-2222-222222222222"
         headers = {{}} if {case!r} == "unauthorized" else {{"Authorization":"Bearer consumer-one-secret"}}
+        headers["X-Request-ID"] = chosen
         try:
-            async with connect(origin.replace("http:","ws:")+path, additional_headers=headers):
+            async with connect(origin.replace("http:","ws:")+path, additional_headers=headers) as ws:
                 assert {case!r} == "accepted"
+                assert ws.response.headers["x-request-id"] == chosen
+                await ws.wait_closed()
+                assert ws.close_code == 1000
         except InvalidStatus as error:
             assert {case!r} != "accepted"
             assert error.response.status_code == (401 if {case!r} == "unauthorized" else 403)
+            identity = error.response.headers["x-request-id"]
+            assert str(UUID(identity)) == identity
+            assert (identity == chosen) == ({case!r} != "unauthorized")
 asyncio.run(run())
 assert seen == [{status!r}], seen
 dispatcher.close()
@@ -618,3 +628,22 @@ dispatcher.close()
     events = [event for event in records(result) if event["event"] == "request.completed"]
     assert len(events) == 1
     assert events[0]["outcome"] == outcome
+
+
+def test_websocket_close_without_http_denial_extension() -> None:
+    result = child("""
+from boxie.observability.logging import RequestLogging
+close = {"type": "websocket.close", "code": 1008, "reason": "policy"}
+async def app(scope, receive, send): await send(close)
+async def run():
+    messages = []
+    async def receive(): return {"type": "websocket.connect"}
+    async def send(message): messages.append(message)
+    await RequestLogging(app)({"type": "websocket"}, receive, send)
+    assert messages == [close]
+asyncio.run(run())
+dispatcher.close()
+""")
+    events = records(result)
+    assert len(events) == 1
+    assert events[0]["outcome"] == "failed"

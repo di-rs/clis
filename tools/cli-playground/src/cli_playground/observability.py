@@ -79,8 +79,12 @@ class RequestContext:
             return
         selected = str(uuid4())
         scope.setdefault("state", {})["request_id"] = selected
+        failed = False
 
         async def respond(message: Message) -> None:
+            nonlocal failed
+            if message["type"] in {"http.response.start", "websocket.http.response.start"}:
+                failed = message["status"] >= 400
             if message["type"] in {
                 "http.response.start",
                 "websocket.accept",
@@ -95,9 +99,14 @@ class RequestContext:
         with request_context(selected):
             try:
                 await self.app(scope, receive, respond)
+            except BaseException:
+                failed = True
+                raise
             finally:
-                if scope.get("path") != "/healthz":
-                    logging.getLogger(__name__).info("Request completed")
+                if failed or scope.get("path") != "/healthz":
+                    logging.getLogger(__name__).log(
+                        logging.ERROR if failed else logging.INFO, "Request completed"
+                    )
 
 
 async def unhandled_error(request: Request, _error: Exception) -> PlainTextResponse:

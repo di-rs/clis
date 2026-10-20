@@ -11,10 +11,10 @@ from cli_playground.service import CliPlaygroundService
 
 def test_public_context_and_uvicorn_factory_logging(tmp_path: Path) -> None:
     code = """
-import asyncio, logging, socket, sys
+import asyncio, json, logging, socket, sys
 from pathlib import Path
 import httpx, uvicorn
-from fastapi import WebSocket
+from fastapi import HTTPException, WebSocket
 from websockets.asyncio.client import connect
 from cli_playground.app import create_app
 from cli_playground.config import Settings
@@ -31,6 +31,9 @@ async def run():
             async def fail():
                 logging.getLogger("unknown").error("PRIVATE_SENTINEL %s", "credentials")
                 raise RuntimeError("PRIVATE_SENTINEL")
+            @app.get("/unavailable")
+            async def unavailable():
+                raise HTTPException(503, "PRIVATE_SENTINEL")
             @app.websocket("/probe")
             async def probe(ws: WebSocket):
                 await ws.accept()
@@ -45,17 +48,20 @@ async def run():
                 await asyncio.sleep(.01)
             assert server.started
             async with httpx.AsyncClient(base_url=origin) as client:
-                identities = []
-                for path, status in (("/missing",404), ("/fail",500)):
+                expected = {}
+                for path, status in (("/missing",404), ("/unavailable",503), ("/fail",500)):
                     response = await client.get(path, headers={"X-Request-ID":"11111111-1111-1111-1111-111111111111"})
                     assert response.status_code == status
                     identity = response.headers["x-request-id"]
                     assert identity != "11111111-1111-1111-1111-111111111111"
-                    identities.append(identity)
-                assert len(set(identities)) == 2
+                    expected[identity] = "ERROR"
+                assert len(expected) == 3
+                assert (await client.get("/healthz")).status_code == 200
             async with connect(origin.replace("http:","ws:")+"/probe") as ws:
                 assert ws.response.headers["x-request-id"] == await ws.recv()
+                expected[ws.response.headers["x-request-id"]] = "INFO"
             assert current_request_id() is None
+            print(json.dumps(expected), file=sys.stderr)
         finally:
             server.should_exit = True
             await task
@@ -69,10 +75,32 @@ shutdown_logging()
     assert "PRIVATE_SENTINEL" not in result.stdout + result.stderr
     events = [json.loads(line) for line in result.stdout.splitlines()]
     assert events and all(event["service"] == "cli-playground" for event in events)
-    assert (
-        len({event["request_id"] for event in events if event["event"] == "request.completed"}) == 3
-    )
+    completed = [event for event in events if event["event"] == "request.completed"]
+    assert len(completed) == 4
+    assert {event["request_id"]: event["level"] for event in completed} == json.loads(result.stderr)
     assert all(len(line.encode()) + 1 <= 8192 for line in result.stdout.splitlines())
+
+
+def test_native_log_check_waits_for_delayed_output() -> None:
+    from .test_native import wait_for_request_log
+
+    request_id = "11111111-1111-1111-1111-111111111111"
+    outputs = iter(
+        ["startup\n", '{"request_id":"unrelated"}', json.dumps({"request_id": request_id})]
+    )
+
+    def read_logs(*args: str) -> str:
+        return next(outputs)
+
+    wait_for_request_log(read_logs, "api", request_id, timeout=2)
+    assert next(outputs, None) is None
+
+
+def test_native_log_check_times_out_with_the_missing_service() -> None:
+    from .test_native import wait_for_request_log
+
+    with pytest.raises(AssertionError, match="supervisor"):
+        wait_for_request_log(lambda *args: "", "supervisor", "missing", timeout=0)
 
 
 def test_blocked_stdout_keeps_queue_and_shutdown_bounded() -> None:

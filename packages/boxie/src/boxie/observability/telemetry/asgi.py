@@ -62,6 +62,16 @@ class RequestLogging:
 
         async def observed_send(message: Message) -> None:
             nonlocal status, finished
+            if (
+                message["type"] == "websocket.close"
+                and not finished
+                and "websocket.http.response" in scope.get("extensions", {})
+            ):
+                await observed_send(
+                    {"type": "websocket.http.response.start", "status": 403, "headers": []}
+                )
+                await observed_send({"type": "websocket.http.response.body", "body": b""})
+                return
             if message["type"] in (
                 "http.response.start",
                 "websocket.accept",
