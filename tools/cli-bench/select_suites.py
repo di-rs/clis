@@ -7,21 +7,13 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import TypedDict
 
-from cli_check.affected import affected_packages, changed_paths
+from cli_check.affected import changed_paths
 from cli_check.workspace import discover, load_toml
 from pydantic import BaseModel, ConfigDict, Field
 
 ROOT = Path(__file__).resolve().parents[2]
-GLOBAL_PATHS = {
-    "Cargo.toml",
-    "rust-toolchain.toml",
-    ".python-version",
-    "tools/cli-bench/bench.py",
-    "tools/cli-bench/select_suites.py",
-    ".github/workflows/cli-bench.yml",
-}
 
 
 class Suite(BaseModel):
@@ -45,6 +37,8 @@ class Selection(TypedDict):
 def discover_suites() -> list[Suite]:
     suites: list[Suite] = []
     for member in discover(ROOT):
+        if not member.is_cli:
+            continue
         directory, package = member.directory, member.name
         for path in sorted(directory.glob("benches/*.toml")):
             suite = load_toml(path)
@@ -65,81 +59,35 @@ def discover_suites() -> list[Suite]:
     return sorted(suites, key=lambda suite: suite.path)
 
 
-def parse_request(body: object) -> frozenset[str] | None:
-    if body is None:
-        return None
-    if not isinstance(body, str):
-        raise ValueError("pull_request.body must be text or null")
-    fields = [
-        line.strip().removeprefix("Benchmark-CLIs:").strip()
-        for line in body.splitlines()
-        if line.strip().startswith("Benchmark-CLIs:")
-    ]
-    if len(fields) > 1:
-        raise ValueError("duplicate Benchmark-CLIs fields; use one standalone field")
-    if not fields or fields[0] in {"", "auto"}:
-        return None
-    names = frozenset(name.strip() for name in fields[0].split(","))
-    if "" in names:
-        raise ValueError("Benchmark-CLIs must contain nonempty comma-separated CLI names")
-    return names
-
-
 def affected_suites(suites: list[Suite], base: str, head: str) -> list[Suite]:
     paths = changed_paths(ROOT, base, head)
-    for path in paths:
-        if path in GLOBAL_PATHS or path.startswith((".cargo/", "tools/cli-check/src/")):
-            return suites
-    affected = affected_packages(ROOT, base, head, paths)
     return [
         suite
         for suite in suites
-        if ("biggie" in affected and suite.generate)
-        or suite.package in affected
-        or suite.path in paths
+        if any(
+            path == f"{suite.directory}/build.rs"
+            or (path.startswith(f"{suite.directory}/src/") and path.endswith(".rs"))
+            for path in paths
+        )
     ]
 
 
 def select(base: str, head: str, event: dict[str, object]) -> Selection:
-    suites = discover_suites()
-    pull_request = cast(dict[str, object], event.get("pull_request", {}))
-    request = parse_request(pull_request.get("body"))
-    available = {suite.package for suite in suites}
-    if request is not None and request != {"all"}:
-        unknown = request - available
-        if unknown:
-            raise ValueError(
-                f"unknown Benchmark-CLIs: {', '.join(sorted(unknown))}; "
-                f"available CLIs: {', '.join(sorted(available))}"
-            )
-    unchanged = False
     if event.get("action") == "edited":
-        changes = cast(dict[str, object], event.get("changes", {}))
-        body_change = cast(dict[str, object], changes.get("body", {}))
-        if "from" in body_change:
-            try:
-                unchanged = request == parse_request(body_change["from"])
-            except ValueError:
-                pass  # Correcting an invalid previous request must still trigger a run.
-    if unchanged:
-        selected, reason = [], "Benchmark request unchanged"
-    elif request is None:
-        selected = affected_suites(suites, base, head)
-        reason = "Affected CLI smoke benchmarks" if selected else "No affected CLI benchmarks"
+        selected, reason = [], "PR edits do not trigger benchmarks"
     else:
-        selected = [suite for suite in suites if request == {"all"} or suite.package in request]
-        reason = "Explicit Benchmark-CLIs request"
+        selected = affected_suites(discover_suites(), base, head)
+        reason = "Changed CLI code smoke benchmarks" if selected else "No CLI code changes"
     binaries = sorted({suite.package for suite in selected})
     packages = set(binaries)
     if any(suite.generate for suite in selected):
         packages.add("biggie")
-    full = request is not None and not unchanged
     return {
         "suites": [suite.path for suite in selected],
         "packages": sorted(packages),
         "binaries": binaries,
-        "runs": 20 if full else 1,
-        "warmup": 3 if full else 0,
+        "runs": 1,
+        "warmup": 0,
         "reason": reason,
     }
 

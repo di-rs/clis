@@ -11,6 +11,14 @@ import yaml
 from conftest import TOOLS, Repository
 
 
+def test_benchmark_workflow_cannot_run_on_pr_edits_or_with_empty_selection() -> None:
+    workflow = yaml.safe_load((TOOLS.parents[1] / ".github/workflows/cli-bench.yml").read_text())
+    triggers = workflow[True]  # PyYAML reads the YAML 1.1 key "on" as True.
+    assert set(triggers) == {"pull_request"}
+    assert "edited" not in triggers["pull_request"]["types"]
+    assert workflow["jobs"]["suites"]["if"] == "needs.select.outputs.suites != '[]'"
+
+
 @pytest.mark.parametrize("job", ["select", "suites"])
 def test_checkout_matches_pr_dependency_graph_when_base_adds_a_package(
     repo: Repository, job: str

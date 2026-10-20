@@ -19,10 +19,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("group", nargs="?", choices=CHECKS, help="check group (default: all)")
     parser.add_argument("--root", type=Path, help="explicit Cargo workspace root")
+    parser.add_argument("-p", "--package", action="append", help="check only this Cargo package")
     args = parser.parse_args()
     try:
         root = args.root.resolve() if args.root else find_root(Path.cwd())
         packages = discover(root)
+        if args.package:
+            unknown = set(args.package) - {package.name for package in packages}
+            if unknown:
+                raise ValueError(f"Unknown packages: {', '.join(sorted(unknown))}")
+            packages = [package for package in packages if package.name in args.package]
         selected = [CHECKS[args.group]] if args.group else list(CHECKS.values())
         errors = sorted(error for check in selected for error in check(root, packages))
     except (OSError, ValueError, KeyError, TypeError) as error:

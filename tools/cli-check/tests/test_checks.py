@@ -61,6 +61,20 @@ def run_policy(root: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def test_package_selection_ignores_unselected_violations_and_rejects_unknown(
+    tmp_path: Path,
+) -> None:
+    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["buildins/*"]\n')
+    add_cli(tmp_path)
+    write(tmp_path, "buildins/broken/Cargo.toml", '[package]\nname = "broken"\n')
+    command = [sys.executable, "-m", "cli_check", "tests", "--root", str(tmp_path), "-p"]
+    result = subprocess.run(command + ["echo"], capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+    result = subprocess.run(command + ["missing"], capture_output=True, text=True, check=False)
+    assert result.returncode == 1
+    assert "Unknown packages: missing" in result.stderr
+
+
 def test_valid_workspace_includes_globs_and_ignores_libraries_and_excludes(tmp_path: Path) -> None:
     write(
         tmp_path,

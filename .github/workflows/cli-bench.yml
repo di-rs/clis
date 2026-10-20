@@ -4,25 +4,23 @@ name: ⏱️ CLI benchmark execution
 run-name: >-
   ${{
     (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci')) &&
-    (github.event.action != 'edited' || github.event.changes.body != null) &&
     format('⏱️ CLI benchmarks for PR #{0}', github.event.pull_request.number) || '⏭️ CI skipped'
   }}
 
 on:
   pull_request:
     branches: [master]
-    types: [opened, synchronize, reopened, edited, ready_for_review, labeled]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
 
 permissions:
   contents: read
 
 jobs:
   select:
-    name: 🔎 Select affected CLI benchmarks
+    name: 🔎 Select CLIs with code changes
     if: >-
       ${{
-        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci')) &&
-        (github.event.action != 'edited' || github.event.changes.body != null)
+        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
       }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -45,7 +43,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
           cache-suffix: ${{ github.job }}
-      - name: 🔎 Select affected or requested CLI benchmarks
+      - name: 🔎 Select only CLIs with code changes
         id: selection
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
