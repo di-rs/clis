@@ -12,7 +12,7 @@ This skill teaches the craft first and the conventions second. The craft is what
 Four sources do the heavy lifting:
 
 - **[Steven Pinker, *The Sense of Style*](https://www.psychologicalscience.org/observer/the-curse-of-knowledge-pinker-describes-a-key-cause-of-bad-writing)** for *the curse of knowledge* and *classic style*.
-- **[Chip & Dan Heath, *Made to Stick*](https://heathbrothers.com/made-to-stick-introduction/)** for *tappers and listeners* (Newton 1990) and concrete-over-abstract diction.
+- **[Chip & Dan Heath, *Made to Stick*](https://heathbrothers.com/books/made-to-stick/)** for *tappers and listeners* (Newton 1990) and concrete-over-abstract diction.
 - **[Mailchimp Content Style Guide](https://styleguide.mailchimp.com/voice-and-tone/)** for *voice is consistent, tone shifts*.
 - **[Diátaxis](https://diataxis.fr/)** + the celebrated landing pages (React, Stripe, Anthropic, SpacetimeDB, Tokio) for *structural shape*.
 

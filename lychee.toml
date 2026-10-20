@@ -1,0 +1,11 @@
+# Local links/anchors block PRs. Remote availability is checked separately weekly.
+timeout = 20
+max_retries = 2
+retry_wait_time = 2
+exclude_all_private = true
+
+# GNU returns 429 for Lychee's default user agent, even on isolated requests.
+[hosts."www.gnu.org"]
+concurrency = 1
+request_interval = "5s"
+headers = { "User-Agent" = "sanctuary-link-checker (+https://github.com/di-rs/sanctuary)" }
