@@ -320,7 +320,6 @@ def main() -> None:
             "packages/boxie/tests/test_postgres.py",
             "packages/boxie/tests/test_temporal_deployment.py",
             "packages/boxie/tests/test_migrations.py",
-            "packages/boxie/tests/test_rename_state.py",
             "packages/boxie/tests/test_observability_lifecycle.py",
             "packages/boxie/tests/test_observability_logging.py",
         ]

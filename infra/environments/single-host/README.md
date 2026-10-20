@@ -5,10 +5,6 @@ inspect a failed release. Pulumi creates the host, disk, DNS and operator Access
 applications. The setup workflow copies the Compose projects and starts them.
 Routine releases run over pinned SSH from GitHub Actions.
 
-Replace the previous disposable installation using the
-[reset procedure](../../../docs/component-naming-cutover.md) before setup. This
-release changes the consumer API as well as component names.
-
 ## Prepare the Sanctuary environment
 
 Create GitHub environments `sanctuary`, `boxie`, `cli-playground` and
@@ -50,21 +46,6 @@ Optional settings are `sshPublicKey`, `location` (`nbg1` or `fsn1`), `serverType
 host accepts public-key SSH and exposes only SSH, HTTP, HTTPS and ICMP. Boxie and
 Temporal stay on private Docker networks. Narrow `sshCidrs` only if both operators
 and Actions runners can reach the host.
-
-## Reset a disposable installation
-
-To replace the existing installation without retaining its data, use
-[Reset Sanctuary infrastructure](../../../.github/workflows/sanctuary-reset.yml)
-in GitHub Actions. Set repository variable `DEPLOYMENT_ACCEPTANCE_PASSED` to
-`false`, disable `SANCTUARY_INFRA_DRIFT_CHECK`, and disable preview publication
-before starting.
-
-Select **Run workflow**, choose `master`, and enter `destroy-production`. Approve
-the `sanctuary` environment if requested. This deletes the existing server, data
-disk and other stack resources permanently; the empty Pulumi stack and R2 backend
-remain. Wait for success, then run setup with `"protect": true` in
-`SINGLE_HOST_CONFIG`. If reset fails, keep automation disabled and inspect the
-failure before retrying; resources may be unprotected or partially deleted.
 
 ## Run setup
 

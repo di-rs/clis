@@ -41,8 +41,6 @@ def provision_dns(config: DnsConfig, ipv4: pulumi.Input[str]) -> list[pulumi.Res
             content=ipv4,
             ttl=300,
             proxied=False,
-            # Preserve existing DNS record IDs across the component rename.
-            opts=pulumi.ResourceOptions(aliases=[pulumi.Alias(name=name.removeprefix("cli-"))]),
         )
         resources.append(record)
     pulumi.export("publicUrl", f"https://{config.domain}")

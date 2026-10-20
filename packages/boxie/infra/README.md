@@ -95,14 +95,6 @@ The API receives no artifact storage. Both networks are externally supplied and
 owned by the operator, never by either Compose project. Choose a unique API alias
 when operating multiple installations.
 
-## Replace the previous installation
-
-The artifact-only API and fixed default environment require a clean reset of the
-previous disposable installation. Follow the
-[reset procedure](../../../docs/component-naming-cutover.md) before starting these
-services. The older naming converters do not adapt pending requests to this API.
-Fresh databases still use the complete Alembic revision chain.
-
 ## Validation
 
 Default tests require no Docker or frontend build. Integration checks require

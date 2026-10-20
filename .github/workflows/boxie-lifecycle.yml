@@ -95,7 +95,7 @@ jobs:
       - name: 🧪 Test PostgreSQL and Temporal cancellation, replay and diagnostics
         timeout-minutes: 9
         run: |
-          uv run --locked pytest -m integration packages/boxie/tests/test_temporal_deployment.py packages/boxie/tests/test_outbox.py packages/boxie/tests/integration/test_artifact_commit.py packages/boxie/tests/test_migrations.py packages/boxie/tests/test_rename_state.py packages/boxie/tests/test_observability_lifecycle.py packages/boxie/tests/test_observability_logging.py packages/boxie/tests/test_observability_native.py -vv --durations=10
+          uv run --locked pytest -m integration packages/boxie/tests/test_temporal_deployment.py packages/boxie/tests/test_outbox.py packages/boxie/tests/integration/test_artifact_commit.py packages/boxie/tests/test_migrations.py packages/boxie/tests/test_observability_lifecycle.py packages/boxie/tests/test_observability_logging.py packages/boxie/tests/test_observability_native.py -vv --durations=10
       - name: 🔐 Test native credential permissions and endpoint restarts
         timeout-minutes: 3
         run: |
