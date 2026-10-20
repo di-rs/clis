@@ -36,12 +36,22 @@ Follow [Testing](docs/testing.md) for Rust and Python checks and
 Use the root uv workspace and committed lockfile for Python tooling; keep shared
 Ruff and strict mypy configuration at the root.
 
-Run focused checks directly before committing with `prek run --files PATH...`
-or `prek run HOOK_ID --files PATH...`, selecting the changed files. Do not run
-`prek run --all-files` locally unless the user explicitly requests it; reserve
-full-repository runs for CI. Use `prek install` to install hooks; keep the
-installed hooks and Gitmoji validation enabled. Do not use
-`git commit` as a test runner or repeatedly retry commits to discover failures.
+Never run prek checks manually, including `prek run`, selected hook IDs,
+`--files`, or `--all-files`. Do not invoke the hook runner directly to bypass
+this rule. Keep the normal pre-commit and commit-msg hooks enabled, including
+Gitmoji validation; `prek install` is allowed only when hook installation is
+needed. Let a real commit invoke the hooks once. Do not create test commits or
+repeatedly retry commits to discover failures.
+
+During development, run the relevant test or lint tool directly for affected
+packages and their consumers. Local hooks use changed paths to select those
+packages; shared language configuration affects all packages using it. Full
+repository validation belongs in CI.
+
+Never use process-list commands (`ps`, including `ps aux` and `ps -axo`, `pgrep`,
+`top`, or equivalents) to monitor checks. Wait on the execution tool's existing
+session handle and read its output. Do not background checks, redirect their
+output to temporary logs for polling, or repeatedly inspect logs for progress.
 
 Tests that invoke Git in temporary repositories must clear inherited
 repository-local Git environment variables in their child processes (see
