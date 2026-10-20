@@ -1,0 +1,16 @@
+{
+  "default": {
+    "image_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "commands": [
+      [
+        "/opt/boxie/shell.sh"
+      ]
+    ],
+    "env": {
+      "TERM": [
+        "xterm-256color"
+      ]
+    },
+    "artifact_target": "/opt/artifact"
+  }
+}

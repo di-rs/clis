@@ -1,10 +1,10 @@
-name: 🏗️ Playground PR binary builds
+name: 🏗️ cli-playground PR binary builds
 
 # Keep this condition aligned with the first job: downstream workflows skip without a runner.
 run-name: >-
   ${{
     (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci')) &&
-    format('🏗️ Playground CLI builds for PR #{0}', github.event.pull_request.number) || '⏭️ CI skipped'
+    format('🏗️ cli-playground CLI builds for PR #{0}', github.event.pull_request.number) || '⏭️ CI skipped'
   }}
 
 on:
@@ -52,11 +52,11 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           uv run --locked --no-dev python tools/cli-playground/preview_ci.py build \
-            --base "$BASE_SHA" --head "$HEAD_SHA" --output target/playground-artifact
-      - name: 📤 Upload playground CLI binaries
+            --base "$BASE_SHA" --head "$HEAD_SHA" --output "$RUNNER_TEMP/cli-playground-artifact"
+      - name: 📤 Upload cli-playground CLI binaries
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cli-playground-binaries
-          path: target/playground-artifact/
+          path: ${{ runner.temp }}/cli-playground-artifact/
           if-no-files-found: ignore
           retention-days: 7

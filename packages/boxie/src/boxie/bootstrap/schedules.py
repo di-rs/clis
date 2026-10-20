@@ -17,12 +17,12 @@ from temporalio.client import (
 )
 from temporalio.service import RPCError, RPCStatusCode
 
-from boxie.domain.models import OrchestratorIdentity
+from boxie.domain.models import SupervisorIdentity
 from boxie.temporal.contracts import maintenance_queue
 from boxie.temporal.maintenance import Maintenance
 
 
-def schedule_definitions(identity: OrchestratorIdentity) -> dict[str, Schedule]:
+def schedule_definitions(identity: SupervisorIdentity) -> dict[str, Schedule]:
     queue = maintenance_queue(identity)
     return {
         f"{queue}/{kind}": Schedule(
@@ -56,13 +56,13 @@ async def _check_schedule(client: Client, actual: Schedule, expected: Schedule) 
         raise RuntimeError("maintenance schedule configuration differs")
 
 
-async def check_schedules(client: Client, identity: OrchestratorIdentity) -> None:
+async def check_schedules(client: Client, identity: SupervisorIdentity) -> None:
     for identifier, expected in schedule_definitions(identity).items():
         actual = (await client.get_schedule_handle(identifier).describe()).schedule
         await _check_schedule(client, actual, expected)
 
 
-async def ensure_schedules(client: Client, identity: OrchestratorIdentity) -> None:
+async def ensure_schedules(client: Client, identity: SupervisorIdentity) -> None:
     for identifier, schedule in schedule_definitions(identity).items():
         try:
             await client.create_schedule(identifier, schedule)

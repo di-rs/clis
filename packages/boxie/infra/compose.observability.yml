@@ -5,12 +5,12 @@ services:
     networks:
       metrics:
         aliases: [boxie-api]
-  orchestrator:
+  supervisor:
     environment:
       BOXIE_METRICS_HOST: 0.0.0.0
     networks:
       metrics:
-        aliases: [boxie-orchestrator]
+        aliases: [boxie-supervisor]
 networks:
   metrics:
     external: true

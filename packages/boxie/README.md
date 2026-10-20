@@ -3,15 +3,16 @@
 Boxie is an independently deployed private sandbox service. PostgreSQL owns
 admission, idempotency, eight capacity slots and artifact references. The API
 commits requests and a minimal start/stop outbox. Temporal SDK workers embedded
-in the orchestrator drive lifecycle activities directly against its runtime. Only the sandbox orchestrator receives Docker access and owns artifact bytes,
-PTYs and the execution journal. Consumers select approved profiles and upload ZIP
-files; they cannot supply images, host paths or isolation settings. Boxie does not
-inspect executable formats or depend on Playground.
+in the Supervisor drive lifecycle activities through its sandbox execution code.
+Only the Supervisor receives Docker access and owns artifact bytes, PTYs and the
+execution journal. Consumers upload ZIP files and request the default sandbox with an artifact ID;
+they cannot supply profiles, commands, environment variables or isolation settings. Boxie does not
+inspect executable formats or depend on cli-playground.
 
-Complete the [runtime prerequisites](infra/runtime.md) before starting Boxie.
-Run exactly one orchestrator against its data directory.
-The directory and profile files must be writable only by the operator/orchestrator. The
-Docker daemon must see artifact paths at the same absolute location as the orchestrator.
+Complete the [host prerequisites](infra/host-requirements.md) before starting Boxie.
+Run exactly one supervisor against its data directory.
+The directory and profile files must be writable only by the operator/supervisor. The
+Docker daemon must see artifact paths at the same absolute location as the supervisor.
 
 ## Run
 
@@ -19,7 +20,7 @@ Use the root workspace and lockfile:
 
 ```sh
 uv sync --locked --all-packages
-uv run --locked --package boxie boxie-orchestrator --config /etc/boxie/orchestrator.json
+uv run --locked --package boxie boxie-supervisor --config /etc/boxie/supervisor.json
 ```
 
 An operator configuration file contains:
@@ -37,7 +38,7 @@ An operator configuration file contains:
     "temporal_key_file": "/run/secrets/temporal-client.key"
   },
   "profiles_file": "/etc/boxie/profiles.json",
-  "credential_file": "/run/secrets/boxie-orchestrator",
+  "credential_file": "/run/secrets/boxie-supervisor",
   "identity": {
     "installation_id": "b18283b1-dc32-46e7-8da5-7aa380043685",
     "host_id": "sandbox-1"
@@ -48,9 +49,9 @@ An operator configuration file contains:
 ```
 
 Generate a unique installation UUID once and preserve it with the data directory.
-The credential is a separate orchestrator-control secret, at least 16 printable ASCII
+The credential is a separate supervisor-control secret, at least 16 printable ASCII
 bytes, in a private regular file (mode `0600`). Consumer API credentials must not
-be reused here. Only trusted services on a private network may reach the orchestrator;
+be reused here. Only trusted services on a private network may reach the supervisor;
 there is no public endpoint. Access logging is disabled by the entry point and
 credentials are never accepted in URLs.
 
@@ -64,10 +65,10 @@ Its operator configuration contains:
 
 ```json
 {
-  "orchestrator_url": "http://boxie-orchestrator:8091",
-  "orchestrator_credential_file": "/run/secrets/boxie-orchestrator",
+  "supervisor_url": "http://boxie-supervisor:8091",
+  "supervisor_credential_file": "/run/secrets/boxie-supervisor",
   "consumer_credential_files": {
-    "playground": "/run/secrets/boxie-playground"
+    "example-consumer": "/run/secrets/consumer"
   },
   "release": "boxie",
   "identity": {
@@ -88,12 +89,12 @@ Its operator configuration contains:
 }
 ```
 
-Each credential is a private regular file with the same restrictions as the orchestrator
-secret. Consumer credentials must be unique and distinct from the orchestrator secret.
+Each credential is a private regular file with the same restrictions as the supervisor
+secret. Consumer credentials must be unique and distinct from the supervisor secret.
 Only composition roots read secrets; transports receive injected credentials.
 The API resolves consumer identity from Bearer authentication and never accepts
-consumer identity in a sandbox request body. Neither API nor orchestrator is public.
-HTTP and WebSocket redirects are disabled for orchestrator calls. HTTP control bodies
+consumer identity in a sandbox request body. Neither API nor supervisor is public.
+HTTP and WebSocket redirects are disabled for supervisor calls. HTTP control bodies
 and responses are bounded to 64 KiB; uploads stream in chunks of at most 64 KiB
 with an actual-byte ceiling of 512 MiB and a configured total request deadline.
 
@@ -106,16 +107,17 @@ Foreign resources return 404. UUIDs and digests remain opaque to the API.
 | --- | --- |
 | Upload artifact | `PUT /v1/artifacts/{uuid}`, raw ZIP, `X-Content-SHA256`; 201 new, 200 exact retry |
 | Retire artifact | `DELETE /v1/artifacts/{uuid}`; 204 |
-| Create sandbox | `POST /v1/sandboxes`, `Idempotency-Key`, `spec` object described below; 202 with status |
+| Create sandbox | `POST /v1/sandboxes`, `Idempotency-Key`, `{"artifact_id":"UUID"}`; 202 with status |
 | Inspect sandbox | `GET /v1/sandboxes/{uuid}`; 200 with status |
 | Stop sandbox | `DELETE /v1/sandboxes/{uuid}`; 200 with status |
 | Terminal | `WS /v1/sandboxes/{uuid}/terminal` |
 
-Sandbox POST sends the `spec` object directly, without the orchestrator's ownership or
-idempotency envelope. Unknown fields, images, paths and Docker settings are
-rejected. Invalid bodies return 422, conflicting retries 409, capacity exhaustion
-429 and unavailable orchestrator calls 503. API restarts retain SQL-owned IDs,
-idempotency records and capacity; the orchestrator keeps draining terminal output.
+Sandbox POST accepts only `artifact_id`. Boxie resolves its default shell, TERM,
+limits and lifetime settings before admission and retains the accepted snapshot
+for retries and recovery. Profile, command, environment, policy and other unknown
+fields are rejected. Invalid bodies return 422, conflicting retries 409, capacity exhaustion
+429 and unavailable supervisor calls 503. API restarts retain SQL-owned IDs,
+idempotency records and capacity; the supervisor keeps draining terminal output.
 
 Terminal attachments start with a JSON text frame
 `{"type":"attach","attachment_order":1,"resume_after":0,"cols":80,"rows":24}`. The response
@@ -123,14 +125,14 @@ Terminal attachments start with a JSON text frame
 `{"type":"input","epoch":1,"source":"user","data":"echo hello\n"}`;
 parser-generated replies use `source: terminal` and do not renew idle time.
 The consumer allocates a strictly increasing `attachment_order` per sandbox
-execution (1–9007199254740991). The orchestrator persists the highest accepted order with
+execution (1–9007199254740991). The supervisor persists the highest accepted order with
 its attachment state before returning success. Equal/older orders fail before any
 epoch or grace change, even when an older request was already in flight through a
 relay. A new attempt or retry after an uncertain result must use a higher order;
 repeating an accepted order is rejected, not an idempotent attach replay. A failed
 cursor validation does not consume the order. Journal failure exposes no successful
 attachment and disables execution readiness until the pending state is persisted.
-Playground supplies this value from its persisted page claim; browser frames cannot
+cli-playground supplies this value from its persisted page claim; browser frames cannot
 select or override it.
 ACK, resize, heartbeat and detach also carry the current epoch. Controls are at
 most 16 KiB of UTF-8 including JSON, columns are 1–500 and rows 1–300.
@@ -138,7 +140,7 @@ most 16 KiB of UTF-8 including JSON, columns are 1–500 and rows 1–300.
 Each binary output frame contains an eight-byte unsigned big-endian sequence
 followed by at most 16 KiB of raw PTY bytes. Sequences start at one and continue
 across attachments. ACK only after applying bytes; reconnect with the last applied
-sequence. The orchestrator retains at most 1 MiB of payload and 4096 frames while draining
+sequence. The supervisor retains at most 1 MiB of payload and 4096 frames while draining
 independently of readers. An evicted cursor returns `stream_gap`; a future cursor
 is invalid. Replayed bytes and control metadata do not count toward the 16 MiB
 cumulative PTY output limit. JSON status frames contain `type: status` and a
@@ -152,7 +154,7 @@ retained per output frame plus one current tail value, including when a resize
 acknowledgment is lost. This defines observable frame-assignment/resize-success
 order, not exact kernel-time causality for bytes already queued in Docker.
 
-Send browser-origin heartbeat controls every ten seconds; the orchestrator disconnects
+Send browser-origin heartbeat controls every ten seconds; the supervisor disconnects
 a path after thirty seconds without one. Relay-local WebSocket pings do not renew
 that deadline. A detected disconnect retains the terminal for its two-minute
 grace, subject to the earlier absolute or idle deadline. A successful replacement
@@ -161,36 +163,50 @@ cursors stay in page memory. Page reload starts fresh; restart continuity and
 screen snapshots are not supported.
 
 `GET /healthz` is unauthenticated liveness. Authenticated `GET /readyz` returns
-the API release and SQL, orchestrator and Temporal readiness, with 503 when unavailable.
-The orchestrator's authenticated `/readyz` reports Docker, SQL and execution persistence. Access logs are disabled by both entry points.
+the API release and SQL, supervisor and Temporal readiness, with 503 when unavailable.
+The supervisor's authenticated `/readyz` reports Docker, SQL and execution persistence. Access logs are disabled by both entry points.
 
-A trusted profile file is a JSON object keyed by profile ID:
+## Default environment
+
+Boxie owns one Ubuntu 24.04 Linux x86_64 environment with Bash, standard utilities
+and built-in file fixtures. Uploads retain the existing flat ZIP format. Files are
+mounted read-only at `/opt/artifact`, which is on PATH; built-in fixtures seed the
+writable `/workspace`. Uploaded files never replace shell startup configuration.
+The shell disables Bash's `true` and `false` builtins when uploaded executables
+use those names. Workspace files remain non-executable.
+
+The operator installs the Boxie sandbox image using `BOXIE_SANDBOX_IMAGE`. The
+internal profile file is not a consumer interface. It contains one `default`:
+
 
 ```json
 {
-  "shell": {
-    "image_digest": "registry.example/shell@sha256:1111111111111111111111111111111111111111111111111111111111111111",
-    "commands": [["/bin/sh"]],
+  "default": {
+    "image_digest": "registry.example/boxie-sandbox@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "commands": [["/opt/boxie/shell.sh"]],
     "env": {"TERM": ["xterm-256color"]},
     "artifact_target": "/opt/artifact"
   }
 }
 ```
 
-Replace the example image digest with an approved image. Local content-addressed
+Replace the example image digest with the approved Boxie sandbox image. Local content-addressed
 image IDs (`sha256:` plus 64 lowercase hex digits) are also accepted. Commands
 are exact argument-vector allowlists; environment keys and values are allowlists.
 The artifact mount must be a normalized path under `/opt/`. Optional `limits`
 may lower the defaults but cannot increase them. Send `SIGHUP` to validate and
 atomically reload all profiles. A failed reload keeps the last valid version.
-Approved versions are retained by configuration hash, including across orchestrator
+Approved versions are retained by configuration hash, including across supervisor
 restarts, so delayed requests can validate their original snapshot. Reloads never
 change an admitted sandbox's image, command, environment, or limits.
+
+Template selection and consumer-supplied templates require a separate design;
+the current API exposes no template configuration.
 
 ## Private protocol
 
 Every HTTP request and WebSocket handshake requires `Authorization: Bearer SECRET`.
-The orchestrator uses constant-time credential comparison. A trusted API supplies the
+The supervisor uses constant-time credential comparison. A trusted API supplies the
 consumer identity; resources belonging to another consumer return 404. UUIDs are
 opaque resource IDs. Wire schemas reject extra object fields and invalid bounds.
 
@@ -200,11 +216,12 @@ opaque resource IDs. Wire schemas reject extra object fields and invalid bounds.
 | Retire artifact | `DELETE /v1/artifacts/{uuid}?consumer_id=...` |
 | Resolve profile | `POST /v1/profiles/resolve`, `{profile_id, command, env}` |
 | Terminal | `WS /v1/sandboxes/{uuid}/terminal?consumer_id=...` |
-| Readiness | `GET /readyz`, orchestrator identity and dependency results |
+| Readiness | `GET /readyz`, supervisor identity and dependency results |
 
-`spec` contains `artifact_id`, `profile_id`, `command`, `env`, and optional `policy`.
-Policy defaults are `max_seconds: 3600`, `idle_seconds: 600`, and
-`disconnect_seconds: 120`; each may be lowered. Admission returns a `SandboxView`
+The internal accepted `spec` records the resolved profile, command, environment
+and policy alongside the artifact ID. The public API does not expose those choices.
+Lifetime defaults are `max_seconds: 3600`, `idle_seconds: 600`, and
+`disconnect_seconds: 120`. Admission returns a `SandboxView`
 with `id`, `state`, `created_at`, `absolute_deadline`, `reason`, and
 `cleanup_pending`. A repeated consumer/idempotency key returns the same ID only
 for the exact canonical specification; changed requests return 409. Capacity is
@@ -218,12 +235,12 @@ accounting.
 
 The private terminal uses the same sequenced output and strict JSON controls
 as the consumer terminal above. Handshake denials use bounded HTTP JSON responses:
-401 for invalid orchestrator credentials, 404 for unavailable ownership, and 409 for an
-unavailable lifecycle state. Consumer authentication is resolved before any orchestrator
+401 for invalid supervisor credentials, 404 for unavailable ownership, and 409 for an
+unavailable lifecycle state. Consumer authentication is resolved before any supervisor
 request. The API maps failed internal authentication or unsupported denial codes
 to 503. Only a browser-origin attach after downstream WebSocket acceptance acquires
 an attachment epoch. Opening a private relay alone does not renew disconnect grace.
-The orchestrator attaches to Docker before starting the container so initial output is
+The supervisor attaches to Docker before starting the container so initial output is
 retained even without Docker logs.
 
 ## Isolation and lifetime
@@ -241,8 +258,8 @@ Resize, output, reads, and reconnect attempts do not reset it. Disconnection
 starts a separate two-minute deadline. Cleanup operations are bounded and run
 independently so an unresponsive container does not block other deadlines.
 Terminals close when termination begins; slots and artifacts remain reserved
-until Docker deletion is confirmed. The orchestrator survives consumer API restarts;
-an orchestrator restart may end terminals.
+until Docker deletion is confirmed. The supervisor survives consumer API restarts;
+a supervisor restart may end terminals.
 
 Local intent records are written with file and directory fsync before Docker
 creation. Deterministic
@@ -284,7 +301,7 @@ collection. No consumer can select a host filesystem path.
 ## Verification and feasibility
 
 ```sh
-uv run --locked pytest packages/boxie/tests/test_orchestrator.py packages/boxie/tests/test_artifacts.py packages/boxie/tests/test_profiles.py
+uv run --locked pytest packages/boxie/tests/test_supervisor.py packages/boxie/tests/test_artifacts.py packages/boxie/tests/test_profiles.py
 uv run --locked pytest packages/boxie/tests/test_service_boundary.py packages/boxie/tests/test_terminal_proxy.py
 uv run --locked pytest -m integration packages/boxie/tests/test_api.py
 uv run --locked ruff check .
@@ -293,10 +310,10 @@ uv run --locked mypy
 uv run --locked pytest
 ```
 
-Fast terminal tests use real loopback HTTP/WebSocket servers, orchestrator
+Fast terminal tests use real loopback HTTP/WebSocket servers, supervisor
 execution, and explicit test-only SQL admission/artifact metadata and Docker
 boundaries. Integration tests use real PostgreSQL and production Temporal;
-profile reload also starts the real orchestrator subprocess. They cover generic text ZIPs,
+profile reload also starts the real supervisor subprocess. They cover generic text ZIPs,
 isolation requests, attach-before-start, ownership, immutable profile versions,
 byte-preserving terminal input, timeouts, cancellation, cleanup failures, restart
 reconciliation, concurrent idempotency, and artifact retention. These tests do
@@ -307,7 +324,7 @@ The 2026-10-15 compatibility gate verified CPython 3.15.0 with `temporalio==1.34
 native Linux arm64, and emulated Linux amd64. Real Temporal worker execution,
 cancellation, graceful worker replacement, and replay of four exported histories
 passed on each platform. That gate did not exercise PostgreSQL transactions or
-process-crash recovery. These pinned dependencies are installed by the Boxie runtime.
+process-crash recovery. These pinned dependencies are installed by the Boxie image.
 The [lifecycle workflow](../../.github/workflows/boxie-lifecycle.yml) retains real
 PostgreSQL/Temporal recovery coverage on pull requests. Native Linux amd64/runsc,
 browser reconnection and process-loss E2Es are temporarily optional via
@@ -315,44 +332,44 @@ browser reconnection and process-loss E2Es are temporarily optional via
 
 ## Independent distribution and topology
 
-[Local infrastructure](infra/README.md) owns the private API/orchestrator Compose unit,
+[Local infrastructure](infra/README.md) owns the private API/supervisor Compose unit,
 Docker build, trusted generic profile and installed operator smoke commands.
-`boxie` and `cli-playground` are independent runtime distributions; neither image
+`boxie` and `cli-playground` are independent Python distributions; neither image
 installs an infrastructure package. The root lockfile pins both builds. Production
 activation remains unavailable until PR4.
 
 ## Source organization
 
-The consumer API and orchestrator transport share explicit wire contracts under
-`boxie/contracts/`; Playground keeps its own consumer models and has no Boxie
+The consumer API and supervisor transport share explicit wire contracts under
+`boxie/contracts/`; cli-playground keeps its own consumer models and has no Boxie
 runtime dependency. `application/ports.py` defines the interfaces consumed by the
 API. Routes receive those interfaces directly.
 
-The orchestrator implementation is grouped by responsibility:
+The supervisor implementation is grouped by responsibility:
 
-- `sandbox/execution/`: coordination, one runtime owner per sandbox, journal,
+- `sandbox/execution/`: coordination, one execution owner per sandbox, journal,
   provisioning, physical reconciliation and retention.
 - `sandbox/terminal/`: PTY reader, bounded replay and WebSocket session delivery.
-- `sandbox/transport/`: authenticated orchestrator client/server and terminal relay.
+- `sandbox/transport/`: authenticated supervisor client/server and terminal relay.
 - `bootstrap/`: configuration loading, dependency construction, readiness probes
   and background service startup/shutdown.
 
-Each `ExecutionRuntime` owns its locks, deadlines, tasks, terminal and session
+Each `SandboxExecution` owns its locks, deadlines, tasks, terminal and session
 references. Persisted `ExecutionRecord` values retain the existing journal format.
-A terminal session pins its runtime until WebSocket delivery and closing finish;
+A terminal session pins its execution until WebSocket delivery and closing finish;
 retention requires settled local work, a saved removal confirmation and the
-existing control-plane receipt before removing the record and runtime together.
+existing control-plane receipt before removing the record and execution together.
 Network adapters validate incoming terminal controls once and return typed events
 to relays, which serialize them for the next connection.
 
 ## Embedded Temporal execution
 
-Boxie runs two processes: API and orchestrator. The orchestrator embeds SDK
+Boxie runs two processes: API and supervisor. The supervisor embeds SDK
 workers on installation/host-specific lifecycle and maintenance queues. Its OS
-owner lock excludes a second process using the same data directory. An
-orchestrator restart also restarts its workers and ends existing terminals.
+owner lock excludes a second process using the same data directory. A
+supervisor restart also restarts its workers and ends existing terminals.
 
-Provisioning activities await the local runtime. Normal cleanup retries,
+Provisioning activities await the local execution. Normal cleanup retries,
 30-second inspection, command recovery, artifact collection, journal compaction
 and SQL retention are driven by Temporal. Local safety enforcement and journal
 flushes remain independent of Temporal availability. SQL admission/stop and the
@@ -367,6 +384,6 @@ or application retry clocks.
 
 ## Boxie observability
 
-Boxie owns bounded JSON logging, private metrics and the [operator stack](infra/observability/README.md). Its runtime code, PostgreSQL migration, Temporal instrumentation and infrastructure all live under this directory. The API and orchestrator have separate registries; the orchestrator embeds lifecycle and maintenance workers. Domain and consumer contracts remain independent of telemetry.
+Boxie owns bounded JSON logging, private metrics and the [operator stack](infra/observability/README.md). Its service code, PostgreSQL migration, Temporal instrumentation and infrastructure all live under this directory. The API and supervisor have separate registries; the supervisor embeds lifecycle and maintenance workers. Domain and consumer contracts remain independent of telemetry.
 
-CLI Playground keeps its existing lightweight logging. It does not install Boxie, share its telemetry implementation, join its metrics network or add dashboards. A shared library would add a cross-service release boundary without a current second long-lived consumer.
+cli-playground keeps its existing lightweight logging. It does not install Boxie, share its telemetry implementation, join its metrics network or add dashboards. A shared library would add a cross-service release boundary without a current second long-lived consumer.

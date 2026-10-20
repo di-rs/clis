@@ -51,17 +51,17 @@ def compose(*files: Path) -> dict[str, Any]:
             key: "/tmp/boxie-test"
             for key in (
                 "BOXIE_API_CONFIG",
-                "BOXIE_ORCHESTRATOR_CONFIG",
+                "BOXIE_SUPERVISOR_CONFIG",
                 "BOXIE_PROFILES_FILE",
                 "BOXIE_DATA_DIR",
-                "BOXIE_ORCHESTRATOR_CREDENTIAL_FILE",
+                "BOXIE_SUPERVISOR_CREDENTIAL_FILE",
                 "BOXIE_CONSUMER_CREDENTIAL_FILE",
                 "BOXIE_POSTGRES_DSN_FILE",
                 "BOXIE_TEMPORAL_CA_FILE",
                 "BOXIE_API_TEMPORAL_CERT_FILE",
                 "BOXIE_API_TEMPORAL_KEY_FILE",
-                "BOXIE_ORCHESTRATOR_TEMPORAL_CERT_FILE",
-                "BOXIE_ORCHESTRATOR_TEMPORAL_KEY_FILE",
+                "BOXIE_SUPERVISOR_TEMPORAL_CERT_FILE",
+                "BOXIE_SUPERVISOR_TEMPORAL_KEY_FILE",
                 "TEMPORAL_CERTS_DIR",
                 "TEMPORAL_OPERATOR_CERTS_DIR",
                 "TEMPORAL_UI_CERTS_DIR",
@@ -71,7 +71,7 @@ def compose(*files: Path) -> dict[str, Any]:
     env.update(
         BOXIE_CONTROL_NETWORK="control",
         BOXIE_CONSUMER_NETWORK="consumer",
-        BOXIE_RUNTIME_IMAGE="boxie:test",
+        BOXIE_IMAGE="boxie:test",
         TEMPORAL_DB_PASSWORD="test",
         VISIBILITY_DB_PASSWORD="test",
         OBS_GRAFANA_HOSTNAME="grafana.example.com",
@@ -99,7 +99,7 @@ def test_application_deploys_without_monitoring(manifest: str) -> None:
     base = compose(INFRA / manifest)
     assert set(base["networks"]) == {"consumer", "control"}
     monitored = compose(INFRA / manifest, INFRA / "compose.observability.yml")
-    for role in ("api", "orchestrator"):
+    for role in ("api", "supervisor"):
         assert "metrics" in monitored["services"][role]["networks"]
         assert not monitored["services"][role].get("ports")
 

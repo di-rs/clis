@@ -12,7 +12,7 @@ sources:
     include_matches:
       CONTAINER_TAG:
       - boxie-api
-      - boxie-orchestrator
+      - boxie-supervisor
   internal:
     type: internal_metrics
 transforms:
@@ -25,10 +25,10 @@ transforms:
     source: |
       tag = string(.CONTAINER_TAG) ?? ""
       service = "boxie"
-      role = if tag == "boxie-api" { "api" } else { "orchestrator" }
+      role = if tag == "boxie-api" { "api" } else { "supervisor" }
       raw = string(.message) ?? ""
       event = {}
-      valid = includes(["boxie-api", "boxie-orchestrator"], tag) && length(raw) <= 8192
+      valid = includes(["boxie-api", "boxie-supervisor"], tag) && length(raw) <= 8192
       if valid { parsed, err = parse_json(raw); if err == null && is_object(parsed) { event = object!(parsed) } else { valid = false } }
       valid = valid && event.service == service && event.role == role
       valid = valid && (event.schema_version == 1)
@@ -37,7 +37,7 @@ transforms:
       valid = valid && (is_string(event.event) && match(string(event.event) ?? "", r'^[a-z_]+([.][a-z_]+)*$') && length(string(event.event) ?? "") <= 64)
       valid = valid && (is_string(event.message) && length(string(event.message) ?? "") >= 1 && length(string(event.message) ?? "") <= 128)
       valid = valid && (includes(["boxie", "unknown"], event.service))
-      valid = valid && (includes(["api", "orchestrator", "unknown"], event.role))
+      valid = valid && (includes(["api", "supervisor", "unknown"], event.role))
       valid = valid && (is_string(event.release) && match(string(event.release) ?? "", r'^(unknown|[a-f0-9]{40}|[a-f0-9]{64})$'))
       valid = valid && (is_string(event.instance_id) && match(string(event.instance_id) ?? "", r'^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$'))
       valid = valid && (includes(["boxie", "uvicorn", "temporalio", "dependency"], event.logger))
@@ -51,7 +51,7 @@ transforms:
       valid = valid && ((!exists(event.generation) || (is_integer(event.generation) && ((to_float(event.generation) ?? -1.0) >= 0 && (to_float(event.generation) ?? -1.0) <= 2147483647))))
       valid = valid && ((!exists(event.duration_ms) || ((is_integer(event.duration_ms) || is_float(event.duration_ms)) && ((to_float(event.duration_ms) ?? -1.0) >= 0 && (to_float(event.duration_ms) ?? -1.0) <= 86400000))))
       valid = valid && ((!exists(event.outcome) || (includes(["succeeded", "failed", "pending", "cancelled", "ready", "stopped", "confirmed"], event.outcome))))
-      valid = valid && ((!exists(event.reason) || (includes(["unavailable", "invalid", "timeout", "cancelled", "unknown", "requested", "expired", "idle", "disconnected", "output_limit", "exited", "provisioning_failed", "control_plane_lost", "orchestrator_restart", "orchestrator_shutdown", "delete_unconfirmed", "create_pending", "dependency_unavailable", "journal_unavailable", "InvalidRequest", "ProvisioningStopped", "CleanupPending", "DependencyUnavailable"], event.reason))))
+      valid = valid && ((!exists(event.reason) || (includes(["unavailable", "invalid", "timeout", "cancelled", "unknown", "requested", "expired", "idle", "disconnected", "output_limit", "exited", "provisioning_failed", "control_plane_lost", "supervisor_restart", "supervisor_shutdown", "delete_unconfirmed", "create_pending", "dependency_unavailable", "journal_unavailable", "InvalidRequest", "ProvisioningStopped", "CleanupPending", "DependencyUnavailable"], event.reason))))
       valid = valid && ((!exists(event.error_type) || (is_string(event.error_type) && length(string(event.error_type) ?? "") <= 32)))
       valid = valid && ((!exists(event.error_message) || (event.error_message == "operation failed")))
       valid = valid && ((!exists(event.error_stack) || (is_string(event.error_stack) && length(string(event.error_stack) ?? "") <= 512)))

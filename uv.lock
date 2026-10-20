@@ -10,9 +10,9 @@ members = [
     "cli-bench",
     "cli-check",
     "cli-playground",
-    "sanctuary-tools",
+    "cli-playground-infra",
     "host-infra",
-    "playground-infra",
+    "sanctuary-tools",
 ]
 
 [[package]]
@@ -351,59 +351,41 @@ requires-dist = [
 ]
 
 [[package]]
+name = "cli-playground-infra"
+version = "0.1.0"
+source = { editable = "tools/cli-playground/infra" }
+dependencies = [
+    { name = "boxie-infra" },
+    { name = "cli-playground" },
+    { name = "host-infra" },
+    { name = "pulumi" },
+    { name = "pulumi-cloudflare" },
+    { name = "pulumi-hcloud" },
+    { name = "pulumi-tls" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "boxie-infra" },
+    { name = "cli-playground" },
+    { name = "host-infra" },
+    { name = "pulumi", specifier = "==3.268.0" },
+    { name = "pulumi-cloudflare", specifier = "==6.22.1" },
+    { name = "pulumi-hcloud", specifier = "==1.43.1" },
+    { name = "pulumi-tls", specifier = "==5.6.2" },
+    { name = "pydantic", specifier = ">=2.14,<3" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+]
+
+[[package]]
 name = "click"
 version = "8.5.0"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/c7/0e/7fa0ef50764b67090eca4114772a2abf8b6148198475e54c660b97caeee6/click-8.5.0.tar.gz", hash = "sha256:ba0d2089de75ea0310e2dde03160e6ca10009947fb95a182f9b54021bb272e34", size = 382235, upload-time = "2026-08-26T13:33:14.56Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/58/50/6c0d534c5f134586a8e1ba4e330569e32f057e33372ae556463212fb4cd3/click-8.5.0-py3-none-any.whl", hash = "sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360", size = 125251, upload-time = "2026-08-26T13:33:12.928Z" },
-]
-
-[[package]]
-name = "sanctuary-tools"
-version = "0.1.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "anyio" },
-    { name = "cli-check" },
-    { name = "githubkit" },
-    { name = "httpx" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "boxie-test-support" },
-    { name = "mypy" },
-    { name = "pulumi" },
-    { name = "pulumi-cloudflare" },
-    { name = "pulumi-hcloud" },
-    { name = "pulumi-tls" },
-    { name = "pytest" },
-    { name = "pyyaml" },
-    { name = "ruff" },
-    { name = "types-pyyaml" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "anyio" },
-    { name = "cli-check", editable = "tools/cli-check" },
-    { name = "githubkit", specifier = ">=0.16.1,<0.17" },
-    { name = "httpx" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "boxie-test-support", editable = "packages/boxie/tests/support" },
-    { name = "mypy" },
-    { name = "pulumi", specifier = "==3.268.0" },
-    { name = "pulumi-cloudflare", specifier = "==6.22.1" },
-    { name = "pulumi-hcloud", specifier = "==1.43.1" },
-    { name = "pulumi-tls", specifier = "==5.6.2" },
-    { name = "pytest", specifier = ">=9.1.1" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "ruff" },
-    { name = "types-pyyaml", specifier = ">=6.0.12.20260906" },
 ]
 
 [[package]]
@@ -1055,35 +1037,6 @@ wheels = [
 ]
 
 [[package]]
-name = "playground-infra"
-version = "0.1.0"
-source = { editable = "tools/cli-playground/infra" }
-dependencies = [
-    { name = "boxie-infra" },
-    { name = "cli-playground" },
-    { name = "host-infra" },
-    { name = "pulumi" },
-    { name = "pulumi-cloudflare" },
-    { name = "pulumi-hcloud" },
-    { name = "pulumi-tls" },
-    { name = "pydantic" },
-    { name = "pyyaml" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "boxie-infra" },
-    { name = "cli-playground" },
-    { name = "host-infra" },
-    { name = "pulumi", specifier = "==3.268.0" },
-    { name = "pulumi-cloudflare", specifier = "==6.22.1" },
-    { name = "pulumi-hcloud", specifier = "==1.43.1" },
-    { name = "pulumi-tls", specifier = "==5.6.2" },
-    { name = "pydantic", specifier = ">=2.14,<3" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
-]
-
-[[package]]
 name = "pluggy"
 version = "1.6.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1392,6 +1345,53 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ae/bf/024e01e1f6aec87768696725e648ed5b438941341eea8f8100beb681961f/ruff-0.17.0-py3-none-win32.whl", hash = "sha256:5e50aa5b84decd9fe5b0bb0e6f71c3b592f1767ed09faa4b7207d933961e35cd", size = 9904112, upload-time = "2026-10-09T19:47:19.75Z" },
     { url = "https://files.pythonhosted.org/packages/cc/77/1ee73df41dcc8d1cdb686ee4bc46ea29704ea175feb6b95c78420f631ab8/ruff-0.17.0-py3-none-win_amd64.whl", hash = "sha256:8ab76bcda86dfd28e13776cb5de3c7bcdcf1ae3d37ed761113d1a5a415dc134c", size = 10115585, upload-time = "2026-10-09T19:47:22.698Z" },
     { url = "https://files.pythonhosted.org/packages/fd/71/eb4f0ccc844aece56963e8578df9c95d4c00f580547d52329d4035d3af18/ruff-0.17.0-py3-none-win_arm64.whl", hash = "sha256:c154c73ff43f9854395e24cac507af13078962e53d2b511605058d22af1fdb88", size = 9872035, upload-time = "2026-10-09T19:47:26.306Z" },
+]
+
+[[package]]
+name = "sanctuary-tools"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "anyio" },
+    { name = "cli-check" },
+    { name = "githubkit" },
+    { name = "httpx" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "boxie-test-support" },
+    { name = "mypy" },
+    { name = "pulumi" },
+    { name = "pulumi-cloudflare" },
+    { name = "pulumi-hcloud" },
+    { name = "pulumi-tls" },
+    { name = "pytest" },
+    { name = "pyyaml" },
+    { name = "ruff" },
+    { name = "types-pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anyio" },
+    { name = "cli-check", editable = "tools/cli-check" },
+    { name = "githubkit", specifier = ">=0.16.1,<0.17" },
+    { name = "httpx" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "boxie-test-support", editable = "packages/boxie/tests/support" },
+    { name = "mypy" },
+    { name = "pulumi", specifier = "==3.268.0" },
+    { name = "pulumi-cloudflare", specifier = "==6.22.1" },
+    { name = "pulumi-hcloud", specifier = "==1.43.1" },
+    { name = "pulumi-tls", specifier = "==5.6.2" },
+    { name = "pytest", specifier = ">=9.1.1" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "ruff" },
+    { name = "types-pyyaml", specifier = ">=6.0.12.20260906" },
 ]
 
 [[package]]

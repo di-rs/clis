@@ -13,9 +13,9 @@ def main() -> None:
     parser.add_argument("--installation-id", type=UUID, required=True)
     parser.add_argument("--host-id", required=True)
     parser.add_argument("--consumer-id", default="smoke")
-    parser.add_argument("--orchestrator-url", default="http://orchestrator:8091")
+    parser.add_argument("--supervisor-url", default="http://supervisor:8091")
     parser.add_argument("--bind-host", default="0.0.0.0")
-    parser.add_argument("--orchestrator-credential", default="/run/secrets/orchestrator")
+    parser.add_argument("--supervisor-credential", default="/run/secrets/supervisor")
     parser.add_argument("--consumer-credential", default="/run/secrets/consumer")
     parser.add_argument("--profiles", default="/etc/boxie/profiles.json")
     parser.add_argument("--postgres-dsn", default="/run/secrets/postgres-dsn")
@@ -37,12 +37,12 @@ def main() -> None:
         "temporal_key_file": "/run/secrets/temporal-client.key",
     }
     configurations = {
-        "orchestrator.json": {
+        "supervisor.json": {
             "data_dir": str(args.data_dir),
             "postgres_dsn_file": args.postgres_dsn,
             "lifecycle": lifecycle,
             "profiles_file": args.profiles,
-            "credential_file": args.orchestrator_credential,
+            "credential_file": args.supervisor_credential,
             "identity": {"installation_id": str(args.installation_id), "host_id": args.host_id},
             "bind_host": args.bind_host,
         },
@@ -50,8 +50,8 @@ def main() -> None:
             "release": "local",
             "identity": identity,
             "lifecycle": lifecycle,
-            "orchestrator_url": args.orchestrator_url,
-            "orchestrator_credential_file": args.orchestrator_credential,
+            "supervisor_url": args.supervisor_url,
+            "supervisor_credential_file": args.supervisor_credential,
             "consumer_credential_files": {args.consumer_id: args.consumer_credential},
             "bind_host": args.bind_host,
         },

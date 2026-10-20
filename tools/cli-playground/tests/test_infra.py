@@ -8,7 +8,7 @@ from typing import Any, Never
 import pulumi
 import pytest
 import yaml
-from playground_infra.host import HostConfig, provision
+from cli_playground_infra.host import HostConfig, provision
 from pulumi.runtime.settings import get_root_resource, reset_options
 from pulumi.runtime.stack import Stack
 
@@ -211,43 +211,46 @@ async def test_generated_ssh_identity_and_host_key_keep_private_material_secret(
 def test_production_routes_preview_hosts_with_dns_challenge_and_proxy_only_credentials() -> None:
     root = Path(__file__).resolve().parents[1]
     compose = yaml.safe_load((root / "infra/compose.production.yml").read_text())
-    gateway = compose["services"]["gateway"]
-    assert gateway["environment"]["PLAYGROUND_PREVIEW_DOMAIN"] == "${PLAYGROUND_DOMAIN}"
-    assert not any("CLOUDFLARE" in key or key.startswith("CF_") for key in gateway["environment"])
-    assert "PLAYGROUND_BOXIE_URL" in gateway["environment"]
-    assert "PLAYGROUND_SANDBOX_RUNTIME" not in gateway["environment"]
+    backend = compose["services"]["backend"]
+    assert backend["environment"]["CLI_PLAYGROUND_PREVIEW_DOMAIN"] == "${CLI_PLAYGROUND_DOMAIN}"
+    assert not any("CLOUDFLARE" in key or key.startswith("CF_") for key in backend["environment"])
+    assert "CLI_PLAYGROUND_BOXIE_URL" in backend["environment"]
+    assert "CLI_PLAYGROUND_SANDBOX_RUNTIME" not in backend["environment"]
     proxy = compose["services"]["proxy"]
     assert (
         "--certificatesresolvers.preview.acme.dnschallenge.provider=cloudflare" in proxy["command"]
     )
     assert not any("httpchallenge" in argument for argument in proxy["command"])
     assert "env_file" not in proxy
-    assert set(proxy["environment"]) == {"PLAYGROUND_DOMAIN", "CF_DNS_API_TOKEN"}
+    assert set(proxy["environment"]) == {"CLI_PLAYGROUND_DOMAIN", "CF_DNS_API_TOKEN"}
     assert "CLOUDFLARE_DNS_API_TOKEN" in proxy["environment"]["CF_DNS_API_TOKEN"]
 
     routes = yaml.safe_load((root / "infra/routes.yml").read_text())
-    router = routes["http"]["routers"]["playground"]
+    router = routes["http"]["routers"]["cli-playground"]
     assert router["rule"] == (
-        'Host(`{{ env "PLAYGROUND_DOMAIN" }}`) || '
+        'Host(`{{ env "CLI_PLAYGROUND_DOMAIN" }}`) || '
         "HostRegexp(`^(pr-[1-9][0-9]*|[0-9a-f]{32})[.]"
-        '{{ env "PLAYGROUND_DOMAIN" | replace "." "[.]" }}$`)'
+        '{{ env "CLI_PLAYGROUND_DOMAIN" | replace "." "[.]" }}$`)'
     )
     assert router["entryPoints"] == ["websecure"]
     assert router["tls"] == {
         "certResolver": "preview",
         "domains": [
-            {"main": '{{ env "PLAYGROUND_DOMAIN" }}', "sans": ['*.{{ env "PLAYGROUND_DOMAIN" }}']}
+            {
+                "main": '{{ env "CLI_PLAYGROUND_DOMAIN" }}',
+                "sans": ['*.{{ env "CLI_PLAYGROUND_DOMAIN" }}'],
+            }
         ],
     }
 
 
-def test_gateway_healthcheck_uses_public_url_host(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_backend_healthcheck_uses_public_url_host(monkeypatch: pytest.MonkeyPatch) -> None:
     root = Path(__file__).resolve().parents[1]
     compose = yaml.safe_load((root / "infra/compose.production.yml").read_text())
-    command = compose["services"]["gateway"]["healthcheck"]["test"]
+    command = compose["services"]["backend"]["healthcheck"]["test"]
     assert command[:3] == ["CMD", "/app/.venv/bin/python", "-c"]
-    monkeypatch.setenv("PLAYGROUND_PUBLIC_URL", "https://play.example.com")
-    monkeypatch.delenv("PLAYGROUND_PREVIEW_DOMAIN", raising=False)
+    monkeypatch.setenv("CLI_PLAYGROUND_PUBLIC_URL", "https://play.example.com")
+    monkeypatch.delenv("CLI_PLAYGROUND_PREVIEW_DOMAIN", raising=False)
     requests: list[urllib.request.Request] = []
 
     class Response:

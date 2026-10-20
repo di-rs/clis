@@ -16,7 +16,7 @@ def test_temporal_client_fixture_keys_are_private(tmp_path: Path) -> None:
     keys = list((tmp_path / "clients").glob("*.key"))
     assert {path.name for path in keys} == {
         "boxie-api.key",
-        "boxie-orchestrator.key",
+        "boxie-supervisor.key",
         "untrusted.key",
     }
     for path in keys:
@@ -30,7 +30,7 @@ def test_temporal_client_fixture_keys_are_private(tmp_path: Path) -> None:
 def test_native_fixture_private_credentials_and_writable_storage(data_mode: str) -> None:
     # A Docker volume keeps inode ownership in Linux, outside Desktop's host-share
     # ownership translation. Only this test's randomly named volume is removed.
-    image = os.environ.get("BOXIE_RUNTIME_IMAGE", "boxie:lifecycle")
+    image = os.environ.get("BOXIE_IMAGE", "boxie:lifecycle")
     volume = "boxie-dac-" + uuid4().hex
     command(["docker", "volume", "create", volume])
     try:
@@ -51,14 +51,14 @@ def test_native_fixture_private_credentials_and_writable_storage(data_mode: str)
 import os, sys
 from pathlib import Path
 root = Path('/owned')
-for name in ('orchestrator.secret', 'consumer.secret', 'postgres-dsn', 'orchestrator-dsn',
-             'clients/boxie-api.key', 'clients/boxie-orchestrator.key'):
+for name in ('supervisor.secret', 'consumer.secret', 'postgres-dsn', 'supervisor-dsn',
+             'clients/boxie-api.key', 'clients/boxie-supervisor.key'):
     path = root / name
     path.parent.mkdir(exist_ok=True)
     path.write_text('private-fixture-credential')
     path.chmod(0o600)
-for name in ('api.json', 'orchestrator.json', 'profiles.json',
-             'clients/frontend-ca.pem', 'clients/boxie-api.pem', 'clients/boxie-orchestrator.pem'):
+for name in ('api.json', 'supervisor.json', 'profiles.json',
+             'clients/frontend-ca.pem', 'clients/boxie-api.pem', 'clients/boxie-supervisor.pem'):
     (root / name).write_text('{}')
 for name in ('data', 'data/profiles', 'faults', 'negative'):
     (root / name).mkdir(exist_ok=True)
@@ -79,14 +79,14 @@ for name, mode, owner in (('group', 0o640, int(sys.argv[1])),
         )
         stack = LifecycleStack(Path(mountpoint))
         stack.env.update(
-            BOXIE_RUNTIME_IMAGE=image,
+            BOXIE_IMAGE=image,
             BOXIE_TEST_PRODUCT_PORT="18000",
             BOXIE_TEST_API_PORT="18090",
             BOXIE_TEST_DATA_MODE=data_mode,
         )
         config = json.loads(stack.runtime_command("config", "--format", "json"))
         data_dir = stack.env["BOXIE_DATA_DIR"]
-        for name in ("api", "orchestrator"):
+        for name in ("api", "supervisor"):
             service = config["services"][name]
             args = [
                 "docker",
@@ -128,7 +128,7 @@ for name, mode, owner in (('group', 0o640, int(sys.argv[1])),
             assert service["read_only"] and service["cap_drop"] == ["ALL"]
             assert service["security_opt"] == ["no-new-privileges:true"]
             expected = {
-                "/run/secrets/orchestrator",
+                "/run/secrets/supervisor",
                 "/run/secrets/postgres-dsn",
                 "/run/secrets/temporal-client.key",
             }
@@ -191,7 +191,7 @@ if sys.argv[2] != '-':
 print('uid=' + str(os.geteuid()) + '; zero capabilities; private credentials readable; secret mounts immutable; unsafe credentials rejected; storage mode=' + sys.argv[3])
 """,
                     str(os.getuid()),
-                    data_dir if name == "orchestrator" else "-",
+                    data_dir if name == "supervisor" else "-",
                     data_mode,
                     *secrets,
                 ]

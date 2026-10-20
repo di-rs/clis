@@ -1,4 +1,4 @@
-"""Migrated clock-step assertions against the orchestrator execution owner."""
+"""Migrated clock-step assertions against the supervisor execution owner."""
 
 import asyncio
 from pathlib import Path
@@ -14,38 +14,38 @@ from lifecycle_support import settled, setup
 )
 def test_live_deadlines_ignore_wall_steps(tmp_path: Path, wall_step: int, timer: str) -> None:
     async def exercise() -> None:
-        orchestrator, request, daemon, clock, _ = await setup(tmp_path)
-        await settled(orchestrator, request.ref, SandboxState.READY)
+        supervisor, request, daemon, clock, _ = await setup(tmp_path)
+        await settled(supervisor, request.ref, SandboxState.READY)
         epoch = None
         if timer != "initial":
-            epoch = await orchestrator.attach(request.ref, attachment_order=1)
+            epoch = await supervisor.attach(request.ref, attachment_order=1)
         if timer == "disconnected":
             assert epoch is not None
-            await orchestrator.detach(request.ref, epoch)
+            await supervisor.detach(request.ref, epoch)
         clock.advance_wall(wall_step)
-        await orchestrator.reconcile()
+        await supervisor.reconcile()
         assert not daemon.deleted_ids
         duration = 3600 if timer == "absolute" else 600 if timer == "idle" else 120
         for _ in range(duration // 30 - 1):
             clock.advance_monotonic(30)
-            await orchestrator.renew_control_lease(request.ref, orchestrator.boot_id)
+            await supervisor.renew_control_lease(request.ref, supervisor.boot_id)
             if timer == "absolute":
                 assert epoch is not None
-                await orchestrator.write(request.ref, epoch, b"active")
+                await supervisor.write(request.ref, epoch, b"active")
         clock.advance_monotonic(29)
-        await orchestrator.reconcile()
+        await supervisor.reconcile()
         assert not daemon.deleted_ids
         assert (
-            await orchestrator.inspect(request.ref)
+            await supervisor.inspect(request.ref)
         ).absolute_deadline == request.absolute_deadline
         clock.advance_monotonic(1)
-        await orchestrator.reconcile()
-        final = await orchestrator.inspect(request.ref)
+        await supervisor.reconcile()
+        final = await supervisor.inspect(request.ref)
         assert final.removal_confirmed
         assert final.reason == (
             "expired" if timer == "absolute" else "idle" if timer == "idle" else "disconnected"
         )
-        await orchestrator.close()
+        await supervisor.close()
 
     asyncio.run(exercise())
 
@@ -54,19 +54,19 @@ def test_watchdog_does_not_schedule_normal_cleanup_or_retention(tmp_path: Path) 
     from boxie.domain.models import TerminationReason
 
     async def exercise() -> None:
-        orchestrator, request, daemon, _, _ = await setup(tmp_path)
-        await settled(orchestrator, request.ref, SandboxState.READY)
+        supervisor, request, daemon, _, _ = await setup(tmp_path)
+        await settled(supervisor, request.ref, SandboxState.READY)
         daemon.unreachable = True
-        await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
+        await supervisor.remove(request.ref, TerminationReason.REQUESTED)
         daemon.unreachable = False
-        await orchestrator.start()
+        await supervisor.start()
         try:
             await asyncio.sleep(0.04)
             assert daemon.resources, "normal cleanup belongs to Temporal retries"
-            assert request.ref.id in orchestrator.records
-            await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
+            assert request.ref.id in supervisor.records
+            await supervisor.remove(request.ref, TerminationReason.REQUESTED)
             assert not daemon.resources
         finally:
-            await orchestrator.close()
+            await supervisor.close()
 
     asyncio.run(exercise())

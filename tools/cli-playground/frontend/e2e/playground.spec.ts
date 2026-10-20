@@ -139,7 +139,7 @@ test("loads the production terminal, fits the viewport, and inserts commands wit
   const sessions = await openPlayground(page);
   const session = sessions[0];
   expect(new URL(session.socket.url()).searchParams.get("revision")).toBe(metadata.sha);
-  await expect(page).toHaveTitle("catr / CLI playground");
+  await expect(page).toHaveTitle("catr / cli-playground");
   await expect(page.locator("#meta-pr")).toHaveText("#42");
   await expect(page.locator("#session-expiry")).toHaveAttribute("datetime", "2099-01-01T01:00:00Z");
   expect(
@@ -204,7 +204,7 @@ for (const count of [3, 5, 10]) {
     await expect(picker).toHaveValue("catr");
     await picker.selectOption(target);
     await expect(page).toHaveURL(previewPath);
-    await expect(page).toHaveTitle(`${target} / CLI playground`);
+    await expect(page).toHaveTitle(`${target} / cli-playground`);
     await expect(screen).toContainText("Existing workspace output");
     await expect(picker).toHaveValue(target);
     await page

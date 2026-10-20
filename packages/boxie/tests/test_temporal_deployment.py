@@ -67,7 +67,7 @@ def test_private_production_deployment_has_explicit_jobs_and_trust() -> None:
             assert not service.get("ports"), "production ports must remain private"
             assert "build" not in service, "operation jobs reuse existing runtime images"
             if package is temporal and name == "bootstrap":
-                assert service["image"].startswith("${BOXIE_RUNTIME_IMAGE:?")
+                assert service["image"].startswith("${BOXIE_IMAGE:?")
                 assert service["entrypoint"] == ["python", "-m", "boxie.bootstrap.temporal"]
                 assert service["user"] == "1000:1000"
             else:
@@ -114,7 +114,7 @@ class DeploymentWorkflow:
 def test_production_mtls_workflow_ui_and_database_isolation(temporal_stack: Any) -> None:
     async def exercise() -> None:
         stack = temporal_stack
-        for identity in ("boxie-api", "boxie-orchestrator", "operator", "ui-client"):
+        for identity in ("boxie-api", "boxie-supervisor", "operator", "ui-client"):
             client = await asyncio.wait_for(
                 Client.connect(stack.address, namespace="boxie", tls=tls(stack, identity)), 10
             )
@@ -136,7 +136,7 @@ def test_production_mtls_workflow_ui_and_database_isolation(temporal_stack: Any)
             rejections[name] = type(rejected.value).__name__ + ": " + str(rejected.value)[:500]
         stack.evidence["client_rejections"] = rejections
         client = await Client.connect(
-            stack.address, namespace="boxie", tls=tls(stack, "boxie-orchestrator")
+            stack.address, namespace="boxie", tls=tls(stack, "boxie-supervisor")
         )
         queue = "deployment-" + uuid4().hex
         async with Worker(

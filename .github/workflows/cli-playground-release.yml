@@ -1,4 +1,4 @@
-name: 🚀 CLI Playground Release
+name: 🚀 cli-playground Release
 'on':
   workflow_dispatch: {}
 permissions: {}
@@ -28,20 +28,20 @@ jobs:
         run: |
           printf 'sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           printf 'attempt=%s\n' "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
-  gateway:
+  backend:
     needs: source
-    uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
+    uses: ./.github/workflows/build-image.yml # zizmor: ignore[self-repository]
     with:
-      component: playground-gateway
+      component: cli-playground
       revision: ${{ needs.source.outputs.sha }}
     permissions:
       contents: read
       packages: write
-  deploy-gateway:
-    name: 🚀 Update Playground with Compose
-    needs: [source, gateway]
+  deploy-backend:
+    name: 🚀 Update cli-playground Backend with Compose
+    needs: [source, backend]
     if: ${{ github.ref == 'refs/heads/master' && vars.DEPLOYMENT_ACCEPTANCE_PASSED == 'true' }}
-    environment: playground
+    environment: cli-playground
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
@@ -61,13 +61,13 @@ jobs:
         with:
           ref: ${{ needs.source.outputs.sha }}
           persist-credentials: false
-      - name: 🚀 Copy gateway files and run Compose
+      - name: 🚀 Copy backend files and run Compose
         env:
           SOURCE_SHA: ${{ needs.source.outputs.sha }}
-          BUILT_SHA: ${{ needs.gateway.outputs.source_sha }}
-          IMAGE: ${{ needs.gateway.outputs.image }}
+          BUILT_SHA: ${{ needs.backend.outputs.source_sha }}
+          IMAGE: ${{ needs.backend.outputs.image }}
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           GHCR_TOKEN: ${{ github.token }}
-        run: bash infra/environments/single-host/release.sh gateway
+        run: bash infra/environments/single-host/release.sh cli-playground

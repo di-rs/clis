@@ -1,18 +1,18 @@
 # Traefik's file provider evaluates this Go template using its environment.
 http:
   routers:
-    playground:
-      rule: 'Host(`{{ env "PLAYGROUND_DOMAIN" }}`) || HostRegexp(`^(pr-[1-9][0-9]*|[0-9a-f]{32})[.]{{ env "PLAYGROUND_DOMAIN" | replace "." "[.]" }}$`)'
+    cli-playground:
+      rule: 'Host(`{{ env "CLI_PLAYGROUND_DOMAIN" }}`) || HostRegexp(`^(pr-[1-9][0-9]*|[0-9a-f]{32})[.]{{ env "CLI_PLAYGROUND_DOMAIN" | replace "." "[.]" }}$`)'
       entryPoints: [websecure]
-      service: playground
+      service: cli-playground
       tls:
         certResolver: preview
         domains:
-          - main: '{{ env "PLAYGROUND_DOMAIN" }}'
-            sans: ['*.{{ env "PLAYGROUND_DOMAIN" }}']
+          - main: '{{ env "CLI_PLAYGROUND_DOMAIN" }}'
+            sans: ['*.{{ env "CLI_PLAYGROUND_DOMAIN" }}']
   services:
-    playground:
+    cli-playground:
       loadBalancer:
         servers:
-          - url: http://gateway:8000
+          - url: http://backend:8000
         passHostHeader: true

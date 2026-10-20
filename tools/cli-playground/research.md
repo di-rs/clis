@@ -1,5 +1,8 @@
 # Playground research and design
 
+> Historical design research. Component names and responsibilities below predate
+> the Boxie service split; use the [current architecture](README.md) for implementation.
+
 Research date: 2026-10-13. The goal is an easy PR review environment for the actual
 Rust CLIs, including their filesystem and interactive terminal behavior. Python
 owns tooling and the gateway under `tools/`; a Svelte/TypeScript static SPA renders

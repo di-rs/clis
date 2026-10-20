@@ -7,7 +7,7 @@ from uuid import uuid4
 import httpx
 import pytest
 from boxie.bootstrap.dependencies import Dependencies
-from boxie.sandbox.transport.client import OrchestratorClient
+from boxie.sandbox.transport.client import SupervisorClient
 from google.protobuf.timestamp_pb2 import Timestamp
 from temporalio.api.taskqueue.v1 import PollerInfo
 from temporalio.api.workflowservice.v1 import (
@@ -61,9 +61,9 @@ def test_each_queue_requires_recent_worker_presence(age: int | None, queue: int)
                 },
             )
 
-        async with OrchestratorClient(
-            "http://orchestrator.invalid", b"readiness-secret", transport=httpx.MockTransport(ready)
-        ) as orchestrator:
-            assert await Dependencies(orchestrator, Temporal())() == (age == 89)
+        async with SupervisorClient(
+            "http://supervisor.invalid", b"readiness-secret", transport=httpx.MockTransport(ready)
+        ) as supervisor:
+            assert await Dependencies(supervisor, Temporal())() == (age == 89)
 
     asyncio.run(exercise())

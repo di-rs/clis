@@ -65,7 +65,7 @@ class ProductionStack:
         # Compose resolves the operations-only image even when that service is
         # unused. This fixture executes bootstrap with the installed host SDK;
         # LifecycleStack replaces this with its built runtime for application jobs.
-        self.env.setdefault("BOXIE_RUNTIME_IMAGE", "boxie:lifecycle")
+        self.env.setdefault("BOXIE_IMAGE", "boxie:lifecycle")
         self.address = ""
         self.ui_address = ""
         self.pg_port = ""
@@ -125,7 +125,7 @@ class ProductionStack:
             ("operator", "client", "operator", "clientAuth", "operator"),
             ("ui-client", "client", "ui", "clientAuth", "ui"),
             ("boxie-api", "client", "boxie-api", "clientAuth", "clients"),
-            ("boxie-orchestrator", "client", "boxie-orchestrator", "clientAuth", "clients"),
+            ("boxie-supervisor", "client", "boxie-supervisor", "clientAuth", "clients"),
             ("untrusted", "untrusted", "untrusted", "clientAuth", "clients"),
         ):
             target = self.root / directory
@@ -311,13 +311,8 @@ class ProductionStack:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime", choices=["runsc"])
-    parser.add_argument("--browser", action="store_true")
     parser.add_argument("pytest_args", nargs="*")
     args = parser.parse_args()
-    if args.browser and not args.runtime:
-        parser.error("--browser requires --runtime runsc")
-    if args.browser:
-        os.environ["BOXIE_BROWSER"] = "1"
     selected = (
         ["packages/boxie/tests/integration/test_lifecycle.py"]
         if args.runtime
@@ -325,6 +320,7 @@ def main() -> None:
             "packages/boxie/tests/test_postgres.py",
             "packages/boxie/tests/test_temporal_deployment.py",
             "packages/boxie/tests/test_migrations.py",
+            "packages/boxie/tests/test_rename_state.py",
             "packages/boxie/tests/test_observability_lifecycle.py",
             "packages/boxie/tests/test_observability_logging.py",
         ]

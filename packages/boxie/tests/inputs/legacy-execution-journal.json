@@ -1,0 +1,61 @@
+{
+  "identity": {
+    "installation_id": "00000000-0000-0000-0000-000000000001",
+    "host_id": "legacy-host"
+  },
+  "records": [
+    {
+      "id": "00000000-0000-0000-0000-000000000002",
+      "generation": 1,
+      "consumer_id": "playground",
+      "identity": {
+        "installation_id": "00000000-0000-0000-0000-000000000001",
+        "host_id": "legacy-host"
+      },
+      "spec": {
+        "profile_id": "playground",
+        "command": [
+          "/opt/playground/shell.sh"
+        ],
+        "env": {
+          "TERM": "xterm-256color"
+        },
+        "artifact_id": "00000000-0000-0000-0000-000000000003",
+        "policy": {
+          "max_seconds": 3600,
+          "idle_seconds": 600,
+          "disconnect_seconds": 120
+        }
+      },
+      "snapshot": {
+        "profile_id": "playground",
+        "command": [
+          "/opt/playground/shell.sh"
+        ],
+        "env": {
+          "TERM": "xterm-256color"
+        },
+        "config_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "image_digest": "example.org/old@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "artifact_target": "/opt/artifact",
+        "limits": {
+          "memory_bytes": 536870912,
+          "cpu_nanos": 1000000000,
+          "pids": 256,
+          "workspace_bytes": 67108864,
+          "tmp_bytes": 16777216,
+          "nofile": 1024,
+          "output_bytes": 16777216
+        }
+      },
+      "accepted_at": "2026-10-18T12:00:00Z",
+      "absolute_deadline": "2026-10-18T13:00:00Z",
+      "boot_id": "00000000-0000-0000-0000-000000000004",
+      "state": "terminated",
+      "reason": "orchestrator_restart",
+      "cleanup_pending": false,
+      "removal_confirmed": true,
+      "control_lease_until": "2026-10-18T12:00:20Z"
+    }
+  ]
+}

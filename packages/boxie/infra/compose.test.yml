@@ -5,27 +5,27 @@ services:
     user: ${BOXIE_TEST_USER:?Set fixture owner UID:GID}
     restart: "no"
     ports: ["127.0.0.1:${BOXIE_TEST_API_PORT}:8090"]
-  orchestrator:
-    command: [python, /fixture/orchestrator_fixture.py, --config, /etc/boxie/orchestrator.json]
-    extends: {file: compose.yml, service: orchestrator}
+  supervisor:
+    command: [python, /fixture/supervisor_fixture.py, --config, /etc/boxie/supervisor.json]
+    extends: {file: compose.yml, service: supervisor}
     user: ${BOXIE_TEST_USER:?Set fixture owner UID:GID}
     restart: "no"
     environment:
       DOCKER_HOST: unix:///faults/docker.sock
     volumes: !override
       - ${BOXIE_TEST_ROOT}/faults:/faults
-      - ${BOXIE_TEST_ORCHESTRATOR_SCRIPT}:/fixture/orchestrator_fixture.py:ro
+      - ${BOXIE_TEST_SUPERVISOR_SCRIPT}:/fixture/supervisor_fixture.py:ro
       - ${BOXIE_DATA_DIR}:${BOXIE_DATA_DIR}:${BOXIE_TEST_DATA_MODE:-rw}
       - ${BOXIE_DATA_DIR}/profiles:${BOXIE_DATA_DIR}/profiles:rw
-      - ${BOXIE_ORCHESTRATOR_CONFIG}:/etc/boxie/orchestrator.json:ro
+      - ${BOXIE_SUPERVISOR_CONFIG}:/etc/boxie/supervisor.json:ro
       - ${BOXIE_PROFILES_FILE}:/etc/boxie/profiles.json:ro
-      - ${BOXIE_ORCHESTRATOR_CREDENTIAL_FILE}:/run/secrets/orchestrator:ro
-      - ${BOXIE_TEST_ROOT}/orchestrator-dsn:/run/secrets/postgres-dsn:ro
+      - ${BOXIE_SUPERVISOR_CREDENTIAL_FILE}:/run/secrets/supervisor:ro
+      - ${BOXIE_TEST_ROOT}/supervisor-dsn:/run/secrets/postgres-dsn:ro
       - ${BOXIE_TEMPORAL_CA_FILE}:/run/secrets/temporal-ca.pem:ro
-      - ${BOXIE_ORCHESTRATOR_TEMPORAL_CERT_FILE}:/run/secrets/temporal-client.pem:ro
-      - ${BOXIE_ORCHESTRATOR_TEMPORAL_KEY_FILE}:/run/secrets/temporal-client.key:ro
+      - ${BOXIE_SUPERVISOR_TEMPORAL_CERT_FILE}:/run/secrets/temporal-client.pem:ro
+      - ${BOXIE_SUPERVISOR_TEMPORAL_KEY_FILE}:/run/secrets/temporal-client.key:ro
   faults:
-    image: ${BOXIE_RUNTIME_IMAGE}
+    image: ${BOXIE_IMAGE}
     command: [python, /fixture/faults.py]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -33,25 +33,8 @@ services:
       - ${BOXIE_TEST_FAULTS_SCRIPT}:/fixture/faults.py:ro
     networks: [control]
     restart: "no"
-  playground:
-    image: ${PLAYGROUND_IMAGE}
-    ports: ["127.0.0.1:${BOXIE_TEST_PRODUCT_PORT}:8000"]
-    environment:
-      PLAYGROUND_DATA_DIR: /data
-      PLAYGROUND_PUBLIC_URL: ${PLAYGROUND_PUBLIC_URL}
-      PLAYGROUND_DEPLOY_TOKEN: ${PLAYGROUND_DEPLOY_TOKEN}
-      PLAYGROUND_BOXIE_URL: http://api:8090
-      PLAYGROUND_BOXIE_CREDENTIAL_FILE: /run/secrets/consumer
-      PLAYGROUND_BOXIE_PROFILE: playground
-    volumes:
-      - playground:/data
-      - ${BOXIE_CONSUMER_CREDENTIAL_FILE}:/run/secrets/consumer:ro
-    networks: [consumer]
-    restart: "no"
 networks:
   control:
     external: true
     name: ${BOXIE_CONTROL_NETWORK}
   consumer: {}
-volumes:
-  playground: {}

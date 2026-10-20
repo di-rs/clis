@@ -1,0 +1,6 @@
+**
+!packages/
+!packages/boxie/
+!packages/boxie/sandbox/
+!packages/boxie/sandbox/fixtures/**
+!packages/boxie/sandbox/shell.sh

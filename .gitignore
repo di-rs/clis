@@ -18,5 +18,5 @@ node_modules/
 !/tools/cli-playground/infra/Pulumi.example.yaml
 !/tools/cli-playground/infra/Pulumi.production.yaml
 
-/tools/cli-playground/src/playground/static/
+/tools/cli-playground/src/cli_playground/static/
 !/packages/boxie/infra/config.example.env

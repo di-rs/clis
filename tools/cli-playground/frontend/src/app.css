@@ -92,7 +92,7 @@ main {
   padding: 0 40px;
   outline: none;
 }
-.playground {
+.cli-playground {
   max-width: 1680px;
   margin: 0 auto;
 }

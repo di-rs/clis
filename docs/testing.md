@@ -30,7 +30,7 @@ gh pr edit PR_NUMBER --add-label run-ci
 ```
 
 Closing a PR still cleans up hosted previews, including previews created while
-the draft override was enabled. Pushes to `master`, schedules and runtime release
+the draft override was enabled. Pushes to `master`, schedules and image release
 or setup workflows retain their existing behavior. Trusted benchmark reporting
 and preview publication use the new skip policy after their workflow definitions
 reach `master`.
@@ -122,9 +122,9 @@ tooling project's runtime dependencies, including when invoked with `--no-dev`.
 They read `GH_TOKEN`, falling back to `GITHUB_TOKEN`. Their request limits and
 publication checks remain local to each publisher.
 
-## Playground frontend
+## cli-playground Frontend
 
-The [CLI playground](../tools/cli-playground/README.md) uses the pinned Node.js
+The [cli-playground](../tools/cli-playground/README.md) uses the pinned Node.js
 and pnpm versions for frontend development and builds; production serves static
 assets from Python. Run from the repository root:
 
@@ -170,9 +170,11 @@ uv run --locked pytest packages/boxie/tests/test_packaging.py -m integration
 
 These checks build each service sdist/wheel, install it with only locked runtime
 dependencies into a fresh environment, import outside the checkout, serve actual
-installed UI assets, and resolve all four Compose manifests. Missing prerequisites
-fail. The PR frontend job runs this gate. Image builds and native Linux/gVisor
-smoke are separate checks; ordinary Docker/runc is not gVisor evidence.
+installed UI assets, and resolve all four Compose manifests. They also require a
+running Docker daemon to verify that build contexts exclude locally generated
+frontend assets. Missing prerequisites fail. The PR frontend job runs this gate.
+Full service image builds and native Linux/gVisor smoke are separate checks;
+ordinary Docker/runc is not gVisor evidence.
 
 Unprivileged PR quality, frontend, sandbox, binary-build and affected benchmark
 checks target `master`. Benchmark selection runs only affected or explicitly
@@ -189,23 +191,25 @@ uv run --locked python packages/boxie/tests/run_integration.py
 
 The [Linux lifecycle workflow](../.github/workflows/boxie-lifecycle.yml) runs real
 PostgreSQL/Temporal checks, pinned replay/cancellation, credential permissions and
-endpoint restart checks on pull requests. The native lifecycle/browser E2Es are
-temporarily manual-only while their hang is investigated. Use `workflow_dispatch`
-to build the native images and `echor` and run all six cases, or run locally:
+endpoint restart checks on pull requests. The native lifecycle E2Es are
+temporarily manual-only while their hang is investigated. Boxie lifecycle runs
+without consumer sources. The separate [shared-system workflow](../.github/workflows/sanctuary-lifecycle.yml)
+builds cli-playground and `echor` for application/browser coverage. To run both locally:
 
 ```sh
-uv run --locked python packages/boxie/tests/run_integration.py --runtime runsc --browser -- -vv --durations=10
+uv run --locked pytest -m integration packages/boxie/tests/integration/test_lifecycle.py \
+  tools/cli-playground/tests/test_native.py -vv --durations=10
 ```
 
 Each CI tier has its own timeout and reports individual tests and slow durations.
 The optional native E2Es require Linux amd64 Docker with configured gVisor,
 built `boxie:lifecycle`, `cli-playground:lifecycle`
-and `sanctuary-playground-sandbox:lifecycle` images, `target/release/echor`, and Chromium.
+and `boxie-sandbox:lifecycle` images, `target/release/echor`, and Chromium.
 `BOXIE_NATIVE_BINARY` may select the native executable. The fixture owns random
 Compose projects, volumes, identity labels and fault proxies. It independently
-kills API, orchestrator (including its embedded workers) and Temporal; tests failed
+kills API, supervisor (including its embedded workers) and Temporal; tests failed
 Docker deletion, actual artifact COMMIT acknowledgment loss, collector overlap and journal failure across
-orchestrator restart; and replays production histories. Cleanup removes only verified
+supervisor restart; and replays production histories. Cleanup removes only verified
 owned sandbox IDs and attempts every Compose layer even after a cleanup error.
 
 The native browser config uses the fixture's real Playground origin and Linux

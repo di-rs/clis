@@ -1,7 +1,7 @@
 """Run with pulumi preview/up from this directory after root uv sync."""
 
 import pulumi
-from playground_infra.host import HostConfig, provision
+from cli_playground_infra.host import HostConfig, provision
 
 config = pulumi.Config()
 

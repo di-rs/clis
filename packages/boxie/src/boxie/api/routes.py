@@ -1,4 +1,4 @@
-"""Consumer schemas exclude all orchestrator ownership and privileged configuration."""
+"""Consumer schemas exclude all supervisor ownership and privileged configuration."""
 
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict
@@ -10,7 +10,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
 from boxie.application.ports import ArtifactAccess, Lifecycle
-from boxie.contracts.consumer import SpecWire, ViewWire
+from boxie.contracts.consumer import CreateSandboxWire, ViewWire
 from boxie.domain.models import Principal, TerminationReason
 
 
@@ -45,7 +45,7 @@ def routes(
 
     @router.post("/v1/sandboxes", status_code=202)
     async def submit(
-        body: SpecWire,
+        body: CreateSandboxWire,
         request: Request,
         idempotency_key: Annotated[str, Header(min_length=1, max_length=200)],
     ) -> ViewWire:

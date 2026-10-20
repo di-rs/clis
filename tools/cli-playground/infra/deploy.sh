@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
-# Update the gateway without recreating the public proxy.
+# Update the backend without recreating the public proxy.
 set -euo pipefail
 [[ $# == 0 ]] || exit 2
 config=${SANCTUARY_CONFIG_DIR:-/etc/sanctuary}
-owner=${SANCTUARY_PLAYGROUND_DIR:-/opt/sanctuary/playground}
+owner=${SANCTUARY_CLI_PLAYGROUND_DIR:-/opt/sanctuary/cli-playground}
 compose() {
-    docker compose --env-file "$config/playground.env" --env-file "$config/playground-image.env" \
+    docker compose --env-file "$config/cli-playground.env" --env-file "$config/cli-playground-image.env" \
         -f "$owner/compose.production.yml" "$@"
 }
 compose config --quiet
-compose pull gateway
-compose up -d --no-build --pull never --no-deps --wait --wait-timeout 180 gateway
-compose exec -T gateway /app/.venv/bin/python - <<'PY'
+compose pull backend
+compose up -d --no-build --pull never --no-deps --wait --wait-timeout 180 backend
+compose exec -T backend /app/.venv/bin/python - <<'PY'
 import os
 import time
 from urllib.error import URLError
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-credential = Path(os.environ['PLAYGROUND_BOXIE_CREDENTIAL_FILE']).read_text().strip()
-request = Request(os.environ['PLAYGROUND_BOXIE_URL'].rstrip('/') + '/readyz',
+credential = Path(os.environ['CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE']).read_text().strip()
+request = Request(os.environ['CLI_PLAYGROUND_BOXIE_URL'].rstrip('/') + '/readyz',
                   headers={'Authorization': 'Bearer ' + credential})
 deadline = time.monotonic() + 300
 while True:
@@ -29,7 +29,7 @@ while True:
             if response.status != 200:
                 raise ValueError('unexpected status')
         stage = 'public HTTPS readiness'
-        with urlopen(os.environ['PLAYGROUND_PUBLIC_URL'].rstrip('/') + '/healthz', timeout=15) as response:
+        with urlopen(os.environ['CLI_PLAYGROUND_PUBLIC_URL'].rstrip('/') + '/healthz', timeout=15) as response:
             if response.status != 200:
                 raise ValueError('unexpected status')
         break

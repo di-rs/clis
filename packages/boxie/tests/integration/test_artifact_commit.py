@@ -13,7 +13,7 @@ import pytest
 from boxie.persistence.database import database as session_database
 from boxie.persistence.models import Artifact
 from boxie.persistence.postgres_artifacts import PostgresArtifactStore
-from boxie_test_support.orchestrator import bundle
+from boxie_test_support.supervisor import bundle
 from database_support import OWNER, database
 from sqlalchemy.exc import DBAPIError
 from sqlmodel import select
@@ -116,36 +116,34 @@ def test_native_fixture_compose_resolves_owned_fault_boundaries(tmp_path: Path) 
     stack.env["BOXIE_TEST_DATA_MODE"] = "ro"
     config = json.loads(stack.runtime_command("config", "--format", "json"))
     services = config["services"]
-    for service, published, target in (("api", "18890", 8090), ("playground", "18888", 8000)):
+    for service, published, target in (("api", "18890", 8090),):
         assert [
             (port["host_ip"], port["published"], port["target"], port["protocol"])
             for port in services[service]["ports"]
         ] == [("127.0.0.1", published, target, "tcp")]
-    for name in ("api", "playground"):
+    for name in ("api",):
         assert not any("docker.sock" in str(mount) for mount in services[name].get("volumes", []))
-    assert services["orchestrator"]["environment"]["DOCKER_HOST"] == "unix:///faults/docker.sock"
-    assert not any(
-        m["target"] == "/var/run/docker.sock" for m in services["orchestrator"]["volumes"]
-    )
+    assert services["supervisor"]["environment"]["DOCKER_HOST"] == "unix:///faults/docker.sock"
+    assert not any(m["target"] == "/var/run/docker.sock" for m in services["supervisor"]["volumes"])
     assert any(m["target"] == "/var/run/docker.sock" for m in services["faults"]["volumes"])
-    mounts = {m["target"]: m for m in services["orchestrator"]["volumes"]}
+    mounts = {m["target"]: m for m in services["supervisor"]["volumes"]}
     assert mounts[str(tmp_path / "data")]["read_only"] is True
     assert not mounts[str(tmp_path / "data/profiles")].get("read_only", False)
-    assert mounts["/fixture/orchestrator_fixture.py"]["read_only"] is True
+    assert mounts["/fixture/supervisor_fixture.py"]["read_only"] is True
     assert all(service.get("restart") == "no" for service in services.values())
 
 
 def test_disconnected_upload_waiter_and_collector_have_one_total_deadline(
     postgres_dsn: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from boxie.bootstrap.orchestrator import create_orchestrator_app
+    from boxie.bootstrap.supervisor import create_supervisor_app
     from boxie.domain.errors import BoxieError
     from boxie.persistence.start_guard import PostgresStartGuard
-    from boxie.sandbox.execution.orchestrator import Orchestrator
-    from boxie.sandbox.transport.client import OrchestratorClient
+    from boxie.sandbox.execution.supervisor import Supervisor
+    from boxie.sandbox.transport.client import SupervisorClient
     from boxie_test_support.api import serve
     from boxie_test_support.execution import Daemon
-    from boxie_test_support.orchestrator import Clock
+    from boxie_test_support.supervisor import Clock
 
     async def exercise() -> None:
         async with database(postgres_dsn, tmp_path) as (_, store, sessions, config):
@@ -153,18 +151,16 @@ def test_disconnected_upload_waiter_and_collector_have_one_total_deadline(
                 "boxie.persistence.postgres_artifacts.OPERATION_SECONDS", 0.15, raising=False
             )
             clock = Clock()
-            orchestrator = Orchestrator(
+            supervisor = Supervisor(
                 config, Daemon(), store.path, PostgresStartGuard(sessions), clock, clock.monotonic
             )
 
-            app = create_orchestrator_app(
-                orchestrator, store, credential=b"orchestrator-test-secret"
-            )
+            app = create_supervisor_app(supervisor, store, credential=b"supervisor-test-secret")
             async with serve(app) as origin:
                 await store._files_lock.acquire()
                 try:
-                    async with OrchestratorClient(
-                        origin, b"orchestrator-test-secret", timeout=0.05
+                    async with SupervisorClient(
+                        origin, b"supervisor-test-secret", timeout=0.05
                     ) as upstream:
 
                         async def chunks() -> Any:
@@ -175,7 +171,7 @@ def test_disconnected_upload_waiter_and_collector_have_one_total_deadline(
                                 OWNER, uuid4(), hashlib.sha256(bundle()).hexdigest(), chunks()
                             )
                         assert error.value.status == 503
-                    # Upstream already disconnected; the orchestrator's own deadline must
+                    # Upstream already disconnected; the supervisor's own deadline must
                     # evict its waiter without needing to read another body byte.
                     await asyncio.sleep(0.2)
                     assert not store._files_lock._waiters

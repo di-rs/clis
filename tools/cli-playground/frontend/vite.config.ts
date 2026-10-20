@@ -5,7 +5,7 @@ export default defineConfig(({ command }) => ({
   plugins: [svelte()],
   base: command === "build" ? "/static/" : "/",
   build: {
-    outDir: "../src/playground/static",
+    outDir: "../src/cli_playground/static",
     emptyOutDir: true,
     license: { fileName: "licenses.md" },
   },

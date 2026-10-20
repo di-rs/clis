@@ -29,11 +29,11 @@ def test_boxie_release_pulls_before_stopping_and_keeps_dependencies_running(
     (config / "boxie").mkdir(parents=True)
     (config / "boxie.env").write_text("")
     (config / "boxie/api.json").write_text('{"release":"old"}')
-    (config / "boxie/orchestrator.json").write_text("{}")
+    (config / "boxie/supervisor.json").write_text("{}")
     for name in ("installation-id", "host-id"):
         (config / "boxie" / name).write_text("11111111-1111-1111-1111-111111111111")
     image = tmp_path / "boxie-image.env"
-    image.write_text("BOXIE_RUNTIME_IMAGE=ghcr.io/test/boxie@sha256:" + "a" * 64 + "\n")
+    image.write_text("BOXIE_IMAGE=ghcr.io/test/boxie@sha256:" + "a" * 64 + "\n")
     owner = tmp_path / "owner"
     owner.mkdir()
     (owner / "api.json").write_text('{"release":"old"}')
@@ -67,10 +67,10 @@ def test_boxie_release_pulls_before_stopping_and_keeps_dependencies_running(
     assert bool(stops) == (failure != "pull")
     if stops:
         assert pulls[0] < stops[0]
-        assert [call[-1] for call in calls if "stop" in call] == ["api", "orchestrator"]
+        assert [call[-1] for call in calls if "stop" in call] == ["api", "supervisor"]
     assert bool(starts) == (failure not in ("pull", "migrate", "stop_running"))
     if starts:
-        assert [call[-1] for call in starts] == ["orchestrator", "api"]
+        assert [call[-1] for call in starts] == ["supervisor", "api"]
         assert all("compose.observability.yml" in " ".join(call) for call in starts)
     assert not any("down" in call or "postgres" in call or "temporal" in call for call in calls)
     assert not any("smoke" in call for call in calls)

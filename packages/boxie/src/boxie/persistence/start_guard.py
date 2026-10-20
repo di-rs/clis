@@ -1,4 +1,4 @@
-"""Orchestrator-owned final-start guard sharing the SQL stop operation's sandbox row lock."""
+"""Supervisor-owned final-start guard sharing the SQL stop operation's sandbox row lock."""
 
 import asyncio
 from collections.abc import Awaitable, Callable
@@ -47,7 +47,7 @@ class PostgresStartGuard:
                     Sandbox.installation_id == request.identity.installation_id,
                     Sandbox.host_id == request.identity.host_id,
                     Sandbox.generation == request.ref.generation,
-                    Sandbox.orchestrator_boot_id == boot_id,
+                    Sandbox.supervisor_boot_id == boot_id,
                     col(Sandbox.desired_stop).is_(False),
                     col(Sandbox.cleaned_at).is_(None),
                     col(Sandbox.state).in_(["accepted", "provisioning", "ready"]),
@@ -88,7 +88,7 @@ class PostgresStartGuard:
                         .exists(),
                     ).where(
                         Sandbox.id == request.ref.id,
-                        Sandbox.orchestrator_boot_id == boot_id,
+                        Sandbox.supervisor_boot_id == boot_id,
                         col(Sandbox.cleaned_at).is_(None),
                     )
                 )

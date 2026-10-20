@@ -1,0 +1,12 @@
+**
+!pyproject.toml
+!uv.lock
+!.python-version
+!packages/
+!packages/boxie/
+!packages/boxie/pyproject.toml
+!packages/boxie/src/
+!packages/boxie/src/**
+!packages/boxie/alembic/
+!packages/boxie/alembic/**
+**/__pycache__

@@ -1,0 +1,73 @@
+name: 🧪 Sanctuary browser integration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sanctuary-lifecycle-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    name: 🎭 Verify cli-playground with Boxie
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - name: 📥 Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 🐍 Set up uv and Python
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: '0.13.0'
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: ${{ github.job }}
+      - name: 🛡️ Install signed gVisor and configure sandbox runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apt-transport-https ca-certificates curl gnupg
+          curl --fail --silent --show-error --location --max-time 60 https://gvisor.dev/archive.key \
+            | sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
+          printf '%s\n' 'deb [arch=amd64 signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main' \
+            | sudo tee /etc/apt/sources.list.d/gvisor.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y runsc
+          sudo runsc install -- --platform=systrap --fdlimit=4096
+          sudo systemctl restart docker
+          runsc --version
+      - name: 🏗️ Build Boxie sandbox and native CLI
+        run: |
+          docker build -f packages/boxie/sandbox/Dockerfile -t boxie-sandbox:lifecycle .
+          cargo build --locked --release --package echor
+      - name: 🐳 Build Boxie image
+        run: |
+          docker build -f packages/boxie/infra/Boxie.Dockerfile -t boxie:lifecycle .
+      - name: 🐳 Build cli-playground image (Frontend and Backend)
+        run: |
+          docker build -f tools/cli-playground/infra/CliPlayground.Dockerfile -t cli-playground:lifecycle .
+      - name: 🟢 Set up Node.js and frontend tooling
+        uses: voidzero-dev/setup-vp@68f39c78aaf39be468cabd2afb09c162574c84af # v1.21.2
+        with:
+          working-directory: tools/cli-playground/frontend
+          node-version-file: .node-version
+          version-file: package.json
+          run-install: false
+          cache: true
+      - name: 📦 Install locked Python workspace dependencies
+        run: |
+          uv sync --locked --all-packages
+      - name: 🌐 Install frontend and Chromium dependencies
+        run: |
+          pnpm --dir tools/cli-playground/frontend install --frozen-lockfile
+          pnpm --dir tools/cli-playground/frontend exec playwright install --with-deps chromium
+      - name: 🎭 Run native lifecycle and browser tests
+        timeout-minutes: 20
+        run: |
+          uv run --locked pytest -m integration packages/boxie/tests/integration/test_lifecycle.py tools/cli-playground/tests/test_native.py -vv --durations=10 -o faulthandler_timeout=120

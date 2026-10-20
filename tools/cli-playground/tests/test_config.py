@@ -1,16 +1,22 @@
-"""Settings validate environment input before the gateway starts."""
+"""Settings validate environment input before the backend starts."""
 
 from pathlib import Path
 
 import pytest
-from playground.config import Settings
-from playground.storage import EnvironmentStore
+from cli_playground.config import Settings
+from cli_playground.storage import EnvironmentStore
 from pydantic import ValidationError
 
 
 @pytest.mark.usefixtures("configured_environment")
+def test_consumer_cannot_configure_a_boxie_profile() -> None:
+    with pytest.raises(ValidationError, match="boxie_profile"):
+        Settings.model_validate({"boxie_profile": "custom"})
+
+
+@pytest.mark.usefixtures("configured_environment")
 def test_data_directory_requires_an_absolute_mount_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PLAYGROUND_DATA_DIR", "relative")
+    monkeypatch.setenv("CLI_PLAYGROUND_DATA_DIR", "relative")
     with pytest.raises(ValidationError):
         Settings()
 
@@ -47,7 +53,7 @@ def test_preview_urls_and_hosts_remain_scoped_to_one_preview() -> None:
 
 @pytest.mark.usefixtures("configured_environment")
 def test_empty_preview_domain_keeps_path_based_previews(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PLAYGROUND_PREVIEW_DOMAIN", "")
+    monkeypatch.setenv("CLI_PLAYGROUND_PREVIEW_DOMAIN", "")
     settings = Settings()
     assert settings.preview_url("a" * 32) == (
         "https://play.example/p/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -66,7 +72,7 @@ def test_readable_pr_hosts_bind_to_the_correct_preview() -> None:
 
 @pytest.mark.usefixtures("configured_environment")
 def test_composition_root_rejects_symlinked_consumer_credentials(tmp_path: Path) -> None:
-    from playground.app import create_app
+    from cli_playground.app import create_app
 
     secret = tmp_path / "actual-secret"
     secret.write_text("private-boxie-consumer-secret")

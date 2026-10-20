@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.scripts]
-boxie-orchestrator = "boxie.bootstrap.orchestrator:main"
+boxie-supervisor = "boxie.bootstrap.supervisor:main"
 boxie-api = "boxie.bootstrap.api:main"
 
 [build-system]

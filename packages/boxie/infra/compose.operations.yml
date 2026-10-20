@@ -1,6 +1,6 @@
 services:
   migrate:
-    image: ${BOXIE_RUNTIME_IMAGE:?Set approved immutable Boxie image}
+    image: ${BOXIE_IMAGE:?Set approved immutable Boxie image}
     profiles: [operations]
     entrypoint: [python, -m, boxie.persistence.migrate]
     command: [--dsn-file, /run/secrets/postgres-dsn]

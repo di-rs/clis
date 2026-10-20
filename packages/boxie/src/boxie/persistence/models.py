@@ -90,7 +90,7 @@ class Sandbox(SQLModel, table=True):
     generation: int = Field(
         default=1, sa_type=BigInteger, sa_column_kwargs={"server_default": literal(1)}
     )
-    orchestrator_boot_id: UUID | None = None
+    supervisor_boot_id: UUID | None = None
     accepted_at: datetime = Field(sa_type=DateTime(timezone=True))
     absolute_deadline: datetime = Field(sa_type=DateTime(timezone=True))
     desired_stop: bool = Field(default=False, sa_column_kwargs={"server_default": false()})
@@ -140,8 +140,8 @@ class Outbox(SQLModel, table=True):
     delivered_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
 
 
-class OrchestratorObservationRecord(SQLModel, table=True):
-    __tablename__ = "orchestrator_observations"
+class SupervisorObservationRecord(SQLModel, table=True):
+    __tablename__ = "supervisor_observations"
     __table_args__ = (
         CheckConstraint(column("event_version") > 0, name="observation_version"),
         CheckConstraint(

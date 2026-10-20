@@ -1,9 +1,9 @@
-name: 🌐 Playground PR previews
+name: 🌐 cli-playground PR previews
 
 # Only the default-branch script runs with credentials. PR artifacts remain opaque data.
 on: # zizmor: ignore[dangerous-triggers]
   workflow_run:
-    workflows: [🏗️ Playground PR binary builds]
+    workflows: [🏗️ cli-playground PR binary builds]
     types: [in_progress, completed]
   pull_request_target:
     branches: [master]
@@ -13,8 +13,8 @@ permissions: {}
 
 jobs:
   publish:
-    environment: playground-preview
-    name: 🌐 Publish playground previews and PR links
+    environment: cli-playground-preview
+    name: 🌐 Publish cli-playground previews and PR links
     if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.display_title != '⏭️ CI skipped' }}
     concurrency:
       group: cli-playground-publish-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
@@ -37,17 +37,17 @@ jobs:
         with:
           version: '0.13.0'
           enable-cache: false
-      - name: 🌐 Publish playground previews and PR links
+      - name: 🌐 Publish cli-playground previews and PR links
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           RUN_ID: ${{ github.event.workflow_run.id }}
-          PLAYGROUND_URL: ${{ vars.PLAYGROUND_URL }}
-          PLAYGROUND_DEPLOY_TOKEN: ${{ secrets.PLAYGROUND_DEPLOY_TOKEN }}
+          CLI_PLAYGROUND_URL: ${{ vars.CLI_PLAYGROUND_URL }}
+          CLI_PLAYGROUND_DEPLOY_TOKEN: ${{ secrets.CLI_PLAYGROUND_DEPLOY_TOKEN }}
         run: uv run --locked --no-dev python tools/cli-playground/preview_ci.py publish --repo "$REPOSITORY" --run-id "$RUN_ID"
   lifecycle:
-    environment: playground-preview
-    name: 🧹 Reconcile playground preview lifecycle
+    environment: cli-playground-preview
+    name: 🧹 Reconcile cli-playground preview lifecycle
     if: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.repo.full_name == github.repository && github.event.pull_request.base.ref == 'master' && (github.event.action == 'closed' || !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci')) }}
     concurrency:
       group: cli-playground-lifecycle-${{ github.repository }}-${{ github.event.pull_request.number }}
@@ -76,8 +76,8 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_ACTION: ${{ github.event.action }}
-          PLAYGROUND_URL: ${{ vars.PLAYGROUND_URL }}
-          PLAYGROUND_DEPLOY_TOKEN: ${{ secrets.PLAYGROUND_DEPLOY_TOKEN }}
+          CLI_PLAYGROUND_URL: ${{ vars.CLI_PLAYGROUND_URL }}
+          CLI_PLAYGROUND_DEPLOY_TOKEN: ${{ secrets.CLI_PLAYGROUND_DEPLOY_TOKEN }}
         run: |
           uv run --locked --no-dev python tools/cli-playground/preview_ci.py lifecycle \
             --repo "$REPOSITORY" --pr "$PR_NUMBER" --action "$PR_ACTION"

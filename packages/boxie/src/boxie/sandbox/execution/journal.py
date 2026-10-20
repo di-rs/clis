@@ -1,4 +1,4 @@
-"""Orchestrator execution journal; contains no capacity or artifact-reference authority."""
+"""Supervisor execution journal; contains no capacity or artifact-reference authority."""
 
 from datetime import datetime
 from pathlib import Path
@@ -10,7 +10,7 @@ from boxie.contracts.common import WireModel
 from boxie.contracts.consumer import SpecWire, spec_wire
 from boxie.contracts.execution import IdentityWire, SnapshotWire
 from boxie.domain.lifecycle import EnsureRequest, SandboxRef
-from boxie.domain.models import OrchestratorIdentity, Principal, SandboxState, TerminationReason
+from boxie.domain.models import Principal, SandboxState, SupervisorIdentity, TerminationReason
 from boxie.persistence.atomic import atomic_write
 
 
@@ -98,7 +98,7 @@ class JournalData(WireModel):
 
 
 class ExecutionJournal:
-    def __init__(self, path: Path, identity: OrchestratorIdentity) -> None:
+    def __init__(self, path: Path, identity: SupervisorIdentity) -> None:
         self.path = path
         self.identity = IdentityWire(
             installation_id=identity.installation_id, host_id=identity.host_id

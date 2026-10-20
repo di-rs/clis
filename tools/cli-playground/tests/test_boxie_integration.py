@@ -26,7 +26,7 @@ def test_page_admission_returns_a_private_credential_and_exact_revision(
     assert binding["absolute_deadline"] and binding["id"]
 
 
-def test_separate_product_api_orchestrator_publish_terminal_reset_and_pr_close(
+def test_separate_product_api_supervisor_publish_terminal_reset_and_pr_close(
     tmp_path: Path,
 ) -> None:
     import asyncio
@@ -39,7 +39,7 @@ def test_separate_product_api_orchestrator_publish_terminal_reset_and_pr_close(
     from .boxie_network import admit, boxie_network, product_server, publish, socket_url
 
     async def exercise() -> None:
-        async with boxie_network(tmp_path / "orchestrator") as network:
+        async with boxie_network(tmp_path / "supervisor") as network:
             async with product_server(tmp_path / "product", str(network.api.base_url)) as product:
                 identifier = (await publish(product, "a" * 40)).json()["id"]
                 first = await admit(product, identifier, "a" * 40)
@@ -100,7 +100,7 @@ def test_authenticated_readiness_wait_is_not_an_abandoned_page_response(
     import json
     from uuid import UUID
 
-    from playground import boxie_client as client_module
+    from cli_playground import boxie_client as client_module
     from websockets.asyncio.client import connect
     from websockets.typing import Origin
 
@@ -108,7 +108,7 @@ def test_authenticated_readiness_wait_is_not_an_abandoned_page_response(
     from .helpers import binary_bundle, elf_binary
 
     async def exercise() -> None:
-        async with boxie_network(tmp_path / "orchestrator") as network:
+        async with boxie_network(tmp_path / "supervisor") as network:
             gate = asyncio.Event()
             network.daemon.create_gate = gate
             clock = MutableClock()

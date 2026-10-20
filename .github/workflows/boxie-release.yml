@@ -1,4 +1,4 @@
-name: 🚀 Boxie Runtime and Sandbox Release
+name: 🚀 Boxie Release
 'on':
   workflow_dispatch: {}
 permissions: {}
@@ -30,7 +30,7 @@ jobs:
           printf 'attempt=%s\n' "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
   boxie:
     needs: source
-    uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
+    uses: ./.github/workflows/build-image.yml # zizmor: ignore[self-repository]
     with:
       component: boxie
       revision: ${{ needs.source.outputs.sha }}
@@ -39,9 +39,9 @@ jobs:
       packages: write
   sandbox:
     needs: source
-    uses: ./.github/workflows/build-runtime-image.yml # zizmor: ignore[self-repository]
+    uses: ./.github/workflows/build-image.yml # zizmor: ignore[self-repository]
     with:
-      component: playground-sandbox
+      component: boxie-sandbox
       revision: ${{ needs.source.outputs.sha }}
     permissions:
       contents: read
@@ -82,7 +82,7 @@ jobs:
         run: bash infra/environments/single-host/release.sh boxie
 
   deploy-sandbox:
-    name: 🚀 Update Playground sandbox
+    name: 🚀 Update Boxie Sandbox
     needs: [source, sandbox, deploy-boxie]
     if: ${{ github.ref == 'refs/heads/master' && vars.DEPLOYMENT_ACCEPTANCE_PASSED == 'true' }}
     environment: boxie
@@ -105,7 +105,7 @@ jobs:
         with:
           ref: ${{ needs.source.outputs.sha }}
           persist-credentials: false
-      - name: 🚀 Copy profile files and recreate the orchestrator
+      - name: 🚀 Copy profile files and recreate the supervisor
         env:
           SOURCE_SHA: ${{ needs.source.outputs.sha }}
           BUILT_SHA: ${{ needs.sandbox.outputs.source_sha }}
@@ -114,4 +114,4 @@ jobs:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           GHCR_TOKEN: ${{ github.token }}
-        run: bash infra/environments/single-host/release.sh sandbox
+        run: bash infra/environments/single-host/release.sh boxie-sandbox

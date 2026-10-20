@@ -9,10 +9,10 @@ scrape_configs:
   static_configs:
   - targets:
     - boxie-api:9101
-- job_name: boxie-orchestrator
+- job_name: boxie-supervisor
   static_configs:
   - targets:
-    - boxie-orchestrator:9103
+    - boxie-supervisor:9103
 - job_name: boxie-api-sdk
   static_configs:
   - targets:
@@ -40,10 +40,10 @@ scrape_configs:
     action: keep
   - regex: __name__|job|instance|le|namespace|task_queue|activity_type|workflow_type
     action: labelkeep
-- job_name: boxie-orchestrator-sdk
+- job_name: boxie-supervisor-sdk
   static_configs:
   - targets:
-    - boxie-orchestrator:9203
+    - boxie-supervisor:9203
   metric_relabel_configs:
   - source_labels:
     - __name__

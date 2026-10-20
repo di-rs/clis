@@ -15,7 +15,11 @@ QUEUE = {"group": "sanctuary-production", "queue": "max", "cancel-in-progress": 
 
 def workflow(name: str) -> dict[str, Any]:
     result: dict[str, Any] = yaml.load(
-        (WORKFLOWS / f"cli-playground-{name}.yml").read_text(), Loader=yaml.BaseLoader
+        (
+            WORKFLOWS
+            / f"{'sanctuary' if name in {'setup', 'infra-check'} else 'cli-playground'}-{name}.yml"
+        ).read_text(),
+        Loader=yaml.BaseLoader,
     )
     return result
 
@@ -24,9 +28,9 @@ def workflow(name: str) -> dict[str, Any]:
     "filename,job_name",
     [
         ("boxie-release.yml", "deploy-boxie"),
-        ("cli-playground-release.yml", "deploy-gateway"),
+        ("cli-playground-release.yml", "deploy-backend"),
         ("boxie-release.yml", "deploy-sandbox"),
-        ("cli-playground-setup.yml", "provision"),
+        ("sanctuary-setup.yml", "provision"),
     ],
 )
 @pytest.mark.parametrize(
@@ -61,39 +65,39 @@ def test_setup_queues_before_selecting_master_and_builds_all_images() -> None:
     assert jobs["source"]["steps"][0]["with"]["ref"] == "master"
     for name, component in {
         "boxie": "boxie",
-        "gateway": "playground-gateway",
-        "sandbox": "playground-sandbox",
+        "backend": "cli-playground",
+        "sandbox": "boxie-sandbox",
         "collector": "collector",
     }.items():
         job = jobs[name]
-        assert job["uses"] == "./.github/workflows/build-runtime-image.yml"
+        assert job["uses"] == "./.github/workflows/build-image.yml"
         assert job["needs"] == "source"
         assert job["with"] == {
             "component": component,
             "revision": "${{ needs.source.outputs.sha }}",
         }
-    assert set(jobs["provision"]["needs"]) == {"source", "boxie", "gateway", "sandbox", "collector"}
+    assert set(jobs["provision"]["needs"]) == {"source", "boxie", "backend", "sandbox", "collector"}
     assert "concurrency" not in jobs["provision"]
 
 
 def test_reusable_builder_uses_fixed_components_without_deployment_secrets() -> None:
-    builder = yaml.load((WORKFLOWS / "build-runtime-image.yml").read_text(), Loader=yaml.BaseLoader)
+    builder = yaml.load((WORKFLOWS / "build-image.yml").read_text(), Loader=yaml.BaseLoader)
     job = builder["jobs"]["build"]
     assert set(builder["on"]) == {"workflow_call"}
     assert job["permissions"] == {"contents": "read", "packages": "write"}
-    assert "Runtime.Dockerfile" in str(job)
-    assert "Playground.Dockerfile" in str(job)
-    assert "Sandbox.Dockerfile" in str(job)
+    assert "Boxie.Dockerfile" in str(job)
+    assert "CliPlayground.Dockerfile" in str(job)
+    assert "packages/boxie/sandbox/Dockerfile" in str(job)
     assert "observability/collector" in str(job)
     assert "secrets." not in str(job)
 
 
 @pytest.mark.parametrize(
     "job_name,app",
-    [("deploy-boxie", "boxie"), ("deploy-gateway", "playground"), ("deploy-sandbox", "boxie")],
+    [("deploy-boxie", "boxie"), ("deploy-backend", "cli-playground"), ("deploy-sandbox", "boxie")],
 )
 def test_release_uses_one_queue_current_master_and_direct_ssh(job_name: str, app: str) -> None:
-    filename = "cli-playground-release.yml" if app == "playground" else "boxie-release.yml"
+    filename = "cli-playground-release.yml" if app == "cli-playground" else "boxie-release.yml"
     release = yaml.load((WORKFLOWS / filename).read_text(), Loader=yaml.BaseLoader)
     assert release["concurrency"] == QUEUE
     assert release["jobs"]["source"]["steps"][0]["with"]["ref"] == "master"
@@ -106,8 +110,11 @@ def test_release_uses_one_queue_current_master_and_direct_ssh(job_name: str, app
     assert "AUTO_DEPLOY" not in gate
     commands = "\n".join(step.get("run", "") for step in deployment["steps"])
     component = job_name.removeprefix("deploy-")
+    selector = {"boxie": "boxie", "sandbox": "boxie-sandbox", "backend": "cli-playground"}[
+        component
+    ]
     assert deployment["steps"][-1]["run"] == (
-        f"bash infra/environments/single-host/release.sh {component}"
+        f"bash infra/environments/single-host/release.sh {selector}"
     )
     assert deployment["steps"][-1]["env"]["IMAGE"] == (
         "${{ needs." + component + ".outputs.image }}"
@@ -120,36 +127,36 @@ def test_release_uses_one_queue_current_master_and_direct_ssh(job_name: str, app
     assert "HCLOUD" not in str(deployment)
 
 
-def test_releases_are_manual_and_keep_gateway_separate_from_boxie() -> None:
+def test_releases_are_manual_and_keep_backend_separate_from_boxie() -> None:
     playground = workflow("release")
     boxie = yaml.load((WORKFLOWS / "boxie-release.yml").read_text(), Loader=yaml.BaseLoader)
-    assert playground["name"] == "🚀 CLI Playground Release"
-    assert boxie["name"] == "🚀 Boxie Runtime and Sandbox Release"
+    assert playground["name"] == "🚀 cli-playground Release"
+    assert boxie["name"] == "🚀 Boxie Release"
     for release, components in [
-        (playground, {"gateway": "playground-gateway"}),
-        (boxie, {"boxie": "boxie", "sandbox": "playground-sandbox"}),
+        (playground, {"backend": "cli-playground"}),
+        (boxie, {"boxie": "boxie", "sandbox": "boxie-sandbox"}),
     ]:
         assert release["on"] == {"workflow_dispatch": {}}
         jobs = release["jobs"]
         assert set(jobs) == {"source", *components, *(f"deploy-{name}" for name in components)}
         for name, component in components.items():
             assert jobs[name]["needs"] == "source"
-            assert jobs[name]["uses"] == "./.github/workflows/build-runtime-image.yml"
+            assert jobs[name]["uses"] == "./.github/workflows/build-image.yml"
             assert jobs[name]["with"] == {
                 "component": component,
                 "revision": "${{ needs.source.outputs.sha }}",
             }
     assert set(boxie["jobs"]["deploy-boxie"]["needs"]) == {"source", "boxie", "sandbox"}
     assert set(boxie["jobs"]["deploy-sandbox"]["needs"]) == {"source", "sandbox", "deploy-boxie"}
-    assert set(playground["jobs"]["deploy-gateway"]["needs"]) == {"source", "gateway"}
-    assert not (WORKFLOWS / "cli-playground-sandbox-release.yml").exists()
+    assert set(playground["jobs"]["deploy-backend"]["needs"]) == {"source", "backend"}
+    assert not (WORKFLOWS / "boxie-sandbox-release.yml").exists()
 
 
 def test_only_manual_setup_can_provision_cloud_resources() -> None:
     setup = workflow("setup")
     assert set(setup["on"]) == {"workflow_dispatch"}
     provision = setup["jobs"]["provision"]
-    assert provision["environment"] == "platform"
+    assert provision["environment"] == "sanctuary"
     assert {"HCLOUD_TOKEN", "CLOUDFLARE_API_TOKEN"} <= set(provision["env"])
     assert any(
         step.get("working-directory") == "infra/environments/single-host"
@@ -164,7 +171,7 @@ def test_only_manual_setup_can_provision_cloud_resources() -> None:
 
 def test_setup_pulls_all_images_before_starting_boxie() -> None:
     installer = (WORKFLOWS.parent.parent / "infra/environments/single-host/install.sh").read_text()
-    assert "PLAYGROUND_SANDBOX_IMAGE" in installer
+    assert "BOXIE_SANDBOX_IMAGE" in installer
     assert installer.index('docker pull "$image"') < installer.index(
         "bash /opt/sanctuary/boxie/install.sh"
     )
@@ -173,7 +180,7 @@ def test_setup_pulls_all_images_before_starting_boxie() -> None:
 def test_preview_controller_keeps_privileged_code_on_the_default_branch() -> None:
     preview = workflow("preview")
     assert preview["on"]["workflow_run"] == {
-        "workflows": ["🏗️ Playground PR binary builds"],
+        "workflows": ["🏗️ cli-playground PR binary builds"],
         "types": ["in_progress", "completed"],
     }
     assert preview["on"]["pull_request_target"] == {
@@ -183,7 +190,7 @@ def test_preview_controller_keeps_privileged_code_on_the_default_branch() -> Non
     assert preview["permissions"] == {}
     assert set(preview["jobs"]) == {"publish", "lifecycle"}
     for job in preview["jobs"].values():
-        assert job["environment"] == "playground-preview"
+        assert job["environment"] == "cli-playground-preview"
         checkout = job["steps"][0]
         assert checkout["with"] == {
             "ref": "${{ github.event.repository.default_branch }}",
@@ -197,18 +204,18 @@ def test_preview_controller_keeps_privileged_code_on_the_default_branch() -> Non
 
 
 def test_infrastructure_checks_require_trusted_dispatch_or_opted_in_schedule() -> None:
-    path = WORKFLOWS / "cli-playground-infra-check.yml"
+    path = WORKFLOWS / "sanctuary-infra-check.yml"
     assert path.exists(), "Protected infrastructure review workflow is missing"
     check = workflow("infra-check")
     assert set(check["on"]) == {"workflow_dispatch", "schedule"}
     selection = check["jobs"]["revision"]
     assert "github.ref == 'refs/heads/master'" in selection["if"]
-    assert "vars.PLAYGROUND_INFRA_DRIFT_CHECK == 'true'" in selection["if"]
+    assert "vars.SANCTUARY_INFRA_DRIFT_CHECK == 'true'" in selection["if"]
     assert "environment" not in selection
     assert "secrets." not in str(selection)
     protected = check["jobs"]["check"]
     assert protected["needs"] == "revision"
-    assert protected["environment"] == "platform"
+    assert protected["environment"] == "sanctuary"
     assert protected["permissions"] == {"contents": "read"}
     assert check["concurrency"] == {
         "group": "sanctuary-production",
@@ -235,7 +242,7 @@ def test_infrastructure_review_does_not_stage_application_installation() -> None
 def test_infrastructure_review_resolves_only_existing_full_commit_ids(
     tmp_path: Path, requested: str
 ) -> None:
-    path = WORKFLOWS / "cli-playground-infra-check.yml"
+    path = WORKFLOWS / "sanctuary-infra-check.yml"
     assert path.exists(), "Protected infrastructure review workflow is missing"
     selection = workflow("infra-check")["jobs"]["revision"]
     script = next(step["run"] for step in selection["steps"] if step.get("id") == "resolve")

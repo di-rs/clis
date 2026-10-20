@@ -75,8 +75,8 @@ class TerminationReason(StrEnum):
     EXITED = "exited"
     PROVISIONING_FAILED = "provisioning_failed"
     CONTROL_PLANE_LOST = "control_plane_lost"
-    ORCHESTRATOR_RESTART = "orchestrator_restart"
-    ORCHESTRATOR_SHUTDOWN = "orchestrator_shutdown"
+    SUPERVISOR_RESTART = "supervisor_restart"
+    SUPERVISOR_SHUTDOWN = "supervisor_shutdown"
 
 
 @dataclass(frozen=True)
@@ -103,6 +103,6 @@ class ArtifactPutResult:
 
 
 @dataclass(frozen=True)
-class OrchestratorIdentity:
+class SupervisorIdentity:
     installation_id: UUID
     host_id: str

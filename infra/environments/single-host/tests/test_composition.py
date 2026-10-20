@@ -60,3 +60,21 @@ async def test_environment_composes_service_owned_routes(
         assert app["policies"][0]["includes"] == [{"email": {"email": "ops@example.com"}}]
 
     assert not any(kind.startswith("command:") for kind, _ in mocks.inputs)
+
+
+@pulumi.runtime.test  # type: ignore[untyped-decorator]
+async def test_dns_names_preserve_existing_resource_identity() -> None:
+    from cli_playground_infra.dns import DnsConfig, provision_dns
+
+    mocks = HostMocks()
+    provision_dns(DnsConfig(domain="play.example.com", cloudflare_zone_id="a" * 32), "203.0.113.1")
+    await mocks.finish()
+    for name, old in (
+        ("cli-playground", "playground"),
+        ("cli-playground-previews", "playground-previews"),
+    ):
+        registration = mocks.registrations["cloudflare:index/dnsRecord:DnsRecord", name]
+        assert any(
+            isinstance(alias, pulumi.Alias) and alias.name == old
+            for alias in registration.opts.aliases or []
+        )

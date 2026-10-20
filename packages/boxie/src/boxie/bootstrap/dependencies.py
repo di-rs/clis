@@ -21,7 +21,7 @@ from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.service import TLSConfig
 
 from boxie.bootstrap.config import LifecycleConfig, read_credential, validate_file_model
-from boxie.domain.models import OrchestratorIdentity
+from boxie.domain.models import SupervisorIdentity
 from boxie.persistence.database import SessionFactory, database
 from boxie.temporal.contracts import TASK_QUEUE, lifecycle_queue
 
@@ -38,8 +38,8 @@ def lifecycle_config(data: dict[str, Any]) -> LifecycleConfig:
     return validate_file_model(LifecycleConfig, converted)
 
 
-def orchestrator_identity(data: dict[str, str]) -> OrchestratorIdentity:
-    return OrchestratorIdentity(UUID(data["installation_id"]), data["host_id"])
+def supervisor_identity(data: dict[str, str]) -> SupervisorIdentity:
+    return SupervisorIdentity(UUID(data["installation_id"]), data["host_id"])
 
 
 def database_for(path: Path) -> AbstractAsyncContextManager[SessionFactory]:
@@ -62,7 +62,7 @@ async def temporal_client(config: LifecycleConfig, *, lazy: bool = False) -> Cli
     )
 
 
-class OrchestratorReadiness(Protocol):
+class SupervisorReadiness(Protocol):
     async def ready(self) -> bool: ...
 
 
@@ -91,18 +91,18 @@ class TemporalReadiness(Protocol):
 class Dependencies:
     def __init__(
         self,
-        orchestrator: OrchestratorReadiness,
+        supervisor: SupervisorReadiness,
         temporal: TemporalReadiness,
-        identity: OrchestratorIdentity | None = None,
+        identity: SupervisorIdentity | None = None,
         schedules: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
-        self.orchestrator, self.temporal = orchestrator, temporal
+        self.supervisor, self.temporal = supervisor, temporal
         self.identity, self.schedules = identity, schedules
 
     async def __call__(self) -> bool:
         async with asyncio.timeout(5):
             if (
-                not await self.orchestrator.ready()
+                not await self.supervisor.ready()
                 or not await self.temporal.service_client.check_health()
             ):
                 return False

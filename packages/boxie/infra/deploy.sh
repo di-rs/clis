@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Update only Boxie's API and orchestrator; PostgreSQL and Temporal stay up.
+# Update only Boxie's API and supervisor; PostgreSQL and Temporal stay up.
 set -euo pipefail
 umask 077
 [[ $# == 1 && $1 =~ ^[a-f0-9]{40}$ ]] || exit 2
@@ -28,17 +28,17 @@ with tempfile.NamedTemporaryFile(mode='w', dir=target.parent, delete=False) as o
 os.replace(temporary, target)
 PY
 compose config --quiet
-compose pull api orchestrator migrate
+compose pull api supervisor migrate
 compose stop --timeout 60 api
-compose stop --timeout 60 orchestrator
-running=$(compose ps --status running --status restarting --status paused -q api orchestrator)
+compose stop --timeout 60 supervisor
+running=$(compose ps --status running --status restarting --status paused -q api supervisor)
 [[ -z $running ]] || { echo 'Boxie services did not stop; inspect before retry.' >&2; exit 1; }
 installation=$(cat "$config/boxie/installation-id")
 host=$(cat "$config/boxie/host-id")
 remaining=$(docker ps -aq --filter "label=boxie.installation=$installation" --filter "label=boxie.host=$host")
 [[ -z $remaining ]] || { echo 'Sandbox cleanup incomplete; inspect before retry.' >&2; exit 1; }
 compose run --rm --no-deps migrate
-compose up -d --no-build --pull never --no-deps --wait --wait-timeout 150 orchestrator
+compose up -d --no-build --pull never --no-deps --wait --wait-timeout 150 supervisor
 compose up -d --no-build --pull never --no-deps --wait --wait-timeout 150 api
 compose exec -T api python - <<'PY'
 import json

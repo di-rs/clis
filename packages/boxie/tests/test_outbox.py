@@ -8,9 +8,9 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from boxie.bootstrap.runtime import embedded_workers
 from boxie.bootstrap.schedules import check_schedules, ensure_schedules, schedule_definitions
-from boxie.domain.lifecycle import OrchestratorObservation
+from boxie.bootstrap.workers import embedded_workers
+from boxie.domain.lifecycle import SupervisorObservation
 from boxie.domain.models import SandboxState, TerminationReason
 from boxie.persistence.models import Outbox
 from boxie.temporal.contracts import LifecycleResult
@@ -46,7 +46,7 @@ def test_idle_recovery_survives_database_failure_without_polling_workflows(
         client = await Client.connect(
             temporal_stack.address,
             namespace="boxie",
-            tls=tls(temporal_stack, "boxie-orchestrator"),
+            tls=tls(temporal_stack, "boxie-supervisor"),
             data_converter=pydantic_data_converter,
         )
         async with lifecycle_stack(postgres_dsn, tmp_path, client) as stack:
@@ -67,17 +67,17 @@ def test_idle_recovery_survives_database_failure_without_polling_workflows(
                 return events
 
             monkeypatch.setattr(PostgresOutbox, "pending", unavailable_once)
-            async with embedded_workers(client, stack.life, stack.orchestrator, stack.artifacts):
+            async with embedded_workers(client, stack.life, stack.supervisor, stack.artifacts):
                 await asyncio.wait_for(recovered.wait(), 15)
                 assert not [
                     execution
                     async for execution in client.list_workflows(
-                        query=f'TaskQueue = "{maintenance_queue(stack.orchestrator.config.identity)}"'
+                        query=f'TaskQueue = "{maintenance_queue(stack.supervisor.config.identity)}"'
                     )
                     if "/commands-" in execution.id or "/journal-" in execution.id
                 ]
                 maintenance = MaintenanceActivities(
-                    stack.delivery, stack.life, stack.orchestrator, stack.artifacts
+                    stack.delivery, stack.life, stack.supervisor, stack.artifacts
                 )
                 await maintenance.maintain("artifacts")
                 await maintenance.maintain("retention")
@@ -86,7 +86,7 @@ def test_idle_recovery_survives_database_failure_without_polling_workflows(
                     for record in caplog.records
                     if record.name.startswith("boxie.temporal.")
                 ] == ["command recovery unavailable"]
-                for identifier in schedule_definitions(stack.orchestrator.config.identity):
+                for identifier in schedule_definitions(stack.supervisor.config.identity):
                     await client.get_schedule_handle(identifier).delete()
 
     asyncio.run(exercise())
@@ -112,7 +112,7 @@ def test_daily_cleanup_drains_more_than_one_batch(
         client = await Client.connect(
             temporal_stack.address,
             namespace="boxie",
-            tls=tls(temporal_stack, "boxie-orchestrator"),
+            tls=tls(temporal_stack, "boxie-supervisor"),
             data_converter=pydantic_data_converter,
         )
         async with lifecycle_stack(postgres_dsn, tmp_path, client) as stack:
@@ -151,8 +151,8 @@ def test_daily_cleanup_drains_more_than_one_batch(
                                 request_hash="0" * 64,
                                 spec={},
                                 snapshot={},
-                                installation_id=stack.orchestrator.config.identity.installation_id,
-                                host_id=stack.orchestrator.config.identity.host_id,
+                                installation_id=stack.supervisor.config.identity.installation_id,
+                                host_id=stack.supervisor.config.identity.host_id,
                                 accepted_at=old,
                                 absolute_deadline=old + timedelta(hours=1),
                                 state="terminated",
@@ -161,7 +161,7 @@ def test_daily_cleanup_drains_more_than_one_batch(
                             )
                         )
             maintenance = MaintenanceActivities(
-                stack.delivery, stack.life, stack.orchestrator, stack.artifacts
+                stack.delivery, stack.life, stack.supervisor, stack.artifacts
             )
             remove = shutil.rmtree
 
@@ -189,7 +189,7 @@ def test_daily_cleanup_drains_more_than_one_batch(
 def test_upgrade_replaces_polling_schedules_with_twice_daily_cleanup(
     temporal_stack: Any, previous: bool
 ) -> None:
-    from boxie.domain.models import OrchestratorIdentity
+    from boxie.domain.models import SupervisorIdentity
     from boxie.temporal.contracts import maintenance_queue
     from boxie.temporal.maintenance import Maintenance
     from temporalio.client import (
@@ -206,10 +206,10 @@ def test_upgrade_replaces_polling_schedules_with_twice_daily_cleanup(
         client = await Client.connect(
             temporal_stack.address,
             namespace="boxie",
-            tls=tls(temporal_stack, "boxie-orchestrator"),
+            tls=tls(temporal_stack, "boxie-supervisor"),
             data_converter=pydantic_data_converter,
         )
-        identity = OrchestratorIdentity(uuid4(), "upgrade")
+        identity = SupervisorIdentity(uuid4(), "upgrade")
         queue = maintenance_queue(identity)
         identifiers = [
             f"{queue}/{kind}" for kind in ("commands", "journal", "artifacts", "retention")
@@ -270,7 +270,7 @@ def test_committed_command_recovers_without_api_delivery(
         client = await Client.connect(
             temporal_stack.address,
             namespace="boxie",
-            tls=tls(temporal_stack, "boxie-orchestrator"),
+            tls=tls(temporal_stack, "boxie-supervisor"),
             data_converter=pydantic_data_converter,
         )
         async with lifecycle_stack(postgres_dsn, tmp_path, client) as stack:
@@ -292,7 +292,7 @@ def test_committed_command_recovers_without_api_delivery(
                 return await acknowledge(store, event)
 
             monkeypatch.setattr(PostgresOutbox, "acknowledge", fail_ack_once)
-            async with embedded_workers(client, stack.life, stack.orchestrator, stack.artifacts):
+            async with embedded_workers(client, stack.life, stack.supervisor, stack.artifacts):
                 async with asyncio.timeout(15):
                     while (await stack.life.get(OWNER, view.id)).state != (
                         "terminated" if stop_first else "ready"
@@ -326,8 +326,8 @@ def test_committed_command_recovers_without_api_delivery(
                 await Replayer(
                     workflows=[SandboxLifecycle], data_converter=pydantic_data_converter
                 ).replay_workflow(history)
-                await check_schedules(client, stack.orchestrator.config.identity)
-                for identifier in schedule_definitions(stack.orchestrator.config.identity):
+                await check_schedules(client, stack.supervisor.config.identity)
+                for identifier in schedule_definitions(stack.supervisor.config.identity):
                     await client.get_schedule_handle(identifier).delete()
 
     asyncio.run(exercise())
@@ -340,12 +340,12 @@ def test_cancelled_activity_retains_late_create_and_accounting(
         client = await Client.connect(
             temporal_stack.address,
             namespace="boxie",
-            tls=tls(temporal_stack, "boxie-orchestrator"),
+            tls=tls(temporal_stack, "boxie-supervisor"),
             data_converter=pydantic_data_converter,
         )
         async with lifecycle_stack(postgres_dsn, tmp_path, client) as stack:
             stack.daemon.create_gate = asyncio.Event()
-            async with embedded_workers(client, stack.life, stack.orchestrator, stack.artifacts):
+            async with embedded_workers(client, stack.life, stack.supervisor, stack.artifacts):
                 identifier = await create(stack.http, await artifact(stack.http))
                 await asyncio.wait_for(stack.daemon.create_entered.wait(), 5)
                 handle = client.get_workflow_handle(
@@ -358,7 +358,7 @@ def test_cancelled_activity_retains_late_create_and_accounting(
                     await asyncio.sleep(0.02)
                 assert (await stack.life.load_request(UUID(identifier))).desired_stop
                 assert (await counts(stack.sessions))[1:3] == (1, 1)
-                assert not stack.orchestrator.records[UUID(identifier)].removal_confirmed
+                assert not stack.supervisor.records[UUID(identifier)].removal_confirmed
                 stack.daemon.create_gate.set()
                 assert (await asyncio.wait_for(handle.result(), 40)).cleaned
                 assert not stack.daemon.started and not stack.daemon.resources
@@ -366,7 +366,7 @@ def test_cancelled_activity_retains_late_create_and_accounting(
                 await Replayer(
                     workflows=[SandboxLifecycle], data_converter=pydantic_data_converter
                 ).replay_workflow(await handle.fetch_history())
-                for schedule in schedule_definitions(stack.orchestrator.config.identity):
+                for schedule in schedule_definitions(stack.supervisor.config.identity):
                     await client.get_schedule_handle(schedule).delete()
 
     asyncio.run(exercise())
@@ -382,16 +382,16 @@ def test_cleanup_preserves_first_termination_cause(
         client = await Client.connect(
             temporal_stack.address,
             namespace="boxie",
-            tls=tls(temporal_stack, "boxie-orchestrator"),
+            tls=tls(temporal_stack, "boxie-supervisor"),
             data_converter=pydantic_data_converter,
         )
         async with lifecycle_stack(postgres_dsn, tmp_path, client) as stack:
             view = await stack.life.submit(OWNER, "first-cause", await upload(stack.artifacts))
-            identity, boot = stack.orchestrator.config.identity, stack.orchestrator.boot_id
-            assert await stack.life.bind_orchestrator_boot(OWNER, identity, view.id, 1, None, boot)
+            identity, boot = stack.supervisor.config.identity, stack.supervisor.boot_id
+            assert await stack.life.bind_supervisor_boot(OWNER, identity, view.id, 1, None, boot)
             if requested_first:
                 await stack.life.terminate(OWNER, view.id, TerminationReason.REQUESTED)
-            observation = OrchestratorObservation(
+            observation = SupervisorObservation(
                 view.id,
                 OWNER,
                 identity,
@@ -406,7 +406,7 @@ def test_cleanup_preserves_first_termination_cause(
             )
             assert await stack.life.record_observation(observation)
             assert not await stack.life.record_observation(replace(observation, boot_id=uuid4()))
-            async with embedded_workers(client, stack.life, stack.orchestrator, stack.artifacts):
+            async with embedded_workers(client, stack.life, stack.supervisor, stack.artifacts):
                 await stack.delivery.recover_once()
                 handle = client.get_workflow_handle(
                     f"boxie/sandbox/{view.id}", result_type=LifecycleResult
@@ -437,7 +437,7 @@ def test_production_cancel_during_concurrent_inspection(
         client = await Client.connect(
             temporal_stack.address,
             namespace="boxie",
-            tls=tls(temporal_stack, "boxie-orchestrator"),
+            tls=tls(temporal_stack, "boxie-supervisor"),
             data_converter=pydantic_data_converter,
         )
         decisions = Decisions(mode)
@@ -538,7 +538,7 @@ def test_actual_api_process_accepts_status_and_stop_during_temporal_outage(
         client = await Client.connect(
             temporal_stack.address,
             namespace="boxie",
-            tls=tls(temporal_stack, "boxie-orchestrator"),
+            tls=tls(temporal_stack, "boxie-supervisor"),
             data_converter=pydantic_data_converter,
         )
         async with lifecycle_stack(postgres_dsn, tmp_path, client) as stack:
@@ -556,11 +556,11 @@ def test_actual_api_process_accepts_status_and_stop_during_temporal_outage(
                 "release": "outage",
                 "bind_port": port,
                 "identity": {
-                    "installation_id": str(stack.orchestrator.config.identity.installation_id),
-                    "host_id": stack.orchestrator.config.identity.host_id,
+                    "installation_id": str(stack.supervisor.config.identity.installation_id),
+                    "host_id": stack.supervisor.config.identity.host_id,
                 },
-                "orchestrator_url": str(stack.life.resolver._http.base_url),
-                "orchestrator_credential_file": str(stack.orchestrator.config.credential_file),
+                "supervisor_url": str(stack.life.resolver._http.base_url),
+                "supervisor_credential_file": str(stack.supervisor.config.credential_file),
                 "consumer_credential_files": {"one": str(consumer)},
                 "lifecycle": {
                     "postgres_dsn_file": str(dsn_path),
@@ -625,7 +625,7 @@ def test_busy_maintenance_preserves_terminal_and_lease_and_cleanup_history(
         client = await Client.connect(
             temporal_stack.address,
             namespace="boxie",
-            tls=tls(temporal_stack, "boxie-orchestrator"),
+            tls=tls(temporal_stack, "boxie-supervisor"),
             data_converter=pydantic_data_converter,
         )
         async with lifecycle_stack(postgres_dsn, tmp_path, client) as stack:
@@ -645,17 +645,17 @@ def test_busy_maintenance_preserves_terminal_and_lease_and_cleanup_history(
                     active -= 1
 
             monkeypatch.setattr(stack.artifacts, "collect", held_collect)
-            async with embedded_workers(client, stack.life, stack.orchestrator, stack.artifacts):
+            async with embedded_workers(client, stack.life, stack.supervisor, stack.artifacts):
                 identifier = await create(stack.http, await artifact(stack.http))
                 await ready(stack.http, identifier)
                 sid = UUID(identifier)
-                first_lease = stack.orchestrator.records[sid].control_lease_until
+                first_lease = stack.supervisor.records[sid].control_lease_until
                 tasks = [
                     await client.start_workflow(
                         Maintenance.run,
                         "artifacts",
                         id="busy-" + uuid4().hex,
-                        task_queue=maintenance_queue(stack.orchestrator.config.identity),
+                        task_queue=maintenance_queue(stack.supervisor.config.identity),
                     )
                     for _ in range(4)
                 ]
@@ -677,9 +677,7 @@ def test_busy_maintenance_preserves_terminal_and_lease_and_cleanup_history(
                         )
                         assert (await asyncio.wait_for(terminal.recv(), 2))[8:] == b"responsive"
                         async with asyncio.timeout(40):
-                            while (
-                                stack.orchestrator.records[sid].control_lease_until <= first_lease
-                            ):
+                            while stack.supervisor.records[sid].control_lease_until <= first_lease:
                                 await asyncio.sleep(0.1)
                         stack.daemon.unreachable = True
                         assert (
@@ -703,7 +701,7 @@ def test_busy_maintenance_preserves_terminal_and_lease_and_cleanup_history(
                     stack.daemon.unreachable = False
                     gate.set()
                     await asyncio.gather(*(task.result() for task in tasks))
-                    for schedule in schedule_definitions(stack.orchestrator.config.identity):
+                    for schedule in schedule_definitions(stack.supervisor.config.identity):
                         await client.get_schedule_handle(schedule).delete()
 
     asyncio.run(exercise())

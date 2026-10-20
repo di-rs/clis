@@ -1,6 +1,7 @@
 """Render the fixed installation's private owner settings without printing them."""
 
 import argparse
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -29,19 +30,19 @@ def render(root: Path, source: Path) -> None:
         return (credentials / name).read_text().strip()
 
     values = {
-        "BOXIE_RUNTIME_IMAGE": os.environ["BOXIE_RUNTIME_IMAGE"],
+        "BOXIE_IMAGE": os.environ["BOXIE_IMAGE"],
         "BOXIE_DATA_DIR": "/srv/sanctuary/boxie",
         "BOXIE_API_CONFIG": str(credentials / "api.json"),
-        "BOXIE_ORCHESTRATOR_CONFIG": str(credentials / "orchestrator.json"),
+        "BOXIE_SUPERVISOR_CONFIG": str(credentials / "supervisor.json"),
         "BOXIE_PROFILES_FILE": str(credentials / "profiles.json"),
-        "BOXIE_ORCHESTRATOR_CREDENTIAL_FILE": str(credentials / "orchestrator.secret"),
+        "BOXIE_SUPERVISOR_CREDENTIAL_FILE": str(credentials / "supervisor.secret"),
         "BOXIE_CONSUMER_CREDENTIAL_FILE": str(credentials / "consumer.secret"),
         "BOXIE_POSTGRES_DSN_FILE": str(credentials / "postgres-dsn.secret"),
         "BOXIE_TEMPORAL_CA_FILE": str(tls / "api/frontend-ca.pem"),
         "BOXIE_API_TEMPORAL_CERT_FILE": str(tls / "api/boxie-api.pem"),
         "BOXIE_API_TEMPORAL_KEY_FILE": str(tls / "api/boxie-api.key"),
-        "BOXIE_ORCHESTRATOR_TEMPORAL_CERT_FILE": str(tls / "orchestrator/boxie-orchestrator.pem"),
-        "BOXIE_ORCHESTRATOR_TEMPORAL_KEY_FILE": str(tls / "orchestrator/boxie-orchestrator.key"),
+        "BOXIE_SUPERVISOR_TEMPORAL_CERT_FILE": str(tls / "supervisor/boxie-supervisor.pem"),
+        "BOXIE_SUPERVISOR_TEMPORAL_KEY_FILE": str(tls / "supervisor/boxie-supervisor.key"),
         "BOXIE_CONTROL_NETWORK": "boxie-control",
         "BOXIE_CONSUMER_NETWORK": "boxie-consumers",
         "TEMPORAL_CERTS_DIR": str(tls / "server"),
@@ -84,13 +85,38 @@ def render(root: Path, source: Path) -> None:
         ingress = ingress.replace("${" + key + "}", os.environ[key])
     (root / "cloudflared.yml").write_text(ingress)
     (root / "cloudflared.yml").chmod(0o644)
+    update_profile(root, source / "packages/boxie/infra")
+
+
+def update_profile(root: Path, source: Path) -> None:
+    profiles_path = root / "boxie/profiles.json"
+    profiles = json.loads(profiles_path.read_text()) if profiles_path.exists() else {}
+    profile = profiles.get("default")
+    if profile is None:
+        profile = json.loads((source / "profiles/default.json").read_text())["default"]
+    profile["image_digest"] = os.environ["BOXIE_SANDBOX_IMAGE"]
+    profiles["default"] = profile
+    with tempfile.NamedTemporaryFile(mode="w", dir=profiles_path.parent, delete=False) as output:
+        temporary = Path(output.name)
+        try:
+            output.write(json.dumps(profiles, indent=2) + "\n")
+            output.flush()
+            os.fsync(output.fileno())
+            temporary.replace(profiles_path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
+    parser.add_argument("--profile-only", action="store_true")
     args = parser.parse_args()
-    render(Path("/etc/sanctuary"), args.source)
+    root = Path(os.environ.get("SANCTUARY_CONFIG_DIR", "/etc/sanctuary"))
+    if args.profile_only:
+        update_profile(root, args.source)
+    else:
+        render(root, args.source)
 
 
 if __name__ == "__main__":

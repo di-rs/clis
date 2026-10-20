@@ -1,0 +1,4 @@
+Hello, sandbox.
+These are real files in your disposable workspace.
+Try pipes, redirects, and uploaded programs.
+A new sandbox starts a fresh workspace.

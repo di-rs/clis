@@ -7,7 +7,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from boxie.domain.lifecycle import OrchestratorObservation
+from boxie.domain.lifecycle import SupervisorObservation
 from boxie.domain.models import SandboxState, TerminationReason
 from boxie.observability.events import Transition
 from database_support import OWNER, add_check, database, upload
@@ -50,9 +50,9 @@ def test_committed_outcomes_and_rebuilt_gauges(
             assert b'boxie_sandboxes{state="accepted"} 1.0' in metrics.render()
             assert [e.event for e in events] == ["sandbox.accepted"]
             boot = uuid4()
-            await life.bind_orchestrator_boot(OWNER, config.identity, view.id, 1, None, boot)
+            await life.bind_supervisor_boot(OWNER, config.identity, view.id, 1, None, boot)
             ready = outcome in ("ready", "coalesced_ready")
-            item = OrchestratorObservation(
+            item = SupervisorObservation(
                 view.id,
                 OWNER,
                 config.identity,
@@ -91,7 +91,7 @@ def test_committed_outcomes_and_rebuilt_gauges(
                 item = replace(item, event_version=2, ready_at=None)
                 assert await other.record_observation(item)
                 newer_boot = uuid4()
-                assert await life.bind_orchestrator_boot(
+                assert await life.bind_supervisor_boot(
                     OWNER, config.identity, view.id, 1, boot, newer_boot
                 )
                 item = replace(item, boot_id=newer_boot)
@@ -146,27 +146,27 @@ def test_committed_outcomes_and_rebuilt_gauges(
     asyncio.run(exercise())
 
 
-def test_orchestrator_attachment_and_cleanup_attempt_events(tmp_path: Path) -> None:
+def test_supervisor_attachment_and_cleanup_attempt_events(tmp_path: Path) -> None:
     from lifecycle_support import settled, setup
 
     async def exercise() -> None:
-        orchestrator, request, daemon, _, _ = await setup(tmp_path)
+        supervisor, request, daemon, _, _ = await setup(tmp_path)
         events: list[Transition] = []
-        orchestrator.diagnostics = events.append
+        supervisor.diagnostics = events.append
         try:
-            await settled(orchestrator, request.ref, SandboxState.READY)
-            await orchestrator.reconcile()
+            await settled(supervisor, request.ref, SandboxState.READY)
+            await supervisor.reconcile()
             assert events == []
-            epoch = await orchestrator.attach(request.ref, attachment_order=1)
-            await orchestrator.write(request.ref, epoch, b"never-log-this")
-            await orchestrator.detach(request.ref, epoch)
-            await orchestrator.detach(request.ref, epoch)
+            epoch = await supervisor.attach(request.ref, attachment_order=1)
+            await supervisor.write(request.ref, epoch, b"never-log-this")
+            await supervisor.detach(request.ref, epoch)
+            await supervisor.detach(request.ref, epoch)
             assert [e.event for e in events] == ["terminal.attached", "terminal.detached"]
             daemon.unreachable = True
-            await orchestrator.remove(request.ref, TerminationReason.REQUESTED)
+            await supervisor.remove(request.ref, TerminationReason.REQUESTED)
             assert events[-1].event == "cleanup.failed"
             daemon.unreachable = False
-            await orchestrator.reconcile()
+            await supervisor.reconcile()
             assert events[-1].event == "reconciliation.completed"
             assert events[-1].outcome == "confirmed"
             assert not any(
@@ -174,7 +174,7 @@ def test_orchestrator_attachment_and_cleanup_attempt_events(tmp_path: Path) -> N
                 for e in events
             )
         finally:
-            await orchestrator.close()
+            await supervisor.close()
 
     asyncio.run(exercise())
 
@@ -230,7 +230,7 @@ def test_real_sql_http_worker_history_replay_does_not_emit(
     from typing import Any, cast
     from uuid import UUID
 
-    from boxie.bootstrap.runtime import embedded_workers
+    from boxie.bootstrap.workers import embedded_workers
     from boxie.observability.metrics import Metrics
     from boxie.observability.snapshot import operational_snapshot
     from boxie.temporal.workflows import SandboxLifecycle
@@ -245,7 +245,7 @@ def test_real_sql_http_worker_history_replay_does_not_emit(
         client = await Client.connect(
             fixture.address,
             namespace="boxie",
-            tls=tls(fixture, "boxie-orchestrator"),
+            tls=tls(fixture, "boxie-supervisor"),
             data_converter=pydantic_data_converter,
         )
         async with lifecycle_stack(postgres_dsn, tmp_path, client) as stack:
@@ -257,7 +257,7 @@ def test_real_sql_http_worker_history_replay_does_not_emit(
                 metrics.transition(event)
 
             stack.life.diagnostics = sink
-            async with embedded_workers(client, stack.life, stack.orchestrator, stack.artifacts):
+            async with embedded_workers(client, stack.life, stack.supervisor, stack.artifacts):
                 identifier = await create(stack.http, await artifact(stack.http))
                 await ready(stack.http, identifier)
                 stack.daemon.unreachable = True
@@ -289,20 +289,20 @@ def test_domain_events_reach_safe_logging_catalog() -> None:
     import os
 
     from boxie.observability.events import EVENTS
-    from boxie.observability.telemetry.logging import LogRuntime, LogSettings
+    from boxie.observability.telemetry.logging import LogDispatcher, LogSettings
 
     read, write = os.pipe()
-    runtime = LogRuntime(
+    dispatcher = LogDispatcher(
         LogSettings(service="boxie", role="api"), EVENTS, {}, write, 4096, "enabled"
     )
     try:
         for event in EVENTS:
-            runtime.emit(
+            dispatcher.emit(
                 event,
                 sandbox_id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
                 reason="provisioning_failed",
             )
-        runtime.close()
+        dispatcher.close()
         records = [json.loads(line) for line in os.read(read, 65536).splitlines()]
         assert {item["event"] for item in records} == set(EVENTS)
         assert all(item["reason"] == "provisioning_failed" for item in records)
@@ -360,7 +360,7 @@ def test_existing_unknown_cleanup_age_stays_unknown(
         async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
             view = await life.submit(OWNER, "legacy-pending", await upload(artifacts))
             boot = uuid4()
-            assert await life.bind_orchestrator_boot(OWNER, config.identity, view.id, 1, None, boot)
+            assert await life.bind_supervisor_boot(OWNER, config.identity, view.id, 1, None, boot)
             async with sessions() as session, session.begin():
                 row = await session.get(Sandbox, view.id)
                 assert row is not None
@@ -370,7 +370,7 @@ def test_existing_unknown_cleanup_age_stays_unknown(
                 await life.terminate(OWNER, view.id, TerminationReason.REQUESTED)
             else:
                 assert await life.record_observation(
-                    OrchestratorObservation(
+                    SupervisorObservation(
                         view.id,
                         OWNER,
                         config.identity,

@@ -19,8 +19,9 @@ def test_generated_credentials_survive_rerun_without_output(tmp_path: Path) -> N
     first = credentials(directory)
     assert first.returncode == 0, first.stderr
     before = {path.name: path.read_bytes() for path in directory.iterdir() if path.is_file()}
+    assert "preview-token" not in before
     assert len(before["consumer.secret"].strip()) >= 48
-    assert before["consumer.secret"] != before["orchestrator.secret"]
+    assert before["consumer.secret"] != before["supervisor.secret"]
     (tmp_path / "data").write_text("persistent sentinel")
     second = credentials(directory)
     assert second.returncode == 0, second.stderr
@@ -113,7 +114,7 @@ def test_certificates_have_separate_identities_and_private_ca(tmp_path: Path) ->
         for name, file in (
             ("server", "frontend.key"),
             ("api", "boxie-api.key"),
-            ("orchestrator", "boxie-orchestrator.key"),
+            ("supervisor", "boxie-supervisor.key"),
             ("ui", "ui-client.key"),
             ("operator", "operator.key"),
         )
@@ -156,3 +157,41 @@ def test_temporal_schema_setup_can_resume_one_database(tmp_path: Path) -> None:
         "temporal_visibility:setup-schema -v 0.0",
         "temporal_visibility:update-schema -d /etc/temporal/schema/postgresql/v12/visibility/versioned",
     ]
+
+
+def test_boxie_render_seeds_default_shell_without_product_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from boxie_infra.installation import render
+
+    directory = tmp_path / "boxie"
+    assert credentials(directory).returncode == 0
+    for name in (
+        "BOXIE_IMAGE",
+        "BOXIE_SANDBOX_IMAGE",
+        "OBS_COLLECTOR_IMAGE",
+        "OBS_JOURNAL_GROUP_GID",
+        "OPERATOR_GRAFANA_HOSTNAME",
+        "OPERATOR_TUNNEL_ID",
+        "OPERATOR_TEAM_NAME",
+        "OPERATOR_TEMPORAL_HOSTNAME",
+        "OPERATOR_GRAFANA_AUDIENCE",
+        "OPERATOR_TEMPORAL_AUDIENCE",
+    ):
+        monkeypatch.setenv(name, "setting")
+    for name in tuple(os.environ):
+        if name.startswith("CLI_PLAYGROUND_") or name in {"ACME_EMAIL", "CLOUDFLARE_DNS_API_TOKEN"}:
+            monkeypatch.delenv(name)
+    render(tmp_path, ROOT)
+    assert json.loads((directory / "profiles.json").read_text()) == {
+        "default": {
+            "image_digest": "setting",
+            "commands": [["/opt/boxie/shell.sh"]],
+            "env": {"TERM": ["xterm-256color"]},
+            "artifact_target": "/opt/artifact",
+        }
+    }
+    assert (tmp_path / "boxie.env").is_file()
+    assert not (tmp_path / "cli-playground.env").exists()
