@@ -6,9 +6,10 @@ from datetime import UTC, datetime
 
 from sqlalchemy import false
 from sqlalchemy.dialects.postgresql import insert
-from sqlmodel import Session, col, select, update
+from sqlmodel import col, select, update
+from sqlmodel.ext.asyncio.session import AsyncSession
 
-from cli_playground.database import connection
+from cli_playground.database import SessionFactory, connection
 from cli_playground.domain import (
     ArtifactConflictError,
     UploadIntent,
@@ -30,11 +31,11 @@ from cli_playground.models import (
 from cli_playground.tables import Binding, Preview, Retirement, Revision, Upload
 
 
-def locked_preview(session: Session, pr: int) -> Preview:
-    session.execute(
+async def locked_preview(session: AsyncSession, pr: int) -> Preview:
+    await session.exec(
         insert(Preview).values(pr=pr, id=identifier(pr), closed=False).on_conflict_do_nothing()
     )
-    row = (session.exec(select(Preview).where(Preview.pr == pr).with_for_update())).one()
+    row = (await session.exec(select(Preview).where(Preview.pr == pr).with_for_update())).one()
     return row
 
 
@@ -44,11 +45,13 @@ def artifact_value(row: Revision | Upload) -> ArtifactMetadata:
     )
 
 
-def preview_value(session: Session, row: Preview) -> PreviewRecord | None:
+async def preview_value(session: AsyncSession, row: Preview) -> PreviewRecord | None:
     if row.expires_at is None:
         return None
     revision = (
-        session.get(Revision, (row.pr, row.current_revision)) if row.current_revision else None
+        await session.get(Revision, (row.pr, row.current_revision))
+        if row.current_revision
+        else None
     )
     build = (
         BuildStatus.model_validate(
@@ -88,43 +91,47 @@ class EnvironmentStore:
 
     def __init__(
         self,
-        session: Session,
+        sessions: SessionFactory,
         *,
         preview_seconds: float,
         clock: Callable[[], float] = time.time,
     ) -> None:
-        self.session, self.preview_seconds, self.clock = session, preview_seconds, clock
+        self.sessions, self.preview_seconds, self.clock = sessions, preview_seconds, clock
 
-    def is_closed(self, pr: int) -> bool:
-        with connection(self.session) as session:
-            row = session.get(Preview, pr)
+    async def is_closed(self, pr: int) -> bool:
+        async with connection(self.sessions) as session:
+            row = await session.get(Preview, pr)
             return row is not None and row.closed
 
-    def close_pull_request(self, pr: int) -> None:
-        with connection(self.session, write=True) as session:
-            row = locked_preview(session, pr)
+    async def close_pull_request(self, pr: int) -> None:
+        async with connection(self.sessions, write=True) as session:
+            row = await locked_preview(session, pr)
             row.closed = True
-            session.exec(update(Upload).where(col(Upload.pr) == pr).values(cancelled=True))
+            await session.exec(update(Upload).where(col(Upload.pr) == pr).values(cancelled=True))
 
-    def reopen_pull_request(self, pr: int) -> None:
-        with connection(self.session, write=True) as session:
-            row = locked_preview(session, pr)
+    async def reopen_pull_request(self, pr: int) -> None:
+        async with connection(self.sessions, write=True) as session:
+            row = await locked_preview(session, pr)
             if row.closed:
-                session.exec(update(Upload).where(col(Upload.pr) == pr).values(cancelled=True))
+                await session.exec(
+                    update(Upload).where(col(Upload.pr) == pr).values(cancelled=True)
+                )
             row.closed = False
 
-    def record(self, identifier: str, *, include_inactive: bool = False) -> PreviewRecord | None:
-        with connection(self.session) as session:
-            row = (session.exec(select(Preview).where(Preview.id == identifier))).first()
+    async def record(
+        self, identifier: str, *, include_inactive: bool = False
+    ) -> PreviewRecord | None:
+        async with connection(self.sessions) as session:
+            row = (await session.exec(select(Preview).where(Preview.id == identifier))).first()
             if row is None or (
                 not include_inactive
                 and (row.closed or row.expires_at is None or row.expires_at <= self.clock())
             ):
                 return None
-            return preview_value(session, row)
+            return await preview_value(session, row)
 
-    def get(self, identifier: str, *, include_inactive: bool = False) -> Environment | None:
-        record = self.record(identifier, include_inactive=include_inactive)
+    async def get(self, identifier: str, *, include_inactive: bool = False) -> Environment | None:
+        record = await self.record(identifier, include_inactive=include_inactive)
         if (
             record is None
             or record.artifact is None
@@ -133,8 +140,8 @@ class EnvironmentStore:
             return None
         return Environment(id=identifier, **record.artifact.model_dump())
 
-    def metadata(self, identifier: str) -> EnvironmentMetadata | None:
-        record = self.record(identifier)
+    async def metadata(self, identifier: str) -> EnvironmentMetadata | None:
+        record = await self.record(identifier)
         if record is None:
             return None
         artifact = (
@@ -154,15 +161,15 @@ class EnvironmentStore:
             build=record.build,
         )
 
-    def inactive_identifiers(self) -> set[str]:
-        with connection(self.session) as session:
+    async def inactive_identifiers(self) -> set[str]:
+        async with connection(self.sessions) as session:
             needs_stop = select(Binding.preview_id).where(
                 col(Binding.pending_stop)
                 | col(Binding.sandbox)["cleanup_pending"].as_boolean()
                 | col(Binding.sandbox)["state"].as_string().not_in(["terminated", "failed"])
             )
             return set(
-                session.exec(
+                await session.exec(
                     select(Preview.id).where(
                         (
                             (col(Preview.expires_at) <= self.clock())
@@ -174,10 +181,10 @@ class EnvironmentStore:
                 )
             )
 
-    def remove(self, identifiers: set[str]) -> int:
+    async def remove(self, identifiers: set[str]) -> int:
         count = 0
-        with connection(self.session, write=True) as session:
-            rows = session.exec(
+        async with connection(self.sessions, write=True) as session:
+            rows = await session.exec(
                 select(Preview)
                 .where(col(Preview.id).in_(identifiers))
                 .order_by(col(Preview.pr))
@@ -193,54 +200,43 @@ class EnvironmentStore:
                     count += 1
         return count
 
-    def for_pull_request(self, pr: int) -> set[str]:
-        return (
-            {identifier(pr)}
-            if self.record(identifier(pr), include_inactive=True) is not None
-            else set()
-        )
-
-    def check_build(self, pr: int, build: BuildIdentity | None) -> PreviewRecord | None:
-        with connection(self.session, write=True) as session:
-            row = locked_preview(session, pr)
-            record = preview_value(session, row)
+    async def check_build(self, pr: int, build: BuildIdentity | None) -> PreviewRecord | None:
+        async with connection(self.sessions, write=True) as session:
+            row = await locked_preview(session, pr)
+            record = await preview_value(session, row)
             check_build(record, row.closed, build)
             return record
 
-    def update_build(self, pr: int, update: BuildUpdate) -> EnvironmentMetadata:
-        with connection(self.session, write=True) as session:
-            row = locked_preview(session, pr)
-            record = preview_value(session, row)
+    async def update_build(self, pr: int, update: BuildUpdate) -> EnvironmentMetadata:
+        async with connection(self.sessions, write=True) as session:
+            row = await locked_preview(session, pr)
+            record = await preview_value(session, row)
             check_build(record, row.closed, update)
             assign_record(row, next_build(record, pr, update, self.clock() + self.preview_seconds))
-        result = self.metadata(identifier(pr))
+        result = await self.metadata(identifier(pr))
         if result is None:
             raise ArtifactConflictError("preview is no longer active")
         return result
 
-    def revisions(self) -> list[ArtifactMetadata]:
-        with connection(self.session) as session:
-            return [artifact_value(row) for row in session.exec(select(Revision))]
-
-    def revision(self, pr: int, revision: str) -> ArtifactMetadata | None:
-        with connection(self.session) as session:
-            row = session.get(Revision, (pr, revision))
+    async def revision(self, pr: int, revision: str) -> ArtifactMetadata | None:
+        async with connection(self.sessions) as session:
+            row = await session.get(Revision, (pr, revision))
             return artifact_value(row) if row else None
 
-    def publish(self, artifact: ArtifactMetadata, build: BuildIdentity | None) -> Environment:
-        with connection(self.session, write=True) as session:
-            row = locked_preview(session, artifact.pr)
-            return self._publish(session, row, artifact, build)
+    async def publish(self, artifact: ArtifactMetadata, build: BuildIdentity | None) -> Environment:
+        async with connection(self.sessions, write=True) as session:
+            row = await locked_preview(session, artifact.pr)
+            return await self._publish(session, row, artifact, build)
 
-    def _publish(
+    async def _publish(
         self,
-        session: Session,
+        session: AsyncSession,
         row: Preview,
         artifact: ArtifactMetadata,
         build: BuildIdentity | None,
     ) -> Environment:
-        record = preview_value(session, row)
-        previous = session.get(Revision, (artifact.pr, artifact.revision))
+        record = await preview_value(session, row)
+        previous = await session.get(Revision, (artifact.pr, artifact.revision))
         result = publication(
             record,
             row.closed,
@@ -250,24 +246,26 @@ class EnvironmentStore:
             self.clock(),
         )
         assert result.artifact is not None
-        session.merge(Revision(**result.artifact.model_dump()))
-        session.flush()
+        await session.merge(Revision(**result.artifact.model_dump()))
+        await session.flush()
         assign_record(row, result)
         return Environment(id=row.id, **result.artifact.model_dump())
 
-    def finish_upload(self, artifact: ArtifactMetadata, build: BuildIdentity | None) -> Environment:
+    async def finish_upload(
+        self, artifact: ArtifactMetadata, build: BuildIdentity | None
+    ) -> Environment:
         conflict: ArtifactConflictError | None = None
         result: Environment | None = None
-        with connection(self.session, write=True) as session:
-            row = locked_preview(session, artifact.pr)
-            intent = session.get(Upload, artifact.artifact_id)
+        async with connection(self.sessions, write=True) as session:
+            row = await locked_preview(session, artifact.pr)
+            intent = await session.get(Upload, artifact.artifact_id)
             if intent is None:
-                previous = session.get(Revision, (artifact.pr, artifact.revision))
+                previous = await session.get(Revision, (artifact.pr, artifact.revision))
                 if previous and previous.artifact_id == artifact.artifact_id:
                     return Environment(id=row.id, **artifact_value(previous).model_dump())
                 raise ArtifactConflictError("upload is no longer pending")
             try:
-                current = preview_value(session, row)
+                current = await preview_value(session, row)
                 check_upload(
                     UploadIntent(
                         artifact=artifact,
@@ -279,28 +277,28 @@ class EnvironmentStore:
                     row.closed,
                     self.clock(),
                 )
-                result = self._publish(session, row, artifact, build)
+                result = await self._publish(session, row, artifact, build)
                 if result.artifact_id != artifact.artifact_id:
-                    session.execute(
+                    await session.exec(
                         insert(Retirement)
                         .values(artifact_id=artifact.artifact_id, completed=False)
                         .on_conflict_do_nothing()
                     )
             except ArtifactConflictError as error:
                 conflict = error
-                session.execute(
+                await session.exec(
                     insert(Retirement)
                     .values(artifact_id=artifact.artifact_id, completed=False)
                     .on_conflict_do_nothing()
                 )
-            session.delete(intent)
+            await session.delete(intent)
         if conflict is not None:
             raise conflict
         assert result is not None
         return result
 
-    def collect_artifacts(self) -> None:
-        with connection(self.session, write=True) as session:
+    async def collect_artifacts(self) -> None:
+        async with connection(self.sessions, write=True) as session:
             now = self.clock()
             active = (
                 select(Revision.artifact_id)
@@ -321,7 +319,7 @@ class EnvironmentStore:
                 col(Revision.artifact_id).not_in(active),
                 col(Revision.artifact_id).not_in(select(Retirement.artifact_id)),
             )
-            session.execute(
+            await session.exec(
                 insert(Retirement)
                 .from_select(["artifact_id", "completed"], stale)
                 .on_conflict_do_nothing()

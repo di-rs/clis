@@ -36,7 +36,7 @@ class Preview(Table, table=True):
         ),
     )
     pr: int = Field(primary_key=True, sa_type=BigInteger)
-    id: str = Field(index=True)
+    id: str
     closed: bool = False
     expires_at: float | None = None
     build_sha: str | None = None

@@ -2,7 +2,7 @@
 
 import asyncio
 import threading
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from pathlib import Path
 from uuid import UUID
 
@@ -10,10 +10,8 @@ import pytest
 from cli_playground import service as service_module
 from cli_playground.artifacts import stage_archive
 from cli_playground.config import Settings
-from cli_playground.database import adapt_store
 from cli_playground.domain import ArtifactConflictError, SessionBinding
 from cli_playground.models import BuildIdentity, BuildUpdate
-from cli_playground.ports import SessionStore as SessionStorePort
 from cli_playground.sandbox import SandboxRequest, SandboxView
 from cli_playground.service import CliPlaygroundService
 from cli_playground.session_store import SessionStore
@@ -103,9 +101,7 @@ def test_archive_timeout_waits_for_worker_without_blocking_metadata(
             release.set()
             with pytest.raises(TimeoutError):
                 await deploying
-        assert (
-            await service.store(lambda repository: repository.get(environment.id))
-        ) == environment
+        assert (await service.store.get(environment.id)) == environment
         assert not service.uploads.locked()
         assert not list(service.settings.data_dir.glob(".upload-*"))
 
@@ -147,7 +143,7 @@ def test_newer_build_event_supersedes_a_streaming_upload(
         release.set()
         with pytest.raises(ArtifactConflictError, match="^stale build$"):
             await deploying
-        assert (await service.store(lambda repository: repository.get(metadata.id))) is None
+        assert (await service.store.get(metadata.id)) is None
         assert not list(service.settings.data_dir.glob(".upload-*"))
 
     asyncio.run(exercise())
@@ -164,15 +160,15 @@ def test_failed_publication_transaction_leaves_the_previous_batch_readable(
         service = make_service(docker_settings)
         previous = await service.deploy(body(), "a" * 40, 123)
 
-        def failed_publish(*args: object) -> None:
+        async def failed_publish(*args: object) -> None:
             raise OSError("database unavailable")
 
         monkeypatch.setattr(EnvironmentStore, "_publish", failed_publish)
         with pytest.raises(OSError, match="database unavailable"):
             await service.deploy(body(), "b" * 40, 123)
-        assert (await service.store(lambda repository: repository.get(previous.id))) == previous
+        assert (await service.store.get(previous.id)) == previous
         assert previous.artifact_id in boxie(service).artifacts
-        assert len(await service.sessions(lambda repository: repository.uploads())) == 1
+        assert len(await service.sessions.uploads()) == 1
         assert not list(service.settings.data_dir.glob(".upload-*"))
 
     asyncio.run(exercise())
@@ -189,13 +185,8 @@ def make_service(
     )
     return CliPlaygroundService(
         settings,
-        adapt_store(
-            sessions,
-            lambda session: EnvironmentStore(
-                session, preview_seconds=settings.preview_seconds, clock=clock
-            ),
-        ),
-        adapt_store(sessions, SessionStore),
+        EnvironmentStore(sessions, preview_seconds=settings.preview_seconds, clock=clock),
+        SessionStore(sessions),
         client or FakeBoxie(clock=clock),
         clock=clock,
     )
@@ -221,21 +212,21 @@ def test_failed_remote_upload_preserves_ready_and_retries_the_same_artifact(
         remote = boxie(service)
         upload = remote.upload
 
-        def failed(*args: object) -> None:
+        async def failed(*args: object) -> None:
             raise BoxieUnavailable()
 
         monkeypatch.setattr(remote, "upload", failed)
         with pytest.raises(BoxieUnavailable):
             await service.deploy(body(), "b" * 40, 123)
-        assert (await service.store(lambda repository: repository.get(previous.id))) == previous
-        (intent,) = await service.sessions(lambda repository: repository.uploads())
+        assert (await service.store.get(previous.id)) == previous
+        (intent,) = await service.sessions.uploads()
         monkeypatch.setattr(remote, "upload", upload)
         restarted = make_service(service.settings, remote)
         await restarted.recover()
-        current = await restarted.store(lambda repository: repository.get(previous.id))
+        current = await restarted.store.get(previous.id)
         assert current is not None and current.sha == "b" * 40
         assert current.artifact_id == intent.artifact.artifact_id
-        assert not (await restarted.sessions(lambda repository: repository.uploads()))
+        assert not (await restarted.sessions.uploads())
 
     asyncio.run(exercise())
 
@@ -252,18 +243,18 @@ def test_interrupted_product_commit_recovers_the_uploaded_identity(
         previous = await service.deploy(body(), "a" * 40, 123)
         original = EnvironmentStore._publish
 
-        def failed(*args: object) -> None:
+        async def failed(*args: object) -> None:
             raise OSError("interrupted commit")
 
         monkeypatch.setattr(EnvironmentStore, "_publish", failed)
         with pytest.raises(OSError, match="interrupted"):
             await service.deploy(body(), "b" * 40, 123)
-        (intent,) = await service.sessions(lambda repository: repository.uploads())
+        (intent,) = await service.sessions.uploads()
         assert intent.artifact.artifact_id in boxie(service).artifacts
-        assert (await service.store(lambda repository: repository.get(previous.id))) == previous
+        assert (await service.store.get(previous.id)) == previous
         monkeypatch.setattr(EnvironmentStore, "_publish", original)
         await service.recover()
-        current = await service.store(lambda repository: repository.get(previous.id))
+        current = await service.store.get(previous.id)
         assert current is not None and current.artifact_id == intent.artifact.artifact_id
         assert len(boxie(service).artifacts) == 2
 
@@ -284,7 +275,7 @@ def test_build_or_closure_during_remote_upload_retires_the_abandoned_artifact(
         async def racing(identifier: UUID, digest: str, archive: Path) -> None:
             await original(identifier, digest, archive)
             if close:
-                (await service.store(lambda repository: repository.close_pull_request(123)))
+                (await service.store.close_pull_request(123))
             else:
                 (
                     await service.update_build(
@@ -307,10 +298,8 @@ def test_build_or_closure_during_remote_upload_retires_the_abandoned_artifact(
                 123,
                 BuildIdentity(sha="a" * 40, run_id=1000, run_number=10, run_attempt=1),
             )
-        assert not (await service.sessions(lambda repository: repository.uploads()))
-        assert (
-            await service.store(lambda repository: repository.get(EnvironmentStore.identifier(123)))
-        ) is None
+        assert not (await service.sessions.uploads())
+        assert (await service.store.get(EnvironmentStore.identifier(123))) is None
         await service.cleanup_inactive()
         assert set(boxie(service).artifacts) == boxie(service).retired
 
@@ -347,7 +336,7 @@ def test_cancelled_create_recovers_same_id_and_stops_abandoned_response(
         await make_service(service.settings, remote).recover()
         assert len(remote.sandboxes) == 1
         assert next(iter(remote.sandboxes.values())).state == "terminated"
-        assert not (await service.sessions(lambda repository: repository.creates()))
+        assert not (await service.sessions.creates())
 
     asyncio.run(exercise())
 
@@ -443,25 +432,21 @@ def test_close_reopen_never_recovers_a_previous_generation_upload(
                 expected: type[Exception] = BoxieUnavailable
             else:
 
-                def failed_commit(*args: object) -> None:
+                async def failed_commit(*args: object) -> None:
                     raise OSError("interrupted commit")
 
                 fault.setattr(EnvironmentStore, "_publish", failed_commit)
                 expected = OSError
             with pytest.raises(expected):
                 await service.deploy(body(), "a" * 40, 123, build)
-        (intent,) = await service.sessions(lambda repository: repository.uploads())
+        (intent,) = await service.sessions.uploads()
         await service.close_pull_request(123)
         await service.reopen_pull_request(123)
         restarted = make_service(service.settings, boxie(service))
         await restarted.recover()
-        assert (
-            await restarted.store(
-                lambda repository: repository.get(EnvironmentStore.identifier(123))
-            )
-        ) is None
+        assert (await restarted.store.get(EnvironmentStore.identifier(123))) is None
         assert intent.artifact.artifact_id in boxie(service).retired
-        assert not (await restarted.sessions(lambda repository: repository.uploads()))
+        assert not (await restarted.sessions.uploads())
 
     asyncio.run(exercise())
 
@@ -482,27 +467,22 @@ def test_recovery_cannot_cancel_an_attachment_claimed_after_its_snapshot(
             environment.id, binding.id, environment.revision, credential
         )
         clock.now += 41
-        original = service.sessions
+        original = service.sessions.bindings
         replaced = False
 
-        async def snapshot[Result](operation: Callable[[SessionStorePort], Result]) -> Result:
+        async def snapshot() -> list[SessionBinding]:
             nonlocal replaced
-            values = await original(operation)
-            if (
-                not replaced
-                and isinstance(values, list)
-                and values
-                and isinstance(values[0], SessionBinding)
-            ):
+            values = await original()
+            if not replaced and values:
                 replaced = True
                 await service.claim_attachment(
                     environment.id, binding.id, environment.revision, credential
                 )
             return values
 
-        monkeypatch.setattr(service, "sessions", snapshot)
+        monkeypatch.setattr(service.sessions, "bindings", snapshot)
         await service.recover(startup=False)
-        current = await service.sessions(lambda repository: repository.get(binding.id))
+        current = await service.sessions.get(binding.id)
         assert current is not None
         assert current.attachment_claim == first.attachment_claim + 1
         assert current.attachment_deadline == clock.now + 40
@@ -558,27 +538,27 @@ def test_staged_upload_cleanup_requires_known_rejection(
         build = BuildIdentity(sha="a" * 40, run_id=100, run_number=1, run_attempt=1)
         save = SessionStore.upload_intent
 
-        def interrupted(repository: SessionStore, intent: UploadIntent) -> None:
+        async def interrupted(repository: SessionStore, intent: UploadIntent) -> None:
             previews = EnvironmentStore(
-                repository.session, preview_seconds=service.settings.preview_seconds
+                repository.sessions, preview_seconds=service.settings.preview_seconds
             )
             if outcome == "closed":
-                previews.close_pull_request(123)
+                await previews.close_pull_request(123)
             elif outcome == "newer-build":
-                previews.update_build(
+                await previews.update_build(
                     123,
                     BuildUpdate(
                         sha="b" * 40, run_id=200, run_number=2, run_attempt=1, state="building"
                     ),
                 )
-            save(repository, intent)
+            await save(repository, intent)
             raise PersistenceUnavailable("commit acknowledgement lost")
 
         monkeypatch.setattr(SessionStore, "upload_intent", interrupted)
         expected = PersistenceUnavailable if outcome == "lost-ack" else ArtifactConflictError
         with pytest.raises(expected):
             await service.deploy(body(), "a" * 40, 123, build)
-        pending = await service.sessions(lambda repository: repository.uploads())
+        pending = await service.sessions.uploads()
         archives = list(service.staging.uploads.glob("*.zip"))
         assert len(pending) == len(archives) == (1 if outcome == "lost-ack" else 0)
         if pending:

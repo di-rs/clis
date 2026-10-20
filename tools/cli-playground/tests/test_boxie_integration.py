@@ -43,9 +43,7 @@ def test_separate_product_api_supervisor_publish_terminal_reset_and_pr_close(
             async with product_server(tmp_path / "product", str(network.api.base_url)) as product:
                 identifier = (await publish(product, "a" * 40)).json()["id"]
                 first = await admit(product, identifier, "a" * 40)
-                old_artifact = (
-                    await product.app.state.store(lambda repository: repository.get(identifier))
-                ).artifact_id
+                old_artifact = (await product.app.state.store.get(identifier)).artifact_id
                 origin = Origin(str(product.http.base_url).rstrip("/"))
                 async with connect(socket_url(product, identifier, first), origin=origin) as ws:
                     await ws.send(json.dumps({"type": "auth", "credential": first["credential"]}))
@@ -85,9 +83,7 @@ def test_separate_product_api_supervisor_publish_terminal_reset_and_pr_close(
                     headers={"Authorization": "Bearer test-deployment-token"},
                 )
                 assert closed.status_code == 200
-                binding = await product.service.sessions(
-                    lambda repository: repository.get(UUID(sibling["id"]))
-                )
+                binding = await product.service.sessions.get(UUID(sibling["id"]))
                 assert binding is not None
                 assert (await network.api.get(f"/v1/sandboxes/{binding.sandbox.id}")).json()[
                     "state"
@@ -155,9 +151,7 @@ def test_authenticated_readiness_wait_is_not_an_abandoned_page_response(
                         await asyncio.wait_for(polled.wait(), 1)
                         clock.now += 31
                         await product.service.recover(startup=False)
-                        saved = await product.service.sessions(
-                            lambda repository: repository.get(UUID(binding["id"]))
-                        )
+                        saved = await product.service.sessions.get(UUID(binding["id"]))
                         assert (
                             saved is not None
                             and not saved.pending_stop
@@ -174,9 +168,7 @@ def test_authenticated_readiness_wait_is_not_an_abandoned_page_response(
                             await product.service.recover(startup=False)
                             with pytest.raises(ConnectionClosedError):
                                 await ws.recv()
-                            saved = await product.service.sessions(
-                                lambda repository: repository.get(UUID(binding["id"]))
-                            )
+                            saved = await product.service.sessions.get(UUID(binding["id"]))
                             assert saved is not None and saved.attachment_deadline is None
                             assert saved.pending_stop or saved.sandbox.state == "terminated"
                 finally:

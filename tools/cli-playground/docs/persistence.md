@@ -13,18 +13,18 @@ and an explicit time, and performs no database, filesystem or network operations
 [Sandbox contracts](../src/cli_playground/sandbox.py) likewise have no transport
 implementation.
 
-The [persistence ports](../src/cli_playground/ports.py) use synchronous methods
-returning plain values. The SQLModel stores in [storage.py](../src/cli_playground/storage.py)
-and [session_store.py](../src/cli_playground/session_store.py) implement those
-contracts with synchronous session operations. Domain code does not receive SQL
-sessions or await database calls.
+The [persistence ports](../src/cli_playground/ports.py) expose async methods
+returning domain values. The async [application service](../src/cli_playground/service.py)
+calls them directly, for example `await self.store.get(preview_id)`. Domain code
+does not receive SQL sessions or await database calls.
 
-The async [application service](../src/cli_playground/service.py) submits a store
-operation to the [database adapter](../src/cli_playground/database.py), for example
-`await self.store(lambda store: store.get(preview_id))`. The adapter uses
-`AsyncSession.run_sync` to execute it over the async psycopg driver. SQL I/O yields
-to the event loop; it does not run a blocking database client or start another
-event loop. HTTP/WebSocket and Boxie transport remain asynchronous.
+The PostgreSQL adapters in [storage.py](../src/cli_playground/storage.py) and
+[session_store.py](../src/cli_playground/session_store.py) receive a shared async
+session factory from [database.py](../src/cli_playground/database.py). Each database
+operation opens and closes its own `AsyncSession` through the async `connection`
+context manager. Writes use short transactions. SQL queries use the async psycopg
+driver, so waiting for the database yields to the event loop. HTTP/WebSocket and
+Boxie transport remain asynchronous.
 
 Publication locks the PR row while checking build order, closure and immutable
 binary identity. It commits the revision, current preview and upload-intent

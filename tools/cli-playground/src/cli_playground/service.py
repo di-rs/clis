@@ -28,7 +28,7 @@ from cli_playground.models import (
     Environment,
     EnvironmentMetadata,
 )
-from cli_playground.ports import EnvironmentStore, SessionStore, StoreRunner
+from cli_playground.ports import EnvironmentStore, SessionStore
 from cli_playground.sandbox import (
     BoxieClient,
     BoxieUnavailable,
@@ -52,8 +52,8 @@ class CliPlaygroundService:
     def __init__(
         self,
         settings: Settings,
-        store: StoreRunner[EnvironmentStore],
-        sessions: StoreRunner[SessionStore],
+        store: EnvironmentStore,
+        sessions: SessionStore,
         boxie: BoxieClient,
         *,
         clock: Callable[[], float] = time.time,
@@ -65,43 +65,39 @@ class CliPlaygroundService:
         self.active_creates: set[UUID] = set()
 
     async def retry_stops(self) -> None:
-        for binding in await self.sessions(lambda repository: repository.bindings()):
+        for binding in await self.sessions.bindings():
             if binding.pending_stop:
                 try:
                     view = await self.boxie.terminate(binding.sandbox.id, binding.sandbox)
-                    await self.sessions(
-                        lambda repository: repository.change(
-                            binding.id,  # noqa: B023 -- awaited before the next iteration
-                            partial(domain.confirm_stop, view=view),  # noqa: B023
-                            claimed=True,
-                        )
+                    await self.sessions.change(
+                        binding.id,
+                        partial(domain.confirm_stop, view=view),
+                        claimed=True,
                     )
                 except BoxieUnavailable:
                     logger.warning("Sandbox stop remains pending")
 
     async def collect_artifacts(self) -> None:
-        await self.store(lambda repository: repository.collect_artifacts())
+        await self.store.collect_artifacts()
 
     async def retry_retirements(self) -> None:
-        for identifier in await self.sessions(lambda repository: repository.retirements()):
+        for identifier in await self.sessions.retirements():
             try:
                 await self.boxie.retire(identifier)
-                await self.sessions(
-                    lambda repository: repository.retired(identifier)  # noqa: B023 -- awaited in this iteration
-                )
+                await self.sessions.retired(identifier)
             except BoxieUnavailable:
                 logger.warning("Artifact retirement remains pending")
 
     async def cleanup_inactive(self) -> None:
-        identifiers = await self.store(lambda repository: repository.inactive_identifiers())
-        await self.sessions(lambda repository: repository.stop_environments(identifiers))
+        identifiers = await self.store.inactive_identifiers()
+        await self.sessions.stop_environments(identifiers)
         await self.retry_stops()
         await self.collect_artifacts()
-        await self.store(lambda repository: repository.remove(identifiers))
+        await self.store.remove(identifiers)
         await self.retry_retirements()
 
     async def update_build(self, pr: int, update: BuildUpdate) -> EnvironmentMetadata:
-        metadata = await self.store(lambda repository: repository.update_build(pr, update))
+        metadata = await self.store.update_build(pr, update)
         await self.collect_artifacts()
         return metadata
 
@@ -111,9 +107,7 @@ class CliPlaygroundService:
             artifact.artifact_id, artifact.sha256, self.staging.archive(artifact.artifact_id)
         )
         try:
-            environment = await self.store(
-                lambda repository: repository.finish_upload(artifact, intent.build)
-            )
+            environment = await self.store.finish_upload(artifact, intent.build)
         except ArtifactConflictError:
             self.staging.remove(artifact.artifact_id)
             raise
@@ -123,16 +117,14 @@ class CliPlaygroundService:
 
     async def recover(self, *, startup: bool = True) -> None:
         # A restarted process cannot finish an in-flight terminal attachment.
-        for binding in await self.sessions(lambda repository: repository.bindings()):
+        for binding in await self.sessions.bindings():
             if binding.attachment_deadline is not None and (
                 startup or binding.attachment_deadline <= self.clock()
             ):
                 await self.cancel_attachment(binding.id, claim=binding.attachment_claim)
         # A restarted process cannot return an old page's one-time credential.
-        for intent in await self.sessions(lambda repository: repository.creates()):
-            saved = await self.sessions(
-                lambda repository: repository.get(intent.id)  # noqa: B023 -- awaited in this iteration
-            )
+        for intent in await self.sessions.creates():
+            saved = await self.sessions.get(intent.id)
             if saved is not None and (
                 saved.attached or saved.attachment_deadline is not None or saved.pending_stop
             ):
@@ -143,12 +135,10 @@ class CliPlaygroundService:
                 continue
             try:
                 sandbox = await self.boxie.create(str(intent.id), intent.spec)
-                await self.sessions(
-                    lambda repository: repository.recover_creation(intent, sandbox)  # noqa: B023 -- awaited in this iteration
-                )
+                await self.sessions.recover_creation(intent, sandbox)
             except BoxieUnavailable:
                 logger.warning("Sandbox admission recovery remains pending")
-        for upload_intent in await self.sessions(lambda repository: repository.uploads()):
+        for upload_intent in await self.sessions.uploads():
             try:
                 await self.finish_upload(upload_intent)
             except BoxieUnavailable, ArtifactConflictError:
@@ -158,11 +148,8 @@ class CliPlaygroundService:
     async def binding(
         self, preview_id: str, identifier: UUID, revision: str, credential: str
     ) -> SessionBinding:
-        binding = await self.sessions(lambda repository: repository.get(identifier))
-        if (
-            binding is None
-            or await self.store(lambda repository: repository.record(preview_id)) is None
-        ):
+        binding = await self.sessions.get(identifier)
+        if binding is None or await self.store.record(preview_id) is None:
             raise LookupError("session not found")
         domain.authenticate_binding(binding, preview_id, revision, credential, self.clock())
         return binding
@@ -170,16 +157,14 @@ class CliPlaygroundService:
     async def claim_attachment(
         self, preview_id: str, identifier: UUID, revision: str, credential: str
     ) -> SessionBinding:
-        if await self.store(lambda repository: repository.record(preview_id)) is None:
+        if await self.store.record(preview_id) is None:
             raise LookupError("session not found")
 
         def change(binding: SessionBinding) -> None:
             domain.authenticate_binding(binding, preview_id, revision, credential, self.clock())
             domain.claim_attachment(binding, self.clock())
 
-        binding = await self.sessions(
-            lambda repository: repository.change(identifier, change, claimed=True)
-        )
+        binding = await self.sessions.change(identifier, change, claimed=True)
         if binding is None:
             raise LookupError("session not found")
         return binding
@@ -202,25 +187,23 @@ class CliPlaygroundService:
         *,
         claim: int | None = None,
     ) -> None:
-        if await self.store(lambda repository: repository.record(preview_id)) is None:
+        if await self.store.record(preview_id) is None:
             raise LookupError("session not found")
 
         def change(binding: SessionBinding) -> None:
             domain.authenticate_binding(binding, preview_id, revision, credential, self.clock())
             domain.complete_attachment(binding, view, claim)
 
-        if await self.sessions(lambda repository: repository.change(identifier, change)) is None:
+        if await self.sessions.change(identifier, change) is None:
             raise LookupError("session not found")
 
     async def cancel_attachment(self, identifier: UUID, *, claim: int | None = None) -> None:
-        await self.sessions(
-            lambda repository: repository.change(
-                identifier, lambda binding: domain.cancel_attachment(binding, claim)
-            )
+        await self.sessions.change(
+            identifier, lambda binding: domain.cancel_attachment(binding, claim)
         )
 
     async def create_session(self, preview_id: str, revision: str) -> tuple[SessionBinding, str]:
-        environment = await self.store(lambda repository: repository.get(preview_id))
+        environment = await self.store.get(preview_id)
         if environment is None:
             raise LookupError("preview not found")
         if environment.revision != revision:
@@ -234,7 +217,7 @@ class CliPlaygroundService:
             claim_until=self.clock() + 30,
             spec=SandboxRequest(artifact_id=environment.artifact_id),
         )
-        await self.sessions(lambda repository: repository.create_intent(intent))
+        await self.sessions.create_intent(intent)
         self.active_creates.add(intent.id)
         try:
             sandbox = await self.boxie.create(str(intent.id), intent.spec)
@@ -245,39 +228,35 @@ class CliPlaygroundService:
                 credential_hash=intent.credential_hash,
                 sandbox=sandbox,
             )
-            await self.sessions(lambda repository: repository.save(binding))
-            current = await self.store(lambda repository: repository.get(preview_id))
+            await self.sessions.save(binding)
+            current = await self.store.get(preview_id)
             if current is None or current.revision != revision:
                 binding.pending_stop = True
-                await self.sessions(lambda repository: repository.save(binding))
+                await self.sessions.save(binding)
                 await self.retry_stops()
                 raise ArtifactConflictError("preview revision changed")
             intent.claim_until = self.clock() + 30
-            await self.sessions(lambda repository: repository.create_intent(intent))
+            await self.sessions.create_intent(intent)
             return binding, credential
         except BaseException:
             # The persisted idempotency key resolves ambiguous/cancelled admissions on recovery.
             with CancelScope(shield=True):
-                saved = await self.sessions(
-                    lambda repository: repository.get(intent.id)  # noqa: B023 -- awaited in this iteration
-                )
+                saved = await self.sessions.get(intent.id)
                 if (
                     saved is None
                     or saved.sandbox.cleanup_pending
                     or saved.sandbox.state not in {"terminated", "failed"}
                 ):
                     intent.abandoned = True
-                    await self.sessions(lambda repository: repository.create_intent(intent))
+                    await self.sessions.create_intent(intent)
                     if saved is not None:
-                        await self.sessions(
-                            lambda repository: repository.change(saved.id, domain.request_stop)
-                        )
+                        await self.sessions.change(saved.id, domain.request_stop)
             raise
         finally:
             self.active_creates.discard(intent.id)
 
     async def stop_session(self, binding: SessionBinding) -> None:
-        await self.sessions(lambda repository: repository.change(binding.id, domain.request_stop))
+        await self.sessions.change(binding.id, domain.request_stop)
         await self.retry_stops()
 
     async def cleanup_periodically(self) -> None:
@@ -297,7 +276,7 @@ class CliPlaygroundService:
         build: BuildIdentity | None = None,
     ) -> Environment:
         ArtifactIdentity(sha=sha, pr=pr)
-        await self.store(lambda repository: repository.check_build(pr, build))
+        await self.store.check_build(pr, build)
         try:
             await asyncio.wait_for(self.uploads.acquire(), timeout=1)
         except TimeoutError as error:
@@ -330,20 +309,20 @@ class CliPlaygroundService:
                     raise ValueError("invalid binary bundle") from error
                 # Revisions may expire while the upload body is streaming.
                 await self.cleanup_inactive()
-                await self.store(lambda repository: repository.check_build(pr, build))
+                await self.store.check_build(pr, build)
                 revision = sha if build is None else f"{sha}-{build.run_number}-{build.run_attempt}"
-                existing = await self.store(lambda repository: repository.revision(pr, revision))
+                existing = await self.store.revision(pr, revision)
                 if existing is not None and (existing.sha256 != digest or existing.clis != clis):
                     raise ArtifactConflictError(
                         "this revision already has different binaries or CLI set"
                     )
-                current = await self.store(lambda repository: repository.get(domain.identifier(pr)))
+                current = await self.store.get(domain.identifier(pr))
                 if current is not None and current.revision == revision:
                     return current
                 pending = next(
                     (
                         item
-                        for item in (await self.sessions(lambda repository: repository.uploads()))
+                        for item in (await self.sessions.uploads())
                         if item.artifact.pr == pr and item.artifact.revision == revision
                     ),
                     None,
@@ -368,7 +347,7 @@ class CliPlaygroundService:
                 )
                 await run_staging(partial(self.staging.stage, metadata.artifact_id, canonical))
                 try:
-                    await self.sessions(lambda repository: repository.upload_intent(intent))
+                    await self.sessions.upload_intent(intent)
                 except ArtifactConflictError:
                     await run_staging(partial(self.staging.remove, metadata.artifact_id))
                     raise
@@ -380,20 +359,19 @@ class CliPlaygroundService:
 
     async def close_pull_request(self, pr: int) -> int:
         # Publish must see the tombstone even while we wait for its upload lock.
-        await self.store(lambda repository: repository.close_pull_request(pr))
+        await self.store.close_pull_request(pr)
         async with self.uploads:
-            identifiers = await self.store(lambda repository: repository.for_pull_request(pr))
-            identifiers.add(domain.identifier(pr))
-            await self.sessions(lambda repository: repository.stop_environments(identifiers))
+            identifiers = {domain.identifier(pr)}
+            await self.sessions.stop_environments(identifiers)
             await self.collect_artifacts()
             await self.retry_stops()
-            removed = await self.store(lambda repository: repository.remove(identifiers))
+            removed = await self.store.remove(identifiers)
             await self.retry_retirements()
             return removed
 
     async def reopen_pull_request(self, pr: int) -> None:
         async with self.uploads:
-            await self.store(lambda repository: repository.reopen_pull_request(pr))
+            await self.store.reopen_pull_request(pr)
 
     async def metadata(self, identifier: str) -> EnvironmentMetadata | None:
-        return await self.store(lambda repository: repository.metadata(identifier))
+        return await self.store.metadata(identifier)

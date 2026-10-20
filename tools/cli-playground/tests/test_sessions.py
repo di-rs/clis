@@ -96,9 +96,7 @@ def test_copied_ids_cannot_attach_or_delete_and_no_raw_credential_is_persisted(
             pytest.fail("foreign preview accepted")
     from hashlib import sha256
 
-    saved = call(
-        api_client, lambda: service.sessions(lambda repository: repository.get(UUID(binding["id"])))
-    )
+    saved = call(api_client, lambda: service.sessions.get(UUID(binding["id"])))
     assert saved is not None
     assert saved.credential_hash == sha256(binding["credential"].encode()).hexdigest()
     assert binding["credential"] not in saved.model_dump_json()
@@ -107,9 +105,7 @@ def test_copied_ids_cannot_attach_or_delete_and_no_raw_credential_is_persisted(
         headers={**ORIGIN, "Authorization": f"Bearer {binding['credential']}"},
     )
     assert response.status_code == 200
-    saved = call(
-        api_client, lambda: service.sessions(lambda repository: repository.get(UUID(binding["id"])))
-    )
+    saved = call(api_client, lambda: service.sessions.get(UUID(binding["id"])))
     assert saved is not None and saved.sandbox.state == "terminated"
 
 
@@ -128,9 +124,7 @@ def test_page_reload_gets_a_fresh_binding_and_backend_shutdown_keeps_claimed_san
         assert ws.receive_json()["absolute_deadline"] == first["absolute_deadline"]
         attach_terminal(ws)
     call(api_client, lambda: service.boxie.close())
-    saved = call(
-        api_client, lambda: service.sessions(lambda repository: repository.get(UUID(first["id"])))
-    )
+    saved = call(api_client, lambda: service.sessions.get(UUID(first["id"])))
     assert saved is not None and saved.sandbox.state == "ready"
 
 
@@ -148,7 +142,7 @@ def test_stop_failure_survives_preview_removal_and_restart_without_touching_othe
     # Claim B so restart recovery can distinguish a delivered session from an abandoned create.
     call(
         api_client,
-        lambda: service.sessions(lambda repository: repository.claimed(UUID(second["id"]))),
+        lambda: service.sessions.claimed(UUID(second["id"])),
     )
     original = client.terminate
 
@@ -159,7 +153,7 @@ def test_stop_failure_survives_preview_removal_and_restart_without_touching_othe
     if expiry:
         record = call(
             api_client,
-            lambda: service.store(lambda repository: repository.record(first["preview_id"])),
+            lambda: service.store.record(first["preview_id"]),
         )
         assert record is not None
         record.expires_at = 0
@@ -186,19 +180,17 @@ def test_stop_failure_survives_preview_removal_and_restart_without_touching_othe
             == 200
         )
     assert not (service.settings.data_dir / first["preview_id"]).exists()
-    saved = call(
-        api_client, lambda: service.sessions(lambda repository: repository.get(UUID(first["id"])))
-    )
+    saved = call(api_client, lambda: service.sessions.get(UUID(first["id"])))
     assert saved is not None and saved.pending_stop
     monkeypatch.setattr(client, "terminate", original)
     with TestClient(create_app(service.settings, boxie=client), base_url="https://play.example"):
         saved_first = call(
             api_client,
-            lambda: service.sessions(lambda repository: repository.get(UUID(first["id"]))),
+            lambda: service.sessions.get(UUID(first["id"])),
         )
         saved_second = call(
             api_client,
-            lambda: service.sessions(lambda repository: repository.get(UUID(second["id"]))),
+            lambda: service.sessions.get(UUID(second["id"])),
         )
         assert saved_first is not None and saved_second is not None
         assert client.sandboxes[saved_first.sandbox.id].state == "terminated"
@@ -284,7 +276,7 @@ def test_database_failure_at_websocket_admission_returns_unavailable(
 
     binding = admission(api_client, upload(api_client)["id"], "a" * 40)
 
-    def unavailable(self: SessionStore, identifier: UUID) -> SessionBinding | None:
+    async def unavailable(self: SessionStore, identifier: UUID) -> SessionBinding | None:
         raise PersistenceUnavailable("database unavailable")
 
     monkeypatch.setattr(SessionStore, "get", unavailable)

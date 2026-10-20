@@ -29,7 +29,6 @@ def upgrade() -> None:
             name="valid_build",
         ),
     )
-    op.create_index("ix_preview_id", "preview", ["id"])
     op.create_table(
         "artifact_revision",
         sa.Column("pr", sa.BigInteger(), sa.ForeignKey("preview.pr"), primary_key=True),

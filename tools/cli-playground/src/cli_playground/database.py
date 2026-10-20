@@ -1,16 +1,14 @@
 """PostgreSQL adapter lifecycle; application ports never expose SQL sessions."""
 
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
-from typing import cast
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlmodel import Session
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from cli_playground.ports import PersistenceUnavailable, StoreRunner
+from cli_playground.ports import PersistenceUnavailable
 
 SessionFactory = async_sessionmaker[AsyncSession]
 
@@ -35,22 +33,14 @@ async def check_schema(sessions: SessionFactory) -> None:
             raise RuntimeError("Playground database needs an explicit schema upgrade")
 
 
-def adapt_store[Store](
-    sessions: SessionFactory, factory: Callable[[Session], Store]
-) -> StoreRunner[Store]:
-    async def run[Result](operation: Callable[[Store], Result]) -> Result:
-        async with sessions() as session:
-            return await session.run_sync(lambda sync: operation(factory(cast(Session, sync))))
-
-    return run
-
-
-@contextmanager
-def connection(session: Session, *, write: bool = False) -> Iterator[Session]:
+@asynccontextmanager
+async def connection(
+    sessions: SessionFactory, *, write: bool = False
+) -> AsyncIterator[AsyncSession]:
     try:
-        with session:
+        async with sessions() as session:
             if write:
-                with session.begin():
+                async with session.begin():
                     yield session
             else:
                 yield session

@@ -239,9 +239,7 @@ def test_expired_previews_are_unavailable_before_the_periodic_sweep(
     assert (
         call(
             api_client,
-            lambda: service.store(
-                lambda repository: repository.record(deployed["id"], include_inactive=True)
-            ),
+            lambda: service.store.record(deployed["id"], include_inactive=True),
         )
         is not None
     )
@@ -384,10 +382,10 @@ def test_pr_close_rejects_an_upload_that_started_before_closure(tmp_path: Path) 
             await started.wait()
             closing = asyncio.create_task(client.delete("/api/pull-requests/123"))
             for _ in range(100):
-                if await app.state.store(lambda repository: repository.is_closed(123)):
+                if await app.state.store.is_closed(123):
                     break
                 await asyncio.sleep(0.001)
-            assert await app.state.store(lambda repository: repository.is_closed(123))
+            assert await app.state.store.is_closed(123)
             release.set()
             assert (await deploying).status_code == 409
             assert (await closing).json() == {"deleted": 0}

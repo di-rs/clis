@@ -4,9 +4,9 @@ from collections.abc import Callable
 from uuid import UUID
 
 from sqlalchemy.dialects.postgresql import insert
-from sqlmodel import Session, col, delete, select, update
+from sqlmodel import col, delete, select, update
 
-from cli_playground.database import connection
+from cli_playground.database import SessionFactory, connection
 from cli_playground.domain import CreateIntent, SessionBinding, UploadIntent, check_build
 from cli_playground.models import BuildIdentity
 from cli_playground.sandbox import SandboxView, validate_sandbox
@@ -15,19 +15,21 @@ from cli_playground.tables import Binding, Creation, Retirement, Upload
 
 
 class SessionStore:
-    def __init__(self, session: Session) -> None:
-        self.session = session
+    def __init__(self, sessions: SessionFactory) -> None:
+        self.sessions = sessions
 
-    def save(self, binding: SessionBinding) -> None:
-        with connection(self.session, write=True) as session:
-            session.merge(Binding(**(binding.model_dump(mode="json") | {"id": binding.id})))
+    async def save(self, binding: SessionBinding) -> None:
+        async with connection(self.sessions, write=True) as session:
+            await session.merge(Binding(**(binding.model_dump(mode="json") | {"id": binding.id})))
 
-    def change(
+    async def change(
         self, identifier: UUID, change: Callable[[SessionBinding], None], *, claimed: bool = False
     ) -> SessionBinding | None:
-        with connection(self.session, write=True) as session:
+        async with connection(self.sessions, write=True) as session:
             row = (
-                session.exec(select(Binding).where(Binding.id == identifier).with_for_update())
+                await session.exec(
+                    select(Binding).where(Binding.id == identifier).with_for_update()
+                )
             ).first()
             if row is None:
                 return None
@@ -36,40 +38,40 @@ class SessionStore:
             for name, value in binding.model_dump(mode="json", exclude={"id"}).items():
                 setattr(row, name, value)
             if claimed:
-                session.exec(delete(Creation).where(col(Creation.id) == identifier))
+                await session.exec(delete(Creation).where(col(Creation.id) == identifier))
             return binding
 
-    def bindings(self) -> list[SessionBinding]:
-        with connection(self.session) as session:
+    async def bindings(self) -> list[SessionBinding]:
+        async with connection(self.sessions) as session:
             return [
                 SessionBinding.model_validate(row.model_dump())
-                for row in session.exec(select(Binding))
+                for row in await session.exec(select(Binding))
             ]
 
-    def get(self, identifier: UUID) -> SessionBinding | None:
-        with connection(self.session) as session:
-            row = session.get(Binding, identifier)
+    async def get(self, identifier: UUID) -> SessionBinding | None:
+        async with connection(self.sessions) as session:
+            row = await session.get(Binding, identifier)
             return SessionBinding.model_validate(row.model_dump()) if row else None
 
-    def create_intent(self, intent: CreateIntent) -> None:
-        with connection(self.session, write=True) as session:
-            session.merge(Creation(**(intent.model_dump(mode="json") | {"id": intent.id})))
+    async def create_intent(self, intent: CreateIntent) -> None:
+        async with connection(self.sessions, write=True) as session:
+            await session.merge(Creation(**(intent.model_dump(mode="json") | {"id": intent.id})))
 
-    def creates(self) -> list[CreateIntent]:
-        with connection(self.session) as session:
+    async def creates(self) -> list[CreateIntent]:
+        async with connection(self.sessions) as session:
             return [
                 CreateIntent.model_validate(row.model_dump())
-                for row in session.exec(select(Creation))
+                for row in await session.exec(select(Creation))
             ]
 
-    def claimed(self, identifier: UUID) -> None:
-        with connection(self.session, write=True) as session:
-            session.exec(delete(Creation).where(col(Creation.id) == identifier))
+    async def claimed(self, identifier: UUID) -> None:
+        async with connection(self.sessions, write=True) as session:
+            await session.exec(delete(Creation).where(col(Creation.id) == identifier))
 
-    def upload_intent(self, intent: UploadIntent) -> None:
-        with connection(self.session, write=True) as session:
-            row = locked_preview(session, intent.artifact.pr)
-            check_build(preview_value(session, row), row.closed, intent.build)
+    async def upload_intent(self, intent: UploadIntent) -> None:
+        async with connection(self.sessions, write=True) as session:
+            row = await locked_preview(session, intent.artifact.pr)
+            check_build(await preview_value(session, row), row.closed, intent.build)
             session.add(
                 Upload(
                     **intent.artifact.model_dump(),
@@ -82,8 +84,8 @@ class SessionStore:
                 )
             )
 
-    def uploads(self) -> list[UploadIntent]:
-        with connection(self.session) as session:
+    async def uploads(self) -> list[UploadIntent]:
+        async with connection(self.sessions) as session:
             return [
                 UploadIntent(
                     artifact=artifact_value(row),
@@ -100,36 +102,36 @@ class SessionStore:
                     previous_revision=row.previous_revision,
                     cancelled=row.cancelled,
                 )
-                for row in session.exec(select(Upload))
+                for row in await session.exec(select(Upload))
             ]
 
-    def retire(self, identifier: UUID) -> None:
-        with connection(self.session, write=True) as session:
-            session.execute(
+    async def retire(self, identifier: UUID) -> None:
+        async with connection(self.sessions, write=True) as session:
+            await session.exec(
                 insert(Retirement)
                 .values(artifact_id=identifier, completed=False)
                 .on_conflict_do_nothing()
             )
 
-    def retirements(self) -> list[UUID]:
-        with connection(self.session) as session:
+    async def retirements(self) -> list[UUID]:
+        async with connection(self.sessions) as session:
             return list(
-                session.exec(
+                await session.exec(
                     select(Retirement.artifact_id).where(col(Retirement.completed).is_(False))
                 )
             )
 
-    def retired(self, identifier: UUID) -> None:
-        with connection(self.session, write=True) as session:
-            session.exec(
+    async def retired(self, identifier: UUID) -> None:
+        async with connection(self.sessions, write=True) as session:
+            await session.exec(
                 update(Retirement)
                 .where(col(Retirement.artifact_id) == identifier)
                 .values(completed=True)
             )
 
-    def stop_environments(self, identifiers: set[str]) -> None:
-        with connection(self.session, write=True) as session:
-            rows = session.exec(
+    async def stop_environments(self, identifiers: set[str]) -> None:
+        async with connection(self.sessions, write=True) as session:
+            rows = await session.exec(
                 select(Binding)
                 .where(col(Binding.preview_id).in_(identifiers))
                 .order_by(col(Binding.id))
@@ -143,12 +145,12 @@ class SessionStore:
                 }:
                     row.pending_stop = True
 
-    def recover_creation(self, intent: CreateIntent, sandbox: SandboxView) -> None:
-        with connection(self.session, write=True) as session:
+    async def recover_creation(self, intent: CreateIntent, sandbox: SandboxView) -> None:
+        async with connection(self.sessions, write=True) as session:
             row = (
-                session.exec(select(Binding).where(Binding.id == intent.id).with_for_update())
+                await session.exec(select(Binding).where(Binding.id == intent.id).with_for_update())
             ).first()
-            pending = session.get(Creation, intent.id, with_for_update=True)
+            pending = await session.get(Creation, intent.id, with_for_update=True)
             if pending is None or (
                 row is not None
                 and (row.attached or row.attachment_deadline is not None or row.pending_stop)
@@ -164,4 +166,4 @@ class SessionStore:
                 sandbox=sandbox,
                 pending_stop=True,
             )
-            session.merge(Binding(**(binding.model_dump(mode="json") | {"id": binding.id})))
+            await session.merge(Binding(**(binding.model_dump(mode="json") | {"id": binding.id})))

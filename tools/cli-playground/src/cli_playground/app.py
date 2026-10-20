@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from cli_playground.boxie_client import HttpBoxieClient
 from cli_playground.config import Settings
-from cli_playground.database import adapt_store, check_schema, session_factory
+from cli_playground.database import check_schema, session_factory
 from cli_playground.ports import PersistenceUnavailable
 from cli_playground.routes import create_router
 from cli_playground.sandbox import BoxieClient
@@ -46,13 +46,8 @@ def create_app(
     sessions = session_factory(str(settings.database_url))
     service = CliPlaygroundService(
         settings,
-        adapt_store(
-            sessions,
-            lambda session: EnvironmentStore(
-                session, preview_seconds=settings.preview_seconds, clock=clock
-            ),
-        ),
-        adapt_store(sessions, SessionStore),
+        EnvironmentStore(sessions, preview_seconds=settings.preview_seconds, clock=clock),
+        SessionStore(sessions),
         boxie,
         clock=clock,
     )
@@ -63,10 +58,7 @@ def create_app(
         try:
             await check_schema(sessions)
             service.staging.recover(
-                {
-                    intent.artifact.artifact_id
-                    for intent in await service.sessions(lambda repository: repository.uploads())
-                }
+                {intent.artifact.artifact_id for intent in await service.sessions.uploads()}
             )
             await service.recover()
             cleanup = asyncio.create_task(service.cleanup_periodically())
