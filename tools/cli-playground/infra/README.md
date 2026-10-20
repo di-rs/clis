@@ -3,9 +3,7 @@
 Use the [shared-host guide](../../../infra/environments/single-host/README.md) for
 setup, SSH credential handoff, release gates and failure inspection. Routine
 application releases leave the proxy and Boxie alone. The application image contains
-both Frontend and Backend. Existing disposable installations must be reset before
-using the artifact-only Boxie API; see the
-[reset procedure](../../../docs/component-naming-cutover.md).
+both Frontend and Backend.
 
 ## Independent local unit
 
