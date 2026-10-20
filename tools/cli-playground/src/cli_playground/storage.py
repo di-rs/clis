@@ -4,6 +4,7 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 
+from sqlalchemy import false
 from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import col, select, update
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -27,7 +28,7 @@ from cli_playground.models import (
     EnvironmentMetadata,
     PreviewRecord,
 )
-from cli_playground.tables import Preview, Retirement, Revision, Upload
+from cli_playground.tables import Binding, Preview, Retirement, Revision, Upload
 
 
 async def locked_preview(session: AsyncSession, pr: int) -> Preview:
@@ -162,12 +163,20 @@ class EnvironmentStore:
 
     async def inactive_identifiers(self) -> set[str]:
         async with connection(self.sessions) as session:
+            needs_stop = select(Binding.preview_id).where(
+                col(Binding.pending_stop)
+                | col(Binding.sandbox)["cleanup_pending"].as_boolean()
+                | col(Binding.sandbox)["state"].as_string().not_in(["terminated", "failed"])
+            )
             return set(
                 await session.exec(
                     select(Preview.id).where(
-                        (col(Preview.expires_at) <= self.clock())
-                        | col(Preview.closed)
-                        | col(Preview.expires_at).is_(None)
+                        (
+                            (col(Preview.expires_at) <= self.clock())
+                            | col(Preview.closed)
+                            | col(Preview.expires_at).is_(None)
+                        )
+                        & (col(Preview.expires_at).is_not(None) | col(Preview.id).in_(needs_stop))
                     )
                 )
             )
@@ -301,28 +310,28 @@ class EnvironmentStore:
 
     async def collect_artifacts(self) -> None:
         async with connection(self.sessions, write=True) as session:
-            rows = await session.exec(select(Preview).order_by(col(Preview.pr)).with_for_update())
-            for row in rows:
-                record = await preview_value(session, row)
-                current = (
-                    record.artifact
-                    if record
-                    and record.artifact
-                    and not row.closed
-                    and record.expires_at > self.clock()
-                    and record.artifact.expires_at > self.clock()
-                    else None
+            now = self.clock()
+            active = (
+                select(Revision.artifact_id)
+                .join(
+                    Preview,
+                    (col(Preview.pr) == col(Revision.pr))
+                    & (col(Preview.current_revision) == col(Revision.revision)),
                 )
-                pending = set(
-                    await session.exec(select(Upload.artifact_id).where(Upload.pr == row.pr))
+                .where(
+                    ~col(Preview.closed),
+                    col(Preview.expires_at) > now,
+                    col(Revision.expires_at) > now,
                 )
-                revisions = await session.exec(select(Revision).where(Revision.pr == row.pr))
-                for artifact in revisions:
-                    if artifact.artifact_id not in pending and (
-                        current is None or current.artifact_id != artifact.artifact_id
-                    ):
-                        await session.execute(
-                            insert(Retirement)
-                            .values(artifact_id=artifact.artifact_id, completed=False)
-                            .on_conflict_do_nothing()
-                        )
+            )
+            # One snapshot sees a completing upload as either pending or current.
+            stale = select(col(Revision.artifact_id), false()).where(
+                col(Revision.artifact_id).not_in(select(Upload.artifact_id)),
+                col(Revision.artifact_id).not_in(active),
+                col(Revision.artifact_id).not_in(select(Retirement.artifact_id)),
+            )
+            await session.execute(
+                insert(Retirement)
+                .from_select(["artifact_id", "completed"], stale)
+                .on_conflict_do_nothing()
+            )

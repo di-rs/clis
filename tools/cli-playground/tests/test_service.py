@@ -522,3 +522,44 @@ def test_durable_zip_staging_does_not_block_metadata(
         await upload
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("outcome", ["closed", "newer-build", "lost-ack"])
+def test_staged_upload_cleanup_requires_known_rejection(
+    docker_settings: Settings, monkeypatch: pytest.MonkeyPatch, outcome: str
+) -> None:
+    from cli_playground.domain import UploadIntent
+    from cli_playground.ports import PersistenceUnavailable
+
+    async def body() -> AsyncIterator[bytes]:
+        yield binary_bundle({"echor": elf_binary()})
+
+    async def exercise() -> None:
+        service = make_service(docker_settings)
+        build = BuildIdentity(sha="a" * 40, run_id=100, run_number=1, run_attempt=1)
+        save = service.sessions.upload_intent
+
+        async def interrupted(intent: UploadIntent) -> None:
+            if outcome == "closed":
+                await service.store.close_pull_request(123)
+            elif outcome == "newer-build":
+                await service.store.update_build(
+                    123,
+                    BuildUpdate(
+                        sha="b" * 40, run_id=200, run_number=2, run_attempt=1, state="building"
+                    ),
+                )
+            await save(intent)
+            raise PersistenceUnavailable("commit acknowledgement lost")
+
+        monkeypatch.setattr(service.sessions, "upload_intent", interrupted)
+        expected = PersistenceUnavailable if outcome == "lost-ack" else ArtifactConflictError
+        with pytest.raises(expected):
+            await service.deploy(body(), "a" * 40, 123, build)
+        pending = await service.sessions.uploads()
+        archives = list(service.staging.uploads.glob("*.zip"))
+        assert len(pending) == len(archives) == (1 if outcome == "lost-ack" else 0)
+        if pending:
+            assert archives == [service.staging.archive(pending[0].artifact.artifact_id)]
+
+    asyncio.run(exercise())

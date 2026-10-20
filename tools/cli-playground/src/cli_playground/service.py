@@ -88,23 +88,10 @@ class CliPlaygroundService:
 
     async def cleanup_inactive(self) -> None:
         identifiers = await self.store.inactive_identifiers()
-        identifiers.update(
-            [
-                binding.preview_id
-                for binding in (await self.sessions.bindings())
-                if (await self.store.record(binding.preview_id)) is None
-            ]
-        )
         await self.sessions.stop_environments(identifiers)
         await self.retry_stops()
         await self.collect_artifacts()
-        await self.store.remove(
-            {
-                identifier
-                for identifier in identifiers
-                if await self.store.record(identifier) is None
-            }
-        )
+        await self.store.remove(identifiers)
         await self.retry_retirements()
 
     async def update_build(self, pr: int, update: BuildUpdate) -> EnvironmentMetadata:
@@ -357,7 +344,11 @@ class CliPlaygroundService:
                     previous_revision=current.revision if current else None,
                 )
                 await run_staging(partial(self.staging.stage, metadata.artifact_id, canonical))
-                await self.sessions.upload_intent(intent)
+                try:
+                    await self.sessions.upload_intent(intent)
+                except ArtifactConflictError:
+                    await run_staging(partial(self.staging.remove, metadata.artifact_id))
+                    raise
                 return await self.finish_upload(intent)
         finally:
             if temporary is not None:

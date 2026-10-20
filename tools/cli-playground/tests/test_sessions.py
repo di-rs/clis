@@ -93,8 +93,12 @@ def test_copied_ids_cannot_attach_or_delete_and_no_raw_credential_is_persisted(
             socket_url({**binding, "preview_id": second["id"]}), headers=ORIGIN
         ):
             pytest.fail("foreign preview accepted")
-    root = service.settings.data_dir
-    assert all(binding["credential"] not in p.read_text() for p in root.rglob("*.json"))
+    from hashlib import sha256
+
+    saved = call(api_client, lambda: service.sessions.get(UUID(binding["id"])))
+    assert saved is not None
+    assert saved.credential_hash == sha256(binding["credential"].encode()).hexdigest()
+    assert binding["credential"] not in saved.model_dump_json()
     response = api_client.delete(
         f"/api/environments/{first['id']}/sessions/{binding['id']}",
         headers={**ORIGIN, "Authorization": f"Bearer {binding['credential']}"},

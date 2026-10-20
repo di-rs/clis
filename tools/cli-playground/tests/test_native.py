@@ -29,6 +29,7 @@ def test_native_application_and_browser(tmp_path: Path) -> None:
         runtime_services=("faults", "supervisor", "api"),
     )
     stack.env.update(
+        CLI_PLAYGROUND_DATABASE_NETWORK=stack.postgres + "_playground",
         CLI_PLAYGROUND_IMAGE=os.environ.get("CLI_PLAYGROUND_IMAGE", "cli-playground:lifecycle"),
         BOXIE_TEST_PRODUCT_PORT=str(port),
         CLI_PLAYGROUND_PUBLIC_URL=origin,

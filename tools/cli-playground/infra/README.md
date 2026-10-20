@@ -26,7 +26,7 @@ docker volume create cli-playground-data
 export CLI_PLAYGROUND_PROJECT_NAME=cli-playground
 export CLI_PLAYGROUND_DATA_VOLUME=cli-playground-data
 export CLI_PLAYGROUND_CONSUMER_NETWORK=boxie-consumers
-export CLI_PLAYGROUND_DATABASE_NETWORK=boxie-control
+export CLI_PLAYGROUND_DATABASE_NETWORK=boxie-postgres_playground
 export CLI_PLAYGROUND_POSTGRES_DSN_FILE=/private/path/playground-postgres.secret
 export CLI_PLAYGROUND_BOXIE_URL=http://boxie-api:8090
 export CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE=/private/path/consumer.secret
@@ -62,7 +62,8 @@ Provision a dedicated `cli_playground` database and login on the existing
 PostgreSQL service. For the independent local unit, have its operator create the
 database, grant ownership to that login, revoke public database access, and provide
 a mode-`0600` DSN file reachable through `CLI_PLAYGROUND_DATABASE_NETWORK`.
-Only the gateway joins that private network; the proxy does not.
+The database network contains only PostgreSQL and the gateway. Keep it separate
+from Boxie's control network; the proxy does not join it.
 
 Shared-host setup generates a separate password and DSN under
 `/etc/sanctuary/cli-playground/`. Its `provision.sh` adds the database using the
@@ -70,7 +71,9 @@ existing PostgreSQL administrator inside the database container. This works with
 already-initialized PostgreSQL volumes; it does not depend on first-boot scripts.
 The application receives only its own DSN, never the administrator password.
 
-`install.sh` provisions the database and runs Alembic before startup. `deploy.sh`
+`install.sh` reconciles the PostgreSQL Compose service to attach its internal
+`playground` network, which may restart PostgreSQL on an existing host. Schedule
+this first installation during the cutover window. It then provisions the database and runs Alembic before startup. `deploy.sh`
 runs the migration command from the new image before replacing the backend. A
 failed upgrade stops the deployment. Neither path enables multiple workers.
 For an existing host receiving this change, install the updated owner scripts and

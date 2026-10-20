@@ -41,7 +41,7 @@ pnpm --dir tools/cli-playground/frontend build
 The Python package lives in `src/cli_playground/`. The frontend build places real assets
 in `src/cli_playground/static/`, included in the installed
 wheel and sdist. To run the installed service, set `CLI_PLAYGROUND_DATA_DIR`,
-`CLI_PLAYGROUND_PUBLIC_URL`, `CLI_PLAYGROUND_DEPLOY_TOKEN`, `CLI_PLAYGROUND_BOXIE_URL`, and
+`CLI_PLAYGROUND_PUBLIC_URL`, `CLI_PLAYGROUND_DEPLOY_TOKEN`, `CLI_PLAYGROUND_BOXIE_URL`,
 `CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE` and `CLI_PLAYGROUND_POSTGRES_DSN_FILE`
 (private regular files, mode `0600`). Provision a separate PostgreSQL database and
 apply its schema before startup:

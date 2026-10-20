@@ -71,7 +71,7 @@ def render(root: Path) -> None:
         root / "cli-playground.env",
         {
             "CLI_PLAYGROUND_POSTGRES_DSN_FILE": str(dsn_file),
-            "CLI_PLAYGROUND_DATABASE_NETWORK": "boxie-control",
+            "CLI_PLAYGROUND_DATABASE_NETWORK": "boxie-postgres_playground",
             "CLI_PLAYGROUND_IMAGE": os.environ["CLI_PLAYGROUND_IMAGE"],
             "CLI_PLAYGROUND_DOMAIN": os.environ["CLI_PLAYGROUND_DOMAIN"],
             "CLI_PLAYGROUND_DEPLOY_TOKEN": token.read_text().strip(),
