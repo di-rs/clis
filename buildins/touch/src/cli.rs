@@ -1,8 +1,5 @@
+use anyhow::{Context, Result, anyhow};
 use clap::{Arg, ArgAction, Parser};
-use color_eyre::{
-    Result,
-    eyre::{Context, eyre},
-};
 use jiff::{
     Zoned,
     civil::DateTime,
@@ -57,7 +54,7 @@ pub struct Cli {
 /// # Errors
 /// Rejects malformed timestamps and dates outside the supported range.
 fn parse_timestamp(value: &str) -> Result<Timespec> {
-    let invalid = || eyre!("Invalid timestamp format. Use [[CC]YY]MMDDhhmm[.SS]");
+    let invalid = || anyhow!("Invalid timestamp format. Use [[CC]YY]MMDDhhmm[.SS]");
     let (digits, seconds) = value.split_once('.').unwrap_or((value, "00"));
     if !digits.bytes().all(|b| b.is_ascii_digit())
         || seconds.len() != 2
@@ -100,7 +97,7 @@ fn parse_timestamp(value: &str) -> Result<Timespec> {
 fn parse_adjustment(value: &str) -> Result<i64> {
     let digits = value.strip_prefix('-').unwrap_or(value);
     if !matches!(digits.len(), 2 | 4 | 6) || !digits.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(eyre!("Invalid adjustment. Use [-][[hh]mm]SS"));
+        return Err(anyhow!("Invalid adjustment. Use [-][[hh]mm]SS"));
     }
     let mut total = 0_i64;
     for pair in digits.as_bytes().as_chunks::<2>().0 {
@@ -108,12 +105,12 @@ fn parse_adjustment(value: &str) -> Result<i64> {
         total = total
             .checked_mul(60)
             .and_then(|v| v.checked_add(part))
-            .ok_or_else(|| eyre!("Adjustment is out of range"))?;
+            .ok_or_else(|| anyhow!("Adjustment is out of range"))?;
     }
     Ok(if value.starts_with('-') {
         total
             .checked_neg()
-            .ok_or_else(|| eyre!("Adjustment is out of range"))?
+            .ok_or_else(|| anyhow!("Adjustment is out of range"))?
     } else {
         total
     })
@@ -133,7 +130,7 @@ pub fn legacy_timestamp(value: &Path) -> Result<Option<Timespec>> {
     let numeric = if value.len() == 10 {
         let year = value
             .get(8..)
-            .ok_or_else(|| eyre!("Invalid legacy timestamp"))?;
+            .ok_or_else(|| anyhow!("Invalid legacy timestamp"))?;
         let century = if year.parse::<u8>()? >= 39 {
             "19"
         } else {
@@ -143,7 +140,7 @@ pub fn legacy_timestamp(value: &Path) -> Result<Option<Timespec>> {
             "{century}{year}{}",
             value
                 .get(..8)
-                .ok_or_else(|| eyre!("Invalid legacy timestamp"))?
+                .ok_or_else(|| anyhow!("Invalid legacy timestamp"))?
         )
     } else {
         value.to_owned()
@@ -152,7 +149,7 @@ pub fn legacy_timestamp(value: &Path) -> Result<Option<Timespec>> {
     time.tv_sec = time
         .tv_sec
         .checked_add(i64::from(Zoned::now().second()))
-        .ok_or_else(|| eyre!("Legacy timestamp out of range"))?;
+        .ok_or_else(|| anyhow!("Legacy timestamp out of range"))?;
     Ok(Some(time))
 }
 
@@ -184,11 +181,11 @@ pub fn date_times(value: &str, reference: Option<&Timestamps>) -> Result<Timesta
                 .next()
                 .is_some_and(|seconds| seconds.starts_with("60"))
             {
-                return Err(eyre!(
+                return Err(anyhow!(
                     "invalid date '{value}': seconds must be between 00 and 59"
                 ));
             }
-            let time = local_time(naive).wrap_err_with(|| format!("invalid date '{value}'"))?;
+            let time = local_time(naive).with_context(|| format!("invalid date '{value}'"))?;
             return Ok(Timestamps {
                 last_access: time,
                 last_modification: time,
@@ -206,7 +203,7 @@ pub fn date_times(value: &str, reference: Option<&Timestamps>) -> Result<Timesta
         } else {
             parse_datetime::parse_datetime(value)
         }
-        .wrap_err_with(|| format!("invalid date '{value}'"))?;
+        .with_context(|| format!("invalid date '{value}'"))?;
         Ok(Timespec {
             tv_sec: parsed.unix_epoch_second(),
             tv_nsec: i64::from(parsed.subsec_nanosecond()),
@@ -228,7 +225,7 @@ pub fn date_times(value: &str, reference: Option<&Timestamps>) -> Result<Timesta
 fn local_time(date: DateTime) -> Result<Timespec> {
     let time = TimeZone::system().to_ambiguous_timestamp(date);
     if matches!(time.offset(), AmbiguousOffset::Gap { .. }) {
-        return Err(eyre!("nonexistent local time"));
+        return Err(anyhow!("nonexistent local time"));
     }
     let nanos = time.earlier()?.as_nanosecond();
     Ok(Timespec {

@@ -1,7 +1,4 @@
-use color_eyre::{
-    Result,
-    eyre::{Context, eyre},
-};
+use anyhow::{Context, Result, anyhow};
 use rustix::fs::{self, AtFlags, CWD, Timespec, Timestamps, UTIME_NOW, UTIME_OMIT};
 use std::{fs::OpenOptions, os::unix::fs::MetadataExt, path::Path};
 
@@ -74,7 +71,7 @@ impl Options {
                     return Ok(());
                 }
                 Err(error) => {
-                    return Err(error).wrap_err_with(|| {
+                    return Err(error).with_context(|| {
                         format!("failed to read timestamps for {}", path.display())
                     });
                 }
@@ -89,7 +86,7 @@ impl Options {
             time.tv_sec = time
                 .tv_sec
                 .checked_add(self.adjustment)
-                .ok_or_else(|| eyre!("Timestamp adjustment overflow"))?;
+                .ok_or_else(|| anyhow!("Timestamp adjustment overflow"))?;
         }
         if !self.access {
             times.last_access = OMIT;
@@ -107,12 +104,12 @@ impl Options {
                     .create(true)
                     .truncate(false)
                     .open(path)
-                    .wrap_err_with(|| format!("failed to create file {}", path.display()))?;
+                    .with_context(|| format!("failed to create file {}", path.display()))?;
                 fs::futimens(&file, &times)
-                    .wrap_err_with(|| format!("failed to update timestamps for {}", path.display()))
+                    .with_context(|| format!("failed to update timestamps for {}", path.display()))
             }
             Err(error) => Err(error)
-                .wrap_err_with(|| format!("failed to update timestamps for {}", path.display())),
+                .with_context(|| format!("failed to update timestamps for {}", path.display())),
         }
     }
 }

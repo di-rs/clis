@@ -1,5 +1,5 @@
+use anyhow::Result;
 use cli_testing::cargo_bin_cmd;
-use color_eyre::Result;
 use predicates::prelude::*;
 use std::fs;
 

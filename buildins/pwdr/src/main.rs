@@ -1,13 +1,12 @@
 use std::{io::BufWriter, io::Write};
 
-use color_eyre::Result;
+use anyhow::Result;
 
 mod cli;
 use cli::Cli;
 use pwdr::{logical_path, physical_path};
 
 fn main() -> Result<std::process::ExitCode> {
-    color_eyre::install()?;
     cli_log::try_run("pwdr", |cli| run(&cli))
 }
 

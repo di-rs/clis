@@ -3,11 +3,8 @@ use std::{
     io::{BufRead, BufReader, BufWriter, IsTerminal, Write, stdin},
 };
 
+use anyhow::{Context, Result, bail};
 use clap::CommandFactory;
-use color_eyre::{
-    Result,
-    eyre::{Context, bail},
-};
 
 mod cli;
 use cli::Cli;
@@ -15,7 +12,6 @@ use cli::Cli;
 use parsu::parse_xml;
 
 fn main() -> Result<std::process::ExitCode> {
-    color_eyre::install()?;
     cli_log::try_run("parsu", |cli| run(&cli))
 }
 
@@ -45,7 +41,7 @@ fn get_reader(path: &str) -> Result<Box<dyn BufRead>> {
             Ok(Box::new(BufReader::new(stdin().lock())))
         }
         path => {
-            let file = File::open(path).wrap_err_with(|| format!("cannot open file {path}"))?;
+            let file = File::open(path).with_context(|| format!("cannot open file {path}"))?;
             Ok(Box::new(BufReader::new(file)))
         }
     }
