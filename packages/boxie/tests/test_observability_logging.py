@@ -571,3 +571,50 @@ def test_request_context_replaces_clears_and_restores() -> None:
             assert context.current_context()["sandbox_id"] == first
         assert context.current_request_id() == first
     assert context.current_request_id() is None
+
+
+@pytest.mark.parametrize(
+    "case,status,outcome",
+    [
+        ("unauthorized", "4xx", "failed"),
+        ("invalid", "4xx", "failed"),
+        ("accepted", "2xx", "succeeded"),
+    ],
+)
+def test_websocket_completion_tracks_handshake_result(case: str, status: str, outcome: str) -> None:
+    result = child(f"""
+from boxie.api.app import ApiConfig, create_app
+from boxie_test_support.api import serve
+from fastapi import WebSocket
+from websockets.asyncio.client import connect
+from websockets.exceptions import InvalidStatus
+seen = []
+class Ports: pass
+ports = Ports()
+app = create_app(ApiConfig(release="test", consumers={{"one":b"consumer-one-secret"}}), ports, ports, ports,
+    request_completed=lambda method, route, status, duration: seen.append(status))
+@app.websocket("/accepted")
+async def accepted(ws: WebSocket):
+    await ws.accept()
+    await ws.close()
+async def run():
+    async with serve(app) as origin:
+        # Match the entry point's log_config=None after the socket helper configures Uvicorn.
+        for name in ("uvicorn", "uvicorn.error"):
+            logging.getLogger(name).handlers.clear()
+            logging.getLogger(name).propagate = True
+        path = "/accepted" if {case!r} == "accepted" else "/v1/sandboxes/" + ("not-a-uuid" if {case!r} == "invalid" else "11111111-1111-1111-1111-111111111111") + "/terminal"
+        headers = {{}} if {case!r} == "unauthorized" else {{"Authorization":"Bearer consumer-one-secret"}}
+        try:
+            async with connect(origin.replace("http:","ws:")+path, additional_headers=headers):
+                assert {case!r} == "accepted"
+        except InvalidStatus as error:
+            assert {case!r} != "accepted"
+            assert error.response.status_code == (401 if {case!r} == "unauthorized" else 403)
+asyncio.run(run())
+assert seen == [{status!r}], seen
+dispatcher.close()
+""")
+    events = [event for event in records(result) if event["event"] == "request.completed"]
+    assert len(events) == 1
+    assert events[0]["outcome"] == outcome

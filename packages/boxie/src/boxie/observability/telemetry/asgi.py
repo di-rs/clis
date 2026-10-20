@@ -72,12 +72,19 @@ class RequestLogging:
                     (k, v) for k, v in message.get("headers", ()) if k.lower() != b"x-request-id"
                 ] + [(b"x-request-id", selected.encode("ascii"))]
             await send(message)
-            if message["type"] == "http.response.start":
+            if message["type"] in ("http.response.start", "websocket.http.response.start"):
                 code = message.get("status", 500)
                 status = f"{code // 100}xx" if type(code) is int and 100 <= code < 600 else "error"
-            elif message["type"] in ("websocket.close", "websocket.accept"):
+            elif message["type"] == "websocket.accept":
                 status, finished = "2xx", True
-            elif message["type"] == "http.response.body" and not message.get("more_body", False):
+            elif message["type"] == "websocket.close":
+                if not finished:
+                    status = "4xx"
+                finished = True
+            elif message["type"] in (
+                "http.response.body",
+                "websocket.http.response.body",
+            ) and not message.get("more_body", False):
                 finished = True
 
         with request_context(selected):

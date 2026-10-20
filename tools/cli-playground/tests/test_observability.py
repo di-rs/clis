@@ -140,3 +140,50 @@ def test_failed_upload_recovery_logs_saved_origin(
         assert origins == ["11111111-1111-1111-1111-111111111111"]
 
     asyncio.run(exercise())
+
+
+def test_periodic_cleanup_failure_keeps_its_action_id(
+    service: CliPlaygroundService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+    import logging
+
+    from cli_playground.observability import current_request_id, request_context
+
+    service.settings = service.settings.model_copy(update={"cleanup_interval_seconds": 0})
+    actions: list[str | None] = []
+    failures: list[str | None] = []
+
+    async def exercise() -> None:
+        failed = asyncio.Event()
+
+        class Capture(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                failures.append(current_request_id())
+                failed.set()
+
+        async def recover(*, startup: bool = True) -> None:
+            actions.append(current_request_id())
+            raise OSError("unavailable storage")
+
+        monkeypatch.setattr(service, "recover", recover)
+        logger = logging.getLogger("cli_playground.service")
+        handler = Capture()
+        logger.addHandler(handler)
+        inherited = "11111111-1111-1111-1111-111111111111"
+        with request_context(inherited):
+            task = asyncio.create_task(service.cleanup_periodically())
+            try:
+                async with asyncio.timeout(1):
+                    await failed.wait()
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                logger.removeHandler(handler)
+            assert current_request_id() == inherited
+        assert actions == failures
+        assert actions and all(
+            identity is not None and identity != inherited for identity in actions
+        )
+
+    asyncio.run(exercise())

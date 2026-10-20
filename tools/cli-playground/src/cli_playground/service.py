@@ -329,6 +329,11 @@ class CliPlaygroundService:
             self.active_creates.discard(intent.id)
 
     async def stop_session(self, binding: SessionBinding) -> None:
+        if (
+            binding.sandbox.state in {"terminated", "failed"}
+            and not binding.sandbox.cleanup_pending
+        ):
+            return
         if not binding.pending_stop:
             binding.stop_request_id = UUID(current_request_id() or str(uuid4()))
         binding.pending_stop = True
@@ -338,12 +343,12 @@ class CliPlaygroundService:
     async def cleanup_periodically(self) -> None:
         while True:
             await asyncio.sleep(self.settings.cleanup_interval_seconds)
-            try:
-                with request_context(str(uuid4())):
+            with request_context(str(uuid4())):
+                try:
                     async with self.uploads:
                         await self.recover(startup=False)
-            except OSError, RuntimeError, TimeoutError:
-                logger.exception("Failed to expire playground environments")
+                except OSError, RuntimeError, TimeoutError:
+                    logger.exception("Failed to expire playground environments")
 
     async def deploy(
         self,
