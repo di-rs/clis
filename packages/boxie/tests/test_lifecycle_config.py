@@ -5,7 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from boxie.bootstrap.config import LifecycleConfig, OrchestratorConfig
+from boxie.bootstrap.config import LifecycleConfig, SupervisorConfig
 from pydantic import ValidationError
 
 
@@ -26,10 +26,10 @@ def test_lifecycle_configuration_requires_verified_tls_and_explicit_dsn(tmp_path
         LifecycleConfig.model_validate({**settings.model_dump(), "temporal_namespace": ""})
 
 
-def test_orchestrator_file_ignores_environment_and_rejects_unknown_keys(
+def test_supervisor_file_ignores_environment_and_rejects_unknown_keys(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    config_path = tmp_path / "orchestrator.json"
+    config_path = tmp_path / "supervisor.json"
     data = {
         "data_dir": str(tmp_path / "approved"),
         "profiles_file": str(tmp_path / "profiles.json"),
@@ -39,11 +39,11 @@ def test_orchestrator_file_ignores_environment_and_rejects_unknown_keys(
     config_path.write_text(json.dumps(data))
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "unapproved"))
     monkeypatch.setenv("BOXIE_DATA_DIR", str(tmp_path / "unapproved"))
-    assert OrchestratorConfig.from_file(config_path).data_dir == tmp_path / "approved"
+    assert SupervisorConfig.from_file(config_path).data_dir == tmp_path / "approved"
 
     config_path.write_text(json.dumps({**data, "secret-value": "secret-value"}))
     with pytest.raises(ValueError) as raised:
-        OrchestratorConfig.from_file(config_path)
+        SupervisorConfig.from_file(config_path)
     assert "secret-value" not in str(raised.value)
     assert "secret-value" not in repr(raised.value.args)
     assert raised.value.__context__ is None

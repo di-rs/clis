@@ -24,12 +24,12 @@ from boxie.application.ports import AdmissionProfileResolver
 from boxie.contracts.consumer import SpecWire, ViewWire, spec_wire
 from boxie.contracts.execution import SnapshotWire
 from boxie.domain.errors import BoxieError
-from boxie.domain.lifecycle import OrchestratorObservation, SandboxRequest
+from boxie.domain.lifecycle import SandboxRequest, SupervisorObservation
 from boxie.domain.models import (
-    OrchestratorIdentity,
     Principal,
     SandboxSpec,
     SandboxView,
+    SupervisorIdentity,
     TerminationReason,
 )
 from boxie.observability.events import DiagnosticSink, Transition, deliver, emit
@@ -37,10 +37,10 @@ from boxie.persistence.database import SessionFactory
 from boxie.persistence.models import (
     Artifact,
     CapacitySlot,
-    OrchestratorObservationRecord,
     Outbox,
     Sandbox,
     SandboxArtifactRef,
+    SupervisorObservationRecord,
 )
 
 
@@ -87,7 +87,7 @@ class PostgresLifecycle:
         self,
         sessions: SessionFactory,
         resolver: AdmissionProfileResolver,
-        identity: OrchestratorIdentity,
+        identity: SupervisorIdentity,
         dependencies: DependencyCheck,
         readiness: AdmissionReadiness | None = None,
         *,
@@ -261,9 +261,9 @@ class PostgresLifecycle:
             return SandboxRequest(
                 sandbox_id,
                 Principal(row.consumer_id),
-                OrchestratorIdentity(row.installation_id, row.host_id),
+                SupervisorIdentity(row.installation_id, row.host_id),
                 row.generation,
-                row.orchestrator_boot_id,
+                row.supervisor_boot_id,
                 SpecWire.model_validate(row.spec).domain(),
                 SnapshotWire.model_validate(row.snapshot).domain(),
                 row.accepted_at,
@@ -272,10 +272,10 @@ class PostgresLifecycle:
                 TerminationReason(row.reason) if row.reason else None,
             )
 
-    async def bind_orchestrator_boot(
+    async def bind_supervisor_boot(
         self,
         principal: Principal,
-        identity: OrchestratorIdentity,
+        identity: SupervisorIdentity,
         sandbox_id: UUID,
         generation: int,
         expected_boot: UUID | None,
@@ -292,7 +292,7 @@ class PostgresLifecycle:
                         Sandbox.installation_id == identity.installation_id,
                         Sandbox.host_id == identity.host_id,
                         Sandbox.generation == generation,
-                        col(Sandbox.orchestrator_boot_id).is_not_distinct_from(expected_boot),
+                        col(Sandbox.supervisor_boot_id).is_not_distinct_from(expected_boot),
                         col(Sandbox.cleaned_at).is_(None),
                     )
                     .with_for_update()
@@ -300,16 +300,16 @@ class PostgresLifecycle:
             ).one_or_none()
             if row is None:
                 return False
-            row.orchestrator_boot_id = boot_id
+            row.supervisor_boot_id = boot_id
             if expected_boot != boot_id:
                 await session.exec(
-                    delete(OrchestratorObservationRecord).where(
-                        col(OrchestratorObservationRecord.sandbox_id) == sandbox_id
+                    delete(SupervisorObservationRecord).where(
+                        col(SupervisorObservationRecord.sandbox_id) == sandbox_id
                     )
                 )
             return True
 
-    async def record_observation(self, observation: OrchestratorObservation) -> bool:
+    async def record_observation(self, observation: SupervisorObservation) -> bool:
         """Project a fresh authenticated report, releasing only proven absence."""
         item = observation
         async with self.sessions() as session, session.begin():
@@ -322,18 +322,18 @@ class PostgresLifecycle:
                         Sandbox.installation_id == item.identity.installation_id,
                         Sandbox.host_id == item.identity.host_id,
                         Sandbox.generation == item.generation,
-                        Sandbox.orchestrator_boot_id == item.boot_id,
+                        Sandbox.supervisor_boot_id == item.boot_id,
                     )
                     .with_for_update()
                 )
             ).one_or_none()
             if row is None or row.cleaned_at is not None:
                 return False
-            old = await session.get(OrchestratorObservationRecord, item.sandbox_id)
+            old = await session.get(SupervisorObservationRecord, item.sandbox_id)
             if old is not None and old.event_version >= item.event_version:
                 return False
             prior_ready = old is not None and old.ready_at is not None
-            record = OrchestratorObservationRecord(
+            record = SupervisorObservationRecord(
                 sandbox_id=item.sandbox_id,
                 generation=item.generation,
                 boot_id=item.boot_id,
@@ -412,7 +412,7 @@ class PostgresLifecycle:
         deliver(self.diagnostics, *events)
         return True
 
-    async def confirm_removed(self, observation: OrchestratorObservation) -> bool:
+    async def confirm_removed(self, observation: SupervisorObservation) -> bool:
         if not observation.removal_confirmed:
             raise ValueError("explicit physical removal confirmation required")
         return await self.record_observation(observation)
@@ -439,7 +439,7 @@ class PostgresLifecycle:
                 )
             ).all()
             for row in rows:
-                observation = await session.get(OrchestratorObservationRecord, row.id)
+                observation = await session.get(SupervisorObservationRecord, row.id)
                 if observation:
                     await session.delete(observation)
                     await session.flush()

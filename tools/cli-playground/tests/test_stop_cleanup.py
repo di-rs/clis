@@ -4,9 +4,9 @@ import asyncio
 from uuid import UUID
 
 import pytest
+from cli_playground.boxie_client import SandboxState
+from cli_playground.service import CliPlaygroundService
 from fastapi.testclient import TestClient
-from playground.boxie_client import SandboxState
-from playground.service import PlaygroundService
 
 from .boxie_fake import FakeBoxie
 from .helpers import admission, upload
@@ -14,7 +14,10 @@ from .helpers import admission, upload
 
 @pytest.mark.parametrize("final_state", ["terminated", "failed"])
 def test_removed_preview_does_not_repeat_confirmed_stop(
-    service: PlaygroundService, api_client: TestClient, boxie: FakeBoxie, final_state: SandboxState
+    service: CliPlaygroundService,
+    api_client: TestClient,
+    boxie: FakeBoxie,
+    final_state: SandboxState,
 ) -> None:
     preview = upload(api_client)
     binding = admission(api_client, preview["id"], "a" * 40)

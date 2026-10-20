@@ -1,22 +1,22 @@
-"""Orchestrator-owned PTY reader and bounded sequenced output."""
+"""Supervisor-owned PTY reader and bounded sequenced output."""
 
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from boxie.domain.lifecycle import OrchestratorObservation
+from boxie.domain.lifecycle import SupervisorObservation
 from boxie.domain.models import TerminationReason
 from boxie.sandbox.docker import TerminalPort
 from boxie.sandbox.terminal.replay import ReplayBuffer
 
 
 class ExecutionTerminal:
-    """PTY byte owner; attachment/activity decisions belong to the orchestrator."""
+    """PTY byte owner; attachment/activity decisions belong to the supervisor."""
 
     def __init__(
         self,
         stream: TerminalPort,
         output_limit: int,
-        terminate: Callable[[TerminationReason], Awaitable[OrchestratorObservation]],
+        terminate: Callable[[TerminationReason], Awaitable[SupervisorObservation]],
     ) -> None:
         self.stream, self.remaining, self.terminate = stream, output_limit, terminate
         self.replay = ReplayBuffer()

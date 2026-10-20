@@ -6,25 +6,25 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
-from boxie.domain.lifecycle import EnsureRequest, OrchestratorObservation, SandboxRef
+from boxie.domain.lifecycle import EnsureRequest, SandboxRef, SupervisorObservation
 from boxie.domain.models import Principal, SandboxSpec, SandboxState
-from boxie.sandbox.execution.orchestrator import Orchestrator
+from boxie.sandbox.execution.supervisor import Supervisor
 from boxie_test_support.execution import Daemon, Guard, launch_execution
-from boxie_test_support.orchestrator import Clock, configuration
+from boxie_test_support.supervisor import Clock, configuration
 
 
 async def setup(
     root: Path, **changes: Any
-) -> tuple[Orchestrator, EnsureRequest, Daemon, Clock, Guard]:
+) -> tuple[Supervisor, EnsureRequest, Daemon, Clock, Guard]:
     config = configuration(root, **changes)
     clock, daemon, guard = Clock(), Daemon(), Guard()
 
     async def artifact(principal: Principal, identifier: UUID) -> Path:
         return root
 
-    orchestrator = Orchestrator(config, daemon, artifact, guard, clock, clock.monotonic)
+    supervisor = Supervisor(config, daemon, artifact, guard, clock, clock.monotonic)
     spec = SandboxSpec(uuid4(), "shell", ("/bin/sh",), {})
-    snapshot = orchestrator.profiles.resolve_profile(spec.profile_id, spec.command, spec.env)
+    snapshot = supervisor.profiles.resolve_profile(spec.profile_id, spec.command, spec.env)
     request = EnsureRequest(
         SandboxRef(uuid4(), 1),
         Principal("one"),
@@ -34,15 +34,15 @@ async def setup(
         clock(),
         clock() + timedelta(seconds=3600),
     )
-    await launch_execution(orchestrator, request)
-    return orchestrator, request, daemon, clock, guard
+    await launch_execution(supervisor, request)
+    return supervisor, request, daemon, clock, guard
 
 
 async def settled(
-    orchestrator: Orchestrator, ref: SandboxRef, state: SandboxState
-) -> OrchestratorObservation:
+    supervisor: Supervisor, ref: SandboxRef, state: SandboxState
+) -> SupervisorObservation:
     for _ in range(200):
-        observation = await orchestrator.inspect(ref)
+        observation = await supervisor.inspect(ref)
         if observation.state == state:
             return observation
         await asyncio.sleep(0.001)

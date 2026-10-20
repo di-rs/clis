@@ -51,7 +51,7 @@ services:
     - operations
     networks:
     - control
-    image: ${BOXIE_RUNTIME_IMAGE:?provide approved immutable Boxie runtime image}
+    image: ${BOXIE_IMAGE:?provide approved immutable Boxie image}
     user: 1000:1000
     entrypoint:
     - python

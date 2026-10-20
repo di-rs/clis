@@ -1,12 +1,16 @@
 {
-  "smoke": {
+  "default": {
     "image_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
     "commands": [
       [
-        "/bin/sh"
+        "/opt/boxie/shell.sh"
       ]
     ],
-    "env": {},
+    "env": {
+      "TERM": [
+        "xterm-256color"
+      ]
+    },
     "artifact_target": "/opt/artifact"
   }
 }

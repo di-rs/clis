@@ -4,23 +4,23 @@ import json
 import re
 from typing import Any
 
-ORCHESTRATOR_PROBE = """
+SUPERVISOR_PROBE = """
 import json
 from pathlib import Path
 import httpx
 from prometheus_client.parser import text_string_to_metric_families
 result = {}
-credential = Path('/run/secrets/orchestrator').read_text().strip()
+credential = Path('/run/secrets/supervisor').read_text().strip()
 with httpx.Client(timeout=2, trust_env=False) as client:
     try:
-        response = client.get('http://orchestrator:8091/readyz', headers={'Authorization': 'Bearer ' + credential})
+        response = client.get('http://supervisor:8091/readyz', headers={'Authorization': 'Bearer ' + credential})
         values = response.json().get('dependencies', {})
-        result['orchestrator'] = {'status': response.status_code, 'dependencies': {
+        result['supervisor'] = {'status': response.status_code, 'dependencies': {
             name: values.get(name) if type(values.get(name)) is bool else None
             for name in ('docker', 'postgres', 'execution')
         }}
     except Exception as error:
-        result['orchestrator'] = {'error_type': type(error).__name__}
+        result['supervisor'] = {'error_type': type(error).__name__}
     try:
         response = client.get('http://127.0.0.1:9101/metrics')
         response.raise_for_status()
@@ -30,7 +30,7 @@ with httpx.Client(timeout=2, trust_env=False) as client:
         for family in text_string_to_metric_families(response.text):
             for sample in family.samples:
                 name = sample.labels.get('dependency')
-                if sample.name in ('boxie_dependency_known', 'boxie_dependency_ready') and name in ('orchestrator', 'temporal', 'namespace', 'workflow_poller', 'activity_poller', 'maintenance_workflow_poller', 'maintenance_activity_poller') and sample.value in (0, 1):
+                if sample.name in ('boxie_dependency_known', 'boxie_dependency_ready') and name in ('supervisor', 'temporal', 'namespace', 'workflow_poller', 'activity_poller', 'maintenance_workflow_poller', 'maintenance_activity_poller') and sample.value in (0, 1):
                     result['dependencies'].setdefault(sample.name, {})[name] = sample.value
     except Exception as error:
         result['metrics_error_type'] = type(error).__name__
@@ -40,7 +40,7 @@ print(json.dumps(result))
 
 def readiness_details(stack: Any) -> str:
     result: dict[str, Any] = {"containers": {}}
-    for service in ("orchestrator", "api", "faults"):
+    for service in ("supervisor", "api", "faults"):
         try:
             identifier = stack.runtime_command("ps", "--all", "--quiet", service)
             if not re.fullmatch("[a-f0-9]{64}", identifier):
@@ -67,7 +67,7 @@ def readiness_details(stack: Any) -> str:
             result["containers"][service] = {"error_type": type(error).__name__}
     try:
         output = stack.runtime_command(
-            "exec", "-T", "api", "timeout", "8", "python", "-c", ORCHESTRATOR_PROBE
+            "exec", "-T", "api", "timeout", "8", "python", "-c", SUPERVISOR_PROBE
         )
         if len(output) > 4096:
             raise ValueError("readiness diagnostic size limit")

@@ -1,4 +1,4 @@
-"""Loopback product/API/orchestrator harness; only the Docker daemon is substituted."""
+"""Loopback product/API/supervisor harness; only the Docker daemon is substituted."""
 
 import asyncio
 import socket
@@ -10,10 +10,10 @@ from pathlib import Path
 import httpx
 import uvicorn
 from boxie_test_support.terminal_network import EchoDaemon, Network, network
+from cli_playground.app import create_app
+from cli_playground.boxie_client import HttpBoxieClient
+from cli_playground.service import CliPlaygroundService
 from fastapi import FastAPI
-from playground.app import create_app
-from playground.boxie_client import HttpBoxieClient
-from playground.service import PlaygroundService
 
 from .helpers import MutableClock, Settings
 
@@ -22,12 +22,12 @@ from .helpers import MutableClock, Settings
 class Product:
     http: httpx.AsyncClient
     app: FastAPI
-    service: PlaygroundService
+    service: CliPlaygroundService
 
 
 @asynccontextmanager
 async def boxie_network(root: Path, *, daemon: EchoDaemon | None = None) -> AsyncIterator[Network]:
-    async with network(root, shell="/opt/playground/shell.sh", daemon=daemon) as result:
+    async with network(root, daemon=daemon) as result:
         yield result
 
 
@@ -44,7 +44,6 @@ async def product_server(
             public_url=url,
             deploy_token="test-deployment-token",
             boxie_url=api_url,
-            boxie_profile="shell",
             boxie_credential_file=root / "secret",
         )
         app = create_app(

@@ -1,4 +1,4 @@
-"""Bounded authenticated private-orchestrator network adapter; no Docker or disk access."""
+"""Bounded authenticated private-supervisor network adapter; no Docker or disk access."""
 
 import asyncio
 
@@ -14,7 +14,7 @@ from boxie.domain.errors import BoxieError, TerminalWriteClosed
 
 
 def dependency_error() -> BoxieError:
-    return BoxieError(503, "orchestrator unavailable")
+    return BoxieError(503, "supervisor unavailable")
 
 
 class NoRedirectConnect(connect):
@@ -22,7 +22,7 @@ class NoRedirectConnect(connect):
         return exc
 
 
-class OrchestratorTerminal:
+class SupervisorTerminal:
     def __init__(self, connection: ClientConnection, timeout: float) -> None:
         self._connection, self._timeout = connection, timeout
 

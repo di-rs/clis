@@ -8,8 +8,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from playground.boxie_client import SandboxRequest, SandboxState, SandboxView, TerminalPort
-from playground.terminal_protocol import TerminalEvent, response
+from cli_playground.boxie_client import SandboxRequest, SandboxState, SandboxView, TerminalPort
+from cli_playground.terminal_protocol import TerminalEvent, response
 
 
 class EchoTerminal:

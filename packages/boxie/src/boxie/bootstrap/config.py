@@ -1,4 +1,4 @@
-"""Orchestrator configuration comes from operator-owned files, never from API consumers."""
+"""Supervisor configuration comes from operator-owned files, never from API consumers."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
-from boxie.domain.models import LifetimePolicy, OrchestratorIdentity
+from boxie.domain.models import LifetimePolicy, SupervisorIdentity
 from boxie.domain.policy import validate_policy
 
 
@@ -71,11 +71,11 @@ class FileOwnedSettings(BaseSettings):
         return (init_settings,)
 
 
-class OrchestratorConfig(FileOwnedSettings):
+class SupervisorConfig(FileOwnedSettings):
     data_dir: Path
     profiles_file: Path
     credential_file: Path
-    identity: OrchestratorIdentity
+    identity: SupervisorIdentity
     policy_maximum: LifetimePolicy = Field(default_factory=LifetimePolicy)
     docker_timeout: float = Field(default=20, gt=0, le=60, allow_inf_nan=False)
     sweep_seconds: float = Field(default=1, gt=0, le=10, allow_inf_nan=False)
@@ -92,12 +92,12 @@ class OrchestratorConfig(FileOwnedSettings):
         return self
 
     @classmethod
-    def from_file(cls, path: Path) -> OrchestratorConfig:
+    def from_file(cls, path: Path) -> SupervisorConfig:
         data = json.loads(path.read_text())
         if "lifecycle" in data:
             data["lifecycle"] = validate_file_model(LifecycleConfig, data["lifecycle"])
         identity = data.pop("identity")
-        data["identity"] = OrchestratorIdentity(
+        data["identity"] = SupervisorIdentity(
             UUID(identity["installation_id"]), identity["host_id"]
         )
         if "policy_maximum" in data:
@@ -108,7 +108,7 @@ class OrchestratorConfig(FileOwnedSettings):
 class LifecycleConfig(BaseModel):
     """Explicit inputs for the coordinated lifecycle composition; no migration hook.
 
-    API and orchestrator use separate Temporal client identities. The orchestrator
+    API and supervisor use separate Temporal client identities. The supervisor
     remains the sole Docker and artifact filesystem owner.
     """
 
@@ -123,4 +123,4 @@ class LifecycleConfig(BaseModel):
     temporal_namespace: str = Field(default="boxie", min_length=1)
 
 
-OrchestratorConfig.model_rebuild()
+SupervisorConfig.model_rebuild()

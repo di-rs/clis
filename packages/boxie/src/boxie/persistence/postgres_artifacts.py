@@ -1,4 +1,4 @@
-"""Orchestrator-only concrete artifact bytes; PostgreSQL is the sole metadata authority."""
+"""Supervisor-only concrete artifact bytes; PostgreSQL is the sole metadata authority."""
 
 import asyncio
 import hashlib
@@ -36,7 +36,7 @@ class PostgresArtifactStore:
     ) -> None:
         self.sessions, self.root, self.limits = sessions, root, limits or ArtifactLimits()
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        # One orchestrator owns this directory. Serializes uploads with orphan collection.
+        # One supervisor owns this directory. Serializes uploads with orphan collection.
         self._files_lock = asyncio.Lock()
         self._scan: Iterator[os.DirEntry[str]] | None = None
 
@@ -139,7 +139,7 @@ class PostgresArtifactStore:
             row.retired = True
             row.collection_pending = row.collected_at is None
         # Physical deletion is separately retryable; retirement remains committed even if
-        # this process exits now. The orchestrator's collector periodically calls collect.
+        # this process exits now. The supervisor's collector periodically calls collect.
         await self.collect()
 
     async def collect(self, limit: int = 100) -> int:
@@ -178,7 +178,7 @@ class PostgresArtifactStore:
         return collected
 
     async def collect_orphans(self, *, minimum_age_seconds: int = 3600, limit: int = 100) -> int:
-        """Bounded scan with a persistent in-process cursor; run on the sole owning orchestrator.
+        """Bounded scan with a persistent in-process cursor; run on the sole owning supervisor.
 
         Published directories without committed SQL metadata and abandoned uploads
         are unreachable. Serialize against publication, keep a grace period, and

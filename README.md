@@ -6,12 +6,6 @@ README describes its usage, API, and current limitations. See [Testing](docs/tes
 for test commands and regression guidance, and [Benchmarking](docs/benchmarking.md)
 for per-CLI TOML suites using Biggie and hyperfine.
 
-[cli-check](tools/cli-check/README.md) validates CLI package boundaries, test and
-documentation layout, and benchmark coverage with one local or CI command.
-
-The [CLI playground](tools/cli-playground/README.md) provides a deployable Python
-web terminal with real Rust binaries, disposable sample files, and one preview URL per PR.
-
 ## Layout
 
 - `buildins/`: command-line utilities, each with its own Cargo package.
@@ -25,10 +19,26 @@ Run Python package commands with `uv run --locked --package NAME COMMAND`.
 Cargo and uv resolve package names independently of their directory locations.
 File inputs, test paths, and Docker build contexts still use filesystem paths.
 
-## Apps
+## Packages
+
+Applications and services in `packages/` cover data generation, sandbox execution,
+text editing, and parsing. Follow each project's README for usage and limitations.
 
 | Project | Purpose |
 | --- | --- |
+| [biggie](packages/biggie/README.md) | Generate text, records, fields, bytes, and sorted pairs |
+| [boxie](packages/boxie/README.md) | Run isolated sandboxes through a private service API |
+| [kara](packages/kara/README.md) | Edit text in a terminal |
+| [parsu](packages/parsu/README.md) | Parse a restricted XML-like language |
+
+## Buildins
+
+Small Rust command-line utilities in `buildins/` work with text, files,
+directories, and calendars. Each command has its own Cargo package and README.
+
+| Project | Purpose |
+| --- | --- |
+| [calr](buildins/calr/README.md) | Print month or year calendars |
 | [catr](buildins/catr/README.md) | Concatenate and number text lines |
 | [commr](buildins/commr/README.md) | Compare two sorted inputs |
 | [cutr](buildins/cutr/README.md) | Select bytes, characters, or fields |
@@ -45,15 +55,24 @@ File inputs, test paths, and Docker build contexts still use filesystem paths.
 | [true](buildins/true/README.md) | Return success without output |
 | [uniqr](buildins/uniqr/README.md) | Filter or count adjacent repeated lines |
 | [wcr](buildins/wcr/README.md) | Count lines, words, bytes, and characters |
-| [calr](buildins/calr/README.md) | Print month or year calendars |
-| [biggie](packages/biggie/README.md) | Generate text, records, fields, bytes, and sorted pairs |
-| [parsu](packages/parsu/README.md) | Parse a restricted XML-like language |
-| [kara](packages/kara/README.md) | Edit text in a terminal |
 
-All binaries write structured events and errors to local rotating log files. See
+The Rust CLIs share structured logging to local rotating files. See
 [logging configuration and the dashboard contract](utils/cli-log/README.md).
 
+## Tools
+
+Repository tools in `tools/` check package conventions, run benchmarks, and let
+you try CLI changes in a browser.
+
+| Project | Purpose |
+| --- | --- |
+| [cli-bench](docs/benchmarking.md) | Run per-CLI benchmark suites with Biggie and hyperfine |
+| [cli-check](tools/cli-check/README.md) | Check CLI package boundaries, tests, documentation, and benchmark coverage |
+| [cli-playground](tools/cli-playground/README.md) | Try Rust CLIs in a browser terminal with disposable files and a preview URL per PR |
+
 ## Libraries
+
+Shared Rust libraries in `utils/` provide logging and test support for the CLIs.
 
 | Project | Purpose |
 | --- | --- |

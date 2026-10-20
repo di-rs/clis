@@ -15,7 +15,7 @@ from prometheus_client import (
 )
 from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily, Metric
 
-from boxie.observability.telemetry.logging import LogRuntime
+from boxie.observability.telemetry.logging import LogDispatcher
 
 METHODS = frozenset(("GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "other"))
 STATUS = frozenset(("1xx", "2xx", "3xx", "4xx", "5xx", "disconnected", "error"))
@@ -23,7 +23,7 @@ STATUS = frozenset(("1xx", "2xx", "3xx", "4xx", "5xx", "disconnected", "error"))
 
 class ProcessMetrics:
     def __init__(
-        self, prefix: str, *, routes: Iterable[str] = (), logs: LogRuntime | None = None
+        self, prefix: str, *, routes: Iterable[str] = (), logs: LogDispatcher | None = None
     ) -> None:
         self.prefix, self.logs = prefix, logs
         self.routes = frozenset(routes) | {"unmatched", "unresolved"}

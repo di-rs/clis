@@ -10,14 +10,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from boxie.domain.models import SandboxState
 from boxie.observability.events import Transition, emit
-from boxie.observability.telemetry.logging import LogRuntime
+from boxie.observability.telemetry.logging import LogDispatcher
 from boxie.observability.telemetry.metrics import ProcessMetrics
 
 STATES = tuple(state.value for state in SandboxState)
 KINDS = ("start", "stop")
 API_DEPENDENCIES = (
     "postgres",
-    "orchestrator",
+    "supervisor",
     "temporal",
     "namespace",
     "workflow_poller",
@@ -25,7 +25,7 @@ API_DEPENDENCIES = (
     "maintenance_workflow_poller",
     "maintenance_activity_poller",
 )
-ORCHESTRATOR_DEPENDENCIES = ("postgres", "docker", "execution")
+SUPERVISOR_DEPENDENCIES = ("postgres", "docker", "execution")
 ROUTES = (
     "/healthz",
     "/readyz",
@@ -56,7 +56,7 @@ class Metrics(ProcessMetrics):
         role: str,
         *,
         clock: Callable[[], float] = time.monotonic,
-        logs: LogRuntime | None = None,
+        logs: LogDispatcher | None = None,
     ) -> None:
         self.role, self.clock = role, clock
         self._lock = threading.Lock()
@@ -66,8 +66,8 @@ class Metrics(ProcessMetrics):
         self.dependencies = (
             API_DEPENDENCIES
             if role == "api"
-            else ORCHESTRATOR_DEPENDENCIES
-            if role == "orchestrator"
+            else SUPERVISOR_DEPENDENCIES
+            if role == "supervisor"
             else ()
         )
         self._lease: tuple[int, float | None, float] | None = None
@@ -142,15 +142,15 @@ class Metrics(ProcessMetrics):
         if self.dependencies:
             yield known_family
             yield ready_family
-        if self.role == "orchestrator" and lease is not None and now - lease[2] <= 5:
+        if self.role == "supervisor" and lease is not None and now - lease[2] <= 5:
             yield GaugeMetricFamily(
-                "boxie_orchestrator_control_lease_active",
+                "boxie_supervisor_control_lease_active",
                 "Current boot eligible executions",
                 value=lease[0],
             )
             if lease[1] is not None:
                 yield GaugeMetricFamily(
-                    "boxie_orchestrator_control_lease_remaining_seconds",
+                    "boxie_supervisor_control_lease_remaining_seconds",
                     "Minimum remaining monotonic control lease",
                     value=max(0, lease[1] - max(0, now - lease[2])),
                 )

@@ -1,0 +1,128 @@
+name: ☁️ Sanctuary infrastructure review
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Reviewed same-repository commit SHA to preview (blank uses master)
+        required: false
+        type: string
+  schedule:
+    - cron: '41 5 * * 1'
+
+permissions: {}
+concurrency:
+  group: sanctuary-production
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  revision:
+    name: 🔎 Validate reviewed revision
+    if: ${{ github.ref == 'refs/heads/master' && (github.event_name == 'workflow_dispatch' || vars.SANCTUARY_INFRA_DRIFT_CHECK == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      revision: ${{ steps.resolve.outputs.revision }}
+    steps:
+      - name: 📥 Check out trusted workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 🔎 Resolve reviewed commit before requesting credentials
+        id: resolve
+        env:
+          REQUESTED_REVISION: ${{ inputs.revision }}
+        run: |
+          revision=${REQUESTED_REVISION:-$GITHUB_SHA}
+          if [[ ! $revision =~ ^[0-9a-f]{40}$ ]]; then
+            echo '::error::Use a full lowercase commit SHA for the reviewed revision.'
+            exit 1
+          fi
+          resolved=$(git rev-parse --verify "$revision^{commit}")
+          if [[ $resolved != "$revision" ]]; then
+            echo '::error::The revision must identify a commit, not a tag object.'
+            exit 1
+          fi
+          printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
+
+  check:
+    name: ☁️ Pulumi review (${{ needs.revision.outputs.revision }})
+    needs: revision
+    environment: sanctuary
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      PULUMI_SKIP_UPDATE_CHECK: 'true'
+      PULUMI_BACKEND_URL: ${{ vars.PULUMI_BACKEND_URL }}
+      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_EC2_METADATA_DISABLED: 'true'
+      HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      # Dispatch and environment approval explicitly trust all code in this SHA,
+      # including dependency installation. No PR event can enter this job.
+      - name: 📥 Check out explicitly reviewed revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.revision.outputs.revision }}
+          persist-credentials: false
+      - name: 🐍 Install pinned uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: '0.13.0'
+          enable-cache: false
+      - name: 📦 Install locked workspace dependencies
+        run: uv sync --locked --all-packages
+      - name: ☁️ Install pinned Pulumi CLI
+        uses: pulumi/setup-pulumi@b374ceb6168550de27c6eba92e01c1a774040e11 # v2
+        with:
+          pulumi-version: '3.268.0'
+      - name: 🔎 Read existing infrastructure configuration
+        run: |
+          umask 077
+          cd infra/environments/single-host
+          pulumi login "$PULUMI_BACKEND_URL" --non-interactive
+          pulumi stack select production --non-interactive
+          pulumi config refresh --force --non-interactive
+      - name: 🔍 Preview reviewed infrastructure and summarize changes
+        id: preview
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: pulumi/actions@8e5e406f4007fca908480587cb9893c07090f58d # v7.0.0
+        with:
+          command: preview
+          stack-name: production
+          work-dir: infra/environments/single-host
+          cloud-url: ${{ vars.PULUMI_BACKEND_URL }}
+          pulumi-version: '3.268.0'
+          refresh: true
+          diff: true
+          upsert: false
+          suppress-outputs: true
+          comment-on-summary: true
+          comment-on-pr: false
+      - name: 🔎 Detect drift without updating state or applying cloud changes
+        if: ${{ github.event_name == 'schedule' }}
+        working-directory: infra/environments/single-host
+        run: |
+          pulumi login "$PULUMI_BACKEND_URL" --non-interactive
+          pulumi stack select production --non-interactive
+          status=0
+          pulumi refresh --preview-only --expect-no-changes --non-interactive --diff --suppress-outputs || status=$?
+          {
+            printf '### Infrastructure drift check\n\n'
+            if [[ $status == 0 ]]; then
+              printf 'No drift detected.\n'
+            else
+              printf 'Drift check failed. Inspect the job logs for resource changes or provider errors.\n'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"

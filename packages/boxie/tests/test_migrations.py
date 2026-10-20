@@ -41,7 +41,7 @@ def test_observability_revision_preserves_unknown_cleanup_age() -> None:
     output = StringIO()
     config = migration_config("postgresql://localhost/boxie")
     config.output_buffer = output
-    command.upgrade(config, "0002_command_outbox:head", sql=True)
+    command.upgrade(config, "0002_command_outbox:0004_observability_cleanup", sql=True)
     schema = output.getvalue()
     assert "ADD COLUMN provisioning_outcome" in schema
     assert "ADD COLUMN provisioning_ready_observed_at" in schema

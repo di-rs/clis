@@ -55,10 +55,8 @@ jobs:
         run: cargo fmt --all -- --check
       - name: 📏 Check committed file sizes
         run: prek run check-added-large-files --all-files --show-diff-on-failure
-      - name: 🎨 Verify Rust formatting hook
-        run: prek run cargo-fmt --all-files --show-diff-on-failure
       - name: 🔍 Lint Rust code with Clippy
-        run: prek run cargo-clippy --all-files --show-diff-on-failure
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings -F unsafe_code
       - name: 📚 Build Rust API documentation
         run: cargo doc --locked --workspace --all-features --no-deps
       - name: 🧹 Verify checks leave the checkout unchanged
@@ -203,7 +201,7 @@ jobs:
       - name: 📦 Fetch locked Rust dependencies
         run: cargo fetch --locked
       - name: 🧪 Run Rust workspace tests
-        run: prek run cargo-nexttest --all-files --show-diff-on-failure | tee target/ci/tests.log
+        run: cargo nextest run --locked --workspace --hide-progress-bar --failure-output final | tee target/ci/tests.log
       - name: 📚 Run Rust documentation examples
         run: cargo test --locked --workspace --doc | tee target/ci/doctests.log
       - name: 🧹 Verify tests leave the checkout unchanged

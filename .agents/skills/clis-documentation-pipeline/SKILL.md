@@ -95,9 +95,12 @@ document from beginning to end. Ensure local links resolve from its final path
 and diagrams, if useful, describe the system accurately. Keep the verification
 trail in the completion report, with reader-relevant evidence in the document.
 
-Follow [Testing](../../../docs/testing.md) for documentation checks. Pass new and
-changed Markdown paths to `prek run lychee --files ... --show-diff-on-failure`
-and `prek run typos --files ... --show-diff-on-failure`, then run `git diff --check`.
+Follow [Testing](../../../docs/testing.md) for documentation checks. Run
+`lychee --offline --include-fragments=anchor-only -- PATH...` and
+`typos --force-exclude -- PATH...` directly for new and changed Markdown files,
+then run `git diff --check`. Never invoke prek checks manually; normal commit
+hooks run automatically. Wait on the execution tool's session handle, never
+process-list commands or temporary-log polling.
 Run additional checks only when needed for the documented examples or changed
 area. Report missing tools or unverified commands accurately.
 

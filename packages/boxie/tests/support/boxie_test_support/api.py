@@ -1,4 +1,4 @@
-"""Two independent loopback servers, replacing only the orchestrator's Docker port."""
+"""Two independent loopback servers, replacing only the supervisor's Docker port."""
 
 import asyncio
 import hashlib
@@ -12,7 +12,7 @@ import httpx
 import uvicorn
 from fastapi import FastAPI
 
-from boxie_test_support.orchestrator import bundle, request
+from boxie_test_support.supervisor import bundle
 
 CONSUMER_AUTH = {"Authorization": "Bearer consumer-one-secret"}
 FOREIGN_AUTH = {"Authorization": "Bearer consumer-two-secret"}
@@ -55,7 +55,7 @@ async def artifact(client: httpx.AsyncClient) -> str:
 
 async def create(client: httpx.AsyncClient, identifier: str, key: str = "first") -> str:
     response = await client.post(
-        "/v1/sandboxes", json=request(identifier)["spec"], headers={"Idempotency-Key": key}
+        "/v1/sandboxes", json={"artifact_id": identifier}, headers={"Idempotency-Key": key}
     )
     assert response.status_code == 202, response.text
     return str(response.json()["id"])

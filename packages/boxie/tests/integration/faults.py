@@ -1,7 +1,7 @@
 """Owned fixture proxies. No product fault endpoints or shared daemon mutations.
 
 PostgreSQL is plaintext only inside the isolated test control network. A selected
-artifact COMMIT is consumed from the server but never forwarded to the orchestrator.
+artifact COMMIT is consumed from the server but never forwarded to the supervisor.
 The on-disk barrier is evidence of COMMIT, not of a failed INSERT.
 """
 

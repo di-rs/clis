@@ -1,4 +1,4 @@
-"""Bounded authenticated private-orchestrator network adapter; no Docker or disk access."""
+"""Bounded authenticated private-supervisor network adapter; no Docker or disk access."""
 
 import asyncio
 import logging
@@ -27,14 +27,14 @@ from boxie.contracts.execution import (
 from boxie.domain.errors import BoxieError
 from boxie.domain.models import (
     ArtifactPutResult,
-    OrchestratorIdentity,
     Principal,
     ProfileSnapshot,
     SandboxSpec,
+    SupervisorIdentity,
 )
 from boxie.sandbox.transport.terminal import (
     NoRedirectConnect,
-    OrchestratorTerminal,
+    SupervisorTerminal,
     dependency_error,
 )
 
@@ -47,7 +47,7 @@ ERRORS = {
 }
 
 
-class OrchestratorClient:
+class SupervisorClient:
     def __init__(
         self,
         base_url: str,
@@ -66,9 +66,9 @@ class OrchestratorClient:
             or url.fragment
             or url.path not in ("", "/")
         ):
-            raise ValueError("orchestrator URL must be an HTTP origin")
+            raise ValueError("supervisor URL must be an HTTP origin")
         if not 0 < timeout <= 60:
-            raise ValueError("invalid orchestrator timeout")
+            raise ValueError("invalid supervisor timeout")
         self._base_url = base_url.rstrip("/")
         self._ws_url = urlunsplit(
             ("wss" if url.scheme == "https" else "ws", url.netloc, "", "", "")
@@ -85,7 +85,7 @@ class OrchestratorClient:
             transport=transport,
         )
 
-    async def __aenter__(self) -> OrchestratorClient:
+    async def __aenter__(self) -> SupervisorClient:
         return self
 
     async def __aexit__(
@@ -121,7 +121,7 @@ class OrchestratorClient:
         except BoxieError, ValidationError:
             ready = False
         if not ready:
-            logging.getLogger(__name__).warning("Orchestrator readiness probe failed")
+            logging.getLogger(__name__).warning("Supervisor readiness probe failed")
         return ready
 
     async def put(
@@ -162,7 +162,7 @@ class OrchestratorClient:
             raise dependency_error() from None
 
     def _control(
-        self, principal: Principal, identity: OrchestratorIdentity, generation: int
+        self, principal: Principal, identity: SupervisorIdentity, generation: int
     ) -> dict[str, Any]:
         return ControlRequest(
             consumer_id=principal.consumer_id,
@@ -192,7 +192,7 @@ class OrchestratorClient:
                 compression=None,
                 proxy=None,
             ) as connection:
-                yield OrchestratorTerminal(connection, self._timeout)
+                yield SupervisorTerminal(connection, self._timeout)
         except InvalidStatus as error:
             status = error.response.status_code
             if status in (404, 409):

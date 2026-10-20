@@ -3,7 +3,7 @@
 Each finite CLI owns TOML suites under its `benches/` directory.
 Each CLI has its own Cargo package, with matching package and binary names;
 see the [repository rules](../AGENTS.md).
-Run `uv run --locked cli-check benches` to check suite presence, ownership and
+Run `uv run --locked cli-check benches -p PACKAGE` to check suite presence, ownership and
 case structure without executing benchmarks. A CLI without a finite benchmark
 records a reason in its manifest's `package.metadata.cli-check.benchmark-exemption`;
 see [cli-check](../tools/cli-check/README.md#record-a-benchmark-exemption).
@@ -18,7 +18,7 @@ interpreter and development checks.
 From the workspace root, with `uv` and `hyperfine` on PATH:
 
 ```sh
-cargo build --locked --release --workspace --bins
+cargo build --locked --release -p tailr -p biggie --bins
 uv run --locked python tools/cli-bench/bench.py buildins/tailr/benches/cli-bench.toml
 ```
 
@@ -129,7 +129,7 @@ environment sets `LC_ALL=C`, `TZ=UTC`, `SANCTUARY_LOG_LEVEL=off` and
 ## Verification and scope
 
 ```sh
-uv run --locked pytest
+uv run --locked pytest tools/cli-bench/tests
 ```
 
 The [workflow](../.github/workflows/cli-bench.yml) runs for pull requests targeting
@@ -139,44 +139,31 @@ or adding the override label starts selection. There are no benchmark runs on
 pushes, merges, or a schedule. A small selection job examines the whole PR's diff
 from its merge base, then Linux and
 macOS jobs build only the selected CLI packages from the PR head commit
-(plus Biggie when needed). Selection reads manifests and the lockfile from that
-same commit, even if the target branch has added packages since the PR branched.
-An empty selection skips both benchmark jobs.
+(plus Biggie when needed to generate inputs). An empty selection skips both
+benchmark jobs.
+
+A CLI is selected if and only if its own `src/**/*.rs` or `build.rs` changed and
+it has a benchmark suite. This rule has no PR-body or manual override. Changes
+are measured against the merge base across the entire PR; added, modified,
+deleted and renamed Rust source files count. The selector reads package manifests
+and suites from the PR head, so removed suites are not run.
 
 | Changed files | Automatic selection |
 | --- | --- |
-| CLI source, manifest, or build script | That package's suites. |
-| Suite TOML | That suite. |
-| Biggie implementation | Biggie and suites using generated input. |
-| Shared Rust implementations, including CLI logging | Suites whose packages depend on the changed library, directly or transitively. |
-| Cargo lockfile | Suites whose packages have changed resolved dependencies. |
-| Root Cargo manifest, Rust toolchain, or `.cargo/` configuration | All suites, conservatively. |
-| Benchmark runner, selector, workflows, shared Python tooling, or Python version pin | No additional suites. Use `Benchmark-CLIs` to request execution coverage for tooling changes. |
-| Documentation, correctness tests, or Python development-tool configuration | No native benchmarks. Ordinary CI checks still run. |
+| A CLI's `src/**/*.rs` or `build.rs` | Only that CLI's suites. |
+| Biggie's `src/**/*.rs` or `build.rs` | Only Biggie's suites. |
+| Shared libraries, manifests, lockfiles, toolchains or Cargo configuration | None. |
+| Benchmark suites, runner, selector, workflows or Python tooling | None. |
+| Documentation, tests, examples or non-Rust files under `src/` | None. |
 
-Lockfile selection compares each package's dependency graph at the PR merge base
-and head. Adding a dependency for one CLI does not select unrelated CLIs. Version,
-source, checksum and transitive dependency changes count; comments and Cargo's
-dependency-name disambiguation do not. The lockfile does not distinguish active
-features, target platforms or development dependencies, so a change within a
-CLI's graph can still select it even if that dependency is unused by its release
-build. Biggie dependency changes also select suites that generate inputs.
-Removed suites are not run; renamed source files count on both sides of the rename.
+Changing a dependency does not select its consumers. Biggie may still be built
+as an input generator for a selected CLI; that does not run Biggie's benchmark.
+Legacy `Benchmark-CLIs` fields are ignored, including `all`. Editing the PR title
+or description does not trigger benchmarks. Draft and `run-ci` rules control
+whether selection runs; they cannot select a CLI whose code is unchanged.
 
-Automatic checks use one measurement and no warmup. To request full measurements
-for specific CLIs, put this standalone line in the PR description:
-
-```text
-Benchmark-CLIs: tailr,wcr
-```
-
-This overrides automatic selection and runs exactly those CLIs with three
-warmups and twenty measurements. `Benchmark-CLIs: all` explicitly selects every
-CLI with a suite. `Benchmark-CLIs: auto`, or no field, restores automatic selection.
-Unknown names fail with a diagnostic. Editing this field triggers a new run;
-unrelated PR-description edits do not rerun benchmarks. The request applies to
-subsequent commits until changed back to `auto`, and works for fork contributors
-subject to GitHub's normal workflow approval settings.
+Automatic checks use one measurement and no warmup. For full measurements of a
+changed CLI on a controlled local machine, use the [suite runner](#run-a-suite).
 
 Reports are saved as workflow artifacts. The
 [reporting workflow](../.github/workflows/cli-bench-report.yml) updates one PR
@@ -199,11 +186,9 @@ so elapsed time was about 90 seconds plus queueing, while their summed runner
 time was 160 seconds. These are observed durations, not billing estimates.
 
 Selective builds avoid compiling unrelated CLIs. Exact duration depends mainly
-on selected dependencies, runner load, and whether full measurements were
-requested. Every results comment reports actual durations so estimates can be
-checked against real runs. Full measurements repeat each command 23 times
-including warmups, in addition to generation and preflight checks; they do not
-repeat compilation for each sample.
+on selected dependencies and runner load. Every results comment reports actual
+durations so estimates can be checked against real runs. The single CI sample
+checks execution and does not establish a statistically significant change.
 
 Kara is interactive and has no finite CLI benchmark here. Suites without a
 portable system-output match use previous-version comparisons. There is no custom

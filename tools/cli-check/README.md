@@ -3,13 +3,14 @@
 Check whether the repository's Rust CLI packages follow its structural standards:
 
 ```sh
-uv run --locked cli-check
+uv run --locked cli-check -p echor
 ```
 
 Run from the repository root or a directory inside its Cargo workspace, using
 the pinned Python version and uv 0.13 or newer. The root uv workspace installs
 the command and its Markdown parser from the committed lockfile. A successful
-run prints `CLI checks passed`.
+run prints `CLI checks passed`. Repeat `-p PACKAGE` to select more packages;
+omit it to inspect the whole workspace.
 
 ## Choose checks
 
@@ -82,11 +83,9 @@ For a CLI at the workspace root, the root README is already its index entry.
 
 ## Local hooks and regression tests
 
-The `cli-check` prek hook and Python CI job run all groups. Invoke the hook with:
-
-```sh
-prek run cli-check --all-files --show-diff-on-failure
-```
+The normal commit hook runs all groups for affected Cargo packages. Python CI
+checks the full workspace. Agents must not invoke prek checks manually; use
+`uv run --locked cli-check -p PACKAGE` for focused checks during development.
 
 Regression tests invoke the real command against temporary workspace trees:
 

@@ -21,12 +21,12 @@ from boxie.contracts.execution import (
 from boxie.domain.errors import BoxieError
 from boxie.domain.models import Principal
 from boxie.domain.policy import validate_policy
-from boxie.sandbox.execution.orchestrator import Orchestrator
+from boxie.sandbox.execution.supervisor import Supervisor
 from boxie.sandbox.terminal.session import serve_terminal
 
 
-def create_orchestrator_app(
-    orchestrator: Orchestrator,
+def create_supervisor_app(
+    supervisor: Supervisor,
     artifacts: ArtifactAccess,
     *,
     credential: bytes,
@@ -34,7 +34,7 @@ def create_orchestrator_app(
     lifespan: Lifespan[FastAPI],
 ) -> FastAPI:
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
-    app.state.orchestrator = orchestrator
+    app.state.supervisor = supervisor
 
     def authorized(value: str) -> bool:
         return hmac.compare_digest(value.encode(), b"Bearer " + credential)
@@ -42,7 +42,7 @@ def create_orchestrator_app(
     @app.middleware("http")
     async def authenticate(request: Request, next: RequestResponseEndpoint) -> Response:
         if not authorized(request.headers.get("Authorization", "")):
-            return JSONResponse({"detail": "invalid orchestrator credential"}, status_code=401)
+            return JSONResponse({"detail": "invalid supervisor credential"}, status_code=401)
         if request.method == "POST":
             data = bytearray()
             async for chunk in request.stream():
@@ -62,7 +62,7 @@ def create_orchestrator_app(
 
     @app.get("/v1/identity")
     async def identity() -> dict[str, object]:
-        return {"identity": asdict(orchestrator.config.identity), "boot_id": orchestrator.boot_id}
+        return {"identity": asdict(supervisor.config.identity), "boot_id": supervisor.boot_id}
 
     @app.get("/readyz")
     async def ready() -> JSONResponse:
@@ -70,8 +70,8 @@ def create_orchestrator_app(
         return JSONResponse(
             {
                 "identity": {
-                    "installation_id": str(orchestrator.config.identity.installation_id),
-                    "host_id": orchestrator.config.identity.host_id,
+                    "installation_id": str(supervisor.config.identity.installation_id),
+                    "host_id": supervisor.config.identity.host_id,
                 },
                 "dependencies": dependencies,
             },
@@ -80,9 +80,9 @@ def create_orchestrator_app(
 
     @app.post("/v1/profiles/resolve")
     async def profile(body: AdmissionProfileRequest) -> SnapshotWire:
-        validate_policy(body.policy.domain(), orchestrator.config.policy_maximum)
+        validate_policy(body.policy.domain(), supervisor.config.policy_maximum)
         return SnapshotWire.from_domain(
-            orchestrator.profiles.resolve_profile(body.profile_id, body.command, body.env)
+            supervisor.profiles.resolve_profile(body.profile_id, body.command, body.env)
         )
 
     @app.put("/v1/artifacts/{artifact_id}")
@@ -110,16 +110,16 @@ def create_orchestrator_app(
     ) -> None:
         if not authorized(websocket.headers.get("Authorization", "")):
             await websocket.send_denial_response(
-                JSONResponse({"detail": "invalid orchestrator credential"}, status_code=401)
+                JSONResponse({"detail": "invalid supervisor credential"}, status_code=401)
             )
             return
         try:
-            ref = orchestrator.terminal_ref(Principal(consumer_id), identifier)
+            ref = supervisor.terminal_ref(Principal(consumer_id), identifier)
         except BoxieError as error:
             await websocket.send_denial_response(
                 JSONResponse({"detail": str(error)}, status_code=error.status)
             )
             return
-        await serve_terminal(websocket, orchestrator, ref)
+        await serve_terminal(websocket, supervisor, ref)
 
     return app

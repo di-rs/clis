@@ -12,20 +12,20 @@ from uuid import UUID, uuid4
 
 import httpx
 from boxie.api.app import ApiConfig, create_app
-from boxie.bootstrap.config import OrchestratorConfig
+from boxie.bootstrap.config import SupervisorConfig
 from boxie.domain.errors import BoxieError
 from boxie.domain.lifecycle import EnsureRequest, SandboxRef
 from boxie.domain.models import Principal, SandboxSpec, SandboxView, TerminationReason
-from boxie.sandbox.execution.orchestrator import Orchestrator
-from boxie.sandbox.transport.client import OrchestratorClient
-from boxie.sandbox.transport.server import create_orchestrator_app
+from boxie.sandbox.execution.supervisor import Supervisor
+from boxie.sandbox.transport.client import SupervisorClient
+from boxie.sandbox.transport.server import create_supervisor_app
 from fastapi import FastAPI
 from websockets.asyncio.client import ClientConnection
 
 from boxie_test_support.api import CONSUMER_AUTH, serve
 from boxie_test_support.artifacts import Artifacts
 from boxie_test_support.execution import Daemon, Guard, launch_execution
-from boxie_test_support.orchestrator import Clock, FakeTerminal, configuration
+from boxie_test_support.supervisor import Clock, FakeTerminal, configuration
 
 
 class EchoDaemon(Daemon):
@@ -39,8 +39,8 @@ class EchoDaemon(Daemon):
 
 
 class Admission:
-    def __init__(self, orchestrator: Orchestrator, artifacts: Artifacts) -> None:
-        self.orchestrator, self.artifacts = orchestrator, artifacts
+    def __init__(self, supervisor: Supervisor, artifacts: Artifacts) -> None:
+        self.supervisor, self.artifacts = supervisor, artifacts
         self.keys: dict[tuple[Principal, str], UUID] = {}
 
     async def ready(self) -> bool:
@@ -54,21 +54,21 @@ class Admission:
         request = EnsureRequest(
             SandboxRef(identifier, 1),
             principal,
-            self.orchestrator.config.identity,
+            self.supervisor.config.identity,
             spec,
-            self.orchestrator.profiles.resolve_profile(spec.profile_id, spec.command, spec.env),
-            self.orchestrator.clock(),
-            self.orchestrator.clock() + timedelta(seconds=spec.policy.max_seconds),
+            self.supervisor.profiles.resolve_profile(spec.profile_id, spec.command, spec.env),
+            self.supervisor.clock(),
+            self.supervisor.clock() + timedelta(seconds=spec.policy.max_seconds),
         )
-        await launch_execution(self.orchestrator, request)
+        await launch_execution(self.supervisor, request)
         self.keys[principal, key] = identifier
         return await self.get(principal, identifier)
 
     async def get(self, principal: Principal, identifier: UUID) -> SandboxView:
-        record = self.orchestrator.records.get(identifier)
+        record = self.supervisor.records.get(identifier)
         if record is None or record.consumer_id != principal.consumer_id:
             raise BoxieError(404, "sandbox not found")
-        item = await self.orchestrator.inspect(record.ref)
+        item = await self.supervisor.inspect(record.ref)
         return SandboxView(
             identifier,
             item.state,
@@ -82,30 +82,23 @@ class Admission:
         self, principal: Principal, identifier: UUID, reason: TerminationReason
     ) -> SandboxView:
         await self.get(principal, identifier)
-        await self.orchestrator.remove(self.orchestrator.records[identifier].ref, reason)
+        await self.supervisor.remove(self.supervisor.records[identifier].ref, reason)
         return await self.get(principal, identifier)
 
 
 @dataclass
 class Network:
     api: httpx.AsyncClient
-    orchestrator_url: str
+    supervisor_url: str
     daemon: EchoDaemon
-    orchestrator: Orchestrator
-    config: OrchestratorConfig
+    supervisor: Supervisor
+    config: SupervisorConfig
     clock: Clock
 
 
 @asynccontextmanager
-async def network(
-    root: Path, *, shell: str = "/bin/sh", daemon: EchoDaemon | None = None
-) -> AsyncIterator[Network]:
-    import json
-
+async def network(root: Path, *, daemon: EchoDaemon | None = None) -> AsyncIterator[Network]:
     config = configuration(root)
-    profiles = json.loads(config.profiles_file.read_text())
-    profiles["shell"]["commands"] = [[shell]]
-    config.profiles_file.write_text(json.dumps(profiles))
     clock = Clock()
     daemon = daemon or EchoDaemon()
     clock.now = datetime.now(UTC)
@@ -114,34 +107,34 @@ async def network(
     async def path(principal: Principal, identifier: UUID) -> Path:
         return artifacts.path(principal, identifier)
 
-    orchestrator = Orchestrator(config, daemon, path, Guard(), clock, clock.monotonic)
+    supervisor = Supervisor(config, daemon, path, Guard(), clock, clock.monotonic)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         try:
-            await orchestrator.start()
+            await supervisor.start()
             yield
         finally:
-            await orchestrator.close()
+            await supervisor.close()
 
     async def readiness() -> dict[str, bool]:
-        return {"docker": await daemon.ready(), "execution": orchestrator.execution_ready}
+        return {"docker": await daemon.ready(), "execution": supervisor.execution_ready}
 
-    app = create_orchestrator_app(
-        orchestrator,
+    app = create_supervisor_app(
+        supervisor,
         artifacts,
-        credential=b"orchestrator-test-secret",
+        credential=b"supervisor-test-secret",
         readiness=readiness,
         lifespan=lifespan,
     )
     async with serve(app) as origin:
-        async with OrchestratorClient(origin, b"orchestrator-test-secret", timeout=1) as client:
+        async with SupervisorClient(origin, b"supervisor-test-secret", timeout=1) as client:
             api = create_app(
                 ApiConfig(
                     release="terminal-test",
                     consumers={"one": b"consumer-one-secret", "two": b"consumer-two-secret"},
                 ),
-                Admission(orchestrator, artifacts),
+                Admission(supervisor, artifacts),
                 artifacts,
                 client,
             )
@@ -149,9 +142,9 @@ async def network(
                 async with httpx.AsyncClient(base_url=url, headers=CONSUMER_AUTH) as http:
                     yield Network(
                         api=http,
-                        orchestrator_url=origin,
+                        supervisor_url=origin,
                         daemon=daemon,
-                        orchestrator=orchestrator,
+                        supervisor=supervisor,
                         config=config,
                         clock=clock,
                     )

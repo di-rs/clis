@@ -30,7 +30,7 @@ gh pr edit PR_NUMBER --add-label run-ci
 ```
 
 Closing a PR still cleans up hosted previews, including previews created while
-the draft override was enabled. Pushes to `master`, schedules and runtime release
+the draft override was enabled. Pushes to `master`, schedules and image release
 or setup workflows retain their existing behavior. Trusted benchmark reporting
 and preview publication use the new skip policy after their workflow definitions
 reach `master`.
@@ -47,19 +47,27 @@ identity checks, benchmark timing lookups and required status checks together.
 
 ## Local hooks and full CI checks
 
-Install the Git hooks with `prek install`. On commit, prek checks staged files;
-`prek run` uses the same selection. To check specific working-tree files, use
-`prek run --files PATH...`. CI keeps `prek run --all-files` to check every tracked
-file. Use that command locally when you want the full checks.
+Install missing Git hooks with `prek install`, then let each real commit run its
+pre-commit and commit-msg hooks normally. Agents must never run prek checks
+manually, invoke the hook runner directly, disable hooks, or create commits just
+to test them. During development, use the focused tool commands below.
 
-Ruff, workflow linting, Markdown links and spelling receive matching filenames
-from prek. Separate configuration hooks run full lint checks when their settings
-change. Cargo, mypy, pytest and CLI repository standards keep their workspace-wide
-commands, but only run when their file filters match a change. Prek selects files
-and hooks; it does not infer which packages or tests depend on changed code.
+Ruff, workflow linting, Markdown links and spelling receive matching filenames.
+The [package hook runner](../tools/cli-check/src/cli_check/hooks.py) selects Cargo
+packages and Python test directories from the changed paths. Shared source
+changes include dependent packages; test and fixture changes select their owner.
+Python infrastructure tests do not trigger Rust checks. Formatting and CLI
+standards checks select the owning Cargo packages.
 
-This uses prek's native [file filters and filename passing](https://prek.j178.dev/0.5.5/reference/configuration/),
-with no selection script to maintain.
+Shared language configuration and lockfiles select all packages of that language.
+A package's configuration selects that package and, for type checks and tests,
+its consumers. Changing the hook configuration alone does not run every suite.
+CI retains full validation, using direct Cargo commands and all-file selections
+for the remaining hooks.
+
+Wait for checks through the execution tool's session handle and read its output.
+Do not use `ps`, `ps aux`, `ps -axo`, `pgrep`, `top`, or equivalent process-list
+commands to monitor checks. Do not background checks or poll temporary log files.
 
 ## Choose checks by changed area
 
@@ -72,8 +80,8 @@ Replace `PACKAGE` below with the affected Cargo package name.
 | Shared Rust APIs | Run library doctests and the affected packages’ CLI tests. |
 | CLI tests or fixtures | Follow the [CLI testing skill](../.agents/skills/cli-testing/SKILL.md). |
 | Python tools | Run the [Python checks](#python-tooling). |
-| Markdown | `prek run lychee --all-files --show-diff-on-failure` and `prek run typos --all-files --show-diff-on-failure` |
-| Workflows | `prek run actionlint --all-files --show-diff-on-failure`; consult CI for security checks. |
+| Markdown | `lychee --offline --include-fragments=anchor-only -- PATH...` and `typos --force-exclude -- PATH...` |
+| Workflows | `actionlint PATH...` and `zizmor --offline --no-progress PATH...` |
 | Benchmark suites | Follow [Benchmarking](benchmarking.md). |
 
 For workspace-wide Rust changes, use the all-feature nextest and doctest commands
@@ -84,14 +92,25 @@ platform checks are specified in the workflow rather than duplicated here.
 
 Use uv 0.13 or newer and the root workspace. Shared Ruff, strict mypy and pytest
 settings live in [pyproject.toml](../pyproject.toml); dependencies are pinned in
-[uv.lock](../uv.lock).
+[uv.lock](../uv.lock). Replace `PACKAGE_PATH` with the affected directory, such as
+`tools/cli-check`, and include consumers when shared code changes.
 
 ```sh
 uv sync --locked --all-packages
-uv run --locked ruff check .
-uv run --locked ruff format --check .
-uv run --locked mypy
-uv run --locked pytest
+uv run --locked ruff check PACKAGE_PATH
+uv run --locked ruff format --check PACKAGE_PATH
+uv run --locked pytest PACKAGE_PATH/tests
+```
+
+For mypy, reuse the hook's workspace import paths so scoped checks can resolve
+local dependencies without adding them as check targets:
+
+```sh
+MYPYPATH="$(uv run --locked python -c '
+from pathlib import Path
+from cli_check.hooks import mypy_environment
+print(mypy_environment(Path.cwd())["MYPYPATH"])
+')" uv run --locked mypy PACKAGE_PATH
 ```
 
 Keep tests beside their package under `packages/NAME/tests/`, `tools/NAME/tests/`,
@@ -102,25 +121,26 @@ Use pytest functions and shared fixtures in `conftest.py`; prefer `tmp_path` and
 
 ## CLI repository standards
 
-Run the same structural checks used by the local hook and Python CI job:
+Run structural checks for the affected Cargo package:
 
 ```sh
-uv run --locked cli-check
+uv run --locked cli-check -p PACKAGE
 ```
 
 [cli-check](../tools/cli-check/README.md) verifies package boundaries, CLI test
 registration, README links and benchmark coverage. Select `layout`, `tests`,
-`docs` or `benches` after the command to investigate one group. These checks read
-the workspace; execute the owning package's tests separately to verify behavior.
+`docs` or `benches` after the command to investigate one group. Repeat `-p` for
+multiple packages; CI omits it to check all packages. These checks read the
+workspace; execute the owning package's tests separately to verify behavior.
 
 Benchmark reporting and playground publication use GitHubKit from the root
 tooling project's runtime dependencies, including when invoked with `--no-dev`.
 They read `GH_TOKEN`, falling back to `GITHUB_TOKEN`. Their request limits and
 publication checks remain local to each publisher.
 
-## Playground frontend
+## cli-playground Frontend
 
-The [CLI playground](../tools/cli-playground/README.md) uses the pinned Node.js
+The [cli-playground](../tools/cli-playground/README.md) uses the pinned Node.js
 and pnpm versions for frontend development and builds; production serves static
 assets from Python. Run from the repository root:
 
@@ -149,8 +169,8 @@ environment handling and deliberate failures at system boundaries.
 
 ## Check reporting
 
-Run `git diff --check`. For new documentation, pass `--files PATH` to the relevant
-prek hook so untracked files are checked. Report commands, outcomes and any
+Run `git diff --check`. For new documentation, pass its paths directly to lychee
+and typos so untracked files are checked. Report commands, outcomes and any
 unverified platforms or missing tools. Reuse passing checks while the relevant
 files and environment remain unchanged; documentation-only edits need no Rust run.
 
@@ -166,13 +186,16 @@ uv run --locked pytest packages/boxie/tests/test_packaging.py -m integration
 
 These checks build each service sdist/wheel, install it with only locked runtime
 dependencies into a fresh environment, import outside the checkout, serve actual
-installed UI assets, and resolve all four Compose manifests. Missing prerequisites
-fail. The PR frontend job runs this gate. Image builds and native Linux/gVisor
-smoke are separate checks; ordinary Docker/runc is not gVisor evidence.
+installed UI assets, and resolve all four Compose manifests. They also require a
+running Docker daemon to verify that build contexts exclude locally generated
+frontend assets. Missing prerequisites fail. The PR frontend job runs this gate.
+Full service image builds and native Linux/gVisor smoke are separate checks;
+ordinary Docker/runc is not gVisor evidence.
 
 Unprivileged PR quality, frontend, sandbox, binary-build and affected benchmark
-checks target `master`. Benchmark selection runs only affected or explicitly
-requested suites. Privileged publication and deployment retain their trusted
+checks target `master`. Benchmark selection requires changes to the owning CLI's
+Rust source or build script; PR-body requests cannot override it. Privileged
+publication and deployment retain their trusted
 default-branch boundaries.
 
 Boxie has only the PostgreSQL/Temporal lifecycle. Default pytest excludes live
@@ -185,23 +208,25 @@ uv run --locked python packages/boxie/tests/run_integration.py
 
 The [Linux lifecycle workflow](../.github/workflows/boxie-lifecycle.yml) runs real
 PostgreSQL/Temporal checks, pinned replay/cancellation, credential permissions and
-endpoint restart checks on pull requests. The native lifecycle/browser E2Es are
-temporarily manual-only while their hang is investigated. Use `workflow_dispatch`
-to build the native images and `echor` and run all six cases, or run locally:
+endpoint restart checks on pull requests. The native lifecycle E2Es are
+temporarily manual-only while their hang is investigated. Boxie lifecycle runs
+without consumer sources. The separate [shared-system workflow](../.github/workflows/sanctuary-lifecycle.yml)
+builds cli-playground and `echor` for application/browser coverage. To run both locally:
 
 ```sh
-uv run --locked python packages/boxie/tests/run_integration.py --runtime runsc --browser -- -vv --durations=10
+uv run --locked pytest -m integration packages/boxie/tests/integration/test_lifecycle.py \
+  tools/cli-playground/tests/test_native.py -vv --durations=10
 ```
 
 Each CI tier has its own timeout and reports individual tests and slow durations.
 The optional native E2Es require Linux amd64 Docker with configured gVisor,
 built `boxie:lifecycle`, `cli-playground:lifecycle`
-and `sanctuary-playground-sandbox:lifecycle` images, `target/release/echor`, and Chromium.
+and `boxie-sandbox:lifecycle` images, `target/release/echor`, and Chromium.
 `BOXIE_NATIVE_BINARY` may select the native executable. The fixture owns random
 Compose projects, volumes, identity labels and fault proxies. It independently
-kills API, orchestrator (including its embedded workers) and Temporal; tests failed
+kills API, supervisor (including its embedded workers) and Temporal; tests failed
 Docker deletion, actual artifact COMMIT acknowledgment loss, collector overlap and journal failure across
-orchestrator restart; and replays production histories. Cleanup removes only verified
+supervisor restart; and replays production histories. Cleanup removes only verified
 owned sandbox IDs and attempts every Compose layer even after a cleanup error.
 
 The native browser config uses the fixture's real Playground origin and Linux

@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from boxie_test_support.orchestrator import FakeTerminal
+from boxie_test_support.supervisor import FakeTerminal
 from boxie_test_support.terminal_network import EchoDaemon
 from fastapi import Request
 
@@ -39,7 +39,7 @@ async def main() -> None:
     with tempfile.TemporaryDirectory(prefix="boxie-browser-") as directory:
         root = Path(directory)
         daemon = ObservedDaemon()
-        async with boxie_network(root / "orchestrator", daemon=daemon) as network:
+        async with boxie_network(root / "supervisor", daemon=daemon) as network:
             async with product_server(
                 root / "product", str(network.api.base_url), port=8765
             ) as product:
@@ -50,7 +50,7 @@ async def main() -> None:
                 @product.app.get("/__test__/state")
                 async def state() -> dict[str, Any]:
                     sandboxes = []
-                    for record in network.orchestrator.records.values():
+                    for record in network.supervisor.records.values():
                         stream = (
                             daemon.observed.get(record.container_id)
                             if record.container_id is not None
@@ -84,7 +84,7 @@ async def main() -> None:
                     value = await request.json()
                     record = next(
                         record
-                        for record in network.orchestrator.records.values()
+                        for record in network.supervisor.records.values()
                         if str(record.id) == value["id"]
                     )
                     assert record.container_id is not None

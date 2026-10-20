@@ -42,11 +42,11 @@ groups:
       severity: warning
       job: boxie-api
   - alert: RequiredScrapeUnavailable
-    expr: up{job="boxie-orchestrator"} == 0 or absent(up{job="boxie-orchestrator"})
+    expr: up{job="boxie-supervisor"} == 0 or absent(up{job="boxie-supervisor"})
     for: 2m
     labels:
       severity: warning
-      job: boxie-orchestrator
+      job: boxie-supervisor
   - alert: RequiredScrapeUnavailable
     expr: up{job="boxie-api-sdk"} == 0 or absent(up{job="boxie-api-sdk"})
     for: 2m
@@ -54,11 +54,11 @@ groups:
       severity: warning
       job: boxie-api-sdk
   - alert: RequiredScrapeUnavailable
-    expr: up{job="boxie-orchestrator-sdk"} == 0 or absent(up{job="boxie-orchestrator-sdk"})
+    expr: up{job="boxie-supervisor-sdk"} == 0 or absent(up{job="boxie-supervisor-sdk"})
     for: 2m
     labels:
       severity: warning
-      job: boxie-orchestrator-sdk
+      job: boxie-supervisor-sdk
   - alert: RequiredScrapeUnavailable
     expr: up{job="temporal"} == 0 or absent(up{job="temporal"})
     for: 2m

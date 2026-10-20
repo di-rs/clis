@@ -1,21 +1,20 @@
-name: ${PLAYGROUND_PROJECT_NAME:-cli-playground}
+name: ${CLI_PLAYGROUND_PROJECT_NAME:-cli-playground}
 services:
-  gateway:
-    image: ${PLAYGROUND_IMAGE:-cli-playground:local}
+  backend:
+    image: ${CLI_PLAYGROUND_IMAGE:-cli-playground:local}
     build:
       context: ../../..
-      dockerfile: tools/cli-playground/infra/Playground.Dockerfile
+      dockerfile: tools/cli-playground/infra/CliPlayground.Dockerfile
     ports: ["127.0.0.1:8000:8000"]
     environment:
-      PLAYGROUND_DATA_DIR: /var/lib/cli-playground
-      PLAYGROUND_PUBLIC_URL: ${PLAYGROUND_PUBLIC_URL:-http://localhost:8000}
-      PLAYGROUND_DEPLOY_TOKEN: ${PLAYGROUND_DEPLOY_TOKEN:?Set deployment token}
-      PLAYGROUND_BOXIE_URL: ${PLAYGROUND_BOXIE_URL:?Set private Boxie endpoint}
-      PLAYGROUND_BOXIE_CREDENTIAL_FILE: /run/secrets/consumer
-      PLAYGROUND_BOXIE_PROFILE: ${PLAYGROUND_BOXIE_PROFILE:-playground}
+      CLI_PLAYGROUND_DATA_DIR: /var/lib/cli-playground
+      CLI_PLAYGROUND_PUBLIC_URL: ${CLI_PLAYGROUND_PUBLIC_URL:-http://localhost:8000}
+      CLI_PLAYGROUND_DEPLOY_TOKEN: ${CLI_PLAYGROUND_DEPLOY_TOKEN:?Set deployment token}
+      CLI_PLAYGROUND_BOXIE_URL: ${CLI_PLAYGROUND_BOXIE_URL:?Set private Boxie endpoint}
+      CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE: /run/secrets/consumer
     volumes:
       - data:/var/lib/cli-playground
-      - ${PLAYGROUND_BOXIE_CREDENTIAL_FILE:?Set consumer credential file}:/run/secrets/consumer:ro
+      - ${CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE:?Set consumer credential file}:/run/secrets/consumer:ro
     networks: [consumer]
     read_only: true
     tmpfs: [/tmp]
@@ -26,8 +25,8 @@ services:
 volumes:
   data:
     external: true
-    name: ${PLAYGROUND_DATA_VOLUME:?Set product volume}
+    name: ${CLI_PLAYGROUND_DATA_VOLUME:?Set product volume}
 networks:
   consumer:
     external: true
-    name: ${PLAYGROUND_CONSUMER_NETWORK:?Set private consumer network}
+    name: ${CLI_PLAYGROUND_CONSUMER_NETWORK:?Set private consumer network}

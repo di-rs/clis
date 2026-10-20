@@ -5,10 +5,10 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from cli_playground.app import create_app
+from cli_playground.service import CliPlaygroundService
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from playground.app import create_app
-from playground.service import PlaygroundService
 
 from .boxie_fake import FakeBoxie
 from .helpers import MutableClock, Settings
@@ -68,7 +68,7 @@ def docker_settings(tmp_path: Path) -> Settings:
 @pytest.fixture
 def clean_settings_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in tuple(os.environ):
-        if name.upper().startswith("PLAYGROUND_"):
+        if name.upper().startswith("CLI_PLAYGROUND_"):
             monkeypatch.delenv(name)
 
 
@@ -77,18 +77,18 @@ def configured_environment(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, clean_settings_environment: None
 ) -> None:
     for name, value in {
-        "PLAYGROUND_DATA_DIR": str(tmp_path / "data"),
-        "PLAYGROUND_PUBLIC_URL": "https://play.example/",
-        "PLAYGROUND_DEPLOY_TOKEN": "private-deployment-token",
-        "PLAYGROUND_BOXIE_URL": "http://boxie.internal",
-        "PLAYGROUND_BOXIE_CREDENTIAL_FILE": str(tmp_path / "boxie.secret"),
+        "CLI_PLAYGROUND_DATA_DIR": str(tmp_path / "data"),
+        "CLI_PLAYGROUND_PUBLIC_URL": "https://play.example/",
+        "CLI_PLAYGROUND_DEPLOY_TOKEN": "private-deployment-token",
+        "CLI_PLAYGROUND_BOXIE_URL": "http://boxie.internal",
+        "CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE": str(tmp_path / "boxie.secret"),
     }.items():
         monkeypatch.setenv(name, value)
 
 
 @pytest.fixture
-def service(api_client: TestClient) -> PlaygroundService:
+def service(api_client: TestClient) -> CliPlaygroundService:
     assert isinstance(api_client.app, FastAPI)
     service = api_client.app.state.service
-    assert isinstance(service, PlaygroundService)
+    assert isinstance(service, CliPlaygroundService)
     return service

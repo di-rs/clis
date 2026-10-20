@@ -2,7 +2,7 @@
 
 Boxie emits sanitized JSON on stdout. Docker delivers it through a nonblocking
 4 MiB buffer to bounded persistent journald. Vector reads only the API and
-orchestrator container tags, validates the event allowlist, and sends JSON lines
+supervisor container tags, validates the event allowlist, and sends JSON lines
 to VictoriaLogs. Grafana queries VictoriaLogs and Prometheus. Request, sandbox,
 workflow and run IDs are searchable fields; they never become stream labels or
 metric labels. Sandbox PTY output is never collected. Vector has no Docker socket.
@@ -109,7 +109,7 @@ Successful `/healthz` and `/readyz` requests emit no request logs. HTTPX uses a
 WARNING threshold, so routine probe responses do not become dependency events.
 Failed probes and ordinary application requests remain visible, and every request
 still updates HTTP metrics. Empty command-recovery and cleanup passes emit no
-per-run log events; the [runtime guide](../runtime.md#native-maintenance) describes
+per-run log events; the [host requirements](../host-requirements.md#native-maintenance) describes
 their cadence and recovery behavior.
 
 The supported `prometheus-client` HTTP server serves cached process/SQL gauges

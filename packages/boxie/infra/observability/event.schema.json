@@ -52,7 +52,7 @@
     "role": {
       "enum": [
         "api",
-        "orchestrator",
+        "supervisor",
         "unknown"
       ]
     },
@@ -138,8 +138,8 @@
         "exited",
         "provisioning_failed",
         "control_plane_lost",
-        "orchestrator_restart",
-        "orchestrator_shutdown",
+        "supervisor_restart",
+        "supervisor_shutdown",
         "delete_unconfirmed",
         "create_pending",
         "dependency_unavailable",

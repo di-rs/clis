@@ -4,7 +4,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from boxie.domain.models import OrchestratorIdentity
+from boxie.domain.models import SupervisorIdentity
 from boxie.sandbox.execution.ownership import acquire_owner_lock
 from boxie.temporal.contracts import lifecycle_queue, maintenance_queue
 
@@ -19,11 +19,11 @@ def test_owner_lock_rejects_a_second_process_and_releases(tmp_path: Path) -> Non
 
 
 def test_task_queues_isolate_installations_hosts_and_maintenance() -> None:
-    identity = OrchestratorIdentity(uuid4(), "host-a")
+    identity = SupervisorIdentity(uuid4(), "host-a")
     assert lifecycle_queue(identity) != maintenance_queue(identity)
-    assert lifecycle_queue(identity) != lifecycle_queue(OrchestratorIdentity(uuid4(), "host-a"))
+    assert lifecycle_queue(identity) != lifecycle_queue(SupervisorIdentity(uuid4(), "host-a"))
     assert lifecycle_queue(identity) != lifecycle_queue(
-        OrchestratorIdentity(identity.installation_id, "host-b")
+        SupervisorIdentity(identity.installation_id, "host-b")
     )
 
 
@@ -39,7 +39,7 @@ def test_schedule_restrictions_cannot_silently_disable_recovery(restriction: str
     from temporalio.converter import DataConverter
 
     async def exercise() -> None:
-        identity = OrchestratorIdentity(uuid4(), "host")
+        identity = SupervisorIdentity(uuid4(), "host")
         schedules = schedule_definitions(identity)
         converter = DataConverter.default
         for schedule in schedules.values():

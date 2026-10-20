@@ -15,11 +15,11 @@ def test_render_inputs_writes_private_settings_and_tunnel_without_stdout(
         "render_inputs"
     ]
     render(
-        {"PLAYGROUND_DOMAIN": "play.example.com", "ACME_EMAIL": "ops@example.com"},
+        {"CLI_PLAYGROUND_DOMAIN": "play.example.com", "ACME_EMAIL": "ops@example.com"},
         '{"AccountTag":"account","TunnelID":"tunnel","TunnelSecret":"private"}',
         tmp_path,
     )
-    assert "PLAYGROUND_DOMAIN='play.example.com'" in (tmp_path / "settings.env").read_text()
+    assert "CLI_PLAYGROUND_DOMAIN='play.example.com'" in (tmp_path / "settings.env").read_text()
     assert '"TunnelSecret":"private"' in (tmp_path / "tunnel.json").read_text()
     assert all(
         (tmp_path / name).stat().st_mode & 0o077 == 0 for name in ("settings.env", "tunnel.json")
@@ -32,7 +32,7 @@ def test_render_inputs_rejects_newline_without_writing_secrets(tmp_path: Path) -
         "render_inputs"
     ]
     with pytest.raises(ValueError):
-        render({"PLAYGROUND_DOMAIN": "safe\nBAD=1"}, "{}", tmp_path)
+        render({"CLI_PLAYGROUND_DOMAIN": "safe\nBAD=1"}, "{}", tmp_path)
     assert not list(tmp_path.iterdir())
 
 
@@ -44,7 +44,7 @@ def test_render_inputs_never_overwrites_existing_private_file(tmp_path: Path) ->
     existing.write_text("keep\n")
     with pytest.raises(FileExistsError):
         render(
-            {"PLAYGROUND_DOMAIN": "play.example.com"},
+            {"CLI_PLAYGROUND_DOMAIN": "play.example.com"},
             '{"AccountTag":"account","TunnelID":"tunnel","TunnelSecret":"private"}',
             tmp_path,
         )

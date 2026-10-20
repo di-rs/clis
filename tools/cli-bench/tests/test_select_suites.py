@@ -4,13 +4,6 @@ import pytest
 from conftest import Repository
 from select_suites import Suite
 
-ALL_SUITES = [
-    "buildins/echor/benches/cli-bench.toml",
-    "buildins/tailr/benches/cli-bench.toml",
-    "buildins/wcr/benches/cli-bench.toml",
-    "packages/biggie/benches/cli-bench.toml",
-]
-
 
 def test_suite_record_rejects_empty_path() -> None:
     with pytest.raises(ValueError):
@@ -46,11 +39,11 @@ def test_deleted_source_still_selects_owner(repo: Repository) -> None:
 @pytest.mark.parametrize(
     ("path", "content"),
     [
-        ("buildins/echor/Cargo.toml", '[package]\nname = "echor"\nversion = "0.1.1"\n'),
+        ("buildins/echor/src/nested/module.rs", "pub fn run() {}\n"),
         ("buildins/echor/build.rs", "fn main() {}\n"),
     ],
 )
-def test_package_manifest_and_build_script_select_owner(
+def test_nested_source_and_build_script_select_owner(
     repo: Repository, path: str, content: str
 ) -> None:
     repo.write(path, content)
@@ -58,14 +51,14 @@ def test_package_manifest_and_build_script_select_owner(
     assert repo.selection()["packages"] == ["echor"]
 
 
-def test_suite_change_selects_only_that_suite(repo: Repository) -> None:
+def test_suite_change_does_not_select_any_cli(repo: Repository) -> None:
     repo.write("buildins/echor/benches/other.toml", 'binary = "echor"\n')
     repo.base = repo.commit()
     repo.write_suite("buildins/echor", "echor", generate=True)
     repo.commit()
     result = repo.selection()
-    assert result["suites"] == ["buildins/echor/benches/cli-bench.toml"]
-    assert result["packages"] == ["biggie", "echor"]
+    assert result["suites"] == []
+    assert result["packages"] == []
 
 
 def test_deleted_suite_is_not_scheduled(repo: Repository) -> None:
@@ -78,11 +71,9 @@ def test_deleted_suite_is_not_scheduled(repo: Repository) -> None:
     "path",
     [
         "README.md",
-        ".python-version",
-        ".github/workflows/cli-bench.yml",
-        "tools/cli-check/src/cli_check/workspace.py",
-        "tools/cli-bench/select_suites.py",
-        "tools/cli-bench/bench.py",
+        "buildins/tailr/src/README.md",
+        "buildins/tailr/src/input.txt",
+        "buildins/tailr/examples/demo.rs",
         "buildins/tailr/README.md",
         "buildins/tailr/tests/cli.rs",
         "utils/cli-log/tests/basic.rs",
@@ -96,19 +87,14 @@ def test_deleted_suite_is_not_scheduled(repo: Repository) -> None:
         "mypy.ini",
     ],
 )
-@pytest.mark.parametrize("source_change", [False, True])
-def test_tooling_and_docs_preserve_affected_selection(
-    repo: Repository, path: str, source_change: bool
+def test_docs_tests_and_python_tool_configuration_skip_native_suites(
+    repo: Repository, path: str
 ) -> None:
-    target = repo.root / path
-    previous = target.read_text() if target.exists() else ""
-    repo.write(path, previous + "\n# tooling or documentation change\n")
-    if source_change:
-        repo.write("buildins/echor/src/main.rs", "// changed\n")
+    repo.write(path, "test or documentation change\n")
     repo.commit()
     result = repo.selection()
-    assert result["suites"] == ([ALL_SUITES[0]] if source_change else [])
-    assert result["packages"] == (["echor"] if source_change else [])
+    assert result["suites"] == []
+    assert result["packages"] == []
 
 
 @pytest.mark.parametrize(
@@ -117,16 +103,19 @@ def test_tooling_and_docs_preserve_affected_selection(
         "Cargo.toml",
         "rust-toolchain.toml",
         ".cargo/config.toml",
+        "tools/cli-bench/bench.py",
+        "tools/cli-bench/select_suites.py",
+        "tools/cli-check/src/cli_check/workspace.py",
+        ".github/workflows/cli-bench.yml",
+        ".python-version",
     ],
 )
-def test_global_build_and_runner_changes_select_all_workspace_suites(
-    repo: Repository, path: str
-) -> None:
+def test_global_build_and_runner_changes_never_select_suites(repo: Repository, path: str) -> None:
     target = repo.root / path
     previous = target.read_text() if target.exists() else ""
     repo.write(path, previous + "\n# changed\n")
     repo.commit()
-    assert repo.selection()["suites"] == ALL_SUITES
+    assert repo.selection()["suites"] == []
 
 
 @pytest.mark.parametrize(
@@ -134,20 +123,14 @@ def test_global_build_and_runner_changes_select_all_workspace_suites(
     [
         ("packages/biggie/src/main.rs", "// changed\n"),
         ("packages/biggie/build.rs", "fn main() {}\n"),
-        ("packages/biggie/Cargo.toml", '[package]\nname = "biggie"\nversion = "0.1.1"\n'),
     ],
 )
-def test_biggie_production_changes_select_biggie_and_generated_suites(
-    repo: Repository, path: str, content: str
-) -> None:
+def test_biggie_code_changes_select_only_biggie(repo: Repository, path: str, content: str) -> None:
     repo.write(path, content)
     repo.commit()
     result = repo.selection()
-    assert result["suites"] == [
-        "buildins/tailr/benches/cli-bench.toml",
-        "packages/biggie/benches/cli-bench.toml",
-    ]
-    assert result["packages"] == ["biggie", "tailr"]
+    assert result["suites"] == ["packages/biggie/benches/cli-bench.toml"]
+    assert result["packages"] == ["biggie"]
 
 
 @pytest.mark.parametrize(
@@ -161,7 +144,7 @@ def test_biggie_production_changes_select_biggie_and_generated_suites(
         ("utils/shared/Cargo.toml", '[package]\nname = "shared"\nversion = "0.1.1"\n'),
     ],
 )
-def test_shared_library_production_changes_select_only_consumers(
+def test_shared_library_changes_never_select_consumers(
     repo: Repository, path: str, content: str
 ) -> None:
     repo.write("utils/shared/Cargo.toml", '[package]\nname = "shared"\n')
@@ -179,10 +162,10 @@ def test_shared_library_production_changes_select_only_consumers(
     repo.base = repo.commit()
     repo.write(path, content)
     repo.commit()
-    assert repo.selection()["binaries"] == ["echor"]
+    assert repo.selection()["binaries"] == []
 
 
-def test_lockfile_addition_and_dependency_disambiguation_select_only_consumer(
+def test_lockfile_dependency_additions_never_select_consumers(
     repo: Repository,
 ) -> None:
     repo.lock({"echor": ["shared"], "tailr": [], "wcr": [], "biggie": [], "shared": []})
@@ -206,10 +189,10 @@ def test_lockfile_addition_and_dependency_disambiguation_select_only_consumer(
         + '\n[[package]]\nname = "shared"\nversion = "0.2.0"\nsource = "registry+https://example.invalid/index"\n',
     )
     repo.commit()
-    assert repo.selection()["binaries"] == ["tailr"]
+    assert repo.selection()["binaries"] == []
 
 
-def test_lockfile_transitive_update_selects_consumers_and_generated_suites(
+def test_lockfile_transitive_updates_never_select_consumers(
     repo: Repository,
 ) -> None:
     repo.lock(
@@ -223,7 +206,7 @@ def test_lockfile_transitive_update_selects_consumers_and_generated_suites(
         .replace('name = "leaf"\nversion = "0.1.0"', 'name = "leaf"\nversion = "0.2.0"'),
     )
     repo.commit()
-    assert repo.selection()["binaries"] == ["biggie", "tailr"]
+    assert repo.selection()["binaries"] == []
 
 
 def test_lockfile_comments_do_not_select_any_cli(repo: Repository) -> None:
@@ -233,101 +216,63 @@ def test_lockfile_comments_do_not_select_any_cli(repo: Repository) -> None:
 
 
 @pytest.mark.parametrize(
-    "body", [None, "", "Some description", "Benchmark-CLIs:", "Benchmark-CLIs: auto"]
+    "body",
+    [
+        None,
+        "",
+        "Benchmark-CLIs: auto",
+        "Benchmark-CLIs: all",
+        "Benchmark-CLIs: tailr,wcr",
+        "Benchmark-CLIs: invalid",
+        "Benchmark-CLIs: tailr\nBenchmark-CLIs: wcr",
+    ],
 )
-def test_empty_and_auto_requests_use_affected_smoke_selection(
-    repo: Repository, body: str | None
-) -> None:
+def test_pr_body_cannot_override_code_only_selection(repo: Repository, body: str | None) -> None:
+    assert repo.selection(body)["binaries"] == []
     repo.write("buildins/echor/src/main.rs", "// changed\n")
     repo.commit()
     result = repo.selection(body)
-    assert result["packages"] == ["echor"]
+    assert result["binaries"] == ["echor"]
     assert (result["runs"], result["warmup"]) == (1, 0)
 
 
-def test_explicit_request_overrides_affected_suites_and_uses_full_runs(repo: Repository) -> None:
+def test_cli_manifest_changes_do_not_select_benchmarks(repo: Repository) -> None:
+    repo.write("buildins/echor/Cargo.toml", '[package]\nname = "echor"\nversion = "0.1.1"\n')
+    repo.commit()
+    assert repo.selection()["suites"] == []
+
+
+def test_source_rename_selects_both_owners(repo: Repository) -> None:
+    repo.git("mv", "buildins/echor/src/main.rs", "buildins/wcr/src/moved.rs")
+    repo.commit()
+    assert repo.selection()["binaries"] == ["echor", "wcr"]
+
+
+def test_unrelated_source_does_not_match_a_cli_name_prefix(repo: Repository) -> None:
+    repo.write("buildins/echor-extra/src/main.rs", "fn main() {}\n")
+    repo.write("buildins/echor-extra/Cargo.toml", '[package]\nname = "echor-extra"\n')
+    repo.commit()
+    assert repo.selection()["suites"] == []
+
+
+def test_library_only_package_is_not_a_cli_even_with_a_suite(repo: Repository) -> None:
+    repo.write_suite("utils/cli-log", "cli-log")
+    repo.write("utils/cli-log/src/lib.rs", "// changed\n")
+    repo.commit()
+    assert repo.selection()["suites"] == []
+
+
+@pytest.mark.parametrize("body", ["New description", "Benchmark-CLIs: all"])
+def test_body_edits_never_rerun_benchmarks(repo: Repository, body: str) -> None:
     repo.write("buildins/echor/src/main.rs", "// changed\n")
     repo.commit()
-    result = repo.selection("Description\n\nBenchmark-CLIs: tailr, wcr\n\nMore details")
-    assert result["suites"] == [
-        "buildins/tailr/benches/cli-bench.toml",
-        "buildins/wcr/benches/cli-bench.toml",
-    ]
-    assert result["packages"] == ["biggie", "tailr", "wcr"]
-    assert (result["runs"], result["warmup"]) == (20, 3)
-
-
-def test_all_request_uses_full_runs_even_without_code_changes(repo: Repository) -> None:
-    result = repo.selection("Benchmark-CLIs: all")
-    assert result["suites"] == ALL_SUITES
-    assert (result["runs"], result["warmup"]) == (20, 3)
-
-
-def test_request_must_be_a_standalone_field(repo: Repository) -> None:
-    result = repo.selection("Please use Benchmark-CLIs: tailr\n> Benchmark-CLIs: wcr")
-    assert result["suites"] == []
-
-
-@pytest.mark.parametrize(
-    ("previous", "current"),
-    [
-        ("Before", "After"),
-        ("Before", "After\nBenchmark-CLIs: auto"),
-        ("Benchmark-CLIs: tailr,wcr", "After\nBenchmark-CLIs: wcr, tailr"),
-    ],
-)
-def test_unrelated_body_edit_does_not_repeat_previous_selection(
-    repo: Repository, previous: str, current: str
-) -> None:
-    repo.write("buildins/echor/src/main.rs", "// changed\n")
-    repo.commit()
-    result = repo.selection(current, previous_body=previous)
-    assert result["suites"] == []
-    assert result["packages"] == []
-    assert result["binaries"] == []
-    assert (result["runs"], result["warmup"]) == (1, 0)
-
-
-@pytest.mark.parametrize(
-    "previous",
-    [
-        "Benchmark-CLIs: tailr",
-        "Benchmark-CLIs: invalid",
-        "Benchmark-CLIs: tailr\nBenchmark-CLIs: tailr",
-    ],
-)
-def test_body_edit_changes_request_or_repairs_invalid_request(
-    repo: Repository, previous: str
-) -> None:
-    result = repo.selection("Benchmark-CLIs: wcr", previous_body=previous)
-    assert result["binaries"] == ["wcr"]
-    assert result["packages"] == ["wcr"]
-    assert (result["runs"], result["warmup"]) == (20, 3)
-
-
-@pytest.mark.parametrize(
-    ("body", "diagnostic"),
-    [
-        ("Benchmark-CLIs: missing", "missing"),
-        ("Benchmark-CLIs: excluded", "excluded"),
-        ("Benchmark-CLIs: tailr,", "Benchmark-CLIs"),
-        ("Benchmark-CLIs: all,tailr", "all"),
-        ("Benchmark-CLIs: tailr\nBenchmark-CLIs: wcr", "duplicate"),
-    ],
-)
-def test_invalid_and_duplicate_fields_fail_without_selection(
-    repo: Repository, body: str, diagnostic: str
-) -> None:
-    result = repo.run_selector(body)
-    assert result.returncode != 0
-    assert result.stdout == ""
-    assert diagnostic in result.stderr
+    assert repo.selection(body, previous_body="Before")["suites"] == []
 
 
 def test_suite_binary_must_match_owning_package_even_when_unselected(repo: Repository) -> None:
     repo.write_suite("buildins/echor", "other-binary")
     repo.commit()
-    result = repo.run_selector("Benchmark-CLIs: wcr")
+    result = repo.run_selector()
     assert result.returncode != 0
     assert result.stdout == ""
     assert "other-binary" in result.stderr

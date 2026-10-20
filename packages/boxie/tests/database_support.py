@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
 
-from boxie.bootstrap.config import OrchestratorConfig
+from boxie.bootstrap.config import SupervisorConfig
 from boxie.domain.models import Principal, SandboxSpec
 from boxie.persistence.database import SessionFactory
 from boxie.persistence.database import database as session_database
@@ -15,8 +15,8 @@ from boxie.persistence.migrate import migrate
 from boxie.persistence.models import CapacitySlot, Outbox, Sandbox, SandboxArtifactRef
 from boxie.persistence.postgres import PostgresLifecycle
 from boxie.persistence.postgres_artifacts import PostgresArtifactStore
-from boxie.sandbox.transport.client import OrchestratorClient
-from boxie_test_support.orchestrator import bundle, configuration
+from boxie.sandbox.transport.client import SupervisorClient
+from boxie_test_support.supervisor import bundle, configuration
 from boxie_test_support.terminal_network import network
 from sqlalchemy import CheckConstraint, func
 from sqlalchemy.schema import AddConstraint
@@ -48,14 +48,12 @@ async def add_check(
 async def database(
     dsn: str, root: Path
 ) -> AsyncIterator[
-    tuple[PostgresLifecycle, PostgresArtifactStore, SessionFactory, OrchestratorConfig]
+    tuple[PostgresLifecycle, PostgresArtifactStore, SessionFactory, SupervisorConfig]
 ]:
     await asyncio.to_thread(migrate, dsn, MIGRATIONS)
     config = configuration(root)
     async with network(root / "resolver") as harness:
-        async with OrchestratorClient(
-            harness.orchestrator_url, b"orchestrator-test-secret"
-        ) as resolver:
+        async with SupervisorClient(harness.supervisor_url, b"supervisor-test-secret") as resolver:
             async with session_database(dsn, pool_size=24) as sessions:
 
                 async def healthy() -> bool:

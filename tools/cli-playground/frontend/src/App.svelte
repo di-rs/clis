@@ -114,7 +114,7 @@
 </script>
 
 <svelte:head>
-  <title>{selectedCli ? `${selectedCli} / CLI playground` : 'CLI playground'}</title>
+  <title>{selectedCli ? `${selectedCli} / cli-playground` : 'cli-playground'}</title>
 </svelte:head>
 
 {#snippet commandButton(example: Example)}
@@ -170,7 +170,7 @@
       <button type="button" class="button button-primary" onclick={() => void load()}>Refresh status</button>
     </section>
   {:else if environment}
-    <div id="playground-view" class="playground">
+    <div id="playground-view" class="cli-playground">
       <section class="intro" aria-labelledby="cli-name">
         <div class="intro-title">
           {#if environment.clis.length > 1}

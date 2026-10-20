@@ -7,7 +7,7 @@ Production never uses a development server.
 [versions.json](versions.json) records the verified upstream releases and exact
 multi-platform image identities: server/admin-tools 1.32.0 and UI 2.56.0.
 Schema jobs use the unchanged upstream admin-tools image and its schema tool.
-Namespace bootstrap reuses the approved immutable `BOXIE_RUNTIME_IMAGE` with
+Namespace bootstrap reuses the approved immutable `BOXIE_IMAGE` with
 Boxie's pinned Temporal Python SDK and requires no separate helper image. The
 bootstrap job explicitly retains the prior operator UID/GID `1000:1000`.
 
@@ -22,8 +22,8 @@ only the dedicated client CA plus the internode CA for its required internal
 clients. Internode mTLS uses only the internode CA. Server config disables the
 unused frontend HTTP API and never disables hostname verification.
 
-Issue distinct client identities only to Boxie API, Boxie orchestrator, the UI
-backend, and trusted operator tools. Playground and sandbox containers receive
+Issue distinct client identities only to Boxie API, Boxie supervisor, the UI
+backend, and trusted operator tools. cli-playground and sandbox containers receive
 neither certificates nor control-network membership. Mount only each process's
 own keys and public trust roots; the server's internal worker reuses its
 internode identity. Private keys must be readable only by the relevant runtime
@@ -46,7 +46,7 @@ Provide these read-only certificate directories:
 | `TEMPORAL_UI_CERTS_DIR` | `ui-client.pem`, `ui-client.key`, `frontend-ca.pem` |
 
 Set the PostgreSQL deployment’s `BOXIE_CONTROL_NETWORK`, `TEMPORAL_DB_PASSWORD`,
-`VISIBILITY_DB_PASSWORD`, and approved immutable `BOXIE_RUNTIME_IMAGE`.
+`VISIBILITY_DB_PASSWORD`, and approved immutable `BOXIE_IMAGE`.
 The two database credentials must be distinct. The
 server binds to its container IP for membership, listens privately, and starts
 frontend/history/matching/worker roles explicitly. It receives no Boxie database
@@ -100,7 +100,7 @@ UV_CACHE_DIR=/tmp/boxie-uv-cache uv run --locked python packages/boxie/tests/run
 
 The integration harness requires Docker/Compose support and OpenSSL. It invokes
 the namespace command with the installed pinned SDK and operator certificate;
-production invokes the same module from the approved Boxie runtime image. It
+production invokes the same module from the approved Boxie image. It
 creates isolated projects, fresh databases, two-day test certificates, and
 loopback-only port overrides. The harness creates and removes its external test
 bridge independently of the service projects. That bridge permits host clients; the
@@ -109,7 +109,7 @@ readable by the disposable container UIDs; this test permission choice is not a
 production key policy. No CA private key is mounted into a runtime container.
 Only the harness's projects/volumes are removed, including after failure.
 
-The gate runs both schema operations, bootstrap twice, valid API/orchestrator/operator
+The gate runs both schema operations, bootstrap twice, valid API/supervisor/operator
 and UI identities, no-certificate/foreign-CA/wrong-hostname rejection, a real
 workflow/activity, the actual UI namespace API, and six cross-database credential
 denials. It writes nonsecret runtime evidence into pytest's temporary directory.

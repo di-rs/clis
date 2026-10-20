@@ -182,7 +182,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "boxie_orchestrator_control_lease_remaining_seconds",
+          "expr": "boxie_supervisor_control_lease_remaining_seconds",
           "legendFormat": "{{__name__}} {{state}} {{outcome}} {{dependency}}"
         }
       ]

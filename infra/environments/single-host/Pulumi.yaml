@@ -4,4 +4,4 @@ runtime:
   options:
     toolchain: uv
     virtualenv: ../../../.venv
-description: Shared host with Boxie and CLI Playground
+description: Shared host with Boxie and cli-playground

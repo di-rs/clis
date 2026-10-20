@@ -43,6 +43,18 @@ class SpecWire(ProfileRequest):
         )
 
 
+class CreateSandboxWire(WireModel):
+    artifact_id: UUID
+
+    def domain(self) -> SandboxSpec:
+        return SandboxSpec(
+            self.artifact_id,
+            "default",
+            ("/opt/boxie/shell.sh",),
+            {"TERM": "xterm-256color"},
+        )
+
+
 class ViewWire(WireModel):
     id: UUID
     state: SandboxState

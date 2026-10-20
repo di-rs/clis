@@ -6,9 +6,9 @@ from typing import Any
 from uuid import uuid4
 
 from boxie.observability.telemetry.context import bind_context
-from boxie.observability.telemetry.logging import configured_runtime
+from boxie.observability.telemetry.logging import configured_dispatcher
 
-# ASGI's callable contract, without a runtime web-framework dependency.
+# ASGI's callable contract, without a web-framework dependency.
 type Scope = MutableMapping[str, Any]
 type Message = MutableMapping[str, Any]
 type Receive = Callable[[], Awaitable[Message]]
@@ -30,7 +30,7 @@ class RequestLogging:
             await self.app(scope, receive, send)
             return
         started = time.monotonic()
-        runtime = configured_runtime()
+        dispatcher = configured_dispatcher()
         status, finished, disconnected = "error", False, False
         failure: BaseException | None = None
 
@@ -77,8 +77,8 @@ class RequestLogging:
                     and failure is None
                     and not disconnected
                 )
-                if runtime is not None and not healthy_probe:
-                    runtime.emit(
+                if dispatcher is not None and not healthy_probe:
+                    dispatcher.emit(
                         "request.completed",
                         level=40
                         if failure is not None or status in ("error", "4xx", "5xx")

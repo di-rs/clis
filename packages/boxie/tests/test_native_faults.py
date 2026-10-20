@@ -65,7 +65,7 @@ def test_start_fault_matches_exact_route_and_restores_forwarding(
 
 
 @pytest.mark.parametrize("boundary", ["create", "start"])
-def test_injection_boundary_determines_real_orchestrator_finality(
+def test_injection_boundary_determines_real_supervisor_finality(
     tmp_path: Path, boundary: str
 ) -> None:
     async def exercise() -> None:
@@ -79,7 +79,7 @@ def test_injection_boundary_determines_real_orchestrator_finality(
 
         setattr(daemon, boundary, fail)
         try:
-            task = agent.runtimes[request.ref.id].activity
+            task = agent.executions[request.ref.id].activity
             assert task is not None
             await asyncio.wait_for(task, 2)
             observation = await agent.inspect(request.ref)

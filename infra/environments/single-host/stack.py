@@ -2,8 +2,8 @@
 
 import pulumi
 from boxie_infra.access import OperatorConfig, provision_access
+from cli_playground_infra.dns import DnsConfig, provision_dns
 from host_infra.host import HostConfig, provision_resources
-from playground_infra.dns import DnsConfig, provision_dns
 
 config = pulumi.Config()
 host = provision_resources(

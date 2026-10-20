@@ -12,10 +12,10 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-from boxie.domain.lifecycle import OrchestratorObservation
+from boxie.domain.lifecycle import SupervisorObservation
 from boxie.domain.models import SandboxState, TerminationReason
 from boxie.persistence.start_guard import PostgresStartGuard
-from boxie.sandbox.execution.orchestrator import Orchestrator
+from boxie.sandbox.execution.supervisor import Supervisor
 from boxie.temporal.activities import LifecycleActivities
 from boxie_test_support.dependencies import postgres_dsn as postgres_dsn
 from boxie_test_support.dependencies import postgres_server as postgres_server
@@ -34,7 +34,7 @@ def test_cleanup_completion_waits_for_sessions_before_forgetting_journal(
         async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
             sandbox = await life.submit(OWNER, "cleanup-completion", await upload(artifacts))
             daemon = Daemon()
-            orchestrator = Orchestrator(
+            supervisor = Supervisor(
                 config,
                 daemon,
                 artifacts.path,
@@ -42,30 +42,30 @@ def test_cleanup_completion_waits_for_sessions_before_forgetting_journal(
                 lambda: datetime.now(UTC),
                 time.monotonic,
             )
-            activities = LifecycleActivities(life, orchestrator)
+            activities = LifecycleActivities(life, supervisor)
             finish = getattr(activities, completion)
             try:
                 await activities.ensure_sandbox(str(sandbox.id))
-                record = orchestrator.records[sandbox.id]
-                with orchestrator.terminal_session(record.ref):
+                record = supervisor.records[sandbox.id]
+                with supervisor.terminal_session(record.ref):
                     await life.terminate(OWNER, sandbox.id, TerminationReason.REQUESTED)
                     if completion == "load_request":
                         assert await life.record_observation(
-                            await orchestrator.remove(record.ref, TerminationReason.REQUESTED)
+                            await supervisor.remove(record.ref, TerminationReason.REQUESTED)
                         )
                     with pytest.raises(ApplicationError, match="cleanup pending"):
                         await finish(str(sandbox.id))
                     assert (await counts(sessions))[1:3] == (0, 0)
                     assert not daemon.resources
-                    assert sandbox.id in orchestrator.records
-                    assert len(json.loads(orchestrator.journal.path.read_bytes())["records"]) == 1
+                    assert sandbox.id in supervisor.records
+                    assert len(json.loads(supervisor.journal.path.read_bytes())["records"]) == 1
                 await finish(str(sandbox.id))
-                assert not orchestrator.records and not orchestrator.runtimes
-                assert json.loads(orchestrator.journal.path.read_bytes())["records"] == []
+                assert not supervisor.records and not supervisor.executions
+                assert json.loads(supervisor.journal.path.read_bytes())["records"] == []
                 await finish(str(sandbox.id))
                 assert daemon.creates == 1
             finally:
-                await orchestrator.close()
+                await supervisor.close()
 
     asyncio.run(exercise())
 
@@ -78,10 +78,10 @@ def test_removal_activity_retries_until_terminal_report_is_persisted(
             sandbox = await life.submit(OWNER, "stale-removal", await upload(artifacts))
             await life.terminate(OWNER, sandbox.id, TerminationReason.REQUESTED)
             boot = uuid4()
-            assert await life.bind_orchestrator_boot(
+            assert await life.bind_supervisor_boot(
                 OWNER, config.identity, sandbox.id, 1, None, boot
             )
-            pending = OrchestratorObservation(
+            pending = SupervisorObservation(
                 sandbox.id,
                 OWNER,
                 config.identity,
@@ -109,7 +109,7 @@ def test_removal_activity_retries_until_terminal_report_is_persisted(
                 initialize=AsyncMock(),
                 remove=AsyncMock(side_effect=[stale, replace(stale, event_version=3)]),
             )
-            activities = LifecycleActivities(life, cast(Orchestrator, control))
+            activities = LifecycleActivities(life, cast(Supervisor, control))
             with pytest.raises(ApplicationError, match="cleanup pending"):
                 await activities.remove_sandbox(str(sandbox.id))
             assert await counts(sessions) == (1, 1, 1, 2)
@@ -130,13 +130,13 @@ def test_cleanup_observations_do_not_grow_workflow_notifications(
         async with database(postgres_dsn, tmp_path) as (life, artifacts, sessions, config):
             sandbox = await life.submit(OWNER, "cleanup-notifications", await upload(artifacts))
             boot = uuid4()
-            assert await life.bind_orchestrator_boot(
+            assert await life.bind_supervisor_boot(
                 OWNER, config.identity, sandbox.id, 1, None, boot
             )
             await life.terminate(OWNER, sandbox.id, TerminationReason.REQUESTED)
             for version in range(1, 5):
                 assert await life.record_observation(
-                    OrchestratorObservation(
+                    SupervisorObservation(
                         sandbox.id,
                         OWNER,
                         config.identity,

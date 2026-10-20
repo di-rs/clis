@@ -36,10 +36,22 @@ Follow [Testing](docs/testing.md) for Rust and Python checks and
 Use the root uv workspace and committed lockfile for Python tooling; keep shared
 Ruff and strict mypy configuration at the root.
 
-Run checks directly with `prek run --all-files` before committing. For focused
-checks, use `prek run HOOK_ID --files PATH...`. Use `prek install` to install
-hooks; keep the installed hooks and Gitmoji validation enabled. Do not use
-`git commit` as a test runner or repeatedly retry commits to discover failures.
+Never run prek checks manually, including `prek run`, selected hook IDs,
+`--files`, or `--all-files`. Do not invoke the hook runner directly to bypass
+this rule. Keep the normal pre-commit and commit-msg hooks enabled, including
+Gitmoji validation; `prek install` is allowed only when hook installation is
+needed. Let a real commit invoke the hooks once. Do not create test commits or
+repeatedly retry commits to discover failures.
+
+During development, run the relevant test or lint tool directly for affected
+packages and their consumers. Local hooks use changed paths to select those
+packages; shared language configuration affects all packages using it. Full
+repository validation belongs in CI.
+
+Never use process-list commands (`ps`, including `ps aux` and `ps -axo`, `pgrep`,
+`top`, or equivalents) to monitor checks. Wait on the execution tool's existing
+session handle and read its output. Do not background checks, redirect their
+output to temporary logs for polling, or repeatedly inspect logs for progress.
 
 Tests that invoke Git in temporary repositories must clear inherited
 repository-local Git environment variables in their child processes (see
@@ -49,9 +61,15 @@ repository-local Git environment variables in their child processes (see
 inspect configuration origins and the intended repository type before changing
 `core.bare`; restore only verified accidental changes.
 
-Run benchmarks for pull requests only, selecting affected suites or the CLIs
-explicitly requested by the contributor. Do not add benchmark runs on pushes or
-merges to `master`. Treat automatic one-sample runs as execution smoke checks;
+Run CI benchmarks for pull requests only. Select a CLI if and only if its own
+`src/**/*.rs` or `build.rs` changed in the whole PR diff from the merge base and
+it has a benchmark suite. Never select unchanged CLIs because of shared-library,
+manifest, lockfile, toolchain, benchmark-suite, runner, workflow, documentation,
+or test changes. Changes to Biggie select only Biggie, not consumers of its
+generated inputs. PR-body fields, labels and manual overrides must never bypass
+this code-change requirement. Do not add benchmark runs on pushes or merges to
+`master`, or rerun them for PR-title or description edits.
+Treat automatic one-sample runs as execution smoke checks;
 report measurements and CI duration without claiming statistically significant
 performance changes from those samples.
 

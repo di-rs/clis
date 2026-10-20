@@ -2,6 +2,8 @@
 extend-exclude = ["**/tests/inputs/**", "**/tests/expected/**", "**/benches/data/**", "docs/superpowers/**"]
 
 [default.extend-identifiers]
+# README section named after the buildins directory.
+Buildins = "Buildins"
 # Preserve the exact user-specified notice.
 PERMITED = "PERMITED"
 # Existing commit identifier, not the English misspelling "abd".

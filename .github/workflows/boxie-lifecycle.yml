@@ -6,13 +6,7 @@ on:
     types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
       - '.github/workflows/boxie-lifecycle.yml'
-      - 'tools/cli-playground/**'
       - 'packages/boxie/**'
-      - 'buildins/echor/**'
-      - 'utils/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'rust-toolchain.toml'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.python-version'
@@ -59,39 +53,20 @@ jobs:
           sudo runsc install -- --platform=systrap --fdlimit=4096
           sudo systemctl restart docker
           runsc --version
-      - name: 🏗️ Build shared sandbox and native CLI
+      - name: 🏗️ Build Boxie sandbox
         if: github.event_name == 'workflow_dispatch'
         run: |
-          docker build -f tools/cli-playground/Sandbox.Dockerfile -t sanctuary-playground-sandbox:lifecycle .
-          cargo build --locked --release --package echor
-      - name: 🐳 Build Boxie runtime image
+          docker build -f packages/boxie/sandbox/Dockerfile -t boxie-sandbox:lifecycle .
+      - name: 🐳 Build Boxie image
         run: |
-          docker build -f packages/boxie/infra/Runtime.Dockerfile -t boxie:lifecycle .
-      - name: 🐳 Build playground runtime image
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          docker build -f tools/cli-playground/infra/Playground.Dockerfile -t cli-playground:lifecycle .
-      - name: 🟢 Set up Node.js and frontend tooling
-        uses: voidzero-dev/setup-vp@68f39c78aaf39be468cabd2afb09c162574c84af # v1.21.2
-        if: github.event_name == 'workflow_dispatch'
-        with:
-          working-directory: tools/cli-playground/frontend
-          node-version-file: .node-version
-          version-file: package.json
-          run-install: false
-          cache: true
+          docker build -f packages/boxie/infra/Boxie.Dockerfile -t boxie:lifecycle .
       - name: 📦 Install locked Python workspace dependencies
         run: |
-          uv sync --locked --all-packages
-      - name: 🌐 Install frontend and Chromium dependencies
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          pnpm --dir tools/cli-playground/frontend install --frozen-lockfile
-          pnpm --dir tools/cli-playground/frontend exec playwright install --with-deps chromium
+          uv sync --locked --package sanctuary-tools --package boxie --package boxie-infra
       - name: ⏳ Verify Python imports and pinned Temporal test server
         timeout-minutes: 3
         run: |
-          uv run --locked python -c 'import temporalio.bridge.temporal_sdk_bridge; import boxie.bootstrap.runtime'
+          uv run --locked python -c 'import temporalio.bridge.temporal_sdk_bridge; import boxie.bootstrap.workers'
           uv run --locked python - <<'PYTHON'
           import hashlib, io, json, os, pathlib, tarfile, urllib.request
           pins = json.loads(pathlib.Path("packages/boxie/tests/test-server-pins.json").read_text())
@@ -130,8 +105,8 @@ jobs:
         run: |
           uv run --locked pytest -m integration packages/boxie/tests/test_postgres.py -k failed_restart_journal -vv --durations=10
       # Optional until the native suite's hang is resolved; never blocks a PR.
-      - name: 🎭 Run optional native lifecycle and browser tests
+      - name: 🎭 Run optional native lifecycle tests
         if: github.event_name == 'workflow_dispatch'
         timeout-minutes: 20
         run: |
-          uv run --locked python packages/boxie/tests/run_integration.py --runtime runsc --browser -- -vv --durations=10 -o faulthandler_timeout=120
+          uv run --locked python packages/boxie/tests/run_integration.py --runtime runsc -- -vv --durations=10 -o faulthandler_timeout=120

@@ -55,7 +55,7 @@ else
 fi
 /usr/local/sbin/sanctuary-storage-guard
 install -d -m 0700 /etc/sanctuary /srv/sanctuary/docker /srv/sanctuary/containerd
-install -d -m 0755 /opt/sanctuary/boxie /opt/sanctuary/playground /srv/sanctuary/boxie /srv/sanctuary/playground
+install -d -m 0755 /opt/sanctuary/boxie /opt/sanctuary/cli-playground /srv/sanctuary/boxie /srv/sanctuary/cli-playground
 install -d -m 0755 /etc/docker /etc/containerd \
     /etc/systemd/system/docker.service.d /etc/systemd/system/containerd.service.d
 python3 - <<'PYTHON'
@@ -72,7 +72,7 @@ PYTHON
 cat > /etc/containerd/config.toml <<'EOF'
 version = 2
 root = "/srv/sanctuary/containerd"
-disabled_plugins = ["cri"]
+disabled_plugins = ["io.containerd.grpc.v1.cri"]
 EOF
 for service in docker containerd; do
     cat > "/etc/systemd/system/$service.service.d/storage.conf" <<'EOF'
