@@ -2,14 +2,13 @@
 name: ${CLI_PLAYGROUND_PROJECT_NAME:-cli-playground}
 services:
   backend:
-    image: ${CLI_PLAYGROUND_BACKEND_IMAGE:?Set approved immutable cli-playground image}
+    image: ${CLI_PLAYGROUND_IMAGE:?Set approved immutable cli-playground image}
     environment:
       CLI_PLAYGROUND_DATA_DIR: /var/lib/cli-playground
       CLI_PLAYGROUND_PUBLIC_URL: https://${CLI_PLAYGROUND_DOMAIN:?Set cli-playground domain}
       CLI_PLAYGROUND_DEPLOY_TOKEN: ${CLI_PLAYGROUND_DEPLOY_TOKEN:?Set deployment token}
       CLI_PLAYGROUND_BOXIE_URL: ${CLI_PLAYGROUND_BOXIE_URL:?Set private Boxie endpoint}
       CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE: /run/secrets/consumer
-      CLI_PLAYGROUND_BOXIE_PROFILE: ${CLI_PLAYGROUND_BOXIE_PROFILE:-cli-playground}
       CLI_PLAYGROUND_PREVIEW_DOMAIN: ${CLI_PLAYGROUND_DOMAIN}
     volumes:
     - data:/var/lib/cli-playground

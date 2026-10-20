@@ -1,9 +1,9 @@
 {
-  "cli-playground": {
+  "default": {
     "image_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
     "commands": [
       [
-        "/opt/cli-playground/shell.sh"
+        "/opt/boxie/shell.sh"
       ]
     ],
     "env": {

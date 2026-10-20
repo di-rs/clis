@@ -32,7 +32,7 @@ jobs:
     needs: source
     uses: ./.github/workflows/build-image.yml # zizmor: ignore[self-repository]
     with:
-      component: cli-playground-backend
+      component: cli-playground
       revision: ${{ needs.source.outputs.sha }}
     permissions:
       contents: read
@@ -70,4 +70,4 @@ jobs:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           GHCR_TOKEN: ${{ github.token }}
-        run: bash infra/environments/single-host/release.sh cli-playground-backend
+        run: bash infra/environments/single-host/release.sh cli-playground

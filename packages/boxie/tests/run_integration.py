@@ -311,13 +311,8 @@ class ProductionStack:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime", choices=["runsc"])
-    parser.add_argument("--browser", action="store_true")
     parser.add_argument("pytest_args", nargs="*")
     args = parser.parse_args()
-    if args.browser and not args.runtime:
-        parser.error("--browser requires --runtime runsc")
-    if args.browser:
-        os.environ["BOXIE_BROWSER"] = "1"
     selected = (
         ["packages/boxie/tests/integration/test_lifecycle.py"]
         if args.runtime

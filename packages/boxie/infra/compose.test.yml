@@ -33,25 +33,8 @@ services:
       - ${BOXIE_TEST_FAULTS_SCRIPT}:/fixture/faults.py:ro
     networks: [control]
     restart: "no"
-  cli-playground:
-    image: ${CLI_PLAYGROUND_BACKEND_IMAGE}
-    ports: ["127.0.0.1:${BOXIE_TEST_PRODUCT_PORT}:8000"]
-    environment:
-      CLI_PLAYGROUND_DATA_DIR: /data
-      CLI_PLAYGROUND_PUBLIC_URL: ${CLI_PLAYGROUND_PUBLIC_URL}
-      CLI_PLAYGROUND_DEPLOY_TOKEN: ${CLI_PLAYGROUND_DEPLOY_TOKEN}
-      CLI_PLAYGROUND_BOXIE_URL: http://api:8090
-      CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE: /run/secrets/consumer
-      CLI_PLAYGROUND_BOXIE_PROFILE: cli-playground
-    volumes:
-      - cli-playground:/data
-      - ${BOXIE_CONSUMER_CREDENTIAL_FILE}:/run/secrets/consumer:ro
-    networks: [consumer]
-    restart: "no"
 networks:
   control:
     external: true
     name: ${BOXIE_CONTROL_NETWORK}
   consumer: {}
-volumes:
-  cli-playground: {}

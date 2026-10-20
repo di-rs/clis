@@ -31,7 +31,7 @@ VALUES = {
 
 def rename_key(key: str) -> str:
     if key == "PLAYGROUND_IMAGE":
-        return "CLI_PLAYGROUND_BACKEND_IMAGE"
+        return "CLI_PLAYGROUND_IMAGE"
     if key.startswith("PLAYGROUND_"):
         return "CLI_" + key
     if key == "BOXIE_RUNTIME_IMAGE":

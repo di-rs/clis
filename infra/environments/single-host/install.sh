@@ -20,12 +20,12 @@ source /etc/sanctuary/boxie-image.env
 source /etc/sanctuary/cli-playground-image.env
 set +a
 [[ $(docker info --format '{{if index .Runtimes "runsc"}}runsc{{end}}') == runsc ]]
-for image in "$BOXIE_IMAGE" "$CLI_PLAYGROUND_BACKEND_IMAGE" "$CLI_PLAYGROUND_SANDBOX_IMAGE" "$OBS_COLLECTOR_IMAGE"; do
+for image in "$BOXIE_IMAGE" "$CLI_PLAYGROUND_IMAGE" "$BOXIE_SANDBOX_IMAGE" "$OBS_COLLECTOR_IMAGE"; do
     [[ $image =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]] || exit 2
     timeout 180 docker pull "$image" >/dev/null
 done
 bash /opt/sanctuary/boxie/credentials.sh /etc/sanctuary/boxie
-python3 /opt/sanctuary/cli-playground/cli_playground_infra/installation.py /opt/sanctuary/cli-playground
-bash /opt/sanctuary/boxie/install.sh "$source" "$(cat "$source/revision")"
+python3 /opt/sanctuary/cli-playground/cli_playground_infra/installation.py
+bash /opt/sanctuary/boxie/install.sh "$source" "$(cat "$source/revision")" cli-playground
 bash /opt/sanctuary/cli-playground/install.sh
 bash /opt/sanctuary/cli-playground/deploy.sh

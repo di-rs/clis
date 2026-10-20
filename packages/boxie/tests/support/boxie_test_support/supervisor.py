@@ -76,12 +76,18 @@ def configuration(root: Path, **changes: Any) -> SupervisorConfig:
     profile.write_text(
         json.dumps(
             {
+                "default": {
+                    "image_digest": IMAGE,
+                    "commands": [["/opt/boxie/shell.sh"]],
+                    "env": {"TERM": ["xterm-256color"]},
+                    "artifact_target": "/opt/artifact",
+                },
                 "shell": {
                     "image_digest": IMAGE,
                     "commands": [["/bin/sh"]],
                     "env": {"TERM": ["xterm-256color"], "GREETING": ["hello"]},
                     "artifact_target": "/opt/artifact",
-                }
+                },
             }
         )
     )

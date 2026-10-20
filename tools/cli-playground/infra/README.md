@@ -2,26 +2,21 @@
 
 Use the [shared-host guide](../../../infra/environments/single-host/README.md) for
 setup, SSH credential handoff, release gates and failure inspection. Routine
-backend releases leave the proxy and Boxie alone. A separate sandbox release
-updates its approved Boxie profile digest and recreates the supervisor with the
-current Boxie image. Existing installations need the
-[component naming cutover](../../../docs/component-naming-cutover.md) before their
-first release with these names.
+application releases leave the proxy and Boxie alone. The application image contains
+both Frontend and Backend. Existing disposable installations must be reset before
+using the artifact-only Boxie API; see the
+[reset procedure](../../../docs/component-naming-cutover.md).
 
 ## Independent local unit
 
-First obtain a private Boxie URL and consumer credential from its operator; see
-[Boxie infrastructure](../../../packages/boxie/infra/README.md). Boxie's approved `cli-playground`
-profile must use the immutable product sandbox image, command
-`["/opt/cli-playground/shell.sh"]`, environment allowlist `TERM=["xterm-256color"]`, and
-artifact mount `/opt/artifact`. The declaration is in
-[profiles/cli-playground.json](profiles/cli-playground.json); replace the placeholder digest
-and merge it into the **operator-owned Boxie profiles file**. The product cannot
-upload or change its profile. Build the product sandbox separately:
+Obtain a private Boxie URL and consumer credential from its operator; see
+[Boxie infrastructure](../../../packages/boxie/infra/README.md). Boxie owns its
+default shell, sandbox image and built-in sample files. cli-playground uploads
+validated native binaries and requests a sandbox using only their artifact ID.
+It does not select an environment or modify Boxie's configuration.
 
 ```sh
-docker build -f tools/cli-playground/Sandbox.Dockerfile -t cli-playground-sandbox:local .
-docker build -f tools/cli-playground/infra/Backend.Dockerfile -t cli-playground-backend:local .
+docker build -f tools/cli-playground/infra/CliPlayground.Dockerfile -t cli-playground:local .
 ```
 
 From the repository root, create an external product-data volume and set the
@@ -49,7 +44,7 @@ Their external network and volume identifiers remain independently configured.
 The credential must be a regular non-symlink file, mode `0600`, containing a
 16–4096-character printable token. The local unit publishes only localhost:8000.
 The independently resolvable production manifest uses an explicit immutable
-`CLI_PLAYGROUND_BACKEND_IMAGE`, external `CLI_PLAYGROUND_PROXY_NETWORK` and
+`CLI_PLAYGROUND_IMAGE`, external `CLI_PLAYGROUND_PROXY_NETWORK` and
 `CLI_PLAYGROUND_CERTIFICATES_VOLUME`; only Traefik publishes 80/443 and receives the
 Cloudflare certificate-renewal credential. Boxie's artifact data and supervisor
 credential never enter cli-playground. Runtime images contain only their own installed
@@ -77,7 +72,7 @@ that environment:
 | Kind | Name | Value |
 | --- | --- | --- |
 | Variable | `CLI_PLAYGROUND_URL` | The backend's public HTTPS origin, for example `https://play.example.com`, without a path, query or trailing slash. Use the same origin as the backend's `CLI_PLAYGROUND_PUBLIC_URL`. |
-| Secret | `CLI_PLAYGROUND_DEPLOY_TOKEN` | The exact token configured as `CLI_PLAYGROUND_DEPLOY_TOKEN` on the backend. Shared-host setup stores it at `/etc/sanctuary/boxie/preview-token`. |
+| Secret | `CLI_PLAYGROUND_DEPLOY_TOKEN` | The exact token configured as `CLI_PLAYGROUND_DEPLOY_TOKEN` on the backend. Shared-host setup stores it at `/etc/sanctuary/cli-playground/preview-token`. |
 
 Use the shared-host guide's
 [credential handoff](../../../infra/environments/single-host/README.md#give-application-workflows-their-ssh-credentials)
@@ -126,6 +121,6 @@ build for the current PR commit to trigger publication again.
 Build the real frontend before `uv run --locked pytest
 packages/boxie/tests/test_packaging.py -m integration`. The required PR frontend job
 checks isolated packaging and static responses. The separate
-[Linux sandbox workflow](../../../.github/workflows/boxie-lifecycle.yml)
+[shared-system lifecycle workflow](../../../.github/workflows/sanctuary-lifecycle.yml)
 checks native runsc security and both generic and product terminals through the
 private API. Missing runsc is a failure, never a successful runc substitute.

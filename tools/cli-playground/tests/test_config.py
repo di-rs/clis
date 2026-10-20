@@ -9,6 +9,12 @@ from pydantic import ValidationError
 
 
 @pytest.mark.usefixtures("configured_environment")
+def test_consumer_cannot_configure_a_boxie_profile() -> None:
+    with pytest.raises(ValidationError, match="boxie_profile"):
+        Settings.model_validate({"boxie_profile": "custom"})
+
+
+@pytest.mark.usefixtures("configured_environment")
 def test_data_directory_requires_an_absolute_mount_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CLI_PLAYGROUND_DATA_DIR", "relative")
     with pytest.raises(ValidationError):

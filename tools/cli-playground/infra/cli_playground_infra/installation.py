@@ -1,8 +1,8 @@
-"""Render cli-playground settings and its approved profile from installation inputs."""
+"""Render private cli-playground settings and its own preview credential."""
 
 import argparse
-import json
 import os
+import secrets
 import tempfile
 from pathlib import Path
 
@@ -22,18 +22,29 @@ def write_environment(path: Path, values: dict[str, str]) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def render(root: Path, source: Path) -> None:
+def render(root: Path) -> None:
     credentials = root / "boxie"
 
-    def secret(name: str) -> str:
-        return (credentials / name).read_text().strip()
+    token = root / "cli-playground/preview-token"
+    token.parent.mkdir(mode=0o700, exist_ok=True)
+    if not token.exists():
+        descriptor = os.open(token, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w") as output:
+            output.write(secrets.token_hex(32) + "\n")
+    if (
+        token.is_symlink()
+        or not token.is_file()
+        or token.stat().st_mode & 0o077
+        or not token.read_text().strip()
+    ):
+        raise ValueError("Preview credential must be a private nonempty regular file")
 
     write_environment(
         root / "cli-playground.env",
         {
-            "CLI_PLAYGROUND_BACKEND_IMAGE": os.environ["CLI_PLAYGROUND_BACKEND_IMAGE"],
+            "CLI_PLAYGROUND_IMAGE": os.environ["CLI_PLAYGROUND_IMAGE"],
             "CLI_PLAYGROUND_DOMAIN": os.environ["CLI_PLAYGROUND_DOMAIN"],
-            "CLI_PLAYGROUND_DEPLOY_TOKEN": secret("preview-token"),
+            "CLI_PLAYGROUND_DEPLOY_TOKEN": token.read_text().strip(),
             "CLI_PLAYGROUND_BOXIE_URL": "http://boxie-api:8090",
             "CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE": str(credentials / "consumer.secret"),
             "CLI_PLAYGROUND_CONSUMER_NETWORK": "boxie-consumers",
@@ -44,40 +55,13 @@ def render(root: Path, source: Path) -> None:
             "CLOUDFLARE_DNS_API_TOKEN": os.environ["CLOUDFLARE_DNS_API_TOKEN"],
         },
     )
-    update_profile(root, source)
-
-
-def update_profile(root: Path, source: Path) -> None:
-    profiles_path = root / "boxie/profiles.json"
-    profiles = json.loads(profiles_path.read_text()) if profiles_path.exists() else {}
-    profile = profiles.get("cli-playground")
-    if profile is None:
-        profile = json.loads((source / "profiles/cli-playground.json").read_text())[
-            "cli-playground"
-        ]
-    profile["image_digest"] = os.environ["CLI_PLAYGROUND_SANDBOX_IMAGE"]
-    profiles["cli-playground"] = profile
-    with tempfile.NamedTemporaryFile(mode="w", dir=profiles_path.parent, delete=False) as output:
-        temporary = Path(output.name)
-        try:
-            output.write(json.dumps(profiles, indent=2) + "\n")
-            output.flush()
-            os.fsync(output.fileno())
-            temporary.replace(profiles_path)
-        finally:
-            temporary.unlink(missing_ok=True)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("source", type=Path)
-    parser.add_argument("--profile-only", action="store_true")
-    args = parser.parse_args()
+    parser.parse_args()
     root = Path(os.environ.get("SANCTUARY_CONFIG_DIR", "/etc/sanctuary"))
-    if args.profile_only:
-        update_profile(root, args.source)
-    else:
-        render(root, args.source)
+    render(root)
 
 
 if __name__ == "__main__":

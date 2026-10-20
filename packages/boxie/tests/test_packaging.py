@@ -25,7 +25,7 @@ def test_operations_manifest_keeps_docker_socket_out_of_operator_jobs() -> None:
     "dockerfile",
     [
         "packages/boxie/infra/Boxie.Dockerfile",
-        "tools/cli-playground/infra/Backend.Dockerfile",
+        "tools/cli-playground/infra/CliPlayground.Dockerfile",
     ],
 )
 def test_docker_context_excludes_generated_frontend_assets(tmp_path: Path, dockerfile: str) -> None:
@@ -37,6 +37,9 @@ def test_docker_context_excludes_generated_frontend_assets(tmp_path: Path, docke
     assets.mkdir(parents=True)
     (assets / "stale.js").write_text("stale local frontend")
     (context / source / "__init__.py").write_text("# backend source\n")
+    own_source = context / "packages/boxie/src/boxie/__init__.py"
+    own_source.parent.mkdir(parents=True)
+    own_source.write_text("# Boxie source\n")
     recipe = context / dockerfile
     recipe.parent.mkdir(parents=True, exist_ok=True)
     recipe.write_text("FROM scratch\nCOPY . /\n")
@@ -59,8 +62,12 @@ def test_docker_context_excludes_generated_frontend_assets(tmp_path: Path, docke
         text=True,
         timeout=60,
     )
-    assert (output / source / "__init__.py").read_text() == "# backend source\n"
-    assert not (output / source / "static").exists()
+    if dockerfile.startswith("packages/boxie/"):
+        assert not (output / "tools").exists()
+        assert (output / own_source.relative_to(context)).read_text() == "# Boxie source\n"
+    else:
+        assert (output / source / "__init__.py").read_text() == "# backend source\n"
+        assert not (output / source / "static").exists()
 
 
 @pytest.mark.integration
@@ -217,7 +224,7 @@ def test_resolved_compose_isolated_topology(
         "BOXIE_DATA_DIR": str(tmp_path / "data"),
         "BOXIE_CONSUMER_NETWORK": "test-consumers",
         "BOXIE_CONTROL_NETWORK": "test-control",
-        "CLI_PLAYGROUND_BACKEND_IMAGE": "cli-playground:test",
+        "CLI_PLAYGROUND_IMAGE": "cli-playground:test",
         "CLI_PLAYGROUND_BOXIE_URL": "http://independent-boxie:8090",
         "CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE": str(tmp_path / "consumer.secret"),
         "CLI_PLAYGROUND_CONSUMER_NETWORK": "test-consumers",

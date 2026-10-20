@@ -72,7 +72,7 @@ def test_configuration_copy_preserves_identity_secrets_and_originals(old_config:
         p.relative_to(old_config): p.read_bytes() for p in old_config.rglob("*") if p.is_file()
     } == before
     assert (target / "cli-playground.env").read_text() == (
-        "CLI_PLAYGROUND_BACKEND_IMAGE='ghcr.io/org/playground-gateway@sha256:abc'\n"
+        "CLI_PLAYGROUND_IMAGE='ghcr.io/org/playground-gateway@sha256:abc'\n"
         "CLI_PLAYGROUND_DEPLOY_TOKEN='playground-orchestrator-opaque-token'\n"
         "CLI_PLAYGROUND_DATA_VOLUME='cli-playground-data'\n"
         "CLI_PLAYGROUND_PROJECT_NAME='cli-playground'\n"

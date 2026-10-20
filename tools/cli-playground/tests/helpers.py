@@ -55,7 +55,7 @@ APP_ENV = (
     b"CLI_PLAYGROUND_DEPLOY_TOKEN=local-test-secret\n"
     b"CLOUDFLARE_DNS_API_TOKEN=private-renewal-token\n"
 )
-BACKEND_IMAGE = "ghcr.io/di-rs/sanctuary-cli-playground-backend@sha256:" + "1" * 64
+BACKEND_IMAGE = "ghcr.io/di-rs/sanctuary-cli-playground@sha256:" + "1" * 64
 SANDBOX_IMAGE = "registry.example:5000/team/sandbox@sha256:" + "2" * 64
 
 

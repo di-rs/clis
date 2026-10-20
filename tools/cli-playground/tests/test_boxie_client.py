@@ -7,10 +7,59 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from cli_playground.boxie_client import BoxieUnavailable, HttpBoxieClient
-from fastapi import FastAPI
+from cli_playground.boxie_client import BoxieUnavailable, HttpBoxieClient, SandboxRequest
+from fastapi import FastAPI, Request
+from pydantic import ValidationError
 
 from .boxie_network import serve
+
+
+def test_create_sends_only_the_artifact_id() -> None:
+    async def exercise() -> None:
+        artifact_id, sandbox_id = uuid4(), uuid4()
+        now = datetime.now(UTC)
+        peer = FastAPI()
+        requests: list[bytes] = []
+
+        @peer.post("/v1/sandboxes")
+        async def create(request: Request) -> dict[str, object]:
+            requests.append(await request.body())
+            assert request.headers["Idempotency-Key"] == "create-once"
+            return {
+                "id": str(sandbox_id),
+                "state": "accepted",
+                "created_at": now.isoformat(),
+                "absolute_deadline": (now + timedelta(hours=1)).isoformat(),
+                "reason": None,
+                "cleanup_pending": False,
+            }
+
+        async with serve(peer) as url:
+            client = HttpBoxieClient(url, "private-consumer-secret")
+            try:
+                result = await client.create("create-once", SandboxRequest(artifact_id=artifact_id))
+                assert result.id == sandbox_id
+                assert requests == [f'{{"artifact_id":"{artifact_id}"}}'.encode()]
+            finally:
+                await client.close()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("profile_id", "cli-playground"),
+        ("command", ["/bin/sh"]),
+        ("env", {"TERM": "xterm"}),
+        ("policy", {"max_seconds": 60}),
+    ],
+)
+def test_create_rejects_consumer_environment_configuration(field: str, value: object) -> None:
+    with pytest.raises(ValidationError) as error:
+        SandboxRequest.model_validate({"artifact_id": str(uuid4()), field: value})
+    assert error.value.errors()[0]["type"] == "extra_forbidden"
+    assert error.value.errors()[0]["loc"] == (field,)
 
 
 @pytest.mark.parametrize("method", ["GET", "DELETE"])

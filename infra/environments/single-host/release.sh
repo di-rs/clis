@@ -5,22 +5,22 @@ umask 077
 [[ $# == 1 ]] || exit 2
 component=$1
 case $component in
-    boxie)
+    boxie|boxie-sandbox)
         owner=boxie
         files=packages/boxie/infra
-        image_key=BOXIE_IMAGE
-        retained_key=OBS_COLLECTOR_IMAGE
+        if [[ $component == boxie ]]; then
+            image_key=BOXIE_IMAGE
+            retained_keys=(BOXIE_SANDBOX_IMAGE OBS_COLLECTOR_IMAGE)
+        else
+            image_key=BOXIE_SANDBOX_IMAGE
+            retained_keys=(BOXIE_IMAGE OBS_COLLECTOR_IMAGE)
+        fi
         ;;
-    cli-playground-sandbox|cli-playground-backend)
+    cli-playground)
         owner=cli-playground
         files=tools/cli-playground/infra
-        if [[ $component == cli-playground-sandbox ]]; then
-            image_key=CLI_PLAYGROUND_SANDBOX_IMAGE
-            retained_key=CLI_PLAYGROUND_BACKEND_IMAGE
-        else
-            image_key=CLI_PLAYGROUND_BACKEND_IMAGE
-            retained_key=CLI_PLAYGROUND_SANDBOX_IMAGE
-        fi
+        image_key=CLI_PLAYGROUND_IMAGE
+        retained_keys=()
         ;;
     *) echo 'Unknown release component' >&2; exit 2 ;;
 esac
@@ -57,16 +57,19 @@ SSH
 ssh -F "$private/config" deployment "install -d -m 0700 /opt/sanctuary/$owner $remote"
 remote_created=true
 scp -F "$private/config" -r "$files/." "deployment:/opt/sanctuary/$owner/"
-retained=$(ssh -F "$private/config" deployment "sed -n 's/^$retained_key=//p' /etc/sanctuary/$owner-image.env")
-[[ $retained =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
-printf '%s=%s\n%s=%s\n' "$image_key" "$IMAGE" "$retained_key" "$retained" > "$private/image.env"
+printf '%s=%s\n' "$image_key" "$IMAGE" > "$private/image.env"
+for retained_key in "${retained_keys[@]}"; do
+    retained=$(ssh -F "$private/config" deployment "sed -n 's/^$retained_key=//p' /etc/sanctuary/$owner-image.env")
+    [[ $retained =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
+    printf '%s=%s\n' "$retained_key" "$retained" >> "$private/image.env"
+done
 mkdir "$private/registry"
 printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$(printf '%s:%s' "$GITHUB_ACTOR" "$GHCR_TOKEN" | base64 | tr -d '\n')" > "$private/registry/config.json"
 scp -F "$private/config" "$private/image.env" "deployment:$remote/image.env"
 scp -F "$private/config" -r "$private/registry" "deployment:$remote/registry"
 case $component in
     boxie) command="/opt/sanctuary/boxie/deploy.sh $SOURCE_SHA" ;;
-    cli-playground-sandbox) command="/opt/sanctuary/cli-playground/sandbox-release.sh $IMAGE" ;;
-    cli-playground-backend) command=/opt/sanctuary/cli-playground/deploy.sh ;;
+    boxie-sandbox) command="/opt/sanctuary/boxie/sandbox-release.sh $IMAGE" ;;
+    cli-playground) command=/opt/sanctuary/cli-playground/deploy.sh ;;
 esac
 ssh -F "$private/config" deployment "set -e; trap 'rm -rf $remote' EXIT; install -m 0600 $remote/image.env /etc/sanctuary/$owner-image.env; DOCKER_CONFIG=$remote/registry bash $command"

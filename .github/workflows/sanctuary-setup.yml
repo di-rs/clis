@@ -41,7 +41,7 @@ jobs:
     needs: source
     uses: ./.github/workflows/build-image.yml # zizmor: ignore[self-repository]
     with:
-      component: cli-playground-backend
+      component: cli-playground
       revision: ${{ needs.source.outputs.sha }}
     permissions:
       contents: read
@@ -50,7 +50,7 @@ jobs:
     needs: source
     uses: ./.github/workflows/build-image.yml # zizmor: ignore[self-repository]
     with:
-      component: cli-playground-sandbox
+      component: boxie-sandbox
       revision: ${{ needs.source.outputs.sha }}
     permissions:
       contents: read
@@ -118,8 +118,8 @@ jobs:
         SANDBOX_SOURCE_SHA: ${{ needs.sandbox.outputs.source_sha }}
         COLLECTOR_SOURCE_SHA: ${{ needs.collector.outputs.source_sha }}
         BOXIE_IMAGE: ${{ needs.boxie.outputs.image }}
-        CLI_PLAYGROUND_BACKEND_IMAGE: ${{ needs.backend.outputs.image }}
-        CLI_PLAYGROUND_SANDBOX_IMAGE: ${{ needs.sandbox.outputs.image }}
+        CLI_PLAYGROUND_IMAGE: ${{ needs.backend.outputs.image }}
+        BOXIE_SANDBOX_IMAGE: ${{ needs.sandbox.outputs.image }}
         OBS_COLLECTOR_IMAGE: ${{ needs.collector.outputs.image }}
       run: |
         set -euo pipefail
@@ -133,12 +133,12 @@ jobs:
         cp -a packages/boxie/infra .installation/packages/boxie/
         cp -a tools/cli-playground/infra .installation/tools/cli-playground/
         printf '%s\n' "$SOURCE_SHA" > .installation/revision
-        for key in BOXIE_IMAGE CLI_PLAYGROUND_BACKEND_IMAGE CLI_PLAYGROUND_SANDBOX_IMAGE OBS_COLLECTOR_IMAGE; do
+        for key in BOXIE_IMAGE CLI_PLAYGROUND_IMAGE BOXIE_SANDBOX_IMAGE OBS_COLLECTOR_IMAGE; do
             value=${!key}
             [[ $value =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]]
         done
-        printf 'BOXIE_IMAGE=%s\nOBS_COLLECTOR_IMAGE=%s\n' "$BOXIE_IMAGE" "$OBS_COLLECTOR_IMAGE" > .installation/boxie-image.env
-        printf 'CLI_PLAYGROUND_BACKEND_IMAGE=%s\nCLI_PLAYGROUND_SANDBOX_IMAGE=%s\n' "$CLI_PLAYGROUND_BACKEND_IMAGE" "$CLI_PLAYGROUND_SANDBOX_IMAGE" > .installation/cli-playground-image.env
+        printf 'BOXIE_IMAGE=%s\nBOXIE_SANDBOX_IMAGE=%s\nOBS_COLLECTOR_IMAGE=%s\n' "$BOXIE_IMAGE" "$BOXIE_SANDBOX_IMAGE" "$OBS_COLLECTOR_IMAGE" > .installation/boxie-image.env
+        printf 'CLI_PLAYGROUND_IMAGE=%s\n' "$CLI_PLAYGROUND_IMAGE" > .installation/cli-playground-image.env
     - name: ☁️ Provision shared infrastructure
       working-directory: infra/environments/single-host
       run: |

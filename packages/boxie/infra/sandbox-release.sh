@@ -4,10 +4,9 @@ set -euo pipefail
 [[ $# == 1 && $1 =~ ^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$ ]] || exit 2
 image=$1
 config=${SANCTUARY_CONFIG_DIR:-/etc/sanctuary}
-application=${SANCTUARY_CLI_PLAYGROUND_DIR:-/opt/sanctuary/cli-playground}
 boxie=${SANCTUARY_BOXIE_DIR:-/opt/sanctuary/boxie}
 docker pull "$image"
-CLI_PLAYGROUND_SANDBOX_IMAGE=$image python3 "$application/cli_playground_infra/installation.py" "$application" --profile-only
+BOXIE_SANDBOX_IMAGE=$image python3 "$boxie/boxie_infra/installation.py" "$boxie" --profile-only
 compose() {
     docker compose --env-file "$config/boxie.env" --env-file "$config/boxie-image.env" \
         -f "$boxie/compose.production.yml" -f "$boxie/compose.observability.yml" "$@"

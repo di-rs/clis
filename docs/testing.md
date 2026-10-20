@@ -191,18 +191,20 @@ uv run --locked python packages/boxie/tests/run_integration.py
 
 The [Linux lifecycle workflow](../.github/workflows/boxie-lifecycle.yml) runs real
 PostgreSQL/Temporal checks, pinned replay/cancellation, credential permissions and
-endpoint restart checks on pull requests. The native lifecycle/browser E2Es are
-temporarily manual-only while their hang is investigated. Use `workflow_dispatch`
-to build the native images and `echor` and run all six cases, or run locally:
+endpoint restart checks on pull requests. The native lifecycle E2Es are
+temporarily manual-only while their hang is investigated. Boxie lifecycle runs
+without consumer sources. The separate [shared-system workflow](../.github/workflows/sanctuary-lifecycle.yml)
+builds cli-playground and `echor` for application/browser coverage. To run both locally:
 
 ```sh
-uv run --locked python packages/boxie/tests/run_integration.py --runtime runsc --browser -- -vv --durations=10
+uv run --locked pytest -m integration packages/boxie/tests/integration/test_lifecycle.py \
+  tools/cli-playground/tests/test_native.py -vv --durations=10
 ```
 
 Each CI tier has its own timeout and reports individual tests and slow durations.
 The optional native E2Es require Linux amd64 Docker with configured gVisor,
-built `boxie:lifecycle`, `cli-playground-backend:lifecycle`
-and `sanctuary-cli-playground-sandbox:lifecycle` images, `target/release/echor`, and Chromium.
+built `boxie:lifecycle`, `cli-playground:lifecycle`
+and `boxie-sandbox:lifecycle` images, `target/release/echor`, and Chromium.
 `BOXIE_NATIVE_BINARY` may select the native executable. The fixture owns random
 Compose projects, volumes, identity labels and fault proxies. It independently
 kills API, supervisor (including its embedded workers) and Temporal; tests failed

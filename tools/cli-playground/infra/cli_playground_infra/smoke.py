@@ -1,4 +1,4 @@
-"""Exercise an approved cli-playground shell profile through Boxie's private API.
+"""Exercise a native CLI through Boxie's default shell and private API.
 
 Run against a disposable local Boxie stack with an existing Linux x86_64 echor
 binary, --boxie-url, and --credential-file. This does not configure Docker.
@@ -72,7 +72,7 @@ class Shell:
         return output
 
 
-async def exercise(binary: Path, url: str, credential_file: Path, profile: str) -> None:
+async def exercise(binary: Path, url: str, credential_file: Path) -> None:
     binary = binary.resolve(strict=True)
     validate_elf(binary)
     client = HttpBoxieClient(url, credential_file.read_text().strip())
@@ -85,9 +85,7 @@ async def exercise(binary: Path, url: str, credential_file: Path, profile: str) 
                 bundle.write(binary, "echor")
             digest = hashlib.sha256(archive.read_bytes()).hexdigest()
             await client.upload(artifact_id, digest, archive)
-            view = await client.create(
-                str(uuid.uuid4()), SandboxRequest(artifact_id=artifact_id, profile_id=profile)
-            )
+            view = await client.create(str(uuid.uuid4()), SandboxRequest(artifact_id=artifact_id))
             sandbox_id = view.id
             async with asyncio.timeout(30):
                 while view.state in {"accepted", "provisioning"}:
@@ -160,14 +158,9 @@ def main() -> int:
     parser.add_argument("--binary", type=Path, required=True, help="Linux x86_64 echor executable")
     parser.add_argument("--boxie-url", required=True)
     parser.add_argument("--credential-file", type=Path, required=True)
-    parser.add_argument("--profile", default="cli-playground")
     arguments = parser.parse_args()
     try:
-        asyncio.run(
-            exercise(
-                arguments.binary, arguments.boxie_url, arguments.credential_file, arguments.profile
-            )
-        )
+        asyncio.run(exercise(arguments.binary, arguments.boxie_url, arguments.credential_file))
     except (OSError, RuntimeError, ValueError, TimeoutError) as error:
         print(f"Sandbox smoke failed: {error}", file=sys.stderr)
         return 1

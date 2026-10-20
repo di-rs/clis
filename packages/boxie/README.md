@@ -5,8 +5,8 @@ admission, idempotency, eight capacity slots and artifact references. The API
 commits requests and a minimal start/stop outbox. Temporal SDK workers embedded
 in the Supervisor drive lifecycle activities through its sandbox execution code.
 Only the Supervisor receives Docker access and owns artifact bytes, PTYs and the
-execution journal. Consumers select approved profiles and upload ZIP
-files; they cannot supply images, host paths or isolation settings. Boxie does not
+execution journal. Consumers upload ZIP files and request the default sandbox with an artifact ID;
+they cannot supply profiles, commands, environment variables or isolation settings. Boxie does not
 inspect executable formats or depend on cli-playground.
 
 Complete the [host prerequisites](infra/host-requirements.md) before starting Boxie.
@@ -68,7 +68,7 @@ Its operator configuration contains:
   "supervisor_url": "http://boxie-supervisor:8091",
   "supervisor_credential_file": "/run/secrets/boxie-supervisor",
   "consumer_credential_files": {
-    "cli-playground": "/run/secrets/boxie-cli-playground"
+    "example-consumer": "/run/secrets/consumer"
   },
   "release": "boxie",
   "identity": {
@@ -107,14 +107,15 @@ Foreign resources return 404. UUIDs and digests remain opaque to the API.
 | --- | --- |
 | Upload artifact | `PUT /v1/artifacts/{uuid}`, raw ZIP, `X-Content-SHA256`; 201 new, 200 exact retry |
 | Retire artifact | `DELETE /v1/artifacts/{uuid}`; 204 |
-| Create sandbox | `POST /v1/sandboxes`, `Idempotency-Key`, `spec` object described below; 202 with status |
+| Create sandbox | `POST /v1/sandboxes`, `Idempotency-Key`, `{"artifact_id":"UUID"}`; 202 with status |
 | Inspect sandbox | `GET /v1/sandboxes/{uuid}`; 200 with status |
 | Stop sandbox | `DELETE /v1/sandboxes/{uuid}`; 200 with status |
 | Terminal | `WS /v1/sandboxes/{uuid}/terminal` |
 
-Sandbox POST sends the `spec` object directly, without the supervisor's ownership or
-idempotency envelope. Unknown fields, images, paths and Docker settings are
-rejected. Invalid bodies return 422, conflicting retries 409, capacity exhaustion
+Sandbox POST accepts only `artifact_id`. Boxie resolves its default shell, TERM,
+limits and lifetime settings before admission and retains the accepted snapshot
+for retries and recovery. Profile, command, environment, policy and other unknown
+fields are rejected. Invalid bodies return 422, conflicting retries 409, capacity exhaustion
 429 and unavailable supervisor calls 503. API restarts retain SQL-owned IDs,
 idempotency records and capacity; the supervisor keeps draining terminal output.
 
@@ -165,20 +166,31 @@ screen snapshots are not supported.
 the API release and SQL, supervisor and Temporal readiness, with 503 when unavailable.
 The supervisor's authenticated `/readyz` reports Docker, SQL and execution persistence. Access logs are disabled by both entry points.
 
-A trusted profile file is a JSON object keyed by profile ID:
+## Default environment
+
+Boxie owns one Ubuntu 24.04 Linux x86_64 environment with Bash, standard utilities
+and built-in file fixtures. Uploads retain the existing flat ZIP format. Files are
+mounted read-only at `/opt/artifact`, which is on PATH; built-in fixtures seed the
+writable `/workspace`. Uploaded files never replace shell startup configuration.
+The shell disables Bash's `true` and `false` builtins when uploaded executables
+use those names. Workspace files remain non-executable.
+
+The operator installs the Boxie sandbox image using `BOXIE_SANDBOX_IMAGE`. The
+internal profile file is not a consumer interface. It contains one `default`:
+
 
 ```json
 {
-  "shell": {
-    "image_digest": "registry.example/shell@sha256:1111111111111111111111111111111111111111111111111111111111111111",
-    "commands": [["/bin/sh"]],
+  "default": {
+    "image_digest": "registry.example/boxie-sandbox@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "commands": [["/opt/boxie/shell.sh"]],
     "env": {"TERM": ["xterm-256color"]},
     "artifact_target": "/opt/artifact"
   }
 }
 ```
 
-Replace the example image digest with an approved image. Local content-addressed
+Replace the example image digest with the approved Boxie sandbox image. Local content-addressed
 image IDs (`sha256:` plus 64 lowercase hex digits) are also accepted. Commands
 are exact argument-vector allowlists; environment keys and values are allowlists.
 The artifact mount must be a normalized path under `/opt/`. Optional `limits`
@@ -187,6 +199,9 @@ atomically reload all profiles. A failed reload keeps the last valid version.
 Approved versions are retained by configuration hash, including across supervisor
 restarts, so delayed requests can validate their original snapshot. Reloads never
 change an admitted sandbox's image, command, environment, or limits.
+
+Template selection and consumer-supplied templates require a separate design;
+the current API exposes no template configuration.
 
 ## Private protocol
 
@@ -203,9 +218,10 @@ opaque resource IDs. Wire schemas reject extra object fields and invalid bounds.
 | Terminal | `WS /v1/sandboxes/{uuid}/terminal?consumer_id=...` |
 | Readiness | `GET /readyz`, supervisor identity and dependency results |
 
-`spec` contains `artifact_id`, `profile_id`, `command`, `env`, and optional `policy`.
-Policy defaults are `max_seconds: 3600`, `idle_seconds: 600`, and
-`disconnect_seconds: 120`; each may be lowered. Admission returns a `SandboxView`
+The internal accepted `spec` records the resolved profile, command, environment
+and policy alongside the artifact ID. The public API does not expose those choices.
+Lifetime defaults are `max_seconds: 3600`, `idle_seconds: 600`, and
+`disconnect_seconds: 120`. Admission returns a `SandboxView`
 with `id`, `state`, `created_at`, `absolute_deadline`, `reason`, and
 `cleanup_pending`. A repeated consumer/idempotency key returns the same ID only
 for the exact canonical specification; changed requests return 409. Capacity is

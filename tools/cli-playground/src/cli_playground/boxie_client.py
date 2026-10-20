@@ -59,10 +59,6 @@ class ArtifactReply(BaseModel):
 class SandboxRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     artifact_id: UUID
-    profile_id: str
-    command: tuple[str, ...] = ("/opt/cli-playground/shell.sh",)
-    env: dict[str, str] = {"TERM": "xterm-256color"}
-    policy: dict[str, int] = {"max_seconds": 3600, "idle_seconds": 600, "disconnect_seconds": 120}
 
 
 class TerminalPort(Protocol):
@@ -172,7 +168,7 @@ class HttpBoxieClient:
         await self._request("DELETE", f"/v1/artifacts/{identifier}")
 
     async def create(self, key: str, spec: SandboxRequest) -> SandboxView:
-        view = parse_sandbox(
+        return parse_sandbox(
             await self._request(
                 "POST",
                 "/v1/sandboxes",
@@ -180,8 +176,6 @@ class HttpBoxieClient:
                 headers={"Idempotency-Key": key, "Content-Type": "application/json"},
             )
         )
-        validate_sandbox(view, max_seconds=spec.policy["max_seconds"])
-        return view
 
     async def _sandbox(
         self, method: str, identifier: UUID, previous: SandboxView | None
@@ -244,11 +238,10 @@ def validate_sandbox(
     previous: SandboxView | None = None,
     *,
     identifier: UUID | None = None,
-    max_seconds: int = 3600,
 ) -> None:
     lifetime = (view.absolute_deadline - view.created_at).total_seconds()
     if (
-        not 0 < lifetime <= max_seconds
+        not 0 < lifetime <= 3600
         or (identifier is not None and view.id != identifier)
         or (
             previous is not None

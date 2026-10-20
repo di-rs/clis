@@ -27,7 +27,7 @@ class Product:
 
 @asynccontextmanager
 async def boxie_network(root: Path, *, daemon: EchoDaemon | None = None) -> AsyncIterator[Network]:
-    async with network(root, shell="/opt/cli-playground/shell.sh", daemon=daemon) as result:
+    async with network(root, daemon=daemon) as result:
         yield result
 
 
@@ -44,7 +44,6 @@ async def product_server(
             public_url=url,
             deploy_token="test-deployment-token",
             boxie_url=api_url,
-            boxie_profile="shell",
             boxie_credential_file=root / "secret",
         )
         app = create_app(

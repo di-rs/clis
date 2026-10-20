@@ -7,7 +7,6 @@ import os
 import subprocess
 import time
 from collections.abc import Iterator
-from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -82,13 +81,7 @@ async def create(client: httpx.AsyncClient, artifact: str, key: str) -> str:
     response = await client.post(
         "/v1/sandboxes",
         headers={"Idempotency-Key": key},
-        json={
-            "artifact_id": artifact,
-            "profile_id": "smoke",
-            "command": ["/bin/sh"],
-            "env": {},
-            "policy": {"max_seconds": 3600, "idle_seconds": 600, "disconnect_seconds": 120},
-        },
+        json={"artifact_id": artifact},
     )
     assert response.status_code == 202, response.text
     return str(response.json()["id"])
@@ -407,42 +400,24 @@ def test_unknown_create_ack_loss_recovers_with_persisted_discovery(
     asyncio.run(exercise())
 
 
-def test_native_generic_product_and_browser(lifecycle_stack: LifecycleStack) -> None:
+def test_native_generic_consumer(lifecycle_stack: LifecycleStack) -> None:
     stack = lifecycle_stack
-    for module, extra in (
-        ("boxie_infra.smoke", []),
-        ("cli_playground_infra.smoke", ["--binary", str(stack.binary)]),
-    ):
-        subprocess.run(
-            [
-                "uv",
-                "run",
-                "--locked",
-                "python",
-                "-m",
-                module,
-                "--boxie-url",
-                stack.api_url,
-                "--credential-file",
-                str(stack.root / "consumer.secret"),
-                *extra,
-            ],
-            check=True,
-            timeout=180,
-        )
-    if os.environ.get("BOXIE_BROWSER") == "1":
-        subprocess.run(
-            ["pnpm", "exec", "playwright", "test", "--config", "playwright.native.config.ts"],
-            cwd=Path(__file__).parents[4] / "tools/cli-playground/frontend",
-            env={
-                **os.environ,
-                "BOXIE_NATIVE_ORIGIN": stack.product_url,
-                "BOXIE_NATIVE_BINARY": str(stack.binary),
-                "BOXIE_NATIVE_DEPLOY_TOKEN": stack.deploy,
-            },
-            check=True,
-            timeout=180,
-        )
+    subprocess.run(
+        [
+            "uv",
+            "run",
+            "--locked",
+            "python",
+            "-m",
+            "boxie_infra.smoke",
+            "--boxie-url",
+            stack.api_url,
+            "--credential-file",
+            str(stack.root / "consumer.secret"),
+        ],
+        check=True,
+        timeout=180,
+    )
     for _ in range(120):
         if not stack.children():
             break

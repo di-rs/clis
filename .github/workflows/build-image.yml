@@ -1,8 +1,9 @@
-name: 🐳 Build image
+name: 🐳 Build Sanctuary component image
 'on':
   workflow_call:
     inputs:
       component:
+        description: "Image to build: boxie, cli-playground, boxie-sandbox, or collector"
         required: true
         type: string
       revision:
@@ -16,6 +17,7 @@ name: 🐳 Build image
 permissions: {}
 jobs:
   build:
+    name: 🐳 Build ${{ inputs.component }} image
     if: ${{ github.ref == 'refs/heads/master' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -42,7 +44,7 @@ jobs:
         set -euo pipefail
         [[ $REVISION =~ ^[a-f0-9]{40}$ ]]
         case $COMPONENT in
-          boxie|cli-playground-backend|cli-playground-sandbox|collector) ;;
+          boxie|cli-playground|boxie-sandbox|collector) ;;
           *) echo 'Unknown image component' >&2; exit 2 ;;
         esac
         sha=$(git rev-parse HEAD)
@@ -57,8 +59,8 @@ jobs:
         set -euo pipefail
         case $COMPONENT in
           boxie) file=packages/boxie/infra/Boxie.Dockerfile; context=. ;;
-          cli-playground-backend) file=tools/cli-playground/infra/Backend.Dockerfile; context=. ;;
-          cli-playground-sandbox) file=tools/cli-playground/Sandbox.Dockerfile; context=. ;;
+          cli-playground) file=tools/cli-playground/infra/CliPlayground.Dockerfile; context=. ;;
+          boxie-sandbox) file=packages/boxie/sandbox/Dockerfile; context=. ;;
           collector) file=packages/boxie/infra/observability/collector/Dockerfile; context=packages/boxie/infra/observability/collector ;;
         esac
         printf 'file=%s\ncontext=%s\nname=ghcr.io/%s-%s\n' "$file" "$context" "${REPOSITORY,,}" "$COMPONENT" >> "$GITHUB_OUTPUT"

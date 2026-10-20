@@ -97,15 +97,8 @@ class Network:
 
 
 @asynccontextmanager
-async def network(
-    root: Path, *, shell: str = "/bin/sh", daemon: EchoDaemon | None = None
-) -> AsyncIterator[Network]:
-    import json
-
+async def network(root: Path, *, daemon: EchoDaemon | None = None) -> AsyncIterator[Network]:
     config = configuration(root)
-    profiles = json.loads(config.profiles_file.read_text())
-    profiles["shell"]["commands"] = [[shell]]
-    config.profiles_file.write_text(json.dumps(profiles))
     clock = Clock()
     daemon = daemon or EchoDaemon()
     clock.now = datetime.now(UTC)

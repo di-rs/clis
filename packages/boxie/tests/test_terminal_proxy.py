@@ -128,7 +128,7 @@ def test_final_control_preserves_buffered_status(
         barrier = CompletionBarrier(monkeypatch, SupervisorTerminal, phase, kind, close_code)
         async with network(tmp_path) as net:
             profiles = json.loads(net.config.profiles_file.read_text())
-            profiles["shell"]["limits"] = {"output_bytes": 10}
+            profiles["default"]["limits"] = {"output_bytes": 10}
             net.config.profiles_file.write_text(json.dumps(profiles))
             net.supervisor.profiles.reload()
             barrier.port = urlsplit(str(net.api.base_url)).port

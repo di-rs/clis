@@ -11,7 +11,7 @@ import pytest
 from boxie.api.app import ApiConfig, create_app
 from boxie.sandbox.transport.client import SupervisorClient
 from boxie_test_support.api import CONSUMER_AUTH, FOREIGN_AUTH, artifact, create, ready, serve
-from boxie_test_support.supervisor import bundle, request
+from boxie_test_support.supervisor import bundle
 from database_support import counts, database
 
 pytestmark = pytest.mark.integration
@@ -43,7 +43,7 @@ def test_api_auth_ownership_idempotency_and_validation(tmp_path: Path, postgres_
             )
             assert unauthorized.status_code == 401
             artifact_id = await artifact(client)
-            spec = request(artifact_id)["spec"]
+            spec = {"artifact_id": artifact_id}
             responses = await asyncio.gather(
                 *(
                     client.post("/v1/sandboxes", json=spec, headers={"Idempotency-Key": "first"})
@@ -66,18 +66,21 @@ def test_api_auth_ownership_idempotency_and_validation(tmp_path: Path, postgres_
                 )
             ).status_code == 404
             conflict = await client.post(
-                "/v1/sandboxes", json={**spec, "env": {}}, headers={"Idempotency-Key": "first"}
+                "/v1/sandboxes",
+                json={"artifact_id": str(uuid4())},
+                headers={"Idempotency-Key": "first"},
             )
             assert conflict.status_code == 409
-            for patch in (
-                {"profile_id": "unknown"},
+            overrides: tuple[dict[str, object], ...] = (
+                {"profile_id": "default"},
                 {"image": "arbitrary"},
                 {"host_path": "/etc"},
-                {"command": ["/bin/evil"]},
-                {"env": {"LD_PRELOAD": "evil"}},
+                {"command": ["/opt/boxie/shell.sh"]},
+                {"env": {"TERM": "xterm-256color"}},
                 {"consumer_id": "two"},
-                {"policy": {"max_seconds": 3601}},
-            ):
+                {"policy": {}},
+            )
+            for patch in overrides:
                 assert (
                     await client.post(
                         "/v1/sandboxes", json={**spec, **patch}, headers={"Idempotency-Key": "new"}
@@ -125,7 +128,7 @@ def test_immutable_artifact_status_and_retirement(tmp_path: Path, postgres_dsn: 
             assert (
                 await client.post(
                     "/v1/sandboxes",
-                    json=request(identifier)["spec"],
+                    json={"artifact_id": identifier},
                     headers={"Idempotency-Key": "retired"},
                 )
             ).status_code == 409
@@ -142,7 +145,7 @@ def test_sql_owns_capacity(tmp_path: Path, postgres_dsn: str) -> None:
             assert (
                 await client.post(
                     "/v1/sandboxes",
-                    json=request(identifier)["spec"],
+                    json={"artifact_id": identifier},
                     headers={"Idempotency-Key": "second"},
                 )
             ).status_code == 429

@@ -1,6 +1,7 @@
 """Render the fixed installation's private owner settings without printing them."""
 
 import argparse
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -84,13 +85,38 @@ def render(root: Path, source: Path) -> None:
         ingress = ingress.replace("${" + key + "}", os.environ[key])
     (root / "cloudflared.yml").write_text(ingress)
     (root / "cloudflared.yml").chmod(0o644)
+    update_profile(root, source / "packages/boxie/infra")
+
+
+def update_profile(root: Path, source: Path) -> None:
+    profiles_path = root / "boxie/profiles.json"
+    profiles = json.loads(profiles_path.read_text()) if profiles_path.exists() else {}
+    profile = profiles.get("default")
+    if profile is None:
+        profile = json.loads((source / "profiles/default.json").read_text())["default"]
+    profile["image_digest"] = os.environ["BOXIE_SANDBOX_IMAGE"]
+    profiles["default"] = profile
+    with tempfile.NamedTemporaryFile(mode="w", dir=profiles_path.parent, delete=False) as output:
+        temporary = Path(output.name)
+        try:
+            output.write(json.dumps(profiles, indent=2) + "\n")
+            output.flush()
+            os.fsync(output.fileno())
+            temporary.replace(profiles_path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
+    parser.add_argument("--profile-only", action="store_true")
     args = parser.parse_args()
-    render(Path("/etc/sanctuary"), args.source)
+    root = Path(os.environ.get("SANCTUARY_CONFIG_DIR", "/etc/sanctuary"))
+    if args.profile_only:
+        update_profile(root, args.source)
+    else:
+        render(root, args.source)
 
 
 if __name__ == "__main__":

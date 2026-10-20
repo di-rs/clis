@@ -51,7 +51,6 @@ uv run --locked --package cli-playground uvicorn cli_playground.app:create_app \
 
 No Docker client, Docker socket or Boxie implementation is installed in the
 cli-playground image. Its server-side consumer credential is not sent to the browser.
-Production activation is unavailable until PR4; setup currently provisions only.
 The terminal keeps credentials, applied output sequence and screen in page memory.
 Reconnect drains pending xterm writes, resumes retained output exactly once and
 synchronizes geometry before enabling user input. Input typed while disconnected
@@ -80,9 +79,9 @@ Preview publication retains its separate trust boundary.
 | [🏗️ cli-playground PR binary builds](../../.github/workflows/cli-playground.yml) | Compile affected PR binaries without deployment credentials |
 | [🌐 cli-playground PR previews](../../.github/workflows/cli-playground-preview.yml) | Trusted build-state updates, artifact publication and PR close/reopen reconciliation |
 | [🚀 cli-playground Release](../../.github/workflows/cli-playground-release.yml) | Manually build and deploy cli-playground Backend and Frontend |
-| [🚀 Boxie and cli-playground Sandbox Release](../../.github/workflows/boxie-release.yml) | Manually build and deploy the Boxie and sandbox images together |
+| [🚀 Boxie and Sandbox Release](../../.github/workflows/boxie-release.yml) | Manually build and deploy the Boxie and sandbox images together |
 | [☁️ Single-host Sanctuary setup](../../.github/workflows/sanctuary-setup.yml) | Manually provision infrastructure and install services |
-| [🧪 Boxie lifecycle integration](../../.github/workflows/boxie-lifecycle.yml) | Verify PostgreSQL/Temporal recovery and native Linux/gVisor lifecycle and browser faults |
+| [🧪 Boxie lifecycle integration](../../.github/workflows/boxie-lifecycle.yml) | Verify PostgreSQL/Temporal recovery and native Linux/gVisor lifecycle faults |
 
 PR publication stores a binary batch and preview metadata. It does not deploy
 Boxie or start a sandbox; each browser terminal starts its own sandbox.
@@ -91,4 +90,6 @@ different trust and credentials.
 
 See [Testing](../../docs/testing.md) for Python, frontend and browser checks,
 and the [🧪 Boxie lifecycle integration workflow](../../.github/workflows/boxie-lifecycle.yml)
-for real PostgreSQL/Temporal recovery and native Linux/gVisor browser checks.
+for real PostgreSQL/Temporal recovery. The separate
+[shared-system lifecycle workflow](../../.github/workflows/sanctuary-lifecycle.yml)
+adds native Linux/gVisor browser checks.

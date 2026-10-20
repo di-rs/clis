@@ -22,7 +22,6 @@ class Settings(BaseSettings):
     deploy_token: str = Field(min_length=1, repr=False)
     boxie_url: str
     boxie_credential_file: Path
-    boxie_profile: str = "cli-playground"
     preview_domain: str | None = None
     cleanup_interval_seconds: float = Field(default=60, gt=0, allow_inf_nan=False)
     max_binary_bytes: int = Field(default=MAX_BINARY, gt=0, le=MAX_BINARY)

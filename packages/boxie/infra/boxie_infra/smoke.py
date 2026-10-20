@@ -64,7 +64,7 @@ def verify_deleted(sandbox_id: str) -> None:
         raise RuntimeError("Terminal stop did not delete the sandbox container")
 
 
-async def exercise(url: str, credential_file: Path, profile: str) -> None:
+async def exercise(url: str, credential_file: Path) -> None:
     headers = {"Authorization": "Bearer " + credential_file.read_text().strip()}
     artifact, sandbox = str(uuid4()), None
     archive = io.BytesIO()
@@ -84,15 +84,7 @@ async def exercise(url: str, credential_file: Path, profile: str) -> None:
             response = await client.post(
                 "/v1/sandboxes",
                 headers={"Idempotency-Key": str(uuid4())},
-                json={
-                    "artifact_id": artifact,
-                    "profile_id": profile,
-                    "command": ["/opt/cli-playground/shell.sh"]
-                    if profile == "cli-playground"
-                    else ["/bin/sh"],
-                    "env": {"TERM": "xterm-256color"} if profile == "cli-playground" else {},
-                    "policy": {"max_seconds": 3600, "idle_seconds": 600, "disconnect_seconds": 120},
-                },
+                json={"artifact_id": artifact},
             )
             response.raise_for_status()
             view: dict[str, Any] = response.json()
@@ -154,9 +146,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--boxie-url", required=True)
     parser.add_argument("--credential-file", type=Path, required=True)
-    parser.add_argument("--profile", default="smoke")
     args = parser.parse_args()
-    asyncio.run(exercise(args.boxie_url, args.credential_file, args.profile))
+    asyncio.run(exercise(args.boxie_url, args.credential_file))
 
 
 if __name__ == "__main__":

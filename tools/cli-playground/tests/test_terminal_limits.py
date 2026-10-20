@@ -36,7 +36,7 @@ def test_supervisor_output_limit_reaches_browser_at_exact_cap(
         async with boxie_network(tmp_path / "supervisor") as network:
             profiles = json.loads(network.config.profiles_file.read_text())
             if limit != 16777216:
-                profiles["shell"]["limits"] = {"output_bytes": limit}
+                profiles["default"]["limits"] = {"output_bytes": limit}
                 network.config.profiles_file.write_text(json.dumps(profiles))
                 network.supervisor.profiles.reload()
             async with product_server(tmp_path / "product", str(network.api.base_url)) as product:
@@ -136,7 +136,7 @@ def test_final_control_preserves_buffered_product_status(
         barrier = CompletionBarrier(monkeypatch, HttpTerminal, phase, kind, close_code)
         async with boxie_network(tmp_path / "supervisor") as network:
             profiles = json.loads(network.config.profiles_file.read_text())
-            profiles["shell"]["limits"] = {"output_bytes": 10}
+            profiles["default"]["limits"] = {"output_bytes": 10}
             network.config.profiles_file.write_text(json.dumps(profiles))
             network.supervisor.profiles.reload()
             async with product_server(tmp_path / "product", str(network.api.base_url)) as product:

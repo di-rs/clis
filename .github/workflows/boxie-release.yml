@@ -1,4 +1,4 @@
-name: 🚀 Boxie and cli-playground Sandbox Release
+name: 🚀 Boxie Release
 'on':
   workflow_dispatch: {}
 permissions: {}
@@ -41,7 +41,7 @@ jobs:
     needs: source
     uses: ./.github/workflows/build-image.yml # zizmor: ignore[self-repository]
     with:
-      component: cli-playground-sandbox
+      component: boxie-sandbox
       revision: ${{ needs.source.outputs.sha }}
     permissions:
       contents: read
@@ -82,7 +82,7 @@ jobs:
         run: bash infra/environments/single-host/release.sh boxie
 
   deploy-sandbox:
-    name: 🚀 Update cli-playground Sandbox
+    name: 🚀 Update Boxie Sandbox
     needs: [source, sandbox, deploy-boxie]
     if: ${{ github.ref == 'refs/heads/master' && vars.DEPLOYMENT_ACCEPTANCE_PASSED == 'true' }}
     environment: boxie
@@ -114,4 +114,4 @@ jobs:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           GHCR_TOKEN: ${{ github.token }}
-        run: bash infra/environments/single-host/release.sh cli-playground-sandbox
+        run: bash infra/environments/single-host/release.sh boxie-sandbox

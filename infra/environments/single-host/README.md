@@ -5,9 +5,9 @@ inspect a failed release. Pulumi creates the host, disk, DNS and operator Access
 applications. The setup workflow copies the Compose projects and starts them.
 Routine releases run over pinned SSH from GitHub Actions.
 
-Existing installations must first follow the [component naming cutover](../../../docs/component-naming-cutover.md).
-It preserves configuration, credentials and data while adopting the new service
-names. Do not use fresh setup to bypass that migration.
+Replace the previous disposable installation using the
+[reset procedure](../../../docs/component-naming-cutover.md) before setup. This
+release changes the consumer API as well as component names.
 
 ## Prepare the Sanctuary environment
 
@@ -104,7 +104,7 @@ ssh-keygen -y -f "$private/key" >/dev/null
 ssh-keygen -l -f "$private/known_hosts" >/dev/null
 ssh -o BatchMode=yes -o StrictHostKeyChecking=yes \
   -o "UserKnownHostsFile=$private/known_hosts" -i "$private/key" \
-  "root@$host" 'cat /etc/sanctuary/boxie/preview-token' > "$private/token"
+  "root@$host" 'cat /etc/sanctuary/cli-playground/preview-token' > "$private/token"
 [[ $(cat "$private/token") =~ ^[a-f0-9]{64}$ ]]
 for environment in boxie cli-playground; do
   gh variable set DEPLOY_HOST --repo "$repository" --env "$environment" --body "$host"
@@ -126,10 +126,10 @@ temporary files under `/run`; it expires with the token's lifetime.
 Run either release manually from Actions on `master`:
 
 - [🚀 cli-playground Release](../../../.github/workflows/cli-playground-release.yml)
-  builds and deploys the cli-playground backend and frontend together in the backend image.
-- [🚀 Boxie and cli-playground Sandbox Release](../../../.github/workflows/boxie-release.yml)
+  builds and deploys the cli-playground backend and frontend together in the application image.
+- [🚀 Boxie and Sandbox Release](../../../.github/workflows/boxie-release.yml)
   builds the Boxie image and sandbox from one commit, then updates Boxie followed
-  by the sandbox profile. It does not release the cli-playground application.
+  by its default sandbox image. It does not release the cli-playground application.
 
 A failed stage stops the remaining deployments in its workflow; completed stages
 are not rolled back automatically. Boxie stages use the `boxie` environment;
@@ -143,7 +143,7 @@ up. Authenticated readiness must pass before the next stage. Pending requests ma
 resume after the restart; an empty capacity table is not a release condition.
 The separate native host acceptance run covers terminal allocation and cleanup.
 
-The sandbox stage changes the approved cli-playground profile digest and recreates
+The sandbox stage changes Boxie's default profile digest and recreates
 Boxie's supervisor, preserving other profile fields. The backend stage pulls
 and recreates only `backend`; its proxy stays up.
 

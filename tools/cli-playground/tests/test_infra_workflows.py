@@ -65,8 +65,8 @@ def test_setup_queues_before_selecting_master_and_builds_all_images() -> None:
     assert jobs["source"]["steps"][0]["with"]["ref"] == "master"
     for name, component in {
         "boxie": "boxie",
-        "backend": "cli-playground-backend",
-        "sandbox": "cli-playground-sandbox",
+        "backend": "cli-playground",
+        "sandbox": "boxie-sandbox",
         "collector": "collector",
     }.items():
         job = jobs[name]
@@ -86,8 +86,8 @@ def test_reusable_builder_uses_fixed_components_without_deployment_secrets() -> 
     assert set(builder["on"]) == {"workflow_call"}
     assert job["permissions"] == {"contents": "read", "packages": "write"}
     assert "Boxie.Dockerfile" in str(job)
-    assert "Backend.Dockerfile" in str(job)
-    assert "Sandbox.Dockerfile" in str(job)
+    assert "CliPlayground.Dockerfile" in str(job)
+    assert "packages/boxie/sandbox/Dockerfile" in str(job)
     assert "observability/collector" in str(job)
     assert "secrets." not in str(job)
 
@@ -110,7 +110,9 @@ def test_release_uses_one_queue_current_master_and_direct_ssh(job_name: str, app
     assert "AUTO_DEPLOY" not in gate
     commands = "\n".join(step.get("run", "") for step in deployment["steps"])
     component = job_name.removeprefix("deploy-")
-    selector = "boxie" if component == "boxie" else "cli-playground-" + component
+    selector = {"boxie": "boxie", "sandbox": "boxie-sandbox", "backend": "cli-playground"}[
+        component
+    ]
     assert deployment["steps"][-1]["run"] == (
         f"bash infra/environments/single-host/release.sh {selector}"
     )
@@ -129,10 +131,10 @@ def test_releases_are_manual_and_keep_backend_separate_from_boxie() -> None:
     playground = workflow("release")
     boxie = yaml.load((WORKFLOWS / "boxie-release.yml").read_text(), Loader=yaml.BaseLoader)
     assert playground["name"] == "🚀 cli-playground Release"
-    assert boxie["name"] == "🚀 Boxie and cli-playground Sandbox Release"
+    assert boxie["name"] == "🚀 Boxie Release"
     for release, components in [
-        (playground, {"backend": "cli-playground-backend"}),
-        (boxie, {"boxie": "boxie", "sandbox": "cli-playground-sandbox"}),
+        (playground, {"backend": "cli-playground"}),
+        (boxie, {"boxie": "boxie", "sandbox": "boxie-sandbox"}),
     ]:
         assert release["on"] == {"workflow_dispatch": {}}
         jobs = release["jobs"]
@@ -147,7 +149,7 @@ def test_releases_are_manual_and_keep_backend_separate_from_boxie() -> None:
     assert set(boxie["jobs"]["deploy-boxie"]["needs"]) == {"source", "boxie", "sandbox"}
     assert set(boxie["jobs"]["deploy-sandbox"]["needs"]) == {"source", "sandbox", "deploy-boxie"}
     assert set(playground["jobs"]["deploy-backend"]["needs"]) == {"source", "backend"}
-    assert not (WORKFLOWS / "cli-playground-sandbox-release.yml").exists()
+    assert not (WORKFLOWS / "boxie-sandbox-release.yml").exists()
 
 
 def test_only_manual_setup_can_provision_cloud_resources() -> None:
@@ -169,7 +171,7 @@ def test_only_manual_setup_can_provision_cloud_resources() -> None:
 
 def test_setup_pulls_all_images_before_starting_boxie() -> None:
     installer = (WORKFLOWS.parent.parent / "infra/environments/single-host/install.sh").read_text()
-    assert "CLI_PLAYGROUND_SANDBOX_IMAGE" in installer
+    assert "BOXIE_SANDBOX_IMAGE" in installer
     assert installer.index('docker pull "$image"') < installer.index(
         "bash /opt/sanctuary/boxie/install.sh"
     )

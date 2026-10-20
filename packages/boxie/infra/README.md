@@ -56,15 +56,17 @@ The shared-host installer provisions reader ownership and consumer credentials.
 Key rotation remains operator maintenance. The configuration generator writes
 paths only; it does not provision ownership.
 
-Copy [profiles.example.json](profiles.example.json) to the configured profiles
-file, replacing its placeholder digest with the immutable Docker image ID or
-registry digest for an approved shell image. For example, after pulling
-`busybox:1.37.0`, `docker image inspect busybox:1.37.0 --format '{{.Id}}'` supplies
-its local immutable ID. The `smoke` profile approves `/bin/sh` and a generic text
-artifact; it has no PR, hostname or executable-format assumptions. Product
-operators may separately approve the
-[cli-playground profile](../../../tools/cli-playground/infra/profiles/cli-playground.json) with the
-immutable product sandbox image digest. Profiles are never consumer uploads.
+Build the Boxie sandbox image from the repository root:
+
+```sh
+docker build -f packages/boxie/sandbox/Dockerfile -t boxie-sandbox:local .
+docker image inspect boxie-sandbox:local --format '{{.Id}}'
+```
+
+Copy [profiles/default.json](profiles/default.json) to the configured profiles
+file and replace its placeholder digest with that immutable image ID or the
+published registry digest. The default shell, environment and fixtures belong to
+Boxie. No consumer sources or profile declaration are required.
 
 The [Temporal deployment](temporal/README.md) is owned here and operated as a
 separate Compose project. Its server releases and schema operations remain
@@ -72,13 +74,13 @@ independent of Boxie application releases.
 
 Complete the required [host prerequisites](host-requirements.md) first,
 including explicit Alembic revisions, namespace setup, and API/supervisor mTLS identities.
-Generate all three process JSON files (substitute your installation UUID and paths):
+Generate both process JSON files (substitute your installation UUID and paths):
 
 ```sh
 uv run --locked --package boxie-infra python -m boxie_infra.config \
   --output /etc/boxie --data-dir /var/lib/boxie \
   --installation-id 00000000-0000-0000-0000-000000000001 \
-  --host-id local-linux --consumer-id cli-playground
+  --host-id local-linux --consumer-id example-consumer
 
 docker compose --env-file /etc/boxie/local.env \
   -f packages/boxie/infra/compose.yml up --build -d
@@ -93,44 +95,13 @@ The API receives no artifact storage. Both networks are externally supplied and
 owned by the operator, never by either Compose project. Choose a unique API alias
 when operating multiple installations.
 
-## Upgrade existing stored state
+## Replace the previous installation
 
-Use the [coordinated host cutover](../../../docs/component-naming-cutover.md)
-for configuration, credentials and application data. Stop admission and publication,
-let all sandboxes finish and confirm physical cleanup, then stop every writer and
-back up PostgreSQL and the Boxie data directory. Run these commands with the new
-Boxie package, before starting the renamed services:
-
-```sh
-uv run --locked python -m boxie.persistence.rename_state \
-  /var/lib/boxie/execution.json /var/lib/boxie/execution.converted.json
-uv run --locked python -m boxie.persistence.migrate --dsn-file /etc/boxie/postgres-dsn
-```
-
-Substitute the actual journal and DSN paths. Journal conversion requires a separate
-destination in an existing directory. It retains the source, preserves permissions,
-and refuses active, uncertain, duplicate or conflicting records. An identical
-completed destination makes retry safe. After all migration checks succeed, retain
-the original journal as a backup and place the converted file at the configured
-journal path while writers remain stopped.
-
-Alembic revision `0005_component_names` checks cleanup, capacity, artifact references,
-collection and command delivery before changing anything. It rejects mixed old and
-new application ownership instead of merging it. The database transaction preserves
-identities, artifact storage, retry keys and entire historical execution snapshots.
-Keep the content-addressed files in `BOXIE_DATA_DIR/profiles` unchanged: historical
-profile IDs and commands must still match their original configuration digest.
-The migration updates request
-hashes for the renamed application profile and default shell command. Use the online
-upgrade above for existing requests; generated offline SQL deliberately refuses
-legacy requests because their hashes require Python's canonical JSON encoding.
-
-A failed database check rolls back that transaction. Resolve the reported condition
-using the matching old installation and retry during a new maintenance window.
-If another cutover step fails, keep writers stopped and restore all matching
-pre-cutover backups and images before reopening traffic. Never mix old code with
-migrated state. Temporal workflow IDs, task queues and activity names remain stable;
-legacy stop reasons are decoded only at the recorded-activity boundary.
+The artifact-only API and fixed default environment require a clean reset of the
+previous disposable installation. Follow the
+[reset procedure](../../../docs/component-naming-cutover.md) before starting these
+services. The older naming converters do not adapt pending requests to this API.
+Fresh databases still use the complete Alembic revision chain.
 
 ## Validation
 
@@ -143,18 +114,14 @@ pnpm --dir tools/cli-playground/frontend build
 uv run --locked pytest packages/boxie/tests/test_packaging.py -m integration
 ```
 
-The optional native Linux [sandbox check](../../../.github/workflows/boxie-lifecycle.yml)
-starts isolated PostgreSQL, Temporal, API, supervisor and cli-playground services.
-Manual `workflow_dispatch` runs exercise browser recovery, process faults and both
-`boxie_infra.smoke` and `cli_playground_infra.smoke` through HTTP and WebSocket. Each
-inspects the actual sandbox's `runsc`, non-root user, no-network mode, read-only
-root/artifact, capabilities, no-new-privileges, resource limits, tmpfs, disabled
-Docker logs and confirmed container deletion. The product smoke also checks the
-native Rust CLI, fixtures, pipes/redirection, resize and Ctrl-C. Ordinary Docker
-image builds or fake-daemon E2Es do not count as this platform check. All six native
-lifecycle/browser cases are temporarily excluded from automatic PR runs while
-their hang is investigated. PRs retain real SQL/Temporal integration, credential
-permission and endpoint restart checks.
+The optional native Linux [Boxie check](../../../.github/workflows/boxie-lifecycle.yml)
+starts PostgreSQL, Temporal, API and Supervisor without cli-playground. It checks
+process faults, the generic consumer API and container cleanup. The separate
+[shared-system check](../../../.github/workflows/sanctuary-lifecycle.yml) adds the
+application and browser to verify native CLIs, fixtures, pipes, resize and reconnect.
+Both require real Linux amd64/runsc; image builds and fake-daemon tests do not
+establish native isolation. Native tests remain manual while their hang is investigated.
+PRs retain SQL/Temporal, credential permission and endpoint restart checks.
 
 The lifecycle fixture runs API and supervisor as the runner's numeric UID:GID
 so its private files and writable storage share one owner. Its Linux-volume DAC

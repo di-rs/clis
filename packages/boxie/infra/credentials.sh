@@ -4,7 +4,7 @@ set -euo pipefail
 umask 077
 [[ $# == 1 && ! -L $1 ]] || { echo 'Use a private credentials directory.' >&2; exit 1; }
 directory=$1
-files=(installation-id host-id consumer.secret supervisor.secret postgres-password boxie-password temporal-password visibility-password grafana-admin preview-token postgres-dsn.secret)
+files=(installation-id host-id consumer.secret supervisor.secret postgres-password boxie-password temporal-password visibility-password grafana-admin postgres-dsn.secret)
 if [[ -d $directory && -n $(ls -A "$directory") ]]; then
     for name in "${files[@]}"; do
         [[ -f $directory/$name && ! -L $directory/$name && -s $directory/$name ]] || {
@@ -19,7 +19,7 @@ fi
 install -d -m 0700 "$(dirname "$directory")"
 staging=$(mktemp -d "${directory}.new.XXXXXX")
 trap 'rm -rf "$staging"' EXIT
-for name in consumer.secret supervisor.secret postgres-password boxie-password temporal-password visibility-password grafana-admin preview-token; do
+for name in consumer.secret supervisor.secret postgres-password boxie-password temporal-password visibility-password grafana-admin; do
     openssl rand -hex 32 > "$staging/$name"
 done
 python3 -c 'from uuid import uuid4; print(uuid4())' > "$staging/installation-id"

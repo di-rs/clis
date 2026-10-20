@@ -23,19 +23,18 @@ class LifecycleStack(ProductionStack):
         *,
         command_runner: CommandRunner | None = None,
         runtime_overlay: Path | None = None,
+        runtime_services: tuple[str, ...] = ("faults", "supervisor", "api"),
     ) -> None:
         super().__init__(root, command_runner=command_runner)
         self.runtime_overlay = runtime_overlay
-        self.runtime_services = ("faults", "supervisor", "api", "cli-playground")
+        self.runtime_services = runtime_services
         self.capture_teardown_logs = True
         self.installation = str(uuid4())
         self.host = self.name
         self.runtime = self.name + "-runtime"
         self.runtime_started = False
-        self.api_url = self.product_url = self.dsn = ""
+        self.api_url = self.dsn = ""
         self.consumer = secrets.token_hex(24)
-        self.deploy = secrets.token_hex(24)
-        self.binary = Path(os.environ.get("BOXIE_NATIVE_BINARY", ROOT / "target/release/echor"))
         self.env.update(
             BOXIE_TEST_ROOT=str(root),
             # Bind-mounted private files and writable storage belong to this runner.
@@ -44,9 +43,6 @@ class LifecycleStack(ProductionStack):
             BOXIE_TEST_SUPERVISOR_SCRIPT=str(Path(__file__).with_name("supervisor_fixture.py")),
             BOXIE_TEST_FAULTS_SCRIPT=str(Path(__file__).with_name("faults.py")),
             BOXIE_IMAGE=os.environ.get("BOXIE_IMAGE", "boxie:lifecycle"),
-            CLI_PLAYGROUND_BACKEND_IMAGE=os.environ.get(
-                "CLI_PLAYGROUND_BACKEND_IMAGE", "cli-playground-backend:lifecycle"
-            ),
             BOXIE_DATA_DIR=str(root / "data"),
             BOXIE_SUPERVISOR_CONFIG=str(root / "supervisor.json"),
             BOXIE_API_CONFIG=str(root / "api.json"),
@@ -60,8 +56,6 @@ class LifecycleStack(ProductionStack):
             BOXIE_SUPERVISOR_TEMPORAL_CERT_FILE=str(root / "clients/boxie-supervisor.pem"),
             BOXIE_SUPERVISOR_TEMPORAL_KEY_FILE=str(root / "clients/boxie-supervisor.key"),
             BOXIE_CONSUMER_NETWORK=self.name + "-consumer",
-            CLI_PLAYGROUND_DEPLOY_TOKEN=self.deploy,
-            CLI_PLAYGROUND_PUBLIC_URL="http://127.0.0.1:1",
         )
 
     def runtime_command(self, *args: str) -> str:
@@ -89,8 +83,6 @@ class LifecycleStack(ProductionStack):
             raise RuntimeError(
                 "native lifecycle requires Linux amd64 Docker with configured runsc; no fallback"
             )
-        if "cli-playground" in self.runtime_services and not self.binary.is_file():
-            raise RuntimeError("native echor binary is required (BOXIE_NATIVE_BINARY)")
         super().start()
         for name, value in (
             ("supervisor.secret", secrets.token_hex(24)),
@@ -110,22 +102,13 @@ class LifecycleStack(ProductionStack):
         # Compose's nested profiles bind must not create a root-owned directory.
         (self.root / "data/profiles").mkdir(parents=True, mode=0o700)
         (self.root / "faults").mkdir()
-        profiles = (
-            json.loads(
-                (ROOT / "tools/cli-playground/infra/profiles/cli-playground.json").read_text()
-            )
-            if "cli-playground" in self.runtime_services
-            else {}
-        )
-        profiles.update(
-            json.loads((ROOT / "packages/boxie/infra/profiles.example.json").read_text())
-        )
+        profiles = json.loads((ROOT / "packages/boxie/infra/profiles/default.json").read_text())
         image = self.command(
             [
                 "docker",
                 "image",
                 "inspect",
-                self.env.get("BOXIE_SANDBOX_IMAGE", "sanctuary-cli-playground-sandbox:lifecycle"),
+                self.env.get("BOXIE_SANDBOX_IMAGE", "boxie-sandbox:lifecycle"),
                 "--format",
                 "{{.Id}}",
             ]
@@ -156,20 +139,12 @@ class LifecycleStack(ProductionStack):
         )
         # Explicit host bindings survive Docker kill/start; an omitted published
         # port is reassigned on restart and invalidates long-lived test clients.
-        with socket.socket() as api_reservation, socket.socket() as reservation:
+        with socket.socket() as api_reservation:
             api_reservation.bind(("127.0.0.1", 0))
             self.env["BOXIE_TEST_API_PORT"] = str(api_reservation.getsockname()[1])
-            reservation.bind(("127.0.0.1", 0))
-            port = reservation.getsockname()[1]
-        self.env["BOXIE_TEST_PRODUCT_PORT"] = str(port)
-        self.product_url = f"http://127.0.0.1:{port}"
-        self.env["CLI_PLAYGROUND_PUBLIC_URL"] = self.product_url
         self.runtime_started = True
         self.runtime_command("up", "--detach", *self.runtime_services)
         self.api_url = "http://" + self.runtime_command("port", "api", "8090")
-        if "cli-playground" in self.runtime_services:
-            self.product_url = "http://" + self.runtime_command("port", "cli-playground", "8000")
-        self.env["CLI_PLAYGROUND_PUBLIC_URL"] = self.product_url
         self.wait_ready()
         self.evidence.update(
             native_runtime="runsc",

@@ -263,9 +263,7 @@ class CliPlaygroundService:
             revision=revision,
             credential_hash=hashlib.sha256(credential.encode()).hexdigest(),
             claim_until=self.clock() + 30,
-            spec=SandboxRequest(
-                artifact_id=environment.artifact_id, profile_id=self.settings.boxie_profile
-            ),
+            spec=SandboxRequest(artifact_id=environment.artifact_id),
         )
         self.sessions.create_intent(intent)
         self.active_creates.add(intent.id)

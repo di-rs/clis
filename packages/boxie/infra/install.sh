@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Initialize persistent dependencies and apply the Boxie image.
 set -euo pipefail
-[[ $# == 2 && $2 =~ ^[a-f0-9]{40}$ ]] || exit 2
+[[ $# == 3 && $2 =~ ^[a-f0-9]{40}$ && $3 =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] || exit 2
 source=$1
 revision=$2
+consumer=$3
 owner=${SANCTUARY_BOXIE_DIR:-/opt/sanctuary/boxie}
 bash "$owner/credentials.sh" /etc/sanctuary/boxie
 bash "$owner/certificates.sh" /etc/sanctuary/tls
 python3 "$owner/boxie_infra/config.py" --output /etc/sanctuary/boxie --data-dir /srv/sanctuary/boxie \
-    --installation-id "$(cat /etc/sanctuary/boxie/installation-id)" --host-id "$(cat /etc/sanctuary/boxie/host-id)" --consumer-id cli-playground
+    --installation-id "$(cat /etc/sanctuary/boxie/installation-id)" --host-id "$(cat /etc/sanctuary/boxie/host-id)" --consumer-id "$consumer"
 export OBS_JOURNAL_GROUP_GID
 OBS_JOURNAL_GROUP_GID=$(getent group systemd-journal | cut -d: -f3)
 python3 "$owner/boxie_infra/installation.py" "$source"
