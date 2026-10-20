@@ -33,6 +33,7 @@ from cli_playground.models import (
     Environment,
     EnvironmentMetadata,
 )
+from cli_playground.observability import current_request_id, request_context, sandbox_context
 from cli_playground.session_store import CreateIntent, SessionBinding, SessionStore, UploadIntent
 from cli_playground.storage import ArtifactConflictError, EnvironmentStore
 
@@ -65,19 +66,25 @@ class CliPlaygroundService:
     async def retry_stops(self) -> None:
         for binding in self.sessions.bindings():
             if binding.pending_stop:
-                try:
-                    view = await self.boxie.terminate(binding.sandbox.id, binding.sandbox)
-                    validate_sandbox(view, binding.sandbox)
-                    binding.sandbox = view
-                    binding.attachment_deadline = None
-                    binding.pending_stop = (
-                        binding.sandbox.cleanup_pending
-                        or binding.sandbox.state not in {"terminated", "failed"}
-                    )
-                    self.sessions.save(binding)
-                    self.sessions.claimed(binding.id)
-                except BoxieUnavailable:
-                    logger.warning("Sandbox stop remains pending")
+                with (
+                    request_context(
+                        str(binding.stop_request_id) if binding.stop_request_id else None
+                    ),
+                    sandbox_context(binding.sandbox.id),
+                ):
+                    try:
+                        view = await self.boxie.terminate(binding.sandbox.id, binding.sandbox)
+                        validate_sandbox(view, binding.sandbox)
+                        binding.sandbox = view
+                        binding.attachment_deadline = None
+                        binding.pending_stop = (
+                            binding.sandbox.cleanup_pending
+                            or binding.sandbox.state not in {"terminated", "failed"}
+                        )
+                        self.sessions.save(binding)
+                        self.sessions.claimed(binding.id)
+                    except BoxieUnavailable:
+                        logger.warning("Sandbox stop remains pending")
 
     def collect_artifacts(self) -> None:
         pending = {intent.artifact.artifact_id for intent in self.sessions.uploads()}
@@ -90,11 +97,13 @@ class CliPlaygroundService:
 
     async def retry_retirements(self) -> None:
         for identifier in self.sessions.retirements():
-            try:
-                await self.boxie.retire(identifier)
-                self.sessions.retired(identifier)
-            except BoxieUnavailable:
-                logger.warning("Artifact retirement remains pending")
+            origin = self.sessions.retirement_request_id(identifier)
+            with request_context(str(origin) if origin else None):
+                try:
+                    await self.boxie.retire(identifier)
+                    self.sessions.retired(identifier)
+                except BoxieUnavailable:
+                    logger.warning("Artifact retirement remains pending")
 
     async def cleanup_inactive(self) -> None:
         identifiers = self.store.inactive_identifiers()
@@ -117,34 +126,37 @@ class CliPlaygroundService:
         return metadata
 
     async def finish_upload(self, intent: UploadIntent) -> Environment:
-        artifact = intent.artifact
-        try:
-            await self.boxie.upload(
-                artifact.artifact_id, artifact.sha256, self.sessions.archive(artifact.artifact_id)
-            )
-            # Closure cancellation is irreversible even if the PR has since reopened.
-            stored = next(
-                item
-                for item in self.sessions.uploads()
-                if item.artifact.artifact_id == artifact.artifact_id
-            )
-            if stored.cancelled:
-                raise ArtifactConflictError("publication was cancelled by PR closure")
-            current = self.store.get(self.store.identifier(artifact.pr))
-            if intent.build is None and (current.revision if current else None) not in {
-                intent.previous_revision,
-                artifact.revision,
-            }:
-                raise ArtifactConflictError("a newer publication superseded this upload")
-            # No await between the final stale/closed check and atomic publication.
-            environment = self.store.publish(artifact, intent.build)
-        except ArtifactConflictError:
-            self.sessions.retire(artifact.artifact_id)
+        with request_context(str(intent.request_id) if intent.request_id else None):
+            artifact = intent.artifact
+            try:
+                await self.boxie.upload(
+                    artifact.artifact_id,
+                    artifact.sha256,
+                    self.sessions.archive(artifact.artifact_id),
+                )
+                # Closure cancellation is irreversible even if the PR has since reopened.
+                stored = next(
+                    item
+                    for item in self.sessions.uploads()
+                    if item.artifact.artifact_id == artifact.artifact_id
+                )
+                if stored.cancelled:
+                    raise ArtifactConflictError("publication was cancelled by PR closure")
+                current = self.store.get(self.store.identifier(artifact.pr))
+                if intent.build is None and (current.revision if current else None) not in {
+                    intent.previous_revision,
+                    artifact.revision,
+                }:
+                    raise ArtifactConflictError("a newer publication superseded this upload")
+                # No await between the final stale/closed check and atomic publication.
+                environment = self.store.publish(artifact, intent.build)
+            except ArtifactConflictError:
+                self.sessions.retire(artifact.artifact_id)
+                self.sessions.uploaded(artifact.artifact_id)
+                raise
             self.sessions.uploaded(artifact.artifact_id)
-            raise
-        self.sessions.uploaded(artifact.artifact_id)
-        self.collect_artifacts()
-        return environment
+            self.collect_artifacts()
+            return environment
 
     async def recover(self, *, startup: bool = True) -> None:
         # A restarted process cannot finish an in-flight terminal attachment.
@@ -164,29 +176,34 @@ class CliPlaygroundService:
                 not startup and not intent.abandoned and intent.claim_until > self.clock()
             ):
                 continue
-            try:
-                sandbox = await self.boxie.create(str(intent.id), intent.spec)
-                if saved is not None:
-                    validate_sandbox(sandbox, saved.sandbox)
-                if not any(current.id == intent.id for current in self.sessions.creates()):
-                    continue  # Authentication claimed the binding while recovery yielded.
-                self.sessions.save(
-                    SessionBinding(
-                        id=intent.id,
-                        preview_id=intent.preview_id,
-                        revision=intent.revision,
-                        credential_hash=intent.credential_hash,
-                        sandbox=sandbox,
-                        pending_stop=True,
+            with request_context(str(intent.request_id) if intent.request_id else None):
+                try:
+                    sandbox = await self.boxie.create(str(intent.id), intent.spec)
+                    if saved is not None:
+                        validate_sandbox(sandbox, saved.sandbox)
+                    if not any(current.id == intent.id for current in self.sessions.creates()):
+                        continue  # Authentication claimed the binding while recovery yielded.
+                    self.sessions.save(
+                        SessionBinding(
+                            id=intent.id,
+                            preview_id=intent.preview_id,
+                            revision=intent.revision,
+                            credential_hash=intent.credential_hash,
+                            sandbox=sandbox,
+                            pending_stop=True,
+                            stop_request_id=uuid4(),
+                        )
                     )
-                )
-            except BoxieUnavailable:
-                logger.warning("Sandbox admission recovery remains pending")
+                except BoxieUnavailable:
+                    logger.warning("Sandbox admission recovery remains pending")
         for upload_intent in self.sessions.uploads():
-            try:
-                await self.finish_upload(upload_intent)
-            except BoxieUnavailable, ArtifactConflictError:
-                logger.warning("Artifact publication recovery deferred or abandoned")
+            with request_context(
+                str(upload_intent.request_id) if upload_intent.request_id else None
+            ):
+                try:
+                    await self.finish_upload(upload_intent)
+                except BoxieUnavailable, ArtifactConflictError:
+                    logger.warning("Artifact publication recovery deferred or abandoned")
         await self.cleanup_inactive()
 
     def binding(
@@ -246,6 +263,8 @@ class CliPlaygroundService:
         if binding is not None and binding.attachment_deadline is not None:
             if claim is not None and claim != binding.attachment_claim:
                 return
+            if not binding.attached and not binding.pending_stop:
+                binding.stop_request_id = UUID(current_request_id() or str(uuid4()))
             binding.pending_stop = not binding.attached
             binding.attachment_deadline = None
             self.sessions.save(binding)
@@ -258,6 +277,7 @@ class CliPlaygroundService:
             raise ArtifactConflictError("preview revision changed")
         credential = secrets.token_urlsafe(32)
         intent = CreateIntent(
+            request_id=UUID(current_request_id() or str(uuid4())),
             id=uuid4(),
             preview_id=preview_id,
             revision=revision,
@@ -268,7 +288,8 @@ class CliPlaygroundService:
         self.sessions.create_intent(intent)
         self.active_creates.add(intent.id)
         try:
-            sandbox = await self.boxie.create(str(intent.id), intent.spec)
+            with request_context(str(intent.request_id)):
+                sandbox = await self.boxie.create(str(intent.id), intent.spec)
             binding = SessionBinding(
                 id=intent.id,
                 preview_id=preview_id,
@@ -279,6 +300,8 @@ class CliPlaygroundService:
             self.sessions.save(binding)
             current = self.store.get(preview_id)
             if current is None or current.revision != revision:
+                if not binding.pending_stop:
+                    binding.stop_request_id = UUID(current_request_id() or str(uuid4()))
                 binding.pending_stop = True
                 self.sessions.save(binding)
                 await self.retry_stops()
@@ -297,6 +320,8 @@ class CliPlaygroundService:
                 intent.abandoned = True
                 self.sessions.create_intent(intent)
                 if saved is not None:
+                    if not saved.pending_stop:
+                        saved.stop_request_id = UUID(current_request_id() or str(uuid4()))
                     saved.pending_stop = True
                     self.sessions.save(saved)
             raise
@@ -304,6 +329,8 @@ class CliPlaygroundService:
             self.active_creates.discard(intent.id)
 
     async def stop_session(self, binding: SessionBinding) -> None:
+        if not binding.pending_stop:
+            binding.stop_request_id = UUID(current_request_id() or str(uuid4()))
         binding.pending_stop = True
         self.sessions.save(binding)
         await self.retry_stops()
@@ -312,8 +339,9 @@ class CliPlaygroundService:
         while True:
             await asyncio.sleep(self.settings.cleanup_interval_seconds)
             try:
-                async with self.uploads:
-                    await self.recover(startup=False)
+                with request_context(str(uuid4())):
+                    async with self.uploads:
+                        await self.recover(startup=False)
             except OSError, RuntimeError, TimeoutError:
                 logger.exception("Failed to expire playground environments")
 
@@ -403,6 +431,7 @@ class CliPlaygroundService:
                     expires_at=self.clock() + self.settings.preview_seconds,
                 )
                 intent = UploadIntent(
+                    request_id=UUID(current_request_id() or str(uuid4())),
                     artifact=metadata,
                     build=build,
                     previous_revision=current.revision if current else None,

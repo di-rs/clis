@@ -10,7 +10,8 @@ import aiohttp
 import pytest
 from boxie_test_support.terminal_network import attach
 from cli_playground import boxie_client as client_module
-from cli_playground.boxie_client import BoxieUnavailable
+from cli_playground.boxie_client import BoxieUnavailable, HttpBoxieClient
+from cli_playground.observability import current_request_id
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosedError, InvalidStatus
 from websockets.typing import Origin
@@ -64,8 +65,18 @@ def test_failed_publication_preserves_ready_revision_and_recovers_exact_upload(
                     assert (await attach(ws))[1] == b"ready\n"
                 (pending,) = product.service.sessions.uploads()
                 artifact_id = pending.artifact.artifact_id
+                assert pending.request_id == UUID(failed.headers["x-request-id"])
                 # Both failures occur after the real supervisor has accepted these bytes.
                 assert (network.config.data_dir / "artifacts" / str(artifact_id)).exists()
+            original_upload = HttpBoxieClient.upload
+
+            async def recovering_upload(
+                self: HttpBoxieClient, identifier: UUID, digest: str, archive: Path
+            ) -> None:
+                assert current_request_id() == str(pending.request_id)
+                await original_upload(self, identifier, digest, archive)
+
+            monkeypatch.setattr(HttpBoxieClient, "upload", recovering_upload)
             async with product_server(tmp_path / "product", str(network.api.base_url)) as restarted:
                 recovered = restarted.service.store.get(identifier)
                 assert recovered is not None and recovered.revision == "b" * 40
@@ -132,6 +143,7 @@ def test_capability_failures_and_restart_preserve_claimed_session_while_cleaning
                 pending = product.service.sessions.get(UUID(stopped["id"]))
                 orphan = product.service.sessions.get(UUID(abandoned["id"]))
                 assert pending is not None and pending.pending_stop
+                assert pending.stop_request_id == UUID(closed_pr.headers["x-request-id"])
                 assert orphan is not None
                 assert product.service.store.record(identifier) is None
             network.daemon.unreachable = False

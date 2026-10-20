@@ -1,5 +1,6 @@
 """Application-owned browser proof against the independently usable Boxie stack."""
 
+import json
 import os
 import secrets
 import socket
@@ -7,8 +8,11 @@ import subprocess
 import time
 from pathlib import Path
 
+import httpx
 import pytest
 from integration.stack import LifecycleStack
+
+from .helpers import binary_bundle
 
 ROOT = Path(__file__).resolve().parents[3]
 pytestmark = pytest.mark.integration
@@ -36,6 +40,19 @@ def test_native_application_and_browser(tmp_path: Path) -> None:
     )
     try:
         stack.start()
+        with httpx.Client(base_url=origin, timeout=30) as public:
+            response = public.post(
+                "/api/environments",
+                params={"sha": "c" * 40, "pr": 987654},
+                headers={"Authorization": "Bearer " + token},
+                content=binary_bundle({binary.name: binary.read_bytes()}),
+            )
+            assert response.status_code == 201, response.text
+            request_id = response.headers["x-request-id"]
+        for service in ("cli-playground", "api", "supervisor"):
+            logs = stack.runtime_command("logs", "--no-color", "--no-log-prefix", service)
+            events = [json.loads(line) for line in logs.splitlines() if line.startswith("{")]
+            assert any(event.get("request_id") == request_id for event in events), service
         subprocess.run(
             [
                 "uv",

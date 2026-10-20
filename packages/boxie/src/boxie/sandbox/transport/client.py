@@ -32,6 +32,7 @@ from boxie.domain.models import (
     SandboxSpec,
     SupervisorIdentity,
 )
+from boxie.observability.telemetry.context import current_request_id
 from boxie.sandbox.transport.terminal import (
     NoRedirectConnect,
     SupervisorTerminal,
@@ -97,9 +98,12 @@ class SupervisorClient:
         await self._http.aclose()
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> tuple[int, bytes]:
+        headers = dict(kwargs.pop("headers", {}))
+        if request_id := current_request_id():
+            headers["X-Request-ID"] = request_id
         try:
             async with asyncio.timeout(self._timeout):
-                async with self._http.stream(method, path, **kwargs) as response:
+                async with self._http.stream(method, path, headers=headers, **kwargs) as response:
                     if response.status_code in ERRORS:
                         raise BoxieError(response.status_code, ERRORS[response.status_code])
                     if response.status_code not in (200, 201, 204):
@@ -179,10 +183,13 @@ class SupervisorClient:
         url = f"{self._ws_url}/v1/sandboxes/{sandbox_id}/terminal?" + urlencode(
             {"consumer_id": principal.consumer_id}
         )
+        headers = {"Authorization": self._authorization}
+        if request_id := current_request_id():
+            headers["X-Request-ID"] = request_id
         try:
             async with NoRedirectConnect(
                 url,
-                additional_headers={"Authorization": self._authorization},
+                additional_headers=headers,
                 open_timeout=self._timeout,
                 close_timeout=2,
                 ping_timeout=self._timeout,

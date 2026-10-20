@@ -13,6 +13,12 @@ from fastapi.staticfiles import StaticFiles
 
 from cli_playground.boxie_client import BoxieClient, HttpBoxieClient
 from cli_playground.config import Settings
+from cli_playground.observability import (
+    RequestContext,
+    configure_logging,
+    shutdown_logging,
+    unhandled_error,
+)
 from cli_playground.routes import create_router
 from cli_playground.service import CliPlaygroundService
 from cli_playground.session_store import SessionStore
@@ -29,6 +35,7 @@ def create_app(
     static_dir: Path = STATIC_DIR,
     clock: Callable[[], float] = time.time,
 ) -> FastAPI:
+    configure_logging()
     settings = settings or Settings()
     if boxie is None:
         secret = settings.boxie_credential_file
@@ -58,9 +65,12 @@ def create_app(
             cleanup.cancel()
             await asyncio.gather(cleanup, return_exceptions=True)
             await service.boxie.close()
+            await asyncio.to_thread(shutdown_logging)
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.add_middleware(RequestHostBoundary, settings=service.settings)
+    app.add_middleware(RequestContext)
+    app.add_exception_handler(Exception, unhandled_error)
     app.state.service = service
     app.state.settings = service.settings
     app.state.store = service.store

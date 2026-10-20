@@ -1,6 +1,7 @@
 """Local deadline and journal enforcement, independent of Temporal scheduling."""
 
 import asyncio
+from contextvars import Context
 from typing import TYPE_CHECKING
 
 from boxie.domain.models import SandboxState
@@ -25,7 +26,7 @@ class ExecutionSafety:
             if execution.safety_required and (
                 execution.reconciliation is None or execution.reconciliation.done()
             ):
-                execution.reconciliation = asyncio.create_task(owner._supervised_reconcile(record))
+                execution.reconciliation = asyncio.create_task(owner._autonomous_reconcile(record))
         # Startup cleanup must fence old executions before serving requests.
         await asyncio.gather(
             *(r.reconciliation for r in owner.executions.values() if r.reconciliation is not None)
@@ -33,7 +34,7 @@ class ExecutionSafety:
 
     def start(self) -> None:
         if self.task is None:
-            self.task = asyncio.create_task(self._run())
+            self.task = asyncio.create_task(self._run(), context=Context())
 
     async def close(self) -> None:
         if self.task is not None:
@@ -62,6 +63,6 @@ class ExecutionSafety:
                     execution.reconciliation is None or execution.reconciliation.done()
                 ):
                     execution.reconciliation = asyncio.create_task(
-                        owner._supervised_reconcile(record)
+                        owner._autonomous_reconcile(record)
                     )
             await asyncio.sleep(min(1, owner.config.sweep_seconds))

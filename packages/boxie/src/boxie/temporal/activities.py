@@ -17,8 +17,10 @@ from boxie.domain.lifecycle import (
     SupervisorObservation,
 )
 from boxie.domain.models import SandboxState, TerminationReason
+from boxie.observability.activity_context import ActivityContextResolver, activity_sandbox_id
 from boxie.observability.context import bind_context
 from boxie.observability.events import Transition, deliver, emit
+from boxie.observability.telemetry.context import request_context
 from boxie.persistence.models import Sandbox
 from boxie.persistence.postgres import PostgresLifecycle
 from boxie.sandbox.execution.supervisor import Supervisor
@@ -26,12 +28,33 @@ from boxie.temporal.contracts import LifecycleFacts, StopRequest
 
 
 class SafeActivityInbound(ActivityInboundInterceptor):
+    def __init__(
+        self,
+        next: ActivityInboundInterceptor,
+        *,
+        context_resolver: ActivityContextResolver | None = None,
+    ) -> None:
+        super().__init__(next)
+        self.context_resolver = context_resolver
+
     async def execute_activity(self, input: ExecuteActivityInput) -> Any:
         info = activity.info()
-        with bind_context(
-            workflow_id=info.workflow_id,
-            run_id=info.workflow_run_id,
-            activity_attempt=info.attempt,
+        selected = None
+        with request_context(None):
+            if self.context_resolver is not None:
+                try:
+                    async with asyncio.timeout(0.1):
+                        selected = await self.context_resolver(input)
+                except Exception:
+                    pass
+        with (
+            request_context(selected),
+            bind_context(
+                sandbox_id=activity_sandbox_id(input),
+                workflow_id=info.workflow_id,
+                run_id=info.workflow_run_id,
+                activity_attempt=info.attempt,
+            ),
         ):
 
             async def heartbeat() -> None:
@@ -77,8 +100,11 @@ class SafeActivityInbound(ActivityInboundInterceptor):
 
 
 class SafeActivityErrors(Interceptor):
+    def __init__(self, *, context_resolver: ActivityContextResolver | None = None) -> None:
+        self.context_resolver = context_resolver
+
     def intercept_activity(self, next: ActivityInboundInterceptor) -> ActivityInboundInterceptor:
-        return SafeActivityInbound(next)
+        return SafeActivityInbound(next, context_resolver=self.context_resolver)
 
 
 class LifecycleActivities:

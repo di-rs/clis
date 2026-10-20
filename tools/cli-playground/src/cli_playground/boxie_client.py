@@ -12,6 +12,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationErro
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosedOK, WebSocketException
 
+from cli_playground.observability import current_request_id
 from cli_playground.terminal_protocol import TerminalEvent
 from cli_playground.terminal_protocol import response as terminal_response
 
@@ -120,6 +121,12 @@ class HttpBoxieClient:
             )
         return self._session
 
+    def _headers(self, headers: dict[str, str] | None = None) -> dict[str, str]:
+        result = {**self.headers, **(headers or {})}
+        if request_id := current_request_id():
+            result["X-Request-ID"] = request_id
+        return result
+
     async def _request(
         self,
         method: str,
@@ -130,7 +137,11 @@ class HttpBoxieClient:
     ) -> bytes:
         try:
             async with self._http().request(
-                method, self.url + path, data=body, headers=headers, allow_redirects=False
+                method,
+                self.url + path,
+                data=body,
+                headers=self._headers(headers),
+                allow_redirects=False,
             ) as response:
                 data = await bounded_response(response)
                 if response.status not in {200, 201, 202, 204} or len(data) > 65536:
@@ -150,7 +161,7 @@ class HttpBoxieClient:
             async with self._http().put(
                 self.url + f"/v1/artifacts/{identifier}",
                 data=chunks(),
-                headers={"X-Content-SHA256": digest},
+                headers=self._headers({"X-Content-SHA256": digest}),
                 allow_redirects=False,
             ) as response:
                 if response.status not in {200, 201}:
@@ -196,7 +207,7 @@ class HttpBoxieClient:
             async with NoRedirectConnect(
                 self.url.replace("http:", "ws:").replace("https:", "wss:")
                 + f"/v1/sandboxes/{identifier}/terminal",
-                additional_headers=self.headers,
+                additional_headers=self._headers(),
                 proxy=None,
                 max_size=65536,
                 max_queue=4,

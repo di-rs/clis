@@ -161,6 +161,27 @@ for name in ({forbidden!r}, 'cli-playground', 'cli_playground_infra', 'boxie_inf
             "command.upgrade(config, 'head', sql=True)\n"
             "assert 'CREATE TABLE sandboxes' in output.getvalue()\n"
         )
+        probe += """
+import asyncio
+from boxie.api.app import ApiConfig, create_app
+from boxie.observability.telemetry.context import current_request_id
+class Ports:
+    async def ready(self): return True
+ports = Ports()
+app = create_app(ApiConfig(release='isolated', consumers={'ordinary-client':b'isolated-secret'}), ports, ports, ports)
+async def run():
+    import httpx
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url='http://standalone') as client:
+        for supplied in (None, '11111111-1111-1111-1111-111111111111'):
+            headers = {'Authorization':'Bearer isolated-secret'}
+            if supplied: headers['X-Request-ID'] = supplied
+            response = await client.get('/readyz', headers=headers)
+            assert response.status_code == 200
+            selected = response.headers['x-request-id']
+            assert selected == supplied if supplied else len(selected) == 36
+            assert current_request_id() is None
+asyncio.run(run())
+"""
     else:
         # Real installed assets via ASGI HTTP, without pytest/httpx or source imports.
         probe += """

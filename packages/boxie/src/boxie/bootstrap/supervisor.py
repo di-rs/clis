@@ -36,7 +36,6 @@ def create_supervisor_app(
 
     from sqlmodel import select
 
-    from boxie.observability.logging import RequestLogging
     from boxie.sandbox.transport.server import create_supervisor_app as create_transport_app
 
     async def readiness() -> dict[str, bool]:
@@ -64,9 +63,13 @@ def create_supervisor_app(
             await supervisor.close()
 
     app = create_transport_app(
-        supervisor, artifacts, credential=credential, readiness=readiness, lifespan=lifespan
+        supervisor,
+        artifacts,
+        credential=credential,
+        readiness=readiness,
+        lifespan=lifespan,
+        request_completed=request_completed,
     )
-    app.add_middleware(RequestLogging, completed=request_completed)
     return app
 
 
@@ -74,12 +77,14 @@ def _main(metrics: Metrics, config_path: Path) -> None:
     import uvicorn
 
     from boxie.bootstrap.workers import embedded_workers
+    from boxie.observability.activity_context import build_activity_context_resolver
     from boxie.observability.process import (
         background,
         supervisor_cache,
         supervisor_dependencies,
     )
     from boxie.observability.telemetry.logging import install_asyncio_handler, log_dispatcher
+    from boxie.persistence.database import database
     from boxie.persistence.postgres import PostgresLifecycle
     from boxie.persistence.start_guard import PostgresStartGuard
     from boxie.sandbox.docker import DockerBackend
@@ -99,7 +104,15 @@ def _main(metrics: Metrics, config_path: Path) -> None:
             await run_owned()
 
     async def run_owned() -> None:
-        async with database_for(dsn_file) as sessions:
+        async with (
+            database_for(dsn_file) as sessions,
+            database(
+                read_credential(dsn_file, allow_spaces=True).decode(),
+                pool_size=1,
+                max_overflow=0,
+                pool_timeout=0.1,
+            ) as telemetry_sessions,
+        ):
             artifacts = PostgresArtifactStore(sessions, config.data_dir / "artifacts")
             supervisor = Supervisor(
                 config,
@@ -124,7 +137,13 @@ def _main(metrics: Metrics, config_path: Path) -> None:
                 artifacts,
                 credential=credential,
                 request_completed=metrics.http_completed,
-                workers=lambda: embedded_workers(client, repository, supervisor, artifacts),
+                workers=lambda: embedded_workers(
+                    client,
+                    repository,
+                    supervisor,
+                    artifacts,
+                    context_resolver=build_activity_context_resolver(telemetry_sessions),
+                ),
             )
 
             def reload_profiles() -> None:

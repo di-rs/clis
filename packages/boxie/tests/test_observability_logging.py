@@ -474,9 +474,6 @@ async def downstream(scope, receive, send):
     assert scope["headers"] == [(b"x-request-id", secret.encode())]
     assert scope["query_string"] == secret.encode()
     identity = current_context().get("request_id")
-    if scope["type"] != "http":
-        assert identity == parent_id
-        return
     assert str(UUID(identity)) == identity and identity != parent_id
     await asyncio.sleep(.01)
     assert current_context()["request_id"] == identity
@@ -506,7 +503,7 @@ async def request(case):
     assert "request_id" not in current_context()
 async def run():
     await asyncio.gather(*(request(case) for case in ("success", "other", "failure", "cancelled", "websocket")))
-    assert len(set(seen.values())) == 4
+    assert len(set(seen.values())) == 5
 asyncio.run(run())
 dispatcher.emit("request.completed")
 dispatcher.close()
@@ -515,9 +512,9 @@ dispatcher.close()
     events = records(result)
     assert SECRET not in result.stdout
     assert all(event["service"] == service and event["role"] == role for event in events)
-    assert len(events) == 5  # Successes, failure, cancellation, and an unbound event.
+    assert len(events) == 6  # HTTP/WebSocket successes, failure, cancellation, and unbound event.
     correlated = [event for event in events if "request_id" in event]
-    assert len(correlated) == len({event["request_id"] for event in correlated}) == 4
+    assert len(correlated) == len({event["request_id"] for event in correlated}) == 5
     assert "request_id" not in events[-1]
     failures = [event for event in events if event.get("outcome") == "failed"]
     assert len(failures) == 2
@@ -525,3 +522,52 @@ dispatcher.close()
     assert all(
         "duration_ms" in event for event in correlated if event["event"] == "request.completed"
     )
+
+
+def test_authenticated_request_id_round_trip_and_error_reset() -> None:
+    result = child("""
+import httpx
+from boxie.api.app import ApiConfig, create_app
+from boxie.observability.telemetry.context import current_context
+class Ports:
+    async def ready(self): return True
+ports = Ports()
+app = create_app(ApiConfig(release="test", consumers={"one": b"secret"}), ports, ports, ports)
+@app.get("/explode")
+async def explode(): raise RuntimeError("PRIVATE_SENTINEL")
+async def run():
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app, raise_app_exceptions=False), base_url="http://test") as client:
+        chosen = "11111111-1111-1111-1111-111111111111"
+        for path, status in (("/readyz", 200), ("/missing", 404), ("/v1/sandboxes/not-uuid", 422), ("/explode", 500)):
+            response = await client.get(path, headers={"Authorization": "Bearer secret", "X-Request-ID": chosen})
+            assert response.status_code == status
+            assert response.headers["x-request-id"] == chosen
+            assert "request_id" not in current_context()
+        for headers in (
+            [("Authorization", "Bearer secret")],
+            [("Authorization", "Bearer secret"), ("X-Request-ID", "PRIVATE_SENTINEL")],
+            [("Authorization", "Bearer secret"), ("X-Request-ID", chosen), ("X-Request-ID", chosen)],
+            [("Authorization", "Bearer wrong"), ("X-Request-ID", chosen)],
+        ):
+            response = await client.get("/readyz", headers=headers)
+            assert str(UUID(response.headers["x-request-id"])) == response.headers["x-request-id"] != chosen
+asyncio.run(run())
+dispatcher.close()
+""")
+    events = records(result)
+    assert "PRIVATE_SENTINEL" not in result.stdout + result.stderr
+    assert any(
+        event.get("request_id") == "11111111-1111-1111-1111-111111111111" for event in events
+    )
+
+
+def test_request_context_replaces_clears_and_restores() -> None:
+    from boxie.observability.telemetry import context
+
+    first = "11111111-1111-1111-1111-111111111111"
+    with context.bind_context(request_id=first, sandbox_id=first):
+        with context.request_context(None):
+            assert context.current_request_id() is None
+            assert context.current_context()["sandbox_id"] == first
+        assert context.current_request_id() == first
+    assert context.current_request_id() is None

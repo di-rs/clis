@@ -166,6 +166,33 @@ screen snapshots are not supported.
 the API release and SQL, supervisor and Temporal readiness, with 503 when unavailable.
 The supervisor's authenticated `/readyz` reports Docker, SQL and execution persistence. Access logs are disabled by both entry points.
 
+## Follow a request through logs
+
+Send an optional `X-Request-ID` with an authenticated HTTP request or WebSocket
+handshake to correlate your own service logs with Boxie. Use one canonical,
+lowercase UUID, for example `11111111-1111-4111-8111-111111111111`. Boxie returns
+the selected ID in that header on application HTTP responses, including errors,
+and WebSocket acceptance or HTTP denial. WebSocket frames stay unchanged.
+
+A missing, malformed, uppercase, duplicate or comma-joined header gets a fresh
+UUID. Unauthenticated requests and liveness probes also get fresh IDs, regardless
+of a supplied value. IDs are diagnostic metadata and never replace credentials,
+ownership checks or idempotency keys. Consumers can omit the header entirely.
+
+Creation and a later stop are separate actions. Boxie saves their first accepted
+origins with the sandbox and outbox, preserving them across retries and worker
+restarts. Admission retries keep their own response IDs while the saved creation
+origin stays unchanged. Use `sandbox_id` to join the resource's whole lifetime.
+Periodic activity decisions have their own retry-stable IDs. Historical records
+and unavailable telemetry lookups can omit the originating ID; resource and
+workflow identifiers remain available.
+
+Apply Alembic revision `0006_request_correlation` before updating both Boxie
+processes. Its nullable columns support older writers; keep those columns when
+rolling the application back. Boxie requires no consumer package or shared
+logging runtime. See the [operator logging guide](infra/observability/README.md)
+for collection and searches.
+
 ## Default environment
 
 Boxie owns one Ubuntu 24.04 Linux x86_64 environment with Bash, standard utilities

@@ -6,8 +6,9 @@ from uuid import UUID
 
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from starlette.datastructures import Headers
 from starlette.middleware.base import RequestResponseEndpoint
 
 from boxie.api.auth import ConsumerAuth
@@ -41,6 +42,14 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     auth = ConsumerAuth(config.consumers)
+
+    @app.exception_handler(Exception)
+    async def unhandled_error(request: Request, _error: Exception) -> PlainTextResponse:
+        return PlainTextResponse(
+            "Internal Server Error",
+            status_code=500,
+            headers={"X-Request-ID": request.state.request_id},
+        )
 
     @app.exception_handler(BoxieError)
     async def application_error(_request: Request, error: BoxieError) -> JSONResponse:
@@ -85,5 +94,12 @@ def create_app(
 
     app.include_router(routes(lifecycle, artifacts, deliver))
     app.include_router(terminal_routes(lifecycle, terminal, auth))
-    app.add_middleware(RequestLogging, completed=request_completed)
+    app.add_middleware(
+        RequestLogging,
+        completed=request_completed,
+        accept_incoming=lambda scope: (
+            scope.get("path") != "/healthz"
+            and auth.accepts(Headers(scope=scope).get("authorization", ""))
+        ),
+    )
     return app

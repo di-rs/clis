@@ -20,3 +20,10 @@ class ConsumerAuth:
         if found is None:
             raise BoxieError(401, "invalid consumer credential")
         return Principal(found)
+
+    def accepts(self, header: str) -> bool:
+        try:
+            self.resolve(header)
+        except BoxieError:
+            return False
+        return True

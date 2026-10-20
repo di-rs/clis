@@ -5,12 +5,13 @@ import os
 import secrets
 from pathlib import Path
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict
 
 from cli_playground.boxie_client import SandboxRequest, SandboxView
 from cli_playground.models import ArtifactMetadata, BuildIdentity
+from cli_playground.observability import current_request_id
 
 
 def optional_request_id(value: object) -> UUID | None:
@@ -98,7 +99,7 @@ class SessionStore:
     def save(self, binding: SessionBinding) -> None:
         atomic_write(
             self.root / "bindings" / f"{binding.id}.json",
-            binding.model_dump_json(exclude={"stop_request_id"}).encode(),
+            binding.model_dump_json().encode(),
         )
 
     def bindings(self) -> list[SessionBinding]:
@@ -114,7 +115,7 @@ class SessionStore:
     def create_intent(self, intent: CreateIntent) -> None:
         atomic_write(
             self.root / "creates" / f"{intent.id}.json",
-            intent.model_dump_json(exclude={"request_id"}).encode(),
+            intent.model_dump_json().encode(),
         )
 
     def creates(self) -> list[CreateIntent]:
@@ -141,7 +142,7 @@ class SessionStore:
     def save_upload(self, intent: UploadIntent) -> None:
         atomic_write(
             self.root / "uploads" / f"{intent.artifact.artifact_id}.json",
-            intent.model_dump_json(exclude={"request_id"}).encode(),
+            intent.model_dump_json().encode(),
         )
 
     def cancel_uploads(self, pr: int) -> None:
@@ -163,10 +164,20 @@ class SessionStore:
         unlink_and_sync(self.root / "uploads" / f"{identifier}.json")
         unlink_and_sync(self.archive(identifier))
 
-    def retire(self, identifier: UUID) -> None:
-        if (self.root / "retirements" / f"{identifier}.done").exists():
+    def retire(self, identifier: UUID, *, request_id: UUID | None = None) -> None:
+        path = self.root / "retirements" / str(identifier)
+        if path.exists() or (self.root / "retirements" / f"{identifier}.done").exists():
             return
-        atomic_write(self.root / "retirements" / str(identifier), b"")
+        atomic_write(
+            path, str(request_id or UUID(current_request_id() or str(uuid4()))).encode("ascii")
+        )
+
+    def retirement_request_id(self, identifier: UUID) -> UUID | None:
+        try:
+            with (self.root / "retirements" / str(identifier)).open("rb") as stream:
+                return optional_request_id(stream.read(37).decode("ascii"))
+        except OSError, UnicodeError:
+            return None
 
     def retirements(self) -> list[UUID]:
         return [UUID(p.name) for p in (self.root / "retirements").iterdir() if not p.suffix]
@@ -187,5 +198,6 @@ class SessionStore:
                     or binding.sandbox.state not in {"terminated", "failed"}
                 )
             ):
+                binding.stop_request_id = UUID(current_request_id() or str(uuid4()))
                 binding.pending_stop = True
                 self.save(binding)

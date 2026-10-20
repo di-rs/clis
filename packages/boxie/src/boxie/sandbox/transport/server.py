@@ -8,7 +8,8 @@ from uuid import UUID
 
 from fastapi import FastAPI, Header, Query, Request, Response, WebSocket
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
+from starlette.datastructures import Headers
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.types import Lifespan
 
@@ -21,6 +22,7 @@ from boxie.contracts.execution import (
 from boxie.domain.errors import BoxieError
 from boxie.domain.models import Principal
 from boxie.domain.policy import validate_policy
+from boxie.observability.logging import RequestLogging
 from boxie.sandbox.execution.supervisor import Supervisor
 from boxie.sandbox.terminal.session import serve_terminal
 
@@ -32,12 +34,21 @@ def create_supervisor_app(
     credential: bytes,
     readiness: Callable[[], Awaitable[dict[str, bool]]],
     lifespan: Lifespan[FastAPI],
+    request_completed: Callable[[str, str, str, float], None] | None = None,
 ) -> FastAPI:
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.supervisor = supervisor
 
     def authorized(value: str) -> bool:
         return hmac.compare_digest(value.encode(), b"Bearer " + credential)
+
+    @app.exception_handler(Exception)
+    async def unhandled_error(request: Request, _error: Exception) -> PlainTextResponse:
+        return PlainTextResponse(
+            "Internal Server Error",
+            status_code=500,
+            headers={"X-Request-ID": request.state.request_id},
+        )
 
     @app.middleware("http")
     async def authenticate(request: Request, next: RequestResponseEndpoint) -> Response:
@@ -122,4 +133,9 @@ def create_supervisor_app(
             return
         await serve_terminal(websocket, supervisor, ref)
 
+    app.add_middleware(
+        RequestLogging,
+        completed=request_completed,
+        accept_incoming=lambda scope: authorized(Headers(scope=scope).get("authorization", "")),
+    )
     return app

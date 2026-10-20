@@ -48,6 +48,9 @@ def test_collection_observer_reaches_actual_supervisor_bootstrap(
         ),
     )
     monkeypatch.setattr(supervisor, "database_for", pool)
+    monkeypatch.setattr(
+        supervisor, "read_credential", lambda *args, **kwargs: b"postgresql://localhost/unused"
+    )
     monkeypatch.setattr(PostgresArtifactStore, "__init__", inspect_store)
     monkeypatch.setattr(producer, "install_asyncio_handler", lambda _: None)
     monkeypatch.setattr(producer, "log_dispatcher", lambda: None)

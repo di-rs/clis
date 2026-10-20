@@ -83,3 +83,25 @@ def bind_context(**fields: object) -> Iterator[None]:
 
 def current_context() -> dict[str, str | int | float]:
     return (_context.get() or {}).copy()
+
+
+def parse_request_id(value: object) -> str | None:
+    return value if type(value) is str and len(value) == 36 and _UUID.fullmatch(value) else None
+
+
+def current_request_id() -> str | None:
+    return parse_request_id((_context.get() or {}).get("request_id"))
+
+
+@contextmanager
+def request_context(request_id: str | None) -> Iterator[None]:
+    fields = current_context()
+    fields.pop("request_id", None)
+    selected = parse_request_id(request_id)
+    if selected is not None:
+        fields["request_id"] = selected
+    token = _context.set(fields)
+    try:
+        yield
+    finally:
+        _context.reset(token)
