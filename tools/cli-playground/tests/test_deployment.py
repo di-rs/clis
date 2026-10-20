@@ -110,3 +110,27 @@ def test_readiness_deadline_reports_public_https(
     )
     with pytest.raises(SystemExit, match="public HTTPS readiness failed after 300 seconds"):
         exec(script, {})
+
+
+def test_migration_failure_prevents_backend_replacement(tmp_path: Path) -> None:
+    docker = tmp_path / "docker"
+    log = tmp_path / "calls"
+    docker.write_text(
+        f"#!{sys.executable}\nimport json, os, sys\nwith open(os.environ['CALLS'], 'a') as f: f.write(json.dumps(sys.argv[1:]) + '\\n')\nif 'run' in sys.argv: sys.exit(17)\n"
+    )
+    docker.chmod(0o755)
+    result = subprocess.run(
+        ["bash", str(ROOT / "tools/cli-playground/infra/deploy.sh")],
+        env={
+            **os.environ,
+            "PATH": str(tmp_path) + ":" + os.environ["PATH"],
+            "CALLS": str(log),
+            "SANCTUARY_CONFIG_DIR": str(tmp_path),
+            "SANCTUARY_CLI_PLAYGROUND_DIR": str(tmp_path),
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 17
+    calls = [json.loads(line) for line in log.read_text().splitlines()]
+    assert not any("up" in call for call in calls)

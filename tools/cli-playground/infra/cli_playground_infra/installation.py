@@ -39,9 +39,39 @@ def render(root: Path) -> None:
     ):
         raise ValueError("Preview credential must be a private nonempty regular file")
 
+    password_file = token.parent / "postgres-password"
+    if not password_file.exists():
+        descriptor = os.open(password_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w") as output:
+            output.write(secrets.token_hex(32) + "\n")
+    if (
+        password_file.is_symlink()
+        or not password_file.is_file()
+        or password_file.stat().st_mode & 0o077
+    ):
+        raise ValueError("PostgreSQL credential must be a private regular file")
+    password = password_file.read_text().strip()
+    if len(password) != 64 or any(char not in "0123456789abcdef" for char in password):
+        raise ValueError("Invalid Playground PostgreSQL password")
+    dsn_file = token.parent / "postgres-dsn.secret"
+    # Replace rather than follow a stale symlink when rendering credentials.
+    with tempfile.NamedTemporaryFile(mode="w", dir=token.parent, delete=False) as output:
+        temporary = Path(output.name)
+        try:
+            output.write(
+                f"host=postgres dbname=cli_playground user=cli_playground password={password} sslmode=disable\n"
+            )
+            output.flush()
+            os.fsync(output.fileno())
+            temporary.replace(dsn_file)
+        finally:
+            temporary.unlink(missing_ok=True)
+
     write_environment(
         root / "cli-playground.env",
         {
+            "CLI_PLAYGROUND_POSTGRES_DSN_FILE": str(dsn_file),
+            "CLI_PLAYGROUND_DATABASE_NETWORK": "boxie-control",
             "CLI_PLAYGROUND_IMAGE": os.environ["CLI_PLAYGROUND_IMAGE"],
             "CLI_PLAYGROUND_DOMAIN": os.environ["CLI_PLAYGROUND_DOMAIN"],
             "CLI_PLAYGROUND_DEPLOY_TOKEN": token.read_text().strip(),

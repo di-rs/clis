@@ -4,15 +4,17 @@ services:
     image: ${CLI_PLAYGROUND_IMAGE}
     ports: ["127.0.0.1:${BOXIE_TEST_PRODUCT_PORT}:8000"]
     environment:
+      CLI_PLAYGROUND_POSTGRES_DSN_FILE: /run/secrets/playground-dsn
       CLI_PLAYGROUND_DATA_DIR: /data
       CLI_PLAYGROUND_PUBLIC_URL: ${CLI_PLAYGROUND_PUBLIC_URL}
       CLI_PLAYGROUND_DEPLOY_TOKEN: ${CLI_PLAYGROUND_DEPLOY_TOKEN}
       CLI_PLAYGROUND_BOXIE_URL: http://api:8090
       CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE: /run/secrets/consumer
     volumes:
+      - ${BOXIE_TEST_ROOT}/playground-dsn:/run/secrets/playground-dsn:ro
       - cli-playground:/data
       - ${BOXIE_CONSUMER_CREDENTIAL_FILE}:/run/secrets/consumer:ro
-    networks: [consumer]
+    networks: [consumer, control]
     restart: "no"
 volumes:
   cli-playground: {}

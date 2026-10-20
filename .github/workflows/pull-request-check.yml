@@ -155,8 +155,12 @@ jobs:
           uv run --locked pytest packages/boxie/tests/test_packaging.py -m integration
       - name: 🌐 Install Chromium and browser dependencies
         run: pnpm exec playwright install --with-deps chromium
+      - name: 🐘 Verify Playground PostgreSQL lifecycle
+        working-directory: .
+        run: uv run --locked python tools/cli-playground/tests/run_integration.py
       - name: 🎭 Run browser end-to-end tests
-        run: pnpm test:browser
+        working-directory: .
+        run: uv run --locked pytest -m integration tools/cli-playground/tests/test_browser.py
       - name: 🧹 Verify checks leave the checkout unchanged
         run: git diff --exit-code
 

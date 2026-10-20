@@ -81,3 +81,18 @@ def test_composition_root_rejects_symlinked_consumer_credentials(tmp_path: Path)
     link.symlink_to(secret)
     with pytest.raises(ValueError, match="private regular"):
         create_app(Settings(boxie_credential_file=link))
+
+
+@pytest.mark.parametrize("invalid", ["public", "symlink", "empty"])
+def test_database_secret_rejects_invalid_file(tmp_path: Path, invalid: str) -> None:
+    from cli_playground.database import read_dsn
+
+    secret = tmp_path / "database"
+    secret.write_text("" if invalid == "empty" else "host=localhost dbname=cli_playground")
+    secret.chmod(0o644 if invalid == "public" else 0o600)
+    if invalid == "symlink":
+        link = tmp_path / "link"
+        link.symlink_to(secret)
+        secret = link
+    with pytest.raises((ValueError, OSError)):
+        read_dsn(secret)

@@ -2,7 +2,7 @@
 
 import asyncio
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from urllib.parse import urlsplit
 
@@ -94,8 +94,8 @@ async def close_terminal(websocket: WebSocket, code: int = 1000) -> None:
 async def bridge_terminal(
     websocket: WebSocket,
     session: TerminalPort,
-    attached: Callable[[], None] | None = None,
-    prepare_attach: Callable[[AttachRequest], str] | None = None,
+    attached: Callable[[], Awaitable[None]] | None = None,
+    prepare_attach: Callable[[AttachRequest], Awaitable[str]] | None = None,
 ) -> None:
     epoch: int | None = None
     highest = acked = 0
@@ -112,7 +112,7 @@ async def bridge_terminal(
                     if isinstance(message, Attached):
                         epoch = message.epoch
                         if attached is not None:
-                            attached()
+                            await attached()
                     value = message.model_dump()
                     if isinstance(message, TerminalStatus):
                         value["message"] = f"Session ended: {message.reason}."
@@ -154,7 +154,7 @@ async def bridge_terminal(
             if isinstance(data, AttachRequest):
                 if prepare_attach is None:
                     raise ValueError("attachment ordering is required")
-                wire = prepare_attach(data)
+                wire = await prepare_attach(data)
                 highest = acked = data.resume_after
             else:
                 wire = data.model_dump_json()

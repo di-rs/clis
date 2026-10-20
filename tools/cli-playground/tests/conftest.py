@@ -78,6 +78,7 @@ def configured_environment(
 ) -> None:
     for name, value in {
         "CLI_PLAYGROUND_DATA_DIR": str(tmp_path / "data"),
+        "CLI_PLAYGROUND_POSTGRES_DSN_FILE": str(tmp_path / "postgres-dsn"),
         "CLI_PLAYGROUND_PUBLIC_URL": "https://play.example/",
         "CLI_PLAYGROUND_DEPLOY_TOKEN": "private-deployment-token",
         "CLI_PLAYGROUND_BOXIE_URL": "http://boxie.internal",
@@ -92,3 +93,37 @@ def service(api_client: TestClient) -> CliPlaygroundService:
     service = api_client.app.state.service
     assert isinstance(service, CliPlaygroundService)
     return service
+
+
+DATABASE_TESTS = {
+    "test_api.py",
+    "test_sessions.py",
+    "test_service.py",
+    "test_stop_cleanup.py",
+    "test_terminal_limits.py",
+    "test_reconnect.py",
+    "test_boxie_integration.py",
+    "test_boxie_recovery.py",
+}
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    for item in items:
+        if item.path.parent == Path(__file__).parent and item.path.name in DATABASE_TESTS:
+            item.add_marker(pytest.mark.integration)
+
+
+@pytest.fixture(autouse=True)
+def playground_database(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    if request.node.path.name not in DATABASE_TESTS:
+        return
+    from cli_playground.migrate import migrate
+
+    from .helpers import protected
+
+    dsn: str = request.getfixturevalue("postgres_dsn")
+    migrate(dsn)
+    secret = protected(tmp_path / "postgres-dsn", dsn.encode())
+    monkeypatch.setenv("CLI_PLAYGROUND_POSTGRES_DSN_FILE", str(secret))

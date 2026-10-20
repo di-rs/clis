@@ -42,9 +42,13 @@ The Python package lives in `src/cli_playground/`. The frontend build places rea
 in `src/cli_playground/static/`, included in the installed
 wheel and sdist. To run the installed service, set `CLI_PLAYGROUND_DATA_DIR`,
 `CLI_PLAYGROUND_PUBLIC_URL`, `CLI_PLAYGROUND_DEPLOY_TOKEN`, `CLI_PLAYGROUND_BOXIE_URL`, and
-`CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE` (a private regular file):
+`CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE` and `CLI_PLAYGROUND_POSTGRES_DSN_FILE`
+(private regular files, mode `0600`). Provision a separate PostgreSQL database and
+apply its schema before startup:
 
 ```sh
+uv run --locked --package cli-playground python -m cli_playground.migrate \
+  --dsn-file "$CLI_PLAYGROUND_POSTGRES_DSN_FILE"
 uv run --locked --package cli-playground uvicorn cli_playground.app:create_app \
   --factory --host 127.0.0.1 --port 8000 --workers 1 --no-proxy-headers
 ```
@@ -64,6 +68,10 @@ paste, asynchronous composition and parser replies with the actual browser suite
 when upgrading xterm. This private dependency keeps terminal-generated replies
 working during replay without counting them as user activity. Browser tests drive
 DOM composition events; they do not claim OS-native IME coverage.
+
+See [persistence](docs/persistence.md) for the synchronous domain, async ports and
+PostgreSQL adapters, recovery rules and schema workflow. Metadata belongs to
+PostgreSQL; the data directory retains pending upload ZIPs.
 
 ## Production releases
 

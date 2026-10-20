@@ -10,6 +10,7 @@ compose() {
 }
 compose config --quiet
 compose pull backend
+compose run --rm --no-deps backend python -m cli_playground.migrate --dsn-file /run/secrets/postgres-dsn
 compose up -d --no-build --pull never --no-deps --wait --wait-timeout 180 backend
 if compose exec -T backend /app/.venv/bin/python - <<'PY'
 import os

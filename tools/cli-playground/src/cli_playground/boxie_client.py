@@ -2,80 +2,47 @@
 
 import asyncio
 from collections.abc import AsyncIterator
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal, Protocol
 from uuid import UUID
 
 import aiohttp
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
+from pydantic import ValidationError
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosedOK, WebSocketException
 
+from cli_playground.sandbox import (
+    ArtifactReply as ArtifactReply,
+)
+from cli_playground.sandbox import (
+    BoxieClient as BoxieClient,
+)
+from cli_playground.sandbox import (
+    BoxieUnavailable as BoxieUnavailable,
+)
+from cli_playground.sandbox import (
+    SandboxRequest as SandboxRequest,
+)
+from cli_playground.sandbox import (
+    SandboxState as SandboxState,
+)
+from cli_playground.sandbox import (
+    SandboxView as SandboxView,
+)
+from cli_playground.sandbox import (
+    TerminalPort as TerminalPort,
+)
+from cli_playground.sandbox import (
+    TerminalWriteClosed as TerminalWriteClosed,
+)
+from cli_playground.sandbox import (
+    TerminationReason as TerminationReason,
+)
+from cli_playground.sandbox import (
+    validate_sandbox as validate_sandbox,
+)
 from cli_playground.terminal_protocol import TerminalEvent
 from cli_playground.terminal_protocol import response as terminal_response
-
-
-class BoxieUnavailable(RuntimeError):
-    """A bounded private service call failed; credentials never enter public errors."""
-
-
-class TerminalWriteClosed(BoxieUnavailable):
-    """Boxie closed normally while its final response may still be buffered."""
-
-
-SandboxState = Literal["accepted", "provisioning", "ready", "terminating", "terminated", "failed"]
-TerminationReason = Literal[
-    "requested",
-    "expired",
-    "idle",
-    "disconnected",
-    "output_limit",
-    "exited",
-    "provisioning_failed",
-    "supervisor_restart",
-    "supervisor_shutdown",
-    "control_plane_lost",
-]
-
-
-class SandboxView(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    id: UUID
-    state: SandboxState
-    created_at: AwareDatetime
-    absolute_deadline: AwareDatetime
-    reason: TerminationReason | None
-    cleanup_pending: bool
-
-
-class ArtifactReply(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    id: UUID
-    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    retired: bool
-
-
-class SandboxRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    artifact_id: UUID
-
-
-class TerminalPort(Protocol):
-    async def receive(self) -> bytes | TerminalEvent | None: ...
-    async def send(self, message: str) -> None: ...
-
-
-class BoxieClient(Protocol):
-    async def upload(self, identifier: UUID, digest: str, archive: Path) -> None: ...
-    async def retire(self, identifier: UUID) -> None: ...
-    async def create(self, key: str, spec: SandboxRequest) -> SandboxView: ...
-    async def get(self, identifier: UUID, previous: SandboxView | None = None) -> SandboxView: ...
-    async def terminate(
-        self, identifier: UUID, previous: SandboxView | None = None
-    ) -> SandboxView: ...
-    def terminal(self, identifier: UUID) -> AbstractAsyncContextManager[TerminalPort]: ...
-    async def close(self) -> None: ...
 
 
 class NoRedirectConnect(connect):
@@ -231,25 +198,3 @@ def parse_sandbox(data: bytes) -> SandboxView:
         return view
     except ValidationError as error:
         raise BoxieUnavailable("invalid sandbox response") from error
-
-
-def validate_sandbox(
-    view: SandboxView,
-    previous: SandboxView | None = None,
-    *,
-    identifier: UUID | None = None,
-) -> None:
-    lifetime = (view.absolute_deadline - view.created_at).total_seconds()
-    if (
-        not 0 < lifetime <= 3600
-        or (identifier is not None and view.id != identifier)
-        or (
-            previous is not None
-            and (
-                view.id != previous.id
-                or view.created_at != previous.created_at
-                or view.absolute_deadline != previous.absolute_deadline
-            )
-        )
-    ):
-        raise BoxieUnavailable("invalid sandbox response")

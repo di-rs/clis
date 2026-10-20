@@ -17,6 +17,7 @@ class Settings(BaseSettings):
         env_prefix="CLI_PLAYGROUND_", frozen=True, populate_by_name=True, hide_input_in_errors=True
     )
 
+    postgres_dsn_file: Path
     data_dir: Path
     public_url: str
     deploy_token: str = Field(min_length=1, repr=False)

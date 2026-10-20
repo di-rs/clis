@@ -168,7 +168,14 @@ import asyncio, json, re
 from cli_playground.app import create_app, STATIC_DIR
 from cli_playground.config import Settings
 secret = pathlib.Path('consumer.secret'); secret.write_text('isolated-consumer-secret'); secret.chmod(0o600)
-app = create_app(Settings(data_dir=pathlib.Path.cwd()/'data', public_url='http://localhost', deploy_token='local-token', boxie_url='http://127.0.0.1:1', boxie_credential_file=secret.absolute()))
+dsn = pathlib.Path('postgres-dsn'); dsn.write_text('host=localhost dbname=cli_playground'); dsn.chmod(0o600)
+from cli_playground.migrate import migration_config
+from alembic import command
+from io import StringIO
+config = migration_config('postgresql://localhost/cli_playground'); config.output_buffer = StringIO()
+command.upgrade(config, 'head', sql=True)
+assert 'CREATE TABLE preview' in config.output_buffer.getvalue()
+app = create_app(Settings(postgres_dsn_file=dsn.absolute(), data_dir=pathlib.Path.cwd()/'data', public_url='http://localhost', deploy_token='local-token', boxie_url='http://127.0.0.1:1', boxie_credential_file=secret.absolute()))
 async def request(path):
     sent = []
     received = False
@@ -225,6 +232,8 @@ def test_resolved_compose_isolated_topology(
         "BOXIE_CONSUMER_NETWORK": "test-consumers",
         "BOXIE_CONTROL_NETWORK": "test-control",
         "CLI_PLAYGROUND_IMAGE": "cli-playground:test",
+        "CLI_PLAYGROUND_POSTGRES_DSN_FILE": str(tmp_path / "playground-dsn.secret"),
+        "CLI_PLAYGROUND_DATABASE_NETWORK": "test-control",
         "CLI_PLAYGROUND_BOXIE_URL": "http://independent-boxie:8090",
         "CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE": str(tmp_path / "consumer.secret"),
         "CLI_PLAYGROUND_CONSUMER_NETWORK": "test-consumers",

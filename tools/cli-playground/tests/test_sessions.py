@@ -1,6 +1,5 @@
 """Page capability ownership, terminal authentication, and pinned product revisions."""
 
-import asyncio
 from pathlib import Path
 from uuid import UUID
 
@@ -19,6 +18,7 @@ from .helpers import (
     attach_terminal,
     build_event,
     build_upload,
+    call,
     socket_url,
     upload,
 )
@@ -100,7 +100,7 @@ def test_copied_ids_cannot_attach_or_delete_and_no_raw_credential_is_persisted(
         headers={**ORIGIN, "Authorization": f"Bearer {binding['credential']}"},
     )
     assert response.status_code == 200
-    saved = service.sessions.get(UUID(binding["id"]))
+    saved = call(api_client, lambda: service.sessions.get(UUID(binding["id"])))
     assert saved is not None and saved.sandbox.state == "terminated"
 
 
@@ -118,8 +118,8 @@ def test_page_reload_gets_a_fresh_binding_and_backend_shutdown_keeps_claimed_san
         ws.send_json({"type": "auth", "credential": first["credential"]})
         assert ws.receive_json()["absolute_deadline"] == first["absolute_deadline"]
         attach_terminal(ws)
-    asyncio.run(service.boxie.close())
-    saved = service.sessions.get(UUID(first["id"]))
+    call(api_client, lambda: service.boxie.close())
+    saved = call(api_client, lambda: service.sessions.get(UUID(first["id"])))
     assert saved is not None and saved.sandbox.state == "ready"
 
 
@@ -135,7 +135,7 @@ def test_stop_failure_survives_preview_removal_and_restart_without_touching_othe
     first = admission(api_client, upload(api_client)["id"], "a" * 40)
     second = admission(api_client, upload(api_client, pr=456)["id"], "a" * 40)
     # Claim B so restart recovery can distinguish a delivered session from an abandoned create.
-    service.sessions.claimed(UUID(second["id"]))
+    call(api_client, lambda: service.sessions.claimed(UUID(second["id"])))
     original = client.terminate
 
     async def unavailable(identifier: UUID, previous: SandboxView | None = None) -> SandboxView:
@@ -143,11 +143,23 @@ def test_stop_failure_survives_preview_removal_and_restart_without_touching_othe
 
     monkeypatch.setattr(client, "terminate", unavailable)
     if expiry:
-        record = service.store.record(first["preview_id"])
+        record = call(api_client, lambda: service.store.record(first["preview_id"]))
         assert record is not None
         record.expires_at = 0
-        service.store._write_record(record)
-        asyncio.run(service.cleanup_inactive())
+
+        async def expire() -> None:
+            from cli_playground.database import database, read_dsn
+            from cli_playground.tables import Preview
+            from sqlmodel import col, update
+
+            async with database(read_dsn(service.settings.postgres_dsn_file)) as sessions:
+                async with sessions.begin() as session:
+                    await session.exec(
+                        update(Preview).where(col(Preview.pr) == 123).values(expires_at=0)
+                    )
+
+        call(api_client, expire)
+        call(api_client, lambda: service.cleanup_inactive())
     else:
         assert (
             api_client.delete(
@@ -156,12 +168,12 @@ def test_stop_failure_survives_preview_removal_and_restart_without_touching_othe
             == 200
         )
     assert not (service.settings.data_dir / first["preview_id"]).exists()
-    saved = service.sessions.get(UUID(first["id"]))
+    saved = call(api_client, lambda: service.sessions.get(UUID(first["id"])))
     assert saved is not None and saved.pending_stop
     monkeypatch.setattr(client, "terminate", original)
     with TestClient(create_app(service.settings, boxie=client), base_url="https://play.example"):
-        saved_first = service.sessions.get(UUID(first["id"]))
-        saved_second = service.sessions.get(UUID(second["id"]))
+        saved_first = call(api_client, lambda: service.sessions.get(UUID(first["id"])))
+        saved_second = call(api_client, lambda: service.sessions.get(UUID(second["id"])))
         assert saved_first is not None and saved_second is not None
         assert client.sandboxes[saved_first.sandbox.id].state == "terminated"
         assert client.sandboxes[saved_second.sandbox.id].state == "ready"
@@ -234,3 +246,25 @@ def test_missing_auth_frame_times_out_before_upstream_connection(
             ws.receive_json()
         assert error.value.code == 1008
     assert boxie.attachments == 0
+
+
+def test_database_failure_at_websocket_admission_returns_unavailable(
+    api_client: TestClient,
+    service: CliPlaygroundService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cli_playground.domain import SessionBinding
+    from cli_playground.ports import PersistenceUnavailable
+
+    binding = admission(api_client, upload(api_client)["id"], "a" * 40)
+
+    async def unavailable(identifier: UUID) -> SessionBinding | None:
+        raise PersistenceUnavailable("database unavailable")
+
+    monkeypatch.setattr(service.sessions, "get", unavailable)
+    from starlette.testclient import WebSocketDenialResponse
+
+    with pytest.raises(WebSocketDenialResponse) as disconnected:
+        with api_client.websocket_connect(socket_url(binding), headers=ORIGIN):
+            pass
+    assert disconnected.value.status_code == 503

@@ -26,7 +26,7 @@ def test_native_application_and_browser(tmp_path: Path) -> None:
     stack = LifecycleStack(
         tmp_path,
         runtime_overlay=ROOT / "tools/cli-playground/infra/compose.test.yml",
-        runtime_services=("faults", "supervisor", "api", "cli-playground"),
+        runtime_services=("faults", "supervisor", "api"),
     )
     stack.env.update(
         CLI_PLAYGROUND_IMAGE=os.environ.get("CLI_PLAYGROUND_IMAGE", "cli-playground:lifecycle"),
@@ -36,6 +36,33 @@ def test_native_application_and_browser(tmp_path: Path) -> None:
     )
     try:
         stack.start()
+        # Provision the application's database separately from Boxie's lifecycle schema.
+        import psycopg
+        from cli_playground.migrate import migrate
+
+        password = secrets.token_hex(32)
+        with psycopg.connect(
+            f"host=127.0.0.1 port={stack.pg_port} user=postgres dbname=postgres password={stack.env['POSTGRES_PASSWORD']}",
+            autocommit=True,
+        ) as connection:
+            from psycopg import sql
+
+            connection.execute(
+                sql.SQL("CREATE ROLE cli_playground LOGIN PASSWORD {}").format(
+                    sql.Literal(password)
+                )
+            )
+            connection.execute("CREATE DATABASE cli_playground OWNER cli_playground")
+            connection.execute("REVOKE CONNECT ON DATABASE cli_playground FROM PUBLIC")
+        migrate(
+            f"host=127.0.0.1 port={stack.pg_port} user=cli_playground dbname=cli_playground password={password}"
+        )
+        secret = stack.root / "playground-dsn"
+        secret.write_text(
+            f"host=postgres user=cli_playground dbname=cli_playground password={password}"
+        )
+        secret.chmod(0o600)
+        stack.runtime_command("up", "--detach", "cli-playground")
         subprocess.run(
             [
                 "uv",

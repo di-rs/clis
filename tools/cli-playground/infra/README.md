@@ -26,10 +26,14 @@ docker volume create cli-playground-data
 export CLI_PLAYGROUND_PROJECT_NAME=cli-playground
 export CLI_PLAYGROUND_DATA_VOLUME=cli-playground-data
 export CLI_PLAYGROUND_CONSUMER_NETWORK=boxie-consumers
+export CLI_PLAYGROUND_DATABASE_NETWORK=boxie-control
+export CLI_PLAYGROUND_POSTGRES_DSN_FILE=/private/path/playground-postgres.secret
 export CLI_PLAYGROUND_BOXIE_URL=http://boxie-api:8090
 export CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE=/private/path/consumer.secret
 export CLI_PLAYGROUND_DEPLOY_TOKEN=local-deploy-token
 export CLI_PLAYGROUND_PUBLIC_URL=http://localhost:8000
+docker compose -f tools/cli-playground/infra/compose.yml run --rm --no-deps backend \
+  python -m cli_playground.migrate --dsn-file /run/secrets/postgres-dsn
 docker compose -f tools/cli-playground/infra/compose.yml up --build -d
 ```
 
@@ -51,6 +55,47 @@ package/dependencies and, for cli-playground, its real built frontend assets.
 Operator modules are installed separately from runtime images. Run
 `uv sync --locked --all-packages` for local infrastructure checks. Application
 release jobs use native OpenSSH and do not read Pulumi state.
+
+## Database and cutover
+
+Provision a dedicated `cli_playground` database and login on the existing
+PostgreSQL service. For the independent local unit, have its operator create the
+database, grant ownership to that login, revoke public database access, and provide
+a mode-`0600` DSN file reachable through `CLI_PLAYGROUND_DATABASE_NETWORK`.
+Only the gateway joins that private network; the proxy does not.
+
+Shared-host setup generates a separate password and DSN under
+`/etc/sanctuary/cli-playground/`. Its `provision.sh` adds the database using the
+existing PostgreSQL administrator inside the database container. This works with
+already-initialized PostgreSQL volumes; it does not depend on first-boot scripts.
+The application receives only its own DSN, never the administrator password.
+
+`install.sh` provisions the database and runs Alembic before startup. `deploy.sh`
+runs the migration command from the new image before replacing the backend. A
+failed upgrade stops the deployment. Neither path enables multiple workers.
+For an existing host receiving this change, install the updated owner scripts and
+rendered settings before its first database-backed release.
+
+There is no importer for old metadata files. For the initial cutover:
+
+1. Pause preview publication and new browser sessions at the ingress.
+2. Let the old backend finish pending uploads and stops. Drain its sessions or
+   wait for their bounded sandbox lifetimes before stopping it.
+3. Keep the old data volume for rollback. Provision the new database, apply its
+   schema and select a fresh data volume for ZIP staging.
+4. Start the new backend, verify readiness, then re-enable traffic and rerun the
+   PR builds to republish previews. Old session bindings are not carried over.
+
+Back up the database and staging volume together while the gateway is stopped.
+Restore both from the same backup before starting recovery. Boxie's artifact
+storage and database retain their separate backup requirements. Database backups
+alone cannot recover bytes for an upload Boxie has not acknowledged.
+
+Rollback is a coordinated state restore, not an Alembic downgrade: drain any new
+sessions and pending operations, stop the new backend, then restore the prior
+application/configuration and its matching old data volume. Old metadata files
+cannot describe sessions or previews created after cutover. A schema downgrade
+on a disposable test database is only a migration check.
 
 ## Enable PR comments and live previews
 
