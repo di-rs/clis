@@ -48,6 +48,24 @@ class SessionStore:
                 for row in await session.exec(select(Binding))
             ]
 
+    async def pending_stops(self) -> list[SessionBinding]:
+        async with connection(self.sessions) as session:
+            return [
+                SessionBinding.model_validate(row.model_dump())
+                for row in await session.exec(
+                    select(Binding).where(col(Binding.pending_stop).is_(True))
+                )
+            ]
+
+    async def pending_attachments(self, *, before: float | None = None) -> list[SessionBinding]:
+        query = select(Binding).where(col(Binding.attachment_deadline).is_not(None))
+        if before is not None:
+            query = query.where(col(Binding.attachment_deadline) <= before)
+        async with connection(self.sessions) as session:
+            return [
+                SessionBinding.model_validate(row.model_dump()) for row in await session.exec(query)
+            ]
+
     async def get(self, identifier: UUID) -> SessionBinding | None:
         async with connection(self.sessions) as session:
             row = await session.get(Binding, identifier)

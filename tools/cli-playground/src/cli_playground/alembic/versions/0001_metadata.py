@@ -60,6 +60,12 @@ def upgrade() -> None:
     )
     op.create_index("ix_session_binding_preview_id", "session_binding", ["preview_id"])
     op.create_index("ix_session_binding_pending_stop", "session_binding", ["pending_stop"])
+    op.create_index(
+        "ix_session_binding_attachment_deadline",
+        "session_binding",
+        ["attachment_deadline"],
+        postgresql_where=sa.text("attachment_deadline IS NOT NULL"),
+    )
     op.create_table(
         "create_intent",
         sa.Column("id", sa.Uuid(), primary_key=True),
@@ -87,7 +93,6 @@ def upgrade() -> None:
         sa.Column("cancelled", sa.Boolean(), nullable=False),
         sa.UniqueConstraint("pr", "revision"),
     )
-    op.create_index("ix_upload_intent_pr", "upload_intent", ["pr"])
     op.create_table(
         "artifact_retirement",
         sa.Column("artifact_id", sa.Uuid(), primary_key=True),

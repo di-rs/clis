@@ -10,12 +10,14 @@ import pytest
 from cli_playground import service as service_module
 from cli_playground.artifacts import stage_archive
 from cli_playground.config import Settings
-from cli_playground.domain import ArtifactConflictError, SessionBinding
+from cli_playground.domain import ArtifactConflictError, SessionBinding, request_stop
 from cli_playground.models import BuildIdentity, BuildUpdate
 from cli_playground.sandbox import SandboxRequest, SandboxView
 from cli_playground.service import CliPlaygroundService
 from cli_playground.session_store import SessionStore
 from cli_playground.storage import EnvironmentStore
+from cli_playground.tables import Binding
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -451,6 +453,55 @@ def test_close_reopen_never_recovers_a_previous_generation_upload(
     asyncio.run(exercise())
 
 
+@pytest.mark.parametrize("startup", [False, True])
+def test_recovery_only_loads_sessions_needing_work(
+    docker_settings: Settings, startup: bool
+) -> None:
+    async def body() -> AsyncIterator[bytes]:
+        yield binary_bundle({"echor": elf_binary()})
+
+    async def exercise() -> None:
+        clock = MutableClock()
+        service = make_service(docker_settings, clock=clock)
+        environment = await service.deploy(body(), "a" * 40, 123)
+        bindings = {}
+        for state in ("stopped", "attached", "pending_stop", "expired", "future"):
+            binding, credential = await service.create_session(environment.id, environment.revision)
+            await service.claim_attachment(
+                environment.id, binding.id, environment.revision, credential
+            )
+            if state in {"stopped", "attached", "pending_stop"}:
+                await service.complete_attachment(
+                    environment.id, binding.id, environment.revision, credential, binding.sandbox
+                )
+            bindings[state] = binding
+            if state == "expired":
+                clock.now += 40
+        await service.stop_session(bindings["stopped"])
+        await service.sessions.change(bindings["pending_stop"].id, request_stop)
+        loaded: set[UUID] = set()
+
+        def record_load(binding: Binding, _context: object) -> None:
+            loaded.add(binding.id)
+
+        event.listen(Binding, "load", record_load)
+        try:
+            await service.recover(startup=startup)
+        finally:
+            event.remove(Binding, "load", record_load)
+        expected = {bindings["pending_stop"].id, bindings["expired"].id}
+        if startup:
+            expected.add(bindings["future"].id)
+        assert loaded == expected
+        assert set(boxie(service).stops) == {
+            binding.sandbox.id
+            for binding in bindings.values()
+            if binding.id in expected or binding == bindings["stopped"]
+        }
+
+    asyncio.run(exercise())
+
+
 def test_recovery_cannot_cancel_an_attachment_claimed_after_its_snapshot(
     docker_settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
@@ -467,12 +518,12 @@ def test_recovery_cannot_cancel_an_attachment_claimed_after_its_snapshot(
             environment.id, binding.id, environment.revision, credential
         )
         clock.now += 41
-        original = service.sessions.bindings
+        original = service.sessions.pending_attachments
         replaced = False
 
-        async def snapshot() -> list[SessionBinding]:
+        async def snapshot(*, before: float | None = None) -> list[SessionBinding]:
             nonlocal replaced
-            values = await original()
+            values = await original(before=before)
             if not replaced and values:
                 replaced = True
                 await service.claim_attachment(
@@ -480,7 +531,7 @@ def test_recovery_cannot_cancel_an_attachment_claimed_after_its_snapshot(
                 )
             return values
 
-        monkeypatch.setattr(service.sessions, "bindings", snapshot)
+        monkeypatch.setattr(service.sessions, "pending_attachments", snapshot)
         await service.recover(startup=False)
         current = await service.sessions.get(binding.id)
         assert current is not None

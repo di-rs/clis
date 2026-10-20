@@ -65,17 +65,16 @@ class CliPlaygroundService:
         self.active_creates: set[UUID] = set()
 
     async def retry_stops(self) -> None:
-        for binding in await self.sessions.bindings():
-            if binding.pending_stop:
-                try:
-                    view = await self.boxie.terminate(binding.sandbox.id, binding.sandbox)
-                    await self.sessions.change(
-                        binding.id,
-                        partial(domain.confirm_stop, view=view),
-                        claimed=True,
-                    )
-                except BoxieUnavailable:
-                    logger.warning("Sandbox stop remains pending")
+        for binding in await self.sessions.pending_stops():
+            try:
+                view = await self.boxie.terminate(binding.sandbox.id, binding.sandbox)
+                await self.sessions.change(
+                    binding.id,
+                    partial(domain.confirm_stop, view=view),
+                    claimed=True,
+                )
+            except BoxieUnavailable:
+                logger.warning("Sandbox stop remains pending")
 
     async def collect_artifacts(self) -> None:
         await self.store.collect_artifacts()
@@ -117,11 +116,10 @@ class CliPlaygroundService:
 
     async def recover(self, *, startup: bool = True) -> None:
         # A restarted process cannot finish an in-flight terminal attachment.
-        for binding in await self.sessions.bindings():
-            if binding.attachment_deadline is not None and (
-                startup or binding.attachment_deadline <= self.clock()
-            ):
-                await self.cancel_attachment(binding.id, claim=binding.attachment_claim)
+        for binding in await self.sessions.pending_attachments(
+            before=None if startup else self.clock()
+        ):
+            await self.cancel_attachment(binding.id, claim=binding.attachment_claim)
         # A restarted process cannot return an old page's one-time credential.
         for intent in await self.sessions.creates():
             saved = await self.sessions.get(intent.id)

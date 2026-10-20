@@ -8,8 +8,10 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     ForeignKeyConstraint,
+    Index,
     MetaData,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
@@ -60,6 +62,13 @@ class Revision(Table, table=True):
 
 class Binding(Table, table=True):
     __tablename__ = "session_binding"
+    __table_args__ = (
+        Index(
+            "ix_session_binding_attachment_deadline",
+            "attachment_deadline",
+            postgresql_where=text("attachment_deadline IS NOT NULL"),
+        ),
+    )
     id: UUID = Field(primary_key=True)
     preview_id: str = Field(index=True, foreign_key="preview.id")
     revision: str
@@ -86,7 +95,7 @@ class Upload(Table, table=True):
     __tablename__ = "upload_intent"
     __table_args__ = (UniqueConstraint("pr", "revision"),)
     artifact_id: UUID = Field(primary_key=True)
-    pr: int = Field(index=True, foreign_key="preview.pr", sa_type=BigInteger)
+    pr: int = Field(foreign_key="preview.pr", sa_type=BigInteger)
     revision: str
     sha: str
     sha256: str
