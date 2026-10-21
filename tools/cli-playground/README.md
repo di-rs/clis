@@ -16,6 +16,8 @@ changed shared library in their dependency graph. Lockfile edits for another CLI
 do not select unrelated binaries. Global build settings, including the root
 Cargo manifest and Rust toolchain, still select all CLIs. Dependency analysis uses
 the same [lockfile rules as benchmarks](../../docs/benchmarking.md#verification-and-scope).
+Documentation, tests, workflows, and Python tooling edits do not add CLIs to the
+build selection.
 
 Architecture: Svelte + strict TypeScript + Vite+ static SPA, plain CSS, Python/FastAPI;
 no SSR, production Node server or Tailwind.

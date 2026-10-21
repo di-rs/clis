@@ -2,7 +2,7 @@ use crate::{
     combinators::{either, left, one_or_more, pair, pred, right, zero_or_more},
     parser::{ParseResult, Parser},
 };
-use color_eyre::Result;
+use anyhow::Result;
 
 mod combinators;
 mod parser;

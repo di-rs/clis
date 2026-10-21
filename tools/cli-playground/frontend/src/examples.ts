@@ -56,7 +56,7 @@ const cliArguments: Record<string, readonly (readonly [string, string])[]> = {
   ],
   pwdr: [["Where am I?", ""]],
   mkdirr: [["Create a directory", "my-directory"]],
-  touchr: [["Create a file", "my-file.txt"]],
+  touch: [["Create a file", "my-file.txt"]],
   commr: [["Compare sorted files", "<(sort welcome.txt) <(sort duplicates.txt)"]],
   calr: [
     ["This month", ""],

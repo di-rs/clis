@@ -51,7 +51,7 @@ directories, and calendars. Each command has its own Cargo package and README.
 | [mkdirr](buildins/mkdirr/README.md) | Create directories |
 | [pwdr](buildins/pwdr/README.md) | Print the working directory |
 | [tailr](buildins/tailr/README.md) | Print the end of files |
-| [touchr](buildins/touchr/README.md) | Create files or update timestamps |
+| [touch](buildins/touch/README.md) | Create files or update timestamps |
 | [true](buildins/true/README.md) | Return success without output |
 | [uniqr](buildins/uniqr/README.md) | Filter or count adjacent repeated lines |
 | [wcr](buildins/wcr/README.md) | Count lines, words, bytes, and characters |

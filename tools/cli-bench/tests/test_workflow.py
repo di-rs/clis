@@ -73,6 +73,7 @@ def test_runs_every_suite_before_reporting_failures(
             "RUNS": "20",
             "WARMUP": "3",
             "FAILED_SUITES": json.dumps(failed),
+            "RUNNER_TEMP": str(suite_workflow.parent / "runner temp"),
         },
         capture_output=True,
         text=True,
@@ -90,7 +91,7 @@ def test_runs_every_suite_before_reporting_failures(
         "--runs",
         "20",
         "--output",
-        "target/benchmarks/one-suite.toml",
+        str(suite_workflow.parent / "runner temp/benchmarks/one-suite.toml"),
     ]
     assert result.returncode == (1 if failed else 0), result.stderr
     if failed:

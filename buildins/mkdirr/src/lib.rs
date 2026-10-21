@@ -1,4 +1,4 @@
-use color_eyre::{Result, eyre::Context};
+use anyhow::{Context, Result};
 use std::{fs, path::Path};
 
 /// # Errors
@@ -10,5 +10,5 @@ pub fn create_directory(path: &Path, with_parent: bool) -> Result<()> {
         fs::create_dir(path)
     };
 
-    res.wrap_err_with(|| format!("{}: failed to create directory", path.display()))
+    res.with_context(|| format!("{}: failed to create directory", path.display()))
 }

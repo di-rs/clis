@@ -44,10 +44,6 @@ instead of an action reference and commit hash.
 
 When renaming a workflow or job, update dependent workflow triggers, publisher
 identity checks, benchmark timing lookups and required status checks together.
-The Gitmoji job validates the PR title used for the squash commit. It does not
-inspect individual commit messages, including merge commits. It keeps the
-required `git-policy` check name so existing branch protection and other open PRs
-continue to work. Local commit-msg hooks remain enabled.
 
 ## Local hooks and full CI checks
 

@@ -10,12 +10,12 @@ categories = ["pratice", "pet"]
 
 [dependencies]
 crossterm = "0.29.0"
-color-eyre = "0.6"
 unicode-segmentation = "1.13.3"
 unicode-width = "0.2.2"
 
 log.workspace = true
 cli-log.workspace = true
+anyhow.workspace = true
 
 [dev-dependencies]
 cli-testing.workspace = true

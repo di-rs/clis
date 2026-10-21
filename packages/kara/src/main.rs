@@ -4,9 +4,7 @@ use crate::editor::Editor;
 
 mod editor;
 
-fn main() -> color_eyre::Result<()> {
-    color_eyre::install()?;
-
+fn main() -> anyhow::Result<()> {
     let session = cli_log::init("kara");
     // Console logging would overwrite the editor's terminal display.
     session.set_stderr_level(log::LevelFilter::Off);
@@ -18,7 +16,7 @@ fn main() -> color_eyre::Result<()> {
     result
 }
 
-fn run() -> color_eyre::Result<()> {
+fn run() -> anyhow::Result<()> {
     let args: Vec<String> = env::args().collect();
     let file_name = args.get(1);
 
