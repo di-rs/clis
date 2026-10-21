@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import TypedDict
 
 from cli_check.affected import changed_paths
-from cli_check.workspace import discover, load_toml
+from cli_check.benchmark import load_suite
+from cli_check.workspace import discover
 from pydantic import BaseModel, ConfigDict, Field
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -41,7 +42,7 @@ def discover_suites() -> list[Suite]:
             continue
         directory, package = member.directory, member.name
         for path in sorted(directory.glob("benches/*.toml")):
-            suite = load_toml(path)
+            suite = load_suite(path)
             relative = path.relative_to(ROOT).as_posix()
             if suite.get("binary") != package:
                 raise ValueError(

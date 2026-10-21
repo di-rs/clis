@@ -11,6 +11,7 @@ from cli_check.workspace import discover, find_root, load_toml, strings, table, 
 
 RUST_CONFIG = {
     "Cargo.toml",
+    "prek.toml",
     "Cargo.lock",
     "rust-toolchain.toml",
     "rustfmt.toml",
@@ -116,9 +117,29 @@ def python_packages(root: Path, paths: list[str], *, dependents: bool) -> list[s
 
 
 def commands(root: Path, hook: str, paths: list[str]) -> list[list[str]]:
+    if hook in {"ruff", "ruff-format"}:
+        scopes = {
+            Path(path).parent.as_posix()
+            for path in paths
+            if Path(path).name in {"pyproject.toml", "ruff.toml", ".ruff.toml"}
+        }
+        if (PYTHON_CONFIG | {"prek.toml"}).intersection(paths):
+            scopes = {"."}
+        targets = scopes | {
+            path
+            for path in paths
+            if Path(path).suffix in {".py", ".pyi"} and (root / path).is_file()
+        }
+        targets = {
+            path
+            for path in targets
+            if not any(path != scope and Path(path).is_relative_to(scope) for scope in scopes)
+        }
+        args = ["check"] if hook == "ruff" else ["format", "--check"]
+        return [[*UV, "ruff", *args, "--force-exclude", "--", *sorted(targets)]] if targets else []
     if hook.startswith("cargo-") or hook == "cli-check":
         if hook == "cli-check" and any(
-            path in {"README.md", "pyproject.toml", "uv.lock"}
+            path in {"README.md", "pyproject.toml", "uv.lock", "prek.toml"}
             or path.startswith("tools/cli-check/")
             for path in paths
         ):
@@ -171,10 +192,6 @@ def commands(root: Path, hook: str, paths: list[str]) -> list[list[str]]:
         return [[*UV, "pytest", *tests]] if tests else []
     if hook == "mypy":
         return [[*UV, "mypy", *directories]]
-    if hook == "ruff-config":
-        return [[*UV, "ruff", "check", *directories]]
-    if hook == "ruff-format-config":
-        return [[*UV, "ruff", "format", "--check", *directories]]
     raise ValueError(f"Unknown package hook: {hook}")
 
 
@@ -201,10 +218,10 @@ def main() -> int:
             "cargo-clippy",
             "cargo-nexttest",
             "cli-check",
+            "ruff",
+            "ruff-format",
             "mypy",
             "python-tests",
-            "ruff-config",
-            "ruff-format-config",
         ),
     )
     parser.add_argument("paths", nargs="+")
