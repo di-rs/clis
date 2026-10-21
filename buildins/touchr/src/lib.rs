@@ -16,7 +16,7 @@ pub fn file_proceed(
             if skip_create {
                 return Ok(());
             }
-            File::create(file)
+            create_missing(file)
                 .wrap_err_with(|| format!("failed to create file {}", file.display()))?
         }
         Ok(_) => {
@@ -34,4 +34,27 @@ fn set_modified(file: &File, timestamp: Option<NaiveDateTime>) -> Result<()> {
 
     file.set_modified(time)
         .wrap_err("Failed to update file time")
+}
+
+fn create_missing(path: &Path) -> std::io::Result<File> {
+    File::options()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::create_missing;
+
+    #[test]
+    fn creation_preserves_a_target_that_appeared_after_metadata() {
+        let directory = assert_fs::TempDir::new().expect("temporary directory");
+        let path = directory.path().join("raced");
+        assert!(std::fs::metadata(&path).is_err());
+        std::fs::write(&path, b"keep contents").expect("competing creator");
+        let _file = create_missing(&path).expect("open racing target");
+        assert_eq!(std::fs::read(&path).expect("read target"), b"keep contents");
+    }
 }

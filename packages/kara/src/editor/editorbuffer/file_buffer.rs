@@ -38,7 +38,12 @@ impl FileBuffer {
             .unwrap_or_else(|| std::path::Path::new("."));
         let mut file = tempfile::NamedTempFile::new_in(parent)?;
         match std::fs::metadata(&destination) {
-            Ok(metadata) => file.as_file().set_permissions(metadata.permissions())?,
+            Ok(metadata) => {
+                if metadata.permissions().readonly() {
+                    return Err(std::io::ErrorKind::PermissionDenied.into());
+                }
+                file.as_file().set_permissions(metadata.permissions())?;
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
         }
@@ -46,7 +51,9 @@ impl FileBuffer {
             writeln!(file, "{line}")?;
         }
         file.as_file().sync_all()?;
-        file.persist(destination).map_err(|error| error.error)?;
+        file.persist(&destination).map_err(|error| error.error)?;
+        #[cfg(unix)]
+        std::fs::File::open(parent)?.sync_all()?;
         Ok(())
     }
 }

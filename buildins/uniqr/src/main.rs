@@ -75,7 +75,9 @@ fn get_writer(path: Option<String>, input: &str) -> Result<Box<dyn Write>, CliEr
                 );
             }
         }
-        file.set_len(0)?;
+        if file.metadata()?.is_file() {
+            file.set_len(0)?;
+        }
         Ok(Box::new(BufWriter::new(file)))
     } else {
         let stdout = std::io::stdout();

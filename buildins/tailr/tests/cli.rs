@@ -942,3 +942,19 @@ fn missing_operand_returns_failure() {
         .stdout("")
         .stderr(predicates::str::contains("/sanctuary-audit-missing/path"));
 }
+
+#[test]
+fn unreadable_operand_continues_to_later_files() -> Result<()> {
+    let dir = assert_fs::TempDir::new()?;
+    let valid = dir.path().join("valid");
+    std::fs::write(&valid, "later\n")?;
+    cli_testing::cargo_bin_cmd!()
+        .arg("-q")
+        .arg(dir.path())
+        .arg(&valid)
+        .assert()
+        .code(1)
+        .stdout("later\n")
+        .stderr(predicates::str::contains("directory"));
+    Ok(())
+}

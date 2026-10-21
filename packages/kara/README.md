@@ -43,12 +43,14 @@ request quit, and `q!` to discard changes and quit.
 ## Known limitations
 
 `w other-file` saves to that destination and makes it the active file only after
-success. Command-bar filenames may contain spaces; everything after `w ` is the
-literal filename, without shell quoting or expansion. Failed saves leave the
+success. Command-bar filenames may contain spaces; everything after the first
+space following `w` is the literal filename, without shell quoting or expansion. Failed saves leave the
 buffer identity and modified state intact and display an error.
 
 Saving uses a temporary file in the destination directory and an atomic rename.
 Existing symlinks with valid targets are resolved; permissions are preserved.
+Read-only destinations are rejected. On Unix, the parent directory is synced
+after replacement.
 Replacement breaks hard-link identity and does not preserve all extended metadata.
 New files are private to their owner. Saving adds line terminators rather than
 preserving the original line endings.

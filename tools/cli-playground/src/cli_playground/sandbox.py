@@ -14,6 +14,10 @@ class BoxieUnavailable(RuntimeError):
     """A bounded private service call failed; credentials never enter public errors."""
 
 
+class AdmissionRejected(BoxieUnavailable):
+    """Boxie confirmed that this creation request did not admit a sandbox."""
+
+
 class TerminalWriteClosed(BoxieUnavailable):
     """Boxie closed normally while its final response may still be buffered."""
 

@@ -27,7 +27,7 @@ from cli_playground.sandbox import BoxieClient
 from cli_playground.service import CliPlaygroundService
 from cli_playground.session_store import SessionStore
 from cli_playground.storage import EnvironmentStore
-from cli_playground.transport import RequestHostBoundary
+from cli_playground.transport import RequestBodyBoundary, RequestHostBoundary
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -86,6 +86,7 @@ def create_app(
     ) -> JSONResponse:
         return JSONResponse({"detail": "playground database unavailable"}, status_code=503)
 
+    app.add_middleware(RequestBodyBoundary)
     app.add_middleware(RequestHostBoundary, settings=service.settings)
     app.add_middleware(RequestContext)
     app.add_exception_handler(Exception, unhandled_error)

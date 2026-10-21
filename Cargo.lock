@@ -1530,6 +1530,7 @@ dependencies = [
 name = "tailr"
 version = "0.1.0"
 dependencies = [
+ "assert_fs",
  "clap",
  "cli-log",
  "cli-testing",

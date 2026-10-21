@@ -31,6 +31,7 @@ from cli_playground.models import (
 from cli_playground.observability import current_request_id, request_context, sandbox_context
 from cli_playground.ports import EnvironmentStore, SessionStore
 from cli_playground.sandbox import (
+    AdmissionRejected,
     BoxieClient,
     BoxieUnavailable,
     SandboxRequest,
@@ -143,6 +144,8 @@ class CliPlaygroundService:
                 try:
                     sandbox = await self.boxie.create(str(intent.id), intent.spec)
                     await self.sessions.recover_creation(intent, sandbox)
+                except AdmissionRejected:
+                    await self.sessions.claimed(intent.id)
                 except BoxieUnavailable:
                     logger.warning("Sandbox admission recovery remains pending")
         for upload_intent in await self.sessions.uploads():
@@ -255,6 +258,10 @@ class CliPlaygroundService:
             intent.claim_until = self.clock() + 30
             await self.sessions.create_intent(intent)
             return binding, credential
+        except AdmissionRejected:
+            with CancelScope(shield=True):
+                await self.sessions.claimed(intent.id)
+            raise
         except BaseException:
             # The persisted idempotency key resolves ambiguous/cancelled admissions on recovery.
             with CancelScope(shield=True):

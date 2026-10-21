@@ -38,3 +38,19 @@ fn discovery_does_not_need_a_terminal() {
         .stdout("")
         .stderr(predicates::str::contains("unexpected argument"));
 }
+
+#[cfg(unix)]
+#[test]
+fn filenames_cannot_inject_terminal_commands() {
+    let result = std::process::Command::new("python3")
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/terminal.py"))
+        .arg(env!("CARGO_BIN_EXE_kara"))
+        .env("CLI_LOG", "off")
+        .output()
+        .expect("run PTY regression driver");
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}

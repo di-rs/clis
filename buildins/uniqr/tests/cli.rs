@@ -673,3 +673,44 @@ fn rejects_output_aliases_without_truncating() -> Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn writes_to_non_regular_outputs() {
+    cli_testing::cargo_bin_cmd!()
+        .args(["-", "/dev/null"])
+        .write_stdin("a\na\nb\n")
+        .assert()
+        .code(0)
+        .stdout("")
+        .stderr("");
+}
+
+#[test]
+#[allow(
+    clippy::panic_in_result_fn,
+    reason = "Assertions verify observable CLI behavior."
+)]
+fn writes_to_fifo() -> Result<()> {
+    use std::io::Read;
+    let dir = assert_fs::TempDir::new()?;
+    let path = dir.path().join("output.fifo");
+    let status = std::process::Command::new("mkfifo").arg(&path).status()?;
+    assert!(status.success());
+    // Hold both ends open so the small write never waits for a separate reader.
+    let mut fifo = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&path)?;
+    cli_testing::cargo_bin_cmd!()
+        .arg("-")
+        .arg(&path)
+        .write_stdin("a\na\nb\n")
+        .assert()
+        .code(0)
+        .stdout("")
+        .stderr("");
+    let mut output = [0; 4];
+    fifo.read_exact(&mut output)?;
+    assert_eq!(&output, b"a\nb\n");
+    Ok(())
+}

@@ -1,11 +1,14 @@
 """Run with python tests/pty_smoke.py /absolute/path/to/kara on Unix."""
 
+import fcntl
 import os
 import pty
 import select
 import signal
+import struct
 import sys
 import tempfile
+import termios
 import time
 from pathlib import Path
 
@@ -18,6 +21,7 @@ def session(binary: str, directory: Path, keys: list[bytes]) -> bytes:
             TERM="xterm-256color", SANCTUARY_LOG_LEVEL="off", SANCTUARY_LOG_STDERR="off"
         )
         os.execv(binary, [binary, "original"])
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 120, 0, 0))
     captured = bytearray()
 
     def drain() -> None:
@@ -70,6 +74,13 @@ def main() -> None:
         session(binary, directory, [b"iY\x1b", b":w missing/target\r", b"\x13", b"\x11"])
         assert original.read_bytes() == b"Yoriginal\n", "failed save changed buffer identity"
         assert not (directory / "missing").exists()
+        target.chmod(0o444)
+        try:
+            captured = session(binary, directory, [b":w other file\r", b"\x11"])
+            assert target.read_bytes() == b"Xoriginal\n", "overwrote read-only file"
+            assert b"denied" in captured.lower(), "save error was not displayed"
+        finally:
+            target.chmod(0o644)
     print("Kara PTY save, failed-save recovery, and terminal cleanup checks passed")
 
 

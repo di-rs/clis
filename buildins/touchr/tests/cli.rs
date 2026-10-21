@@ -173,3 +173,19 @@ fn requires_file_operand() -> Result<()> {
         .stderr(predicate::str::is_empty().not());
     Ok(())
 }
+
+#[cfg(unix)]
+#[test]
+fn follows_symlinks_without_erasing_contents() -> Result<()> {
+    let dir = TempDir::new()?;
+    dir.child("target").write_str("preserve target")?;
+    std::os::unix::fs::symlink("target", dir.child("link").path())?;
+    command(&dir)
+        .args(["-t", "20000101000007", "link"])
+        .assert()
+        .code(0)
+        .stdout("")
+        .stderr("");
+    dir.child("target").assert("preserve target");
+    assert_modified(dir.child("target").path(), 946_684_807)
+}
