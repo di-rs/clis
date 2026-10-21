@@ -18,16 +18,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  select:
+    uses: ./.github/workflows/ci-selection.yml # zizmor: ignore[self-repository]
+
   analyze:
-    if: >-
-      ${{
-        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
-      }}
+    needs: select
+    if: needs.select.outputs.languages != '[]' && needs.select.outputs.languages != ''
     name: 🛡️ Analyze ${{ matrix.language }} security
     strategy:
       fail-fast: false
       matrix:
-        language: [rust, actions]
+        language: ${{ fromJSON(needs.select.outputs.languages) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:

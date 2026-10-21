@@ -1,0 +1,51 @@
+name: 🔎 Select affected CI jobs
+
+on:
+  workflow_call:
+    inputs:
+      push-smoke:
+        type: boolean
+        default: false
+    outputs:
+      rust:
+        value: ${{ jobs.select.outputs.rust }}
+      python:
+        value: ${{ jobs.select.outputs.python }}
+      frontend:
+        value: ${{ jobs.select.outputs.frontend }}
+      dependencies:
+        value: ${{ jobs.select.outputs.dependencies }}
+      languages:
+        value: ${{ jobs.select.outputs.languages }}
+      smoke:
+        value: ${{ jobs.select.outputs.smoke }}
+
+permissions:
+  contents: read
+
+jobs:
+  select:
+    if: ${{ !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.selection.outputs.rust }}
+      python: ${{ steps.selection.outputs.python }}
+      frontend: ${{ steps.selection.outputs.frontend }}
+      dependencies: ${{ steps.selection.outputs.dependencies }}
+      languages: ${{ steps.selection.outputs.languages }}
+      smoke: ${{ steps.selection.outputs.smoke }}
+    steps:
+      - name: 📥 Check out source and merge-base history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 🔎 Select jobs from changed inputs
+        id: selection
+        env:
+          PUSH_SMOKE: ${{ inputs.push-smoke }}
+        run: |
+          args=()
+          if [[ "$PUSH_SMOKE" == 'true' ]]; then args+=(--push-smoke); fi
+          python3 tools/ci/select_jobs.py "${args[@]}"

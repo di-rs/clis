@@ -10,13 +10,16 @@ on:
       - 'pyproject.toml'
       - 'uv.lock'
       - '.python-version'
+      - 'tools/ci/**'
+  schedule:
+    - cron: '17 3 * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: boxie-lifecycle-${{ github.event.pull_request.number || github.ref }}
+  group: boxie-lifecycle-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -92,10 +95,23 @@ jobs:
           sudo mkdir -p /var/log/journal
           sudo systemd-tmpfiles --create --prefix /var/log/journal
           sudo journalctl --flush
-      - name: 🧪 Test PostgreSQL and Temporal cancellation, replay and diagnostics
+      - name: 🧪 Test deployment, durable commands, artifact safety and log privacy
         timeout-minutes: 9
         run: |
-          uv run pytest -m integration packages/boxie/tests/test_temporal_deployment.py packages/boxie/tests/test_outbox.py packages/boxie/tests/integration/test_artifact_commit.py packages/boxie/tests/test_migrations.py packages/boxie/tests/test_observability_lifecycle.py packages/boxie/tests/test_observability_logging.py packages/boxie/tests/test_observability_native.py -vv --durations=10
+          uv run pytest -m integration \
+            packages/boxie/tests/test_temporal_deployment.py \
+            packages/boxie/tests/test_outbox.py::test_committed_command_recovers_without_api_delivery \
+            packages/boxie/tests/integration/test_artifact_commit.py \
+            packages/boxie/tests/test_migrations.py \
+            packages/boxie/tests/test_observability_logging.py -vv --durations=10
+      - name: 🧪 Test exhaustive recovery and observability scenarios
+        if: github.event_name != 'pull_request'
+        timeout-minutes: 9
+        run: |
+          uv run pytest -m integration \
+            packages/boxie/tests/test_outbox.py \
+            packages/boxie/tests/test_observability_lifecycle.py \
+            packages/boxie/tests/test_observability_native.py -vv --durations=10
       - name: 🔐 Test native credential permissions and endpoint restarts
         timeout-minutes: 3
         run: |

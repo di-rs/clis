@@ -6,13 +6,15 @@ on:
     types: [opened, synchronize, reopened, ready_for_review, labeled]
   push:
     branches: [master]
+  schedule:
+    - cron: '47 3 * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 defaults:
@@ -25,11 +27,14 @@ env:
   RUSTDOCFLAGS: -D warnings
 
 jobs:
+  select:
+    uses: ./.github/workflows/ci-selection.yml # zizmor: ignore[self-repository]
+    with:
+      push-smoke: true
+
   quality:
-    if: >-
-      ${{
-        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
-      }}
+    needs: select
+    if: needs.select.outputs.rust == 'true'
     name: 🦀 Rust formatting, linting and documentation
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -53,8 +58,6 @@ jobs:
         run: cargo fetch
       - name: 🎨 Check Rust formatting
         run: cargo fmt --all -- --check
-      - name: 📏 Check committed file sizes
-        run: prek run check-added-large-files --all-files --show-diff-on-failure
       - name: 🔍 Lint Rust code with Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings -F unsafe_code
       - name: 📚 Build Rust API documentation
@@ -63,10 +66,8 @@ jobs:
         run: git diff --exit-code
 
   python:
-    if: >-
-      ${{
-        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
-      }}
+    needs: select
+    if: needs.select.outputs.python == 'true'
     name: 🐍 Python lint, types and tests (3.15)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -104,16 +105,12 @@ jobs:
         run: prek run mypy --all-files --show-diff-on-failure
       - name: 🧪 Run Python regression tests
         run: uv run pytest
-      - name: 📜 Verify CLI repository standards
-        run: prek run cli-check --all-files --show-diff-on-failure
       - name: 🧹 Verify checks leave the checkout unchanged
         run: git diff --exit-code
 
   frontend:
-    if: >-
-      ${{
-        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
-      }}
+    needs: select
+    if: needs.select.outputs.frontend == 'true'
     name: 🎨 Frontend checks, builds and browser tests
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -153,8 +150,17 @@ jobs:
         run: |
           uv sync --all-packages
           uv run pytest packages/boxie/tests/test_packaging.py -m integration
-      - name: 🌐 Install Chromium and browser dependencies
-        run: pnpm exec playwright install --with-deps chromium
+      - name: ♻️ Cache pinned Playwright browsers
+        id: browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/cli-playground/frontend/pnpm-lock.yaml') }}
+      - name: 🌐 Install Chromium system dependencies
+        run: pnpm exec playwright install-deps chromium
+      - name: 🌐 Install pinned Chromium
+        if: steps.browsers.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install chromium
       - name: 🐘 Verify Playground PostgreSQL lifecycle
         working-directory: .
         run: uv run python tools/cli-playground/tests/run_integration.py
@@ -165,10 +171,8 @@ jobs:
         run: git diff --exit-code
 
   tests:
-    if: >-
-      ${{
-        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
-      }}
+    needs: select
+    if: needs.select.outputs.rust == 'true'
     name: 🧪 Rust tests and doctests (${{ matrix.platform }})
     strategy:
       fail-fast: false
@@ -222,10 +226,8 @@ jobs:
           if-no-files-found: error
 
   packages:
-    if: >-
-      ${{
-        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
-      }}
+    needs: select
+    if: needs.select.outputs.rust == 'true'
     name: 📦 Rust package and feature compatibility
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -247,12 +249,8 @@ jobs:
           cache-bin: false
       - name: 📦 Check every Rust package and target
         run: cargo hack check --workspace --all-targets
-      - name: 🧩 Check Rust feature combinations
-        run: cargo hack check --workspace --feature-powerset
-      - name: 🧪 Test all Rust features
-        run: cargo nextest run --workspace --all-features --profile ci
-      - name: 📚 Test documentation with all features
-        run: cargo test --workspace --all-features --doc
+      - name: 🧩 Check and test feature-bearing packages
+        run: python3 tools/ci/test_features.py
       - name: 🧹 Verify checks leave the checkout unchanged
         run: git diff --exit-code
 
@@ -274,6 +272,8 @@ jobs:
         with:
           tool: prek@0.5.5,typos@1.50.3
           fallback: none
+      - name: 📏 Check committed file sizes
+        run: prek run check-added-large-files --all-files --show-diff-on-failure
       - name: 🔗 Install checksum-verified link checker
         run: |
           curl --fail --silent --show-error --location --max-time 120 \
@@ -293,16 +293,16 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
           cache-suffix: ${{ github.job }}
-      - name: 🧪 Verify hook selection and deleted links
-        run: uv run pytest tools/cli-check/tests/test_prek.py -m integration
+      - name: 📜 Verify CLI repository standards
+        run: uv run cli-check
+      - name: 🧪 Verify hook and CI selection, including deleted paths
+        run: uv run pytest tools/cli-check/tests/test_prek.py tools/cli-check/tests/test_ci_selection.py -m integration
       - name: 🧹 Verify checks leave the checkout unchanged
         run: git diff --exit-code
 
   dependencies:
-    if: >-
-      ${{
-        (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
-      }}
+    needs: select
+    if: needs.select.outputs.dependencies == 'true'
     name: 📦 Dependency vulnerabilities and license policy
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -376,3 +376,50 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           GITLEAKS_VERSION: '8.30.1'
           GITLEAKS_ENABLE_COMMENTS: 'false'
+
+  smoke:
+    name: 🚦 Post-merge workspace smoke
+    needs: select
+    if: needs.select.outputs.smoke == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: 📥 Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: ♻️ Cache Rust dependencies and build artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: false
+      - name: 🦀 Check merged Rust workspace
+        run: cargo check --locked --workspace --all-targets --all-features
+      - name: 🐍 Set up uv and Python
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: '0.13.0'
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: ${{ github.job }}
+      - name: 🐍 Check merged Python environment
+        run: |
+          uv sync --locked --all-packages
+          uv run --no-sync python -c 'import boxie; import cli_playground'
+
+  validation:
+    name: ✅ Required validation
+    needs: [select, quality, python, frontend, tests, packages, docs-policy, dependencies, workflows, secrets, smoke]
+    if: ${{ always() && (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: ✅ Require selection and every applicable check to succeed
+        env:
+          SELECTION_RESULT: ${{ needs.select.result }}
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          python3 - <<'PYTHON'
+          import json, os
+          assert os.environ["SELECTION_RESULT"] == "success", "CI selection failed"
+          assert all(result in ("success", "skipped") for result in json.loads(os.environ["RESULTS"])), "CI checks failed or were cancelled"
+          PYTHON
