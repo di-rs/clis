@@ -8,9 +8,9 @@ services; GitHub Actions performs setup and releases over pinned SSH.
 
 | Task | Guide |
 | --- | --- |
-| Provision a host and hand credentials to release workflows | [Set up the host](setup.md) |
-| Release services, inspect a failure, or plan maintenance | [Releases and recovery](releases.md) |
-| Follow a request through playground and Boxie logs | [Request tracing](logging.md) |
+| Provision a host and hand credentials to release workflows | [Set up the host](docs/setup.md) |
+| Release services, inspect a failure, or plan maintenance | [Releases and recovery](docs/releases.md) |
+| Follow a request through playground and Boxie logs | [Request tracing](docs/observability.md) |
 
 Setup can create paid cloud resources. It needs an existing Pulumi state bucket,
 provider credentials, and the GitHub environments described in the setup guide.
@@ -34,5 +34,7 @@ off-host backup restore. The protected disk is not a backup. Application release
 credentials grant root SSH authority on the shared host, so the two applications
 are not isolated from each other's deployment operators.
 
-See [host requirements](../../../packages/boxie/infra/host-requirements.md) for
-acceptance checks and [architecture](../../../docs/architecture.md) for the service layout.
+See [host requirements](../packages/boxie/docs/deployment.md#deployment-prerequisites) for
+acceptance checks and [architecture](../docs/architecture.md) for the service layout.
+
+Read [infrastructure architecture](docs/architecture.md) for ownership and service boundaries.

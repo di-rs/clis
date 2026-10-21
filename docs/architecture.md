@@ -1,120 +1,55 @@
-# How Sanctuary fits together
+# Sanctuary architecture
 
-Sanctuary starts with a collection of small command-line programs. You can build
-and run each one locally. Around them, the repository adds shared test tools,
-benchmarks, and a browser playground that lets someone try a pull request without
-installing its binaries.
+Sanctuary's current implementation combines standalone commands, a sandbox runtime,
+and an internal browser playground. The [platform direction](platform-direction.md)
+describes how these components will support durable shell sandboxes. This page
+covers the system that exists today.
 
-The playground needs to run code from a PR safely. That is Boxie's job: it starts
-short-lived sandboxes and keeps their execution separate from the public web
-service. The deployment code brings those services together on a Linux host.
+## Components and boundaries
 
-## Local commands and shared libraries
-
-Each CLI is a Cargo package with one executable, its own tests, and its own
-README. The [project index](../README.md#commands) lists the available commands
-and applications. Package docs explain supported behavior and differences from
-familiar system tools.
-
-Shared libraries provide logging (`cli-log`) and predictable test execution with
-byte fixtures (`cli-testing`). Command implementations depend on those libraries;
-they do not require the playground or Boxie to run locally.
-
-Cargo manages the Rust workspace. uv manages the Python services and tools with
-a shared lockfile. Sharing a repository and lockfile does not mean the services
-must be installed or released together.
-
-## From a change to a preview
-
-The development tools answer different questions:
-
-| Tool | Question it answers |
+| Component | Responsibility |
 | --- | --- |
-| [cli-check](../tools/cli-check/README.md) | Does each CLI follow the repository's layout and documentation conventions? |
-| [cli-bench](../tools/cli-bench/README.md) | How does a CLI run on a declared input compared with a reference or baseline? |
-| [CLI playground](../tools/cli-playground/README.md) | What does this PR's command feel like to use? |
+| [Builtins and applications](../README.md#commands) | Standalone commands and applications, with usage and limitations in each package. |
+| [Boxie](../packages/boxie/README.md) | Private consumer API, sandbox execution, isolation, and lifecycle recovery. |
+| [CLI playground](../tools/cli-playground/README.md) | PR previews, browser terminals, and preview/session metadata. |
+| [Shared libraries](../README.md#shared-libraries) | Logging and CLI test support. |
+| [Development tools](../README.md#development-tools) | Package checks, benchmark execution, and preview workflows. |
+| [Infrastructure](../infra/README.md) | Host provisioning and composition of independently operated services. |
 
-Behavioral tests run the real CLI and check its output and status. Benchmark
-suites use Biggie to prepare inputs and hyperfine to time runs. Automatic
-one-sample CI runs are smoke checks, not statistically reliable performance claims.
+Cargo manages Rust packages and uv manages Python services and tools. Commands
+can run locally without Boxie or the playground. A shared repository and lockfile
+do not require all services to be released together.
 
-PR preview builds compile affected CLIs without deployment credentials. A separate
-trusted publisher uploads the result and updates the PR's preview URL. Benchmark
-selection requires changes to a CLI's own source or build script; preview builds
-also account for affected dependencies. Neither publication nor benchmarking
-releases the web service.
-
-## What happens when a browser opens a terminal
+## Current execution path
 
 ```mermaid
 flowchart LR
-    Browser[Browser] --> Playground[Playground backend]
-    Playground --> PlaygroundDB[(Playground PostgreSQL)]
-    Playground --> API[Private Boxie API]
-    API --> BoxieDB[(Boxie PostgreSQL)]
-    API --> Supervisor[Boxie supervisor]
+    Browser[Browser] --> Playground[CLI playground]
+    Playground --> PlaygroundDB[(Playground database)]
+    Playground --> Boxie[Private Boxie API]
+    Boxie --> BoxieDB[(Boxie database)]
+    Boxie --> Supervisor[Boxie supervisor]
     Supervisor <--> Temporal[Temporal]
-    Supervisor --> BoxieDB
-    Supervisor --> Docker[Docker with gVisor]
-    Docker --> Sandbox[Temporary sandbox]
+    Supervisor --> Sandbox[Docker and gVisor sandbox]
 ```
 
-The browser talks to the playground's Python/FastAPI backend. Its Svelte UI
-shows the preview and terminal. The backend records preview revisions and browser
-sessions in its own PostgreSQL database, then requests a sandbox from Boxie using
-a private consumer credential. That credential stays on the server.
+The playground chooses a preview and asks Boxie to execute its uploaded artifact.
+Boxie owns execution policy and isolation; the playground receives neither Docker
+access nor supervisor credentials. Each service owns its application state.
+Temporal coordinates runtime work, while the supervisor owns physical execution
+and terminal connections.
 
-Boxie's API authenticates the consumer and records the request. Its supervisor
-owns Docker access, uploaded artifact files, and terminal connections. A sandbox
-gets the selected binaries as read-only files and a writable, disposable workspace.
-It has no network and has limits on resources and lifetime. Terminal bytes travel
-back through Boxie and the playground to the browser.
+For implementation and recovery details, read [Boxie architecture](../packages/boxie/docs/architecture.md)
+and [playground architecture](../tools/cli-playground/docs/architecture.md).
+The [threat model](thread-model.md) records current trust boundaries.
 
-The services have different responsibilities. The playground decides which
-preview a user is looking at. Boxie decides how to execute its artifact within
-the operator's sandbox policy. The playground cannot choose arbitrary container
-privileges or access the Docker socket.
+## Deployment and development
 
-## State and recovery
+The current [shared-host deployment](../infra/docs/architecture.md) exposes the
+playground and keeps runtime dependencies private. Service releases and dependency
+maintenance have separate lifecycles.
 
-PostgreSQL records which consumer owns each Boxie resource, which requests have
-already been accepted, and which capacity slots remain occupied. Retrying a
-request must not create an extra sandbox. Stopping one does not release its slot
-until container deletion is confirmed.
-
-Temporal coordinates provisioning, cleanup, and recovery through workers inside
-the supervisor. The supervisor also keeps a local execution journal and enforces
-safety deadlines independently. Terminal contents are not stored in Temporal
-history. An API restart can leave execution running; a supervisor restart can end
-terminals.
-
-The playground separately stores session and preview metadata, while its staging
-volume holds uploads that Boxie has not yet acknowledged. Its
-[persistence guide](../tools/cli-playground/docs/persistence.md) explains recovery.
-Boxie's [execution guide](../packages/boxie/docs/execution.md) covers artifact
-retention and uncertain container creation or deletion.
-
-## Deployment and operations
-
-The [shared-host deployment](../infra/environments/single-host/README.md) uses
-Pulumi for a Hetzner server, disk, DNS, and operator access. Docker Compose runs
-the services. GitHub Actions performs setup and manual releases over pinned SSH.
-Boxie and the playground have separate release workflows; PostgreSQL and Temporal
-upgrades remain explicit maintenance operations.
-
-The intended public entry point is the playground. Boxie and its dependencies
-stay on private networks. Operators reach Grafana and Temporal UI through
-Cloudflare Access. Logs flow through journald and Vector to VictoriaLogs;
-Prometheus collects metrics. Request IDs help connect events across services.
-The [threat model](thread-model.md) records boundaries and deployment assumptions
-that need verification on the actual host.
-
-## Where to make a change
-
-Change a command inside its owning package, including its tests and benchmarks.
-Put shared CLI support in `utils/`. Browser behavior belongs to the playground;
-sandbox execution and isolation belong to Boxie. Host provisioning and the
-composition of those services belong to `infra/`.
-
-Start with that component's README. It provides the usage path and links to the
-more detailed contract or operating guide when you need it.
+Change commands inside their owning packages, shared support under `utils/`, and
+consumer behavior in the playground. Begin with the owner's README for usage,
+verification, and deeper documentation. The root [project index](../README.md)
+provides the entry points.

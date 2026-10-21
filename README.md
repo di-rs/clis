@@ -1,7 +1,7 @@
 # Sanctuary
 
-Sanctuary is a collection of Rust command-line tools, shared libraries, and the
-services used to try those tools in a browser. Each CLI is its own Cargo package.
+Sanctuary is a platform for shell sandboxes, with Rust command-line tools, shared
+libraries, and Python services. Each CLI is its own Cargo package.
 Python services and repository tools share a uv workspace.
 
 ## Try a command
@@ -73,8 +73,9 @@ explains sessions, sample files, and switching builds.
 
 ## Find your way around
 
-The [architecture overview](docs/architecture.md) explains how local commands, PR
-builds, the playground, and Boxie fit together. The
+The [architecture overview](docs/architecture.md) explains how commands, the playground,
+and Boxie fit together. The [platform direction](docs/platform-direction.md)
+describes the durable-shell north star and open design questions. The
 [threat model](docs/thread-model.md) describes security boundaries.
 
 | Directory | Contents |
@@ -91,6 +92,6 @@ Read the owning package's README first. Run checks for the affected package, for
 example `uv run cli-check -p echor` for repository conventions.
 The [CLI testing skill](.agents/skills/cli-testing/SKILL.md) explains behavioral
 tests and reference fixtures; [AGENTS.md](AGENTS.md) records repository rules.
-Deployment instructions live in the [shared-host guide](infra/environments/single-host/README.md).
+Deployment instructions live in the [shared-host guide](infra/README.md).
 
 Licensed under [Apache-2.0](LICENSE). Preserve tutorial credits in package READMEs.

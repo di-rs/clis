@@ -182,4 +182,4 @@ and unavailable telemetry lookups can omit the originating ID; resource and
 workflow identifiers remain available.
 
 Boxie requires no consumer package or shared logging runtime. See the
-[operator logging guide](../infra/observability/README.md) for collection and searches.
+[operator logging guide](observability.md) for collection and searches.

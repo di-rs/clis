@@ -43,6 +43,28 @@ before asserting behavior. Distinguish shipped behavior from proposals. Keep
 unresolved facts visible as questions for the author, rather than inventing
 commands, installation methods, platform support, or guarantees.
 
+## Sanctuary documentation ownership
+
+Keep the root README brief: an overview, supported entry points, and project links.
+`docs/platform-direction.md` owns the north star and unresolved future decisions;
+`docs/architecture.md` explains current cross-component responsibilities. Root
+docs link to component detail rather than reproducing it.
+
+Each direct component in `packages/` has a README and `docs/architecture.md`.
+Tools and utilities use separate architecture pages only when their complexity
+warrants them. Builtins keep their existing README-centered structure. Do not
+create database or observability placeholders for components without those needs.
+
+Put deeper component guides directly in its `docs/` directory, using consistent
+topic names such as `database.md`, `observability.md`, and `deployment.md` when
+applicable. Keep infrastructure code in place while documenting its operations
+with the owning component. Shared host composition belongs to `infra/README.md`
+and flat `infra/docs/`. Nested support packages use their owner's documentation.
+
+A README may contain substantial usage and reference material. Architecture
+explains internals and design choices without copying that reference. Keep each
+detailed contract in one canonical home and update incoming links when moving it.
+
 ## Run the passes
 
 Read each skill from the local path below when its pass begins. Resolve its
@@ -60,10 +82,8 @@ Use prose for causes and relationships, steps for procedures, and tables or
 lists for parallel reference material. Introduce unfamiliar terms when first
 used. Include concrete examples that help the reader recognize success.
 
-Treat upstream README outlines and length targets as guidance for this
-document's scope. Include sections, status claims, and links only when relevant
-and supported. References to other Flagrare skills are optional context, not
-dependencies of this pipeline. The local editorial pass runs at step 3.
+Include sections, status claims, and links only when relevant and supported.
+Use the local skills linked here; the editorial pass runs at step 3.
 
 ### 2. Check with technical-documentation
 
@@ -96,13 +116,13 @@ identify its central message, and review structure, sequencing, pacing,
 consistency, and clarity before individual sentences. Remove writing-process
 residue while preserving facts, useful caveats, examples, and the author's voice.
 
-Prepare the skill's editorial memo before applying revisions. When the user has
+Form a brief editorial diagnosis before applying revisions. When the user has
 asked to write, edit, or polish the document, that authorization includes these
 editorial fixes: apply them as part of the task without another approval round.
 For a review-only request, deliver the memo and leave the document unchanged.
 Ask about an unresolved meaning or consequential author decision when it affects
-correctness; continue fixes that do not depend on that answer. The memo can stay
-in the conversation or working notes; save it only when requested.
+correctness; continue fixes that do not depend on that answer. The diagnosis can stay
+in working notes; save a memo only when requested.
 
 ## Verify and deliver
 
@@ -130,7 +150,7 @@ performed, and any unresolved questions. For review-only work, deliver the memo.
 The final artifact should stand on its own for someone who never saw the chat.
 
 Example invocation: "Use $clis-documentation-pipeline to update
-coreutils/echor/README.md for new users, with verified examples and exit behavior."
+buildins/echor/README.md for new users, with verified examples and exit behavior."
 
 For upstream versions, licenses, local adaptations, and updates, read
 [upstream sources](references/upstream.md) when maintaining these skills.

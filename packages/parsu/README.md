@@ -35,4 +35,6 @@ Text nodes, namespaces, comments, entities, escaped quotes, and schema validatio
 are not supported.
 
 Based on Bodil Stokke's [Learning Parser Combinators With Rust](https://bodil.lol/parser-combinators/).
+[Architecture](docs/architecture.md) explains the implementation and boundaries.
+
 [All projects](../../README.md)

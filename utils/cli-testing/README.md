@@ -48,3 +48,11 @@ does not prevent symlinks from pointing elsewhere.
 
 See the [CLI testing skill](../../.agents/skills/cli-testing/SKILL.md) for independent
 reference fixtures, status assertions, and verification commands.
+
+## Architecture
+
+The [command helpers](src/lib.rs) configure `assert_cmd` at the process boundary.
+The [fixture helper](src/fixtures.rs) resolves paths and reads bytes without
+interpreting expected output. Call-site macros supply the consuming package's
+manifest directory and binary name, so tests retain ownership of their fixtures
+and assertions.

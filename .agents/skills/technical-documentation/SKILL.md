@@ -12,22 +12,18 @@ metadata:
 
 Technical documentation is the interface between a tool and its user. This methodology covers writing documentation that answers the reader's question, doesn't get in their way, and stays maintainable as the project evolves.
 
-## The Technical Writer's Domain
+## Responsibility
 
-| You own | You don't own |
-|---------|--------------|
-| API documentation — endpoint references, parameters, examples | Editorial and long-form narrative content — owned by the editorial function, outside this skill's scope |
-| README authorship — project overview, quickstart, configuration | Brand messaging and marketing copy — that's the brand designer |
-| CLI documentation — help text, usage patterns, exit codes | Code architecture decisions — that's the software-architecture-analysis |
-| Agent-facing docs — AGENTS.md, skill documentation | Project roadmap and product vision — that's the product manager |
-| Reference documentation — config files, troubleshooting, architecture | Performance optimization guidance — that's the systematic-debugging / SRE |
-| Documentation site structure — IA, cross-referencing, search | Code quality and standards — that's the qa-methodology / QA engineer |
+Verify that documentation helps readers complete the task it promises. Check
+interfaces and architecture against implementation, and distinguish future design
+from current behavior. Do not invent architecture decisions or broaden the task
+into product redesign. Use the writing and editorial skills for prose quality.
 
 ## Reference Files
 
 | Reference | When to load |
 |-----------|-------------|
-| `references/readme-patterns.md` | Writing or restructuring a README — sections every README needs, quickstart patterns, installation variants, configuration documentation |
+| `references/readme-patterns.md` | Writing or restructuring a README — reader-driven sections, quickstart patterns, installation variants, configuration documentation |
 | `references/api-documentation-cli-help.md` | Documenting APIs (endpoint structure, parameter conventions, example design, auth patterns, OpenAPI annotations) and designing CLI help text (usage line, flags, exit codes, subcommand hierarchy, man pages) |
 | `references/agent-facing-docs.md` | Writing AGENTS.md and skill documentation — trigger patterns, loading order, output contracts, cross-references |
 
@@ -47,7 +43,7 @@ For documentation site structure, use the core principles below: organize around
 
 **Maintain one explanation of each detailed contract.** Keep closely related material together. Use headings to make long pages navigable, and separate pages only when they improve a reader’s path. Repeat brief context when needed, but avoid parallel versions of the same rules.
 
-**Show, don't just tell** — Every concept needs a worked example. Every API endpoint needs a request and response. Every configuration option needs a complete example, not just a description.
+**Use examples where they resolve uncertainty.** Show complete request/response or configuration examples when a reader needs them to use the interface correctly. Do not repeat examples mechanically for every concept or option.
 
 ## Portability
 

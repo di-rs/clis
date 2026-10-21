@@ -16,7 +16,7 @@ starts a new action; `sandbox_id` still identifies the same terminal resource.
 Saved admission, upload, stop and retirement operations retain their first
 request IDs in PostgreSQL so later retries can be traced to the action that
 started them. These optional diagnostic fields leave existing rows with an
-unknown origin. Apply the [schema upgrade](persistence.md#schema-changes)
+unknown origin. Apply the [schema upgrade](database.md#schema-changes)
 before starting the gateway. The
-[host guide](../../../infra/environments/single-host/logging.md#search-across-services)
+[host guide](../../../infra/docs/observability.md#search-across-services)
 covers the optional collector extension and rollout order.

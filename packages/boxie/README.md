@@ -1,7 +1,7 @@
 # Boxie
 
-Boxie runs uploaded files in short-lived Linux sandboxes. Services connect through
-its private API; the browser playground is one consumer.
+Boxie is Sanctuary's sandbox runtime. It runs uploaded files in short-lived Linux
+sandboxes through a private API; the browser playground is one consumer.
 Boxie can also run independently.
 
 ## Use the API
@@ -17,7 +17,7 @@ choose arbitrary commands, environment settings, or isolation profiles.
 
 ## Run a deployment
 
-Start with the [infrastructure guide](infra/README.md). You need PostgreSQL,
+Start with the [infrastructure guide](docs/deployment.md). You need PostgreSQL,
 Temporal, private credentials, and a native Linux host with gVisor (`runsc`).
 Docker Desktop can build images, but it cannot validate the required isolation.
 
@@ -28,17 +28,9 @@ and Docker.
 
 ## How it works
 
-Boxie has two processes. The API authenticates consumers and records requests in
-PostgreSQL. The supervisor runs containers, stores artifact files, and handles
-terminal connections. Only the supervisor has Docker access.
-
-Temporal workers inside the supervisor carry out provisioning, cleanup, and
-recovery. PostgreSQL records ownership and capacity so retries do not create a
-second sandbox or free a slot before deletion is confirmed.
-
-For resource limits and the mechanisms behind these guarantees, read
-[execution and recovery](docs/execution.md). For logs and metrics, see
-[monitoring](infra/observability/README.md).
+The API records requests; the supervisor owns physical execution. Read
+[architecture](docs/architecture.md) for the component boundaries and
+[execution and recovery](docs/execution.md) for lifecycle guarantees.
 
 ## Develop Boxie
 
@@ -46,5 +38,16 @@ Run focused tests with `uv run pytest packages/boxie/tests`.
 Integration tests require their external dependencies; native isolation checks
 run through the [lifecycle workflow](../../.github/workflows/boxie-lifecycle.yml).
 Passing local tests does not establish production readiness.
+
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [Consumer API](docs/consumer-api.md)
+- [Configuration](docs/configuration.md)
+- [Execution](docs/execution.md)
+- [Database](docs/database.md)
+- [Observability](docs/observability.md)
+- [Deployment](docs/deployment.md)
+- [Temporal](docs/temporal.md)
 
 [All projects](../../README.md)

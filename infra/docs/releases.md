@@ -4,16 +4,16 @@
 
 Run either release manually from Actions on `master`:
 
-- [🚀 cli-playground Release](../../../.github/workflows/cli-playground-release.yml)
+- [🚀 cli-playground Release](../../.github/workflows/cli-playground-release.yml)
   builds and deploys the cli-playground backend and frontend together in the application image.
-- [🚀 Boxie and Sandbox Release](../../../.github/workflows/boxie-release.yml)
+- [🚀 Boxie and Sandbox Release](../../.github/workflows/boxie-release.yml)
   builds the Boxie image and sandbox from one commit, then updates Boxie followed
   by its default sandbox image. It does not release the cli-playground application.
 
 A failed stage stops the remaining deployments in its workflow; completed stages
 are not rolled back automatically. Boxie stages use the `boxie` environment;
 the cli-playground release uses `cli-playground`.
-Each stage calls the shared [release transport](release.sh) for SSH, image settings
+Each stage calls the shared [release transport](../environments/single-host/release.sh) for SSH, image settings
 and temporary registry credentials; service scripts own migration and readiness checks.
 
 ## What a release changes
@@ -77,7 +77,7 @@ uv run pytest infra/host/tests infra/environments/single-host/tests \
 On an authorized native Linux amd64 host, exercise fresh setup, an unchanged
 rerun, both release workflows, migration failure and retry, metrics, tunnel
 configuration and preview publication. The local command tests cannot establish
-those host behaviors. The [host requirements](../../../packages/boxie/infra/host-requirements.md)
+those host behaviors. The [host requirements](../../packages/boxie/docs/deployment.md#deployment-prerequisites)
 include the runsc and backup checks.
 
 ## Certificates and backups
