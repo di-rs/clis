@@ -104,3 +104,11 @@ Progress and the results path go to stdout; runner errors go to stderr. Exit
 status is `0` for success, `1` for validation or execution failure, `2` for invalid
 command-line syntax, and `130` for interruption. A one-sample run is a smoke
 check, not evidence of a performance improvement.
+
+## Architecture
+
+[bench.py](bench.py) validates suites, prepares a temporary working directory,
+runs correctness checks, and invokes hyperfine. [Suite selection](select_suites.py)
+decides which package-owned suites CI should run; [reporting](report.py) handles
+GitHub results separately from execution. This keeps benchmark inputs and cases
+with their CLI while sharing the measurement machinery.

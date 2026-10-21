@@ -7,15 +7,21 @@ to VictoriaLogs. Grafana queries VictoriaLogs and Prometheus. Request, sandbox,
 workflow and run IDs are searchable fields; they never become stream labels or
 metric labels. Sandbox PTY output is never collected. Vector has no Docker socket.
 
+## Find a failed request
+
+Copy the response's `X-Request-ID`. In Grafana Explore, select VictoriaLogs and
+search `request_id:="<UUID>"`. Use `sandbox_id` to follow creation, reconnects,
+and later stop requests across separate request IDs.
+
 ## Collector compatibility
 
-The [collector Dockerfile](collector/Dockerfile) copies the pinned upstream
+The [collector Dockerfile](../infra/observability/collector/Dockerfile) copies the pinned upstream
 Vector 0.59.0 binary onto pinned Ubuntu 26.04 with systemd/journalctl and its runtime
 libraries. The official Vector Debian image bundles journalctl 257; Vector rejects
 `current_boot_only: false` with versions 250–257, so that image cannot preserve
 cross-boot collection. Ubuntu supplies journalctl 259. Native validation checks the
 actual source under UID/GID 65532; a supplementary host journal group grants read
-access. `versions.json` records the upstream image and Grafana plugin pins.
+access. `packages/boxie/infra/observability/versions.json` records the upstream image and Grafana plugin pins.
 
 ## Setup
 
@@ -31,19 +37,19 @@ docker network create --internal boxie-temporal-ui-origin
 
 ### Configure identity and journal access
 
-Copy `observability.env.example` to a private environment file, set the Boxie
+Copy `packages/boxie/infra/observability/observability.env.example` to a private environment file, set the Boxie
 installation UUID, host ID and Temporal namespace to the actual application
 configuration, and source/export it. Use a UUID for the installation and only
 letters, numbers, underscores and hyphens for namespace/host values; these values
 are inserted into Prometheus regular expressions. Get the numeric supplementary
 journal group using `getent group systemd-journal`. Verify that this group can read
-the persistent host journal. Install `journald.conf` as a systemd drop-in, enable
+the persistent host journal. Install `packages/boxie/infra/observability/journald.conf` as a systemd drop-in, enable
 persistent storage, restart journald, and check `journalctl --disk-usage`.
 
 ### Configure Grafana
 
 Provision a private Grafana admin password file readable by UID 472. Install the
-VictoriaLogs datasource plugin from the URL in `versions.json`, verify its SHA256,
+VictoriaLogs datasource plugin from the URL in `packages/boxie/infra/observability/versions.json`, verify its SHA256,
 and unpack it to `OBS_GRAFANA_PLUGIN_DIR`, preserving the archive executable bits
 for its backend binaries. Grafana uses only this mounted plugin;
 startup downloads and anonymous access are disabled.
@@ -80,7 +86,7 @@ searchable logs, Prometheus and Grafana. Start Boxie with its base manifest plus
 `packages/boxie/infra/compose.observability.yml`; start Temporal with its base manifest
 plus `packages/boxie/infra/temporal/compose.observability.yml`. Base deployments need no
 `OBS_*` values or monitoring bridges. Grafana and Temporal UI have no published
-ports. Follow the [operator ingress guide](../ingress/README.md) for Access/Tunnel.
+ports. Follow the [operator ingress guide](deployment.md) for Access/Tunnel.
 
 ### Preserve existing volumes
 
@@ -129,7 +135,7 @@ Successful `/healthz` and `/readyz` requests emit no request logs. HTTPX uses a
 WARNING threshold, so routine probe responses do not become dependency events.
 Failed probes and ordinary application requests remain visible, and every request
 still updates HTTP metrics. Empty command-recovery and cleanup passes emit no
-per-run log events; the [host requirements](../host-requirements.md#native-maintenance) describes
+per-run log events; [runtime maintenance](execution.md#native-maintenance) describes
 their cadence and recovery behavior.
 
 ### Metrics availability
@@ -171,9 +177,9 @@ actual Linux deployment. Ordinary tests do not establish those activation claims
 
 ## Request correlation
 
-Use the [request search instructions](README.md#find-a-failed-request) to locate
+Use the [request search instructions](#find-a-failed-request) to locate
 a failed action. The
-[consumer contract](../../docs/consumer-api.md#follow-a-request-through-logs) describes
+[consumer contract](consumer-api.md#follow-a-request-through-logs) describes
 accepted IDs and separate creation, stop and connection actions. Use `sandbox_id`
 to inspect a sandbox across all of those actions.
 
@@ -185,6 +191,6 @@ origin. Old records retain unknown historical origins.
 
 This collector remains Boxie-only by default. A host may add a consumer-owned
 configuration with a second `--config` argument; the
-[shared-host guide](../../../../infra/environments/single-host/logging.md#search-across-services)
+[shared-host guide](../../../infra/docs/observability.md#search-across-services)
 shows the composed deployment. Its common-field search omits the Boxie service
 filter. The Boxie dashboard retains its existing default scope.

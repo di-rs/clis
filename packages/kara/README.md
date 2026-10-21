@@ -49,4 +49,6 @@ restoration in a PTY or real terminal. The startup E2E only checks failure when
 there is no usable terminal; it does not cover editing.
 
 Based on [Philipp Flenker's Hecto guide](https://philippflenker.com/hecto/).
+[Architecture](docs/architecture.md) explains the implementation and boundaries.
+
 [All projects](../../README.md)

@@ -1,4 +1,4 @@
-# Substitute only the six OPERATOR_* variables listed in README.md before deployment.
+# Substitute only the six OPERATOR_* variables listed in ../../docs/deployment.md#configure-the-tunnel before deployment.
 tunnel: ${OPERATOR_TUNNEL_ID}
 credentials-file: /run/secrets/tunnel.json
 ingress:

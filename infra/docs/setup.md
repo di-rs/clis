@@ -45,7 +45,7 @@ and Actions runners can reach the host.
 ## Run setup
 
 Grant this repository Actions access to its private GHCR packages. Run
-[Single-host Sanctuary setup](../../../.github/workflows/sanctuary-setup.yml)
+[Single-host Sanctuary setup](../../.github/workflows/sanctuary-setup.yml)
 from `master`. This manual workflow builds Boxie, the cli-playground backend and
 sandbox, and the collector from current `master`; it does not ask for image
 digests. It then runs Pulumi, waits for cloud-init, copies the committed files

@@ -1,4 +1,67 @@
-# Playground database operations
+# Playground database and recovery
+
+Playground stores preview metadata, revisions, session bindings and unfinished
+operations in its own PostgreSQL database. Boxie still owns artifacts and sandboxes,
+accessed only through its HTTP/WebSocket API.
+
+## Transaction and recovery guarantees
+
+Publication locks the PR row while checking build order, closure and immutable
+binary identity. It commits the revision, current preview and upload-intent
+removal together. PR closure cancels pending uploads in the same transaction;
+reopening cannot revive them. Attachment updates lock and reload the binding,
+so a late completion cannot overwrite a newer claim. Transactions end before
+calling Boxie.
+
+### Recover unfinished remote operations
+
+Remote operations still need recovery. Playground persists an intent before
+uploading an artifact or requesting a sandbox, and retries with the same UUID.
+Unclaimed admissions are compensated by stopping their sandboxes. Stops and
+artifact retirements remain pending until Boxie confirms them. A database error
+is an unavailable response, never an empty state or permission to discard work.
+
+## What stays on disk
+
+`CLI_PLAYGROUND_DATA_DIR/uploads/` contains ZIPs needed to retry unfinished
+uploads. A ZIP is synced and renamed before its database intent is committed;
+it is removed after publication or compensation commits. Startup removes ZIPs
+without an intent only after successfully reading the database. Temporary
+validation directories also live beneath the data directory.
+
+Structured state has no JSON-file fallback. Keep one Uvicorn worker: admission
+tracking, upload serialization and startup recovery still assume a single gateway.
+PostgreSQL alone does not make replicas safe.
+
+## Schema changes
+
+Use the database connection configured during [local setup](../README.md#configure-the-backend).
+SQLModel and SQLAlchemy handle queries and transactions; Alembic owns the schema.
+
+Run upgrades before starting the gateway:
+
+```sh
+uv run --package cli-playground alembic \
+  -c tools/cli-playground/alembic.ini upgrade head
+```
+
+The installed wheel includes Alembic scripts; the container includes `alembic.ini`
+and runs the standard `alembic upgrade head` command. Startup checks the schema version
+and fails if it is missing or incompatible. It does not create or upgrade tables.
+
+### Author a migration
+
+To author a later revision from the repository root, use:
+
+```sh
+uv run --package cli-playground alembic \
+  -c tools/cli-playground/alembic.ini revision --autogenerate -m "Describe the change"
+```
+
+Review the generated script before applying it. The migrated schema is tested
+against the SQLModel metadata to catch schema drift. See the
+[database provisioning](#database-and-cutover) for provisioning,
+backup and the deliberate fresh-state cutover.
 
 ## Database and cutover
 

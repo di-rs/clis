@@ -9,7 +9,7 @@ creation, later stops and reconnects that have different request IDs.
 
 ## Install the collector extension
 
-Host setup installs the optional [collector overlay](observability/compose.yml)
+Host setup installs the optional [collector overlay](../environments/single-host/observability/compose.yml)
 after starting the service-owned projects. It adds Playground's own validator
 from `/opt/sanctuary/cli-playground/observability/vector.yaml` to Boxie's collector.
 Standalone Boxie keeps its original collector configuration and dashboard scope.
@@ -32,7 +32,7 @@ Keep Boxie's nullable correlation columns during application rollback. Playgroun
 checks its exact schema revision: to return to the preceding PostgreSQL release,
 stop the gateway and downgrade its database to `0001_metadata` before starting
 that release. This removes diagnostic IDs while preserving pending operations.
-The [database guide](../../../tools/cli-playground/infra/docs/database.md#database-and-cutover)
+The [database guide](../../tools/cli-playground/docs/database.md#database-and-cutover)
 covers backup and the cutover from file-based state.
 
 ## Verify the deployment
@@ -40,5 +40,5 @@ covers backup and the cutover from file-based state.
 Before activation, verify request and stop IDs through restart recovery on native
 Linux amd64 with runsc, and verify journald collection after an outage. Local
 Vector validation and Docker Desktop transport tests do not establish those host
-gates. The [Boxie logging guide](../../../packages/boxie/infra/observability/README.md)
+gates. The [Boxie logging guide](../../packages/boxie/docs/observability.md)
 covers journal permissions, retention and pressure checks.

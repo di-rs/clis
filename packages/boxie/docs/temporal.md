@@ -4,7 +4,7 @@ Boxie owns this deployment package. It runs the production Temporal server
 as a separate Compose project with explicit schema operations, so ordinary
 Boxie application releases do not restart the server or upgrade its schemas.
 Production never uses a development server.
-[versions.json](versions.json) records the verified upstream releases and exact
+[versions.json](../infra/temporal/versions.json) records the verified upstream releases and exact
 multi-platform image identities: server/admin-tools 1.32.0 and UI 2.56.0.
 Schema jobs use the unchanged upstream admin-tools image and its schema tool.
 Namespace bootstrap reuses the approved immutable `BOXIE_IMAGE` with
@@ -33,7 +33,7 @@ operator inputs, not committed files.
 Empty authorizer and claim mapper select the upstream no-op authorization
 implementations. **Every admitted mTLS client is a fully trusted Temporal cluster
 administrator.** Namespace `boxie` is organizational, not an authorization
-boundary; no per-user or namespace RBAC is claimed. Use [operator ingress](../ingress/README.md) to protect the UI with Cloudflare
+boundary; no per-user or namespace RBAC is claimed. Use [operator ingress](deployment.md) to protect the UI with Cloudflare
 Access; keep its origin internal.
 Temporal sees the UI backend identity, not the browser user's identity.
 
@@ -54,7 +54,7 @@ credential or Docker socket. UI backend TLS explicitly verifies the server name.
 
 ## Explicit operations
 
-Start the [Boxie PostgreSQL deployment](../postgres/README.md) first. From this directory:
+Start the [Boxie PostgreSQL deployment](database.md) first. From `packages/boxie/infra/temporal/`:
 
 ```sh
 # Empty pre-created databases only:
@@ -116,7 +116,7 @@ denials. It writes nonsecret runtime evidence into pytest's temporary directory.
 Linux arm64/runc proves this infrastructure path, not the later native
 Linux/amd64/runsc full-stack gate or production deployment.
 
-The [lifecycle workflow](../../../../.github/workflows/boxie-lifecycle.yml)
+The [lifecycle workflow](../../../.github/workflows/boxie-lifecycle.yml)
 adds interpreter imports, pinned test-server history replay/cancellation and the
 native Linux amd64/runsc full stack. Its test-only agent launcher observes
 collector entry/completion around a successful SQL COMMIT with lost acknowledgment;

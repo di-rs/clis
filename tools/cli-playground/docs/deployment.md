@@ -1,12 +1,19 @@
-# Run playground against a private Boxie service
+# Deploy CLI playground
+
+For production setup and releases, use the [shared-host guide](../../../infra/README.md).
+This guide covers a local Compose deployment and its service boundaries. Provision
+its [database](database.md#database-and-cutover) before starting the backend; configure
+[preview publication](previews.md) after the service is reachable.
 
 ## Independent local unit
 
 Obtain a private Boxie URL and consumer credential from its operator; see
-[Boxie infrastructure](../../../../packages/boxie/infra/README.md). Boxie owns its
+[Boxie infrastructure](../../../packages/boxie/docs/deployment.md). Boxie owns its
 default shell, sandbox image and built-in sample files. cli-playground uploads
 validated native binaries and requests a sandbox using only their artifact ID.
 It does not select an environment or modify Boxie's configuration.
+
+Run from the repository root:
 
 ```sh
 docker build -f tools/cli-playground/infra/docker/CliPlayground.Dockerfile -t cli-playground:local .
@@ -50,3 +57,10 @@ package/dependencies and, for cli-playground, its real built frontend assets.
 Operator modules are installed separately from runtime images. Run
 `uv sync --all-packages` for local infrastructure checks. Application
 release jobs use native OpenSSH and do not read Pulumi state.
+
+## Application releases
+
+An application release updates the backend and its built frontend together, leaving
+the proxy and Boxie running. Runtime manifests, image builds, and operator scripts
+remain under [infra/](../infra/); shared-host provisioning composes them without
+moving their ownership into the runtime.

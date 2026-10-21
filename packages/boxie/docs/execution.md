@@ -13,7 +13,8 @@ use the [consumer API](consumer-api.md); for process settings, use
 - [Artifacts](#artifacts)
 - [Private protocol](#private-protocol)
 - [Embedded Temporal execution](#embedded-temporal-execution)
-- [Source organization](#source-organization)
+- [Native maintenance](#native-maintenance)
+- [Ownership and retention](#ownership-and-retention)
 
 ## Isolation and lifetime
 
@@ -166,48 +167,95 @@ output even without Docker logs.
 
 ## Embedded Temporal execution
 
-The supervisor embeds Temporal SDK workers on lifecycle and maintenance queues
-scoped to its installation and host. An OS owner lock prevents a second process
-from using the same data directory. A
-supervisor restart also restarts its workers and ends existing terminals.
+Admission atomically reserves a capacity slot, artifact reference and command.
+After commit, the API attempts signal-with-start within one second. A crash or
+transport failure leaves a pending command; committed acceptance still succeeds.
+Status, matching retries and stop requests use SQL during Temporal outages.
 
-### Scheduled work and local safety
+The supervisor holds an exclusive OS lock on its data directory before opening
+execution resources. SDK workers poll stable installation/host lifecycle and
+maintenance queues. Activities invoke the Supervisor directly and validate ownership;
+boot/generation fences and SQL's final-start lock remain mandatory.
 
-Provisioning activities await the local execution. Normal cleanup retries,
-30-second inspection, command recovery, artifact collection, journal compaction
-and SQL retention are driven by Temporal. Local safety enforcement and journal
-flushes remain independent of Temporal availability.
+The lifecycle workflow awaits provisioning, inspects/renews every 30 seconds,
+and retries cleanup across worker restarts with a ten-second maximum retry interval
+and no overall cleanup timeout. Removal completes only when journaled physical
+absence is accepted by SQL with accounting release. Uncertain creation/deletion retains
+both capacity and artifact references. Local monotonic deadlines enforce absolute,
+idle, disconnect and control-lease limits during dependency outages. Safety retries
+cannot release accounting or assume that an unseen pending create was cancelled.
 
-### Publish lifecycle changes
+Attachment and termination events make a bounded direct SQL projection and
+workflow notification. Failed notifications are repaired by activity inspection.
+Input timestamps are journal-flushed on a one-second cadence and can lag in SQL
+by one inspection interval; expiry uses current local facts. PTY bytes never enter
+SQL observations or Temporal history. Terminal framing/replay remain unchanged.
 
-Attachment and termination facts publish directly to SQL; there is no observation
-HTTP callback or lifecycle control HTTP protocol. Input remains local, with SQL
-facts repaired by the next 30-second workflow inspection. No input or PTY output
-is stored in workflow history. The start/stop outbox protects the commit-to-Temporal
-handoff; native scheduled recovery handles pending commands without custom leases
-or application retry clocks.
+## Native maintenance
 
-## Source organization
+Pending start/stop delivery runs in a supervised loop in the supervisor process.
+It starts immediately, attempts up to 32 commands with eight concurrent deliveries
+and a 20-second deadline, then waits five seconds before the next pass. Failed
+deliveries stay pending and produce warnings; an empty pass creates no Temporal
+workflow or log event.
 
-The consumer API and supervisor transport share explicit wire contracts under
-`boxie/contracts/`; cli-playground keeps its own consumer models and has no Boxie
-runtime dependency. `application/ports.py` defines the interfaces consumed by the
-API. Routes receive those interfaces directly.
+Startup creates or verifies two installation/host-specific Temporal Schedules
+before serving. Both run at midnight and noon UTC, skip overlapping runs and
+have a 12-hour catch-up window:
 
-The supervisor implementation is grouped by responsibility:
+| Operation | Interval | Bounds |
+| --- | --- | --- |
+| Artifact collection | 12 hours | Drain eligible artifacts in batches of 100, then scan orphan files |
+| SQL retention | 12 hours | Compact eligible journal records, then purge eligible SQL rows in batches of 1,000 |
 
-- `sandbox/execution/`: coordination, one execution owner per sandbox, journal,
-  provisioning, physical reconciliation and retention.
-- `sandbox/terminal/`: PTY reader, bounded replay and WebSocket session delivery.
-- `sandbox/transport/`: authenticated supervisor client/server and terminal relay.
-- `bootstrap/`: configuration loading, dependency construction, readiness probes
-  and background service startup/shutdown.
+Each activity attempt has a 20-second deadline and a 60-second overall retry
+deadline. Maintenance activity capacity is separate from lifecycle capacity;
+one failed operation does not suppress the other schedule or lease renewal.
 
-Each `SandboxExecution` owns its locks, deadlines, tasks, terminal and session
-references. Persisted `ExecutionRecord` values retain the journal format.
-A terminal session pins its execution until WebSocket delivery and closing finish;
-retention requires settled local work, a saved removal confirmation and the
-control-plane receipt before removing the record and execution together.
+Startup upgrades the shipped 30-second and five-minute cleanup schedules and
+deletes the retired command and journal schedules at their known old intervals
+(5 or 15 seconds for commands, 30 or 60 seconds for journals). Other schedule
+changes, including pauses, are rejected. Handlers remain available for maintenance
+workflows that already started. Missing, paused or incompatible cleanup schedules
+close new admission.
 
-Network adapters validate incoming terminal controls once and return typed events
-to relays, which serialize them for the next connection.
+New admission also rejects an oldest pending command over 30 seconds or a backlog
+of 100. Readiness verifies SQL, supervisor health, schedule configuration and
+recent lifecycle pollers. Poller presence is evidence up to 90 seconds old, not
+instantaneous worker liveness.
+
+## Ownership and retention
+
+Before a lifecycle workflow finishes, its facts activity compacts the local journal
+record once SQL confirms cleanup. If the record still has unsettled work, the
+activity retries with `CleanupPending`. One startup compaction pass and the
+twice-daily retention schedule also reclaim eligible records from older completed
+workflows.
+
+Only executions whose removal is saved in the journal, without pending create
+operations, uncertainty, active activities or terminal sessions, can be compacted.
+SQL must confirm the immutable request and terminal accounting release; unavailable SQL never permits
+forgetting. Normal admission stops at 128 retained journal records, with eight
+additional cleanup-only identities. Journal failures close new admission until a
+full save succeeds. An uncertain create plus lost journal writes may
+still require operator investigation.
+
+Worker execution shares the supervisor process and its Docker trust boundary.
+Restarting it ends PTYs. Shutdown closes terminal admission, drains SDK work within
+its 25-second grace, and retains uncertain physical operations for restart cleanup.
+
+## Verification
+
+Time-skipping workflow tests use the checksum-pinned 1.40.0 executable in
+[test-server-pins.json](../tests/test-server-pins.json), supplied as
+`BOXIE_TEST_SERVER`. Production tests use the pinned self-hosted Temporal image,
+mTLS and real PostgreSQL. Run the isolated native lifecycle harness using:
+
+```sh
+uv run python packages/boxie/tests/run_integration.py --runtime runsc
+```
+
+The [native lifecycle workflow](../../../.github/workflows/boxie-lifecycle.yml)
+provides Linux amd64/gVisor fault evidence. Local Docker/runc or time-skipping tests
+do not establish that gate or production activation readiness. Measure schedule
+volume and recovery latency without assuming a performance improvement.

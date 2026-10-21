@@ -45,3 +45,12 @@ uv run pytest tools/cli-check/tests
 Tests exercise the real command in temporary workspaces. The normal commit hook
 selects affected packages; run `cli-check` directly during development rather
 than invoking the hook runner. Python CI checks the full workspace.
+
+## Architecture
+
+[Workspace discovery](src/cli_check/workspace.py) reads Cargo package metadata.
+The [command](src/cli_check/command.py) selects packages and dispatches to independent
+layout, test, documentation, and benchmark checks. Checks return diagnostics rather
+than modifying packages. [Affected-package selection](src/cli_check/affected.py)
+and [hook planning](src/cli_check/hooks.py) keep repository integration separate
+from the rules themselves.

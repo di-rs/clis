@@ -1,7 +1,7 @@
 # Configure Boxie processes
 
 Configure the supervisor and API separately. Provision PostgreSQL, Temporal,
-and a native Linux/gVisor host using the [infrastructure guide](../infra/README.md)
+and a native Linux/gVisor host using the [infrastructure guide](deployment.md)
 before running these commands. Both endpoints must remain private.
 
 ## Start the supervisor

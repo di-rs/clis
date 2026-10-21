@@ -29,8 +29,8 @@ which requires changes to the CLI's own implementation.
 ## Run locally
 
 The UI uses Svelte and TypeScript; the server uses Python/FastAPI. Before starting
-the backend, provision a private [Boxie service](../../packages/boxie/infra/README.md)
-and a separate PostgreSQL database. [Playground infrastructure](infra/README.md)
+the backend, provision a private [Boxie service](../../packages/boxie/docs/deployment.md)
+and a separate PostgreSQL database. [Playground infrastructure](docs/deployment.md)
 covers Compose and production deployment.
 
 Interactive sandboxes require native Linux with gVisor. Docker Desktop can build
@@ -113,11 +113,19 @@ input method editors (IMEs).
 
 ### Change storage or diagnose failures
 
-Read [persistence](docs/persistence.md) before changing session recovery or
-metadata storage, and [request tracing](docs/requests.md) to diagnose an action
+Read [persistence](docs/database.md) before changing session recovery or
+metadata storage, and [request tracing](docs/observability.md) to diagnose an action
 across services. The [PR workflow](../../.github/workflows/pull-request-check.yml)
 checks Python, frontend, and browser behavior; the
 [native lifecycle workflow](../../.github/workflows/sanctuary-lifecycle.yml)
 checks the Linux/gVisor deployment.
+
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [Database](docs/database.md)
+- [Observability](docs/observability.md)
+- [Deployment](docs/deployment.md)
+- [Previews](docs/previews.md)
 
 [Repository architecture](../../docs/architecture.md)

@@ -155,4 +155,6 @@ before writing, retain I/O causes for downcasting and never flush caller writers
 The older ASCII entry points `generate` and `gen_random_lines` retain `io::Result`.
 See the [API examples](src/lib.rs) and operation-module doctests.
 
+[Architecture](docs/architecture.md) explains the implementation and boundaries.
+
 [All projects](../../README.md)

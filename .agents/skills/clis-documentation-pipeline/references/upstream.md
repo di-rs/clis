@@ -25,47 +25,32 @@ references, and evaluation cases are included.
 
 ## Local adaptations
 
-- README guidance is adapted to Sanctuary: no fixed length, mandatory section
-  inventory, or automatic page splitting. Important technical detail remains;
-  audience, task, and navigation determine its placement.
-- Technical completeness is scoped to the page's promise. The editorial pass
-  checks repetition across related pages as well as within one document.
-- The repository-owned [writing patterns](writing-patterns.md) collect public
-  examples and their applications without copying their product-specific content.
+The repository pipeline owns Sanctuary's documentation layout, verification, and
+writing/checking/editing sequence. The root README remains brief, component docs
+have flat topic locations, and future direction is separate from current architecture.
 
-- Both Flagrare skills link to their installed writing/editorial counterpart
-  instead of requiring a Flagrare slash command. References to other Flagrare
-  skills remain upstream context; the wrapper does not require them.
-- `write-docs` uses "Valve game patch notes" in two upstream asides so the
-  repository spelling check does not mistake the game's name for a typo.
-- `editorial-pass` has a shorter discovery description within the 1,024-character
-  limit. Its research link points to the pinned upstream file, since that file
-  lives outside the imported skill directory.
-  Its noise-category introduction is corrected to match the four categories.
-- `technical-documentation` no longer points to an uninstalled `documents` skill.
-  Its missing `information-architecture.md` reference is replaced with inline
-  routing guidance; upstream does not ship that file. A redundant compatibility
-  frontmatter field was removed for compatibility with the skill validator.
-- Nested Markdown examples in `readme-patterns.md` use four-backtick outer fences
-  so their inner shell blocks render correctly.
-- Trailing whitespace was removed from blank lines in the API/CLI reference.
-- The OAuth response uses an explicit refresh-token placeholder instead of a
-  credential-like example value. The original import's false-positive finding is
-  fingerprinted in `.gitleaksignore` so historical scans remain enabled.
-- API/CLI reference corrections put OpenAPI serialization fields on the
-  parameter, use named component maps, import FastAPI's `Header`, and use the
-  correct data-format exit code in the example.
+The writing and editorial entry points are condensed local adaptations. They retain
+reader context, coherent explanations, whole-document review, and cross-page
+consolidation. Unavailable external skills, unrelated upstream anecdotes, fixed
+illustration requirements, and conflicting approval gates have been removed.
+Authorized edits include editorial revisions; review-only work remains read-only.
 
-The wrapper keeps the selected order, adapts completeness to the page's purpose,
-and applies editorial changes within an authorized writing/editing task. The
-standalone upstream editorial skill retains its memo-before-rewrite workflow.
+Technical completeness is scoped to the page's promise. README references impose
+no length or section quota. Examples and visuals serve a reader's need rather than
+an exhaustive template. Source attribution and the technical-documentation license
+remain preserved. Its missing upstream information-architecture reference is
+replaced with inline guidance, and it does not require unavailable role skills.
+
+The technical references retain earlier local corrections to Markdown fences,
+OpenAPI parameter serialization and component maps, FastAPI imports, and CLI exit
+code examples. The OAuth example uses a refresh-token placeholder; the historical
+false-positive finding remains fingerprinted in `.gitleaksignore`.
 
 ## Update deliberately
 
 Inspect a new upstream commit before replacing a skill. Import the selected skill
 directory and its referenced resources, preserve license notices, then reapply or
-reassess the adaptations above. Update the pinned links in this file and the
-editorial research link together.
+reassess the adaptations above. Update the pinned links in this file together.
 
 Validate skill frontmatter and local references, run the Markdown checks from
 [the documentation pipeline](../SKILL.md#verify-and-deliver) on every imported Markdown file, and try the
