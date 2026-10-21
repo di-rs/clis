@@ -56,7 +56,11 @@ pre-commit and commit-msg hooks normally. Agents must never run prek checks
 manually, invoke the hook runner directly, disable hooks, or create commits just
 to test them. During development, use the focused tool commands below.
 
-Ruff, workflow linting, Markdown links and spelling receive matching filenames.
+Ruff and workflow linters run once over their repository scope when source or
+configuration changes. Lychee scans all tracked Markdown on every commit, so a
+deleted image or changed link target is checked even when its referring document
+is untouched. Typos scans tracked Markdown when Markdown or its configuration
+changes. Untracked documents need direct checks until they are staged.
 The [package hook runner](../tools/cli-check/src/cli_check/hooks.py) selects Cargo
 packages and Python test directories from the changed paths. Shared source
 changes include dependent packages; test and fixture changes select their owner.
@@ -132,7 +136,7 @@ uv run --locked cli-check -p PACKAGE
 ```
 
 [cli-check](../tools/cli-check/README.md) verifies package boundaries, CLI test
-registration, README links and benchmark coverage. Select `layout`, `tests`,
+registration, README indexing and benchmark coverage. Cargo must be available for metadata discovery. Select `layout`, `tests`,
 `docs` or `benches` after the command to investigate one group. Repeat `-p` for
 multiple packages; CI omits it to check all packages. These checks read the
 workspace; execute the owning package's tests separately to verify behavior.

@@ -1,5 +1,7 @@
 """Selection regressions against real, temporary Git workspaces."""
 
+from pathlib import Path
+
 import pytest
 from conftest import Repository
 from select_suites import Suite
@@ -31,7 +33,9 @@ def test_whole_pr_uses_merge_base_and_includes_earlier_commits(repo: Repository)
 
 
 def test_deleted_source_still_selects_owner(repo: Repository) -> None:
-    (repo.root / "buildins/echor/src/main.rs").unlink()
+    repo.write("buildins/echor/src/module.rs", "// module\n")
+    repo.base = repo.commit()
+    (repo.root / "buildins/echor/src/module.rs").unlink()
     repo.commit()
     assert repo.selection()["packages"] == ["echor"]
 
@@ -52,7 +56,10 @@ def test_nested_source_and_build_script_select_owner(
 
 
 def test_suite_change_does_not_select_any_cli(repo: Repository) -> None:
-    repo.write("buildins/echor/benches/other.toml", 'binary = "echor"\n')
+    repo.write(
+        "buildins/echor/benches/other.toml",
+        'binary = "echor"\n[[cases]]\nname = "sample"\nargs = []\n',
+    )
     repo.base = repo.commit()
     repo.write_suite("buildins/echor", "echor", generate=True)
     repo.commit()
@@ -113,6 +120,8 @@ def test_docs_tests_and_python_tool_configuration_skip_native_suites(
 def test_global_build_and_runner_changes_never_select_suites(repo: Repository, path: str) -> None:
     target = repo.root / path
     previous = target.read_text() if target.exists() else ""
+    if path == "rust-toolchain.toml":
+        previous = (Path(__file__).resolve().parents[3] / path).read_text()
     repo.write(path, previous + "\n# changed\n")
     repo.commit()
     assert repo.selection()["suites"] == []
@@ -243,7 +252,9 @@ def test_cli_manifest_changes_do_not_select_benchmarks(repo: Repository) -> None
 
 
 def test_source_rename_selects_both_owners(repo: Repository) -> None:
-    repo.git("mv", "buildins/echor/src/main.rs", "buildins/wcr/src/moved.rs")
+    repo.write("buildins/echor/src/module.rs", "// module\n")
+    repo.base = repo.commit()
+    repo.git("mv", "buildins/echor/src/module.rs", "buildins/wcr/src/moved.rs")
     repo.commit()
     assert repo.selection()["binaries"] == ["echor", "wcr"]
 
@@ -277,3 +288,23 @@ def test_suite_binary_must_match_owning_package_even_when_unselected(repo: Repos
     assert result.stdout == ""
     assert "other-binary" in result.stderr
     assert "echor" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        'name = "metadata"\nargs = []',
+        'name = "sample"\nargs = []\nunknown = true',
+        'name = "sample"\nargs = "bad"',
+        'name = "sample"\nargs = []\n[[cases]]\nname = "sample"\nargs = []',
+    ],
+)
+def test_selector_rejects_invalid_suite_even_when_unselected(repo: Repository, case: str) -> None:
+    repo.write(
+        "buildins/echor/benches/cli-bench.toml", 'binary = "echor"\n[[cases]]\n' + case + "\n"
+    )
+    repo.commit()
+    result = repo.run_selector()
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "select_suites:" in result.stderr

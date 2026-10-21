@@ -7,7 +7,7 @@ uv run --locked cli-check -p echor
 ```
 
 Run from the repository root or a directory inside its Cargo workspace, using
-the pinned Python version and uv 0.13 or newer. The root uv workspace installs
+the pinned Rust and Python versions and uv 0.13 or newer. The root uv workspace installs
 the command and its Markdown parser from the committed lockfile. A successful
 run prints `CLI checks passed`. Repeat `-p PACKAGE` to select more packages;
 omit it to inspect the whole workspace.
@@ -20,8 +20,8 @@ The default command runs every group. Select one group to investigate a failure:
 | --- | --- |
 | `cli-check layout` | One binary per CLI, matching package/directory/binary names, and an existing `src/main.rs`; rejects CLI sources under `src/bin/`. |
 | `cli-check tests` | Nonempty, enabled `tests/cli.rs`, the Rust `cli-testing` development dependency, and fixture generator conventions. |
-| `cli-check docs` | Nonempty package READMEs, links from the root README, and existing local Markdown link/image targets. |
-| `cli-check benches` | Package-owned benchmark suites, matching binary names, nonempty cases with unique names and argument arrays, or an explicit exemption. |
+| `cli-check docs` | Nonempty package READMEs and links to them from the root README. |
+| `cli-check benches` | Package-owned benchmark suites, matching binary names, the same suite validation as the benchmark runner, or an explicit exemption. |
 
 Prefix these commands with `uv run --locked`. Use `--root` to inspect another
 workspace; it can appear before or after the group:
@@ -56,14 +56,13 @@ format and execution commands.
 
 ## What passing establishes
 
-The inventory expands the root Cargo workspace's declared `members` globs and
-`exclude` patterns and includes a root package. It recognizes explicit binary
-targets and automatic `src/main.rs` and `src/bin/` targets, respecting `autobins`.
-A CLI can also expose a library; library-only packages need no CLI-specific
-tests, README registration or benchmark suite. Cargo validates manifests and the
-complete target graph separately. Declare repository packages in the root
-members list: implicit members introduced only through path dependencies are
-outside this inventory's scope.
+The inventory uses `cargo metadata --locked --no-deps --format-version 1`.
+Cargo supplies workspace members and targets, including implicit path-dependency
+members, explicit targets and automatic targets. This requires Cargo on PATH
+and valid workspace manifests, even when checking one package with `-p`.
+Metadata discovery does not build packages or fetch dependencies. A CLI can also
+expose a library; library-only packages need no CLI-specific tests, README
+registration or benchmark suite. Cargo failures are reported on stderr.
 
 The tests group checks target registration, including `autotests = false`,
 explicit target paths and `test = false`. It rejects `mk-outs.nu` and requires
@@ -74,12 +73,11 @@ completeness, assertion quality or reference correctness. The
 byte fixture loading; the [testing skill](../../.agents/skills/cli-testing/SKILL.md)
 describes how to write behavioral tests.
 
-The docs group parses Markdown links, images and reference links while ignoring
-code blocks. It resolves local paths relative to their document, including
-URL-encoded filenames. It skips external URLs and fragment-only links; links
-with a filename and fragment validate the filename only. Existing link, spelling
-and Rust documentation checks cover their broader scopes.
-For a CLI at the workspace root, the root README is already its index entry.
+The docs group parses the root README's links, including reference links and
+URL-encoded paths, to check that every selected CLI has an index entry. Code
+blocks do not count. For a CLI at the workspace root, the root README is already
+its index entry. Lychee owns general link and anchor validation, and typos owns
+spelling checks.
 
 ## Local hooks and regression tests
 
@@ -87,7 +85,7 @@ The normal commit hook runs all groups for affected Cargo packages. Python CI
 checks the full workspace. Agents must not invoke prek checks manually; use
 `uv run --locked cli-check -p PACKAGE` for focused checks during development.
 
-Regression tests invoke the real command against temporary workspace trees:
+Regression tests invoke the real command and Cargo against temporary workspace trees:
 
 ```sh
 uv run --locked pytest tools/cli-check/tests
@@ -95,3 +93,11 @@ uv run --locked pytest tools/cli-check/tests
 
 The benchmark selector and playground build tool use the same typed inventory.
 See [Testing](../../docs/testing.md) for the remaining repository checks.
+
+Hook integration tests require prek and lychee. They use isolated Git repositories
+and substitute expensive compilers and linters while checking real hook selection;
+the deleted-link regression runs lychee itself:
+
+```sh
+uv run --locked pytest tools/cli-check/tests/test_prek.py -m integration
+```

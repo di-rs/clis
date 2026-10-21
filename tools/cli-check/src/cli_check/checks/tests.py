@@ -3,27 +3,11 @@
 from pathlib import Path
 
 from cli_check.diagnostics import Diagnostic
-from cli_check.workspace import Package, string, table, tables
+from cli_check.workspace import Package, table
 
 
 def cli_test_enabled(package: Package) -> bool:
-    targets = tables(package.manifest.get("test", []))
-    entrypoint = (package.directory / "tests/cli.rs").resolve()
-    explicit = [
-        target
-        for target in targets
-        if (
-            package.directory
-            / string(target.get("path", f"tests/{target['name']}.rs"), "test.path")
-        ).resolve()
-        == entrypoint
-    ]
-    if explicit:
-        return any(target.get("test") is not False for target in explicit)
-    settings = table(package.manifest["package"])
-    return settings.get("autotests") is not False and not any(
-        target.get("name") == "cli" for target in targets
-    )
+    return (package.directory / "tests/cli.rs").resolve() in package.enabled_tests
 
 
 def check(root: Path, packages: list[Package]) -> list[Diagnostic]:

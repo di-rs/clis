@@ -43,6 +43,8 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
           cache-suffix: ${{ github.job }}
+      - name: 🦀 Prepare Cargo metadata toolchain
+        run: cargo --version
       - name: 🔎 Select only CLIs with code changes
         id: selection
         env:

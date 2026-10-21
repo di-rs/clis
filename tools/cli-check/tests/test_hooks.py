@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -104,9 +105,6 @@ def test_shared_configs_select_only_their_language(workspace: Path) -> None:
         "apps/client/tests",
         "apps/other/tests",
     ]
-    assert plan(workspace, "ruff-config", "apps/api/pyproject.toml") == [
-        ["uv", "run", "--locked", "ruff", "check", "apps/api"]
-    ]
     assert plan(workspace, "cli-check", "README.md")[0].count("-p") == 3
     assert plan(workspace, "cargo-fmt", "crates/one/src/lib.rs") == [
         ["cargo", "fmt", "-p", "one", "--", "--check"]
@@ -178,7 +176,8 @@ def test_runner_preserves_failure_and_no_selection_runs_nothing(workspace: Path)
     bin_dir.mkdir()
     stub = bin_dir / "cargo"
     stub.write_text(
-        f"#!{sys.executable}\nimport json, pathlib, sys\n"
+        f"#!{sys.executable}\nimport json, os, pathlib, sys\n"
+        f"if sys.argv[1] == 'metadata': os.execv({shutil.which('cargo')!r}, ['cargo', *sys.argv[1:]])\n"
         "pathlib.Path('called.json').write_text(json.dumps(sys.argv[1:]))\nsys.exit(7)\n"
     )
     stub.chmod(0o755)

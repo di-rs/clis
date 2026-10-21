@@ -1,4 +1,4 @@
-"""Check package README discoverability and local Markdown link targets."""
+"""Check nonempty package READMEs and their root index entries."""
 
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -40,16 +40,8 @@ def check(root: Path, packages: list[Package]) -> list[Diagnostic]:
         if not readme.is_file() or not readme.read_bytes().strip():
             errors.append(Diagnostic(relative, "docs", "readme", "requires a nonempty README.md"))
             continue
-        links = local_links(readme)
         if readme == root / "README.md":
-            root_links.update(target for _, target in links)
-        for link, target in links:
-            if not target.exists():
-                errors.append(
-                    Diagnostic(
-                        relative, "docs", "local-link", f"local link target does not exist: {link}"
-                    )
-                )
+            root_links.update(target for _, target in local_links(readme))
     for package in clis:
         if package.directory == root:
             continue

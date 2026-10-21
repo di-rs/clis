@@ -11,6 +11,7 @@ from cli_check.workspace import discover, find_root, load_toml, strings, table, 
 
 RUST_CONFIG = {
     "Cargo.toml",
+    "prek.toml",
     "Cargo.lock",
     "rust-toolchain.toml",
     "rustfmt.toml",
@@ -118,7 +119,7 @@ def python_packages(root: Path, paths: list[str], *, dependents: bool) -> list[s
 def commands(root: Path, hook: str, paths: list[str]) -> list[list[str]]:
     if hook.startswith("cargo-") or hook == "cli-check":
         if hook == "cli-check" and any(
-            path in {"README.md", "pyproject.toml", "uv.lock"}
+            path in {"README.md", "pyproject.toml", "uv.lock", "prek.toml"}
             or path.startswith("tools/cli-check/")
             for path in paths
         ):
@@ -171,10 +172,6 @@ def commands(root: Path, hook: str, paths: list[str]) -> list[list[str]]:
         return [[*UV, "pytest", *tests]] if tests else []
     if hook == "mypy":
         return [[*UV, "mypy", *directories]]
-    if hook == "ruff-config":
-        return [[*UV, "ruff", "check", *directories]]
-    if hook == "ruff-format-config":
-        return [[*UV, "ruff", "format", "--check", *directories]]
     raise ValueError(f"Unknown package hook: {hook}")
 
 
@@ -203,8 +200,6 @@ def main() -> int:
             "cli-check",
             "mypy",
             "python-tests",
-            "ruff-config",
-            "ruff-format-config",
         ),
     )
     parser.add_argument("paths", nargs="+")

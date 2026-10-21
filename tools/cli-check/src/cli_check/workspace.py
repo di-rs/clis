@@ -1,9 +1,7 @@
-"""Read declared Cargo members and targets without invoking Cargo.
+"""Read workspace members and targets from Cargo without building packages."""
 
-Cargo validates the complete graph, including implicit path-dependency members.
-Repository packages must be declared in the root workspace's member patterns.
-"""
-
+import json
+import subprocess
 import tomllib
 from pathlib import Path
 from typing import cast
@@ -58,6 +56,7 @@ class Package(WorkspaceRecord):
     manifest: dict[str, object]
     binaries: tuple[Binary, ...]
     library: bool
+    enabled_tests: tuple[Path, ...] = ()
 
     @property
     def is_cli(self) -> bool:
@@ -65,80 +64,58 @@ class Package(WorkspaceRecord):
         return bool(self.binaries) or not self.library
 
 
-def binary_targets(directory: Path, manifest: dict[str, object]) -> tuple[Binary, ...]:
-    package = table(manifest["package"])
-    name = string(package.get("name"), "package.name")
-    candidates = [Binary(name=name, source=directory / "src/main.rs")]
-    candidates.extend(
-        Binary(name=path.stem, source=path) for path in sorted(directory.glob("src/bin/*.rs"))
-    )
-    candidates.extend(
-        Binary(name=path.parent.name, source=path)
-        for path in sorted(directory.glob("src/bin/*/main.rs"))
-    )
-    explicit: list[Binary] = []
-    for target in tables(manifest.get("bin", [])):
-        target_name = string(target.get("name"), "bin.name")
-        source = target.get("path")
-        if source is None:
-            source = next(
-                (
-                    str(item.source)
-                    for item in candidates
-                    if item.name == target_name and item.source.is_file()
-                ),
-                str(directory / f"src/bin/{target_name}.rs"),
-            )
-            explicit.append(Binary(name=target_name, source=Path(source).resolve()))
-        else:
-            explicit.append(
-                Binary(name=target_name, source=(directory / string(source, "bin.path")).resolve())
-            )
-    if package.get("autobins") is False:
-        return tuple(explicit)
-    names = {target.name for target in explicit}
-    paths = {target.source for target in explicit}
-    return tuple(explicit) + tuple(
-        Binary(name=item.name, source=item.source.resolve())
-        for item in candidates
-        if item.source.is_file() and item.name not in names and item.source.resolve() not in paths
-    )
-
-
 def discover(root: Path) -> list[Package]:
     root = root.resolve()
-    manifest = load_toml(root / "Cargo.toml")
-    workspace = table(manifest["workspace"])
-    members = {
-        directory.resolve()
-        for pattern in strings(workspace.get("members", []), "workspace.members")
-        for directory in root.glob(pattern)
-    }
-    excluded = {
-        directory.resolve()
-        for pattern in strings(workspace.get("exclude", []), "workspace.exclude")
-        for directory in root.glob(pattern)
-    }
-    if "package" in manifest:
-        members.add(root)
+    command = [
+        "cargo",
+        "metadata",
+        "--locked",
+        "--no-deps",
+        "--format-version",
+        "1",
+        "--manifest-path",
+        str(root / "Cargo.toml"),
+    ]
+    try:
+        output = subprocess.run(command, cwd=root, capture_output=True, text=True, check=True)
+    except OSError as error:
+        raise ValueError(f"Cannot run cargo metadata: {error}") from error
+    except subprocess.CalledProcessError as error:
+        raise ValueError(f"cargo metadata failed: {error.stderr.strip()}") from error
+    metadata = table(json.loads(output.stdout))
+    members = strings(metadata["workspace_members"], "workspace_members")
     result: list[Package] = []
-    for directory in sorted(members - excluded):
-        data = load_toml(directory / "Cargo.toml")
-        package = table(data["package"])
-        name = string(package.get("name"), f"{directory}/Cargo.toml package.name")
-        library = "lib" in data or (
-            package.get("autolib") is not False and (directory / "src/lib.rs").is_file()
-        )
+    for package in tables(metadata["packages"]):
+        if package["id"] not in members:
+            continue
+        manifest = Path(string(package["manifest_path"], "manifest_path")).resolve()
+        targets = tables(package["targets"])
         result.append(
             Package(
-                name=name,
-                directory=directory,
-                manifest=data,
-                binaries=binary_targets(directory, data),
-                library=library,
+                name=string(package["name"], "package.name"),
+                directory=manifest.parent,
+                manifest=load_toml(manifest),
+                binaries=tuple(
+                    Binary(
+                        name=string(target["name"], "target.name"),
+                        source=Path(string(target["src_path"], "target.src_path")).resolve(),
+                    )
+                    for target in targets
+                    if "bin" in strings(target["kind"], "target.kind")
+                ),
+                library=any(
+                    set(strings(target["kind"], "target.kind"))
+                    & {"lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"}
+                    for target in targets
+                ),
+                enabled_tests=tuple(
+                    Path(string(target["src_path"], "target.src_path")).resolve()
+                    for target in targets
+                    if "test" in strings(target["kind"], "target.kind") and target["test"]
+                ),
             )
         )
-    return result
+    return sorted(result, key=lambda package: package.directory)
 
 
 def find_root(start: Path) -> Path:
