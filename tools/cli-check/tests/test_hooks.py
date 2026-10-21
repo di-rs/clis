@@ -60,7 +60,7 @@ def test_python_test_never_runs_rust_checks(workspace: Path) -> None:
     for hook in ("cargo-fmt", "cargo-clippy", "cargo-nexttest", "cli-check"):
         assert plan(workspace, hook, "apps/api/tests/test_app.py") == []
     assert plan(workspace, "python-tests", "apps/api/tests/deleted.py") == [
-        ["uv", "run", "--locked", "pytest", "apps/api/tests"]
+        ["uv", "run", "pytest", "apps/api/tests"]
     ]
 
 
@@ -70,7 +70,6 @@ def test_rust_source_includes_consumers_but_fixture_only_checks_owner(workspace:
             "cargo",
             "nextest",
             "run",
-            "--locked",
             "-p",
             "one",
             "-p",
@@ -88,10 +87,10 @@ def test_rust_source_includes_consumers_but_fixture_only_checks_owner(workspace:
 
 def test_python_source_checks_consumers_without_unrelated_package(workspace: Path) -> None:
     assert plan(workspace, "python-tests", "apps/api/src/api.py") == [
-        ["uv", "run", "--locked", "pytest", "apps/api/tests", "apps/client/tests"]
+        ["uv", "run", "pytest", "apps/api/tests", "apps/client/tests"]
     ]
     assert plan(workspace, "mypy", "apps/api/tests/test_app.py") == [
-        ["uv", "run", "--locked", "mypy", "apps/api"]
+        ["uv", "run", "mypy", "apps/api"]
     ]
 
 
@@ -105,7 +104,7 @@ def test_shared_configs_select_only_their_language(workspace: Path) -> None:
         "apps/other/tests",
     ]
     assert plan(workspace, "ruff-config", "apps/api/pyproject.toml") == [
-        ["uv", "run", "--locked", "ruff", "check", "apps/api"]
+        ["uv", "run", "ruff", "check", "apps/api"]
     ]
     assert plan(workspace, "cli-check", "README.md")[0].count("-p") == 3
     assert plan(workspace, "cargo-fmt", "crates/one/src/lib.rs") == [
@@ -116,7 +115,7 @@ def test_shared_configs_select_only_their_language(workspace: Path) -> None:
 def test_real_repository_reset_test_is_isolated() -> None:
     path = "infra/environments/single-host/tests/test_reset.py"
     assert plan(ROOT, "python-tests", path) == [
-        ["uv", "run", "--locked", "pytest", "infra/environments/single-host/tests"]
+        ["uv", "run", "pytest", "infra/environments/single-host/tests"]
     ]
     assert plan(ROOT, "cargo-nexttest", path) == []
     assert plan(ROOT, "cargo-clippy", path) == []
@@ -134,7 +133,7 @@ def test_real_repository_reset_test_is_isolated() -> None:
 )
 def test_checker_changes_select_structural_checks_only(workspace: Path, path: str) -> None:
     assert plan(workspace, "cli-check", path) == [
-        ["uv", "run", "--locked", "cli-check", "-p", "one", "-p", "shared", "-p", "two"]
+        ["uv", "run", "cli-check", "-p", "one", "-p", "shared", "-p", "two"]
     ]
     for hook in ("cargo-fmt", "cargo-clippy", "cargo-nexttest"):
         assert plan(workspace, hook, path) == []
@@ -191,7 +190,7 @@ def test_runner_preserves_failure_and_no_selection_runs_nothing(workspace: Path)
         text=True,
     )
     assert result.returncode == 7, result.stderr
-    assert json.loads((workspace / "called.json").read_text())[3:5] == ["-p", "one"]
+    assert json.loads((workspace / "called.json").read_text())[2:4] == ["-p", "one"]
     (workspace / "called.json").unlink()
     result = subprocess.run(
         [sys.executable, "-m", "cli_check.hooks", "cargo-nexttest", "apps/api/tests/test_app.py"],
@@ -227,6 +226,6 @@ def test_mypy_resolves_workspace_dependencies_without_adding_them_as_targets(
     )
     assert result.returncode == 0, result.stderr
     captured = json.loads((workspace / "mypy.json").read_text())
-    assert captured["args"] == ["run", "--locked", "mypy", "apps/client"]
+    assert captured["args"] == ["run", "mypy", "apps/client"]
     assert str(workspace / "apps/api/src") in captured["paths"]
     assert str(workspace / "apps/api/tests") in captured["paths"]

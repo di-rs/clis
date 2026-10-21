@@ -5,7 +5,7 @@ COPY rust-toolchain.toml ./
 RUN rustup show
 COPY . .
 ARG CLI=echor
-RUN cargo build --locked --release --package "$CLI" \
+RUN cargo build --release --package "$CLI" \
     && mkdir /out && cp "target/release/$CLI" "/out/$CLI"
 FROM scratch
 COPY --from=build /out/ /

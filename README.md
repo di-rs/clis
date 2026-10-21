@@ -1,28 +1,39 @@
 # Sanctuary
 
-Sanctuary is a workspace of Rust command-line utilities, reusable libraries, and
-Python services. Each project's
-README describes its usage, API, and current limitations. See [Testing](docs/testing.md)
-for test commands and regression guidance, and [Benchmarking](docs/benchmarking.md)
-for per-CLI TOML suites using Biggie and hyperfine.
+Sanctuary is a collection of Rust command-line tools, shared libraries, and the
+services used to try those tools in a browser. Each CLI is its own Cargo package.
+Python services and repository tools share a uv workspace.
 
-## Layout
+## Try a command
 
-- `buildins/`: command-line utilities, each with its own Cargo package.
-- `packages/`: applications and services, including Biggie, Kara, Parsu, and Boxie.
-- `utils/`: shared Rust libraries.
-- `tools/`: repository checks, benchmarks, and the browser playground.
-- `infra/`: host provisioning and environment composition.
+From the repository root with the pinned Rust toolchain installed:
 
-Run Rust packages from the root with `cargo run --locked -p NAME -- ARGS`.
-Run Python package commands with `uv run --locked --package NAME COMMAND`.
-Cargo and uv resolve package names independently of their directory locations.
-File inputs, test paths, and Docker build contexts still use filesystem paths.
+```sh
+cargo run -p echor -- hello world
+```
 
-## Packages
+Choose another package from the tables below. These commands implement selected
+behaviors, not complete GNU/BSD replacements; each README explains the differences.
 
-Applications and services in `packages/` cover data generation, sandbox execution,
-text editing, and parsing. Follow each project's README for usage and limitations.
+For Python tools, install the workspace dependencies with
+`uv sync --all-packages`, then run commands through `uv run`.
+Frontend development has its own prerequisites in the playground guide.
+
+## Find your way around
+
+The [architecture overview](docs/architecture.md) explains how local commands, PR
+builds, the playground, and Boxie fit together. The
+[threat model](docs/thread-model.md) describes security boundaries.
+
+| Directory | Contents |
+| --- | --- |
+| `buildins/` | Small standalone Rust CLIs |
+| `packages/` | Larger applications and Boxie |
+| `utils/` | Shared Rust libraries |
+| `tools/` | Repository checks, benchmarks, and browser playground |
+| `infra/` | Host provisioning and service composition |
+
+## Applications
 
 | Project | Purpose |
 | --- | --- |
@@ -31,10 +42,7 @@ text editing, and parsing. Follow each project's README for usage and limitation
 | [kara](packages/kara/README.md) | Edit text in a terminal |
 | [parsu](packages/parsu/README.md) | Parse a restricted XML-like language |
 
-## Buildins
-
-Small Rust command-line utilities in `buildins/` work with text, files,
-directories, and calendars. Each command has its own Cargo package and README.
+## Commands
 
 | Project | Purpose |
 | --- | --- |
@@ -56,28 +64,27 @@ directories, and calendars. Each command has its own Cargo package and README.
 | [uniqr](buildins/uniqr/README.md) | Filter or count adjacent repeated lines |
 | [wcr](buildins/wcr/README.md) | Count lines, words, bytes, and characters |
 
-The Rust CLIs share structured logging to local rotating files. See
-[logging configuration and the dashboard contract](utils/cli-log/README.md).
-
-## Tools
-
-Repository tools in `tools/` check package conventions, run benchmarks, and let
-you try CLI changes in a browser.
+## Development tools
 
 | Project | Purpose |
 | --- | --- |
-| [cli-bench](docs/benchmarking.md) | Run per-CLI benchmark suites with Biggie and hyperfine |
+| [cli-bench](tools/cli-bench/README.md) | Run per-CLI benchmark suites with Biggie and hyperfine |
 | [cli-check](tools/cli-check/README.md) | Check CLI package boundaries, tests, documentation, and benchmark coverage |
 | [cli-playground](tools/cli-playground/README.md) | Try Rust CLIs in a browser terminal with disposable files and a preview URL per PR |
 
-## Libraries
-
-Shared Rust libraries in `utils/` provide logging and test support for the CLIs.
+## Shared libraries
 
 | Project | Purpose |
 | --- | --- |
 | [cli-log](utils/cli-log/README.md) | Shared structured file logging and error reporting |
 | [cli-testing](utils/cli-testing/README.md) | Shared CLI test setup and byte fixture loading |
 
-See [LICENSE](LICENSE) for the Apache-2.0 license. Retain existing tutorial and other
-attribution in individual packages when extending their implementations.
+## Make a change
+
+Read the owning package's README first. Run checks for the affected package, for
+example `uv run cli-check -p echor` for repository conventions.
+The [CLI testing skill](.agents/skills/cli-testing/SKILL.md) explains behavioral
+tests and reference fixtures; [AGENTS.md](AGENTS.md) records repository rules.
+Deployment instructions live in the [shared-host guide](infra/environments/single-host/README.md).
+
+Licensed under [Apache-2.0](LICENSE). Preserve tutorial credits in package READMEs.

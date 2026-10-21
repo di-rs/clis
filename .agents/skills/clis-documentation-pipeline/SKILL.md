@@ -95,7 +95,7 @@ document from beginning to end. Ensure local links resolve from its final path
 and diagrams, if useful, describe the system accurately. Keep the verification
 trail in the completion report, with reader-relevant evidence in the document.
 
-Follow [Testing](../../../docs/testing.md) for documentation checks. Run
+For documentation checks, run
 `lychee --offline --include-fragments=anchor-only -- PATH...` and
 `typos --force-exclude -- PATH...` directly for new and changed Markdown files,
 then run `git diff --check`. Never invoke prek checks manually; normal commit

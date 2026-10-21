@@ -120,7 +120,6 @@ class LifecycleStack(ProductionStack):
             [
                 "uv",
                 "run",
-                "--locked",
                 "python",
                 "-m",
                 "boxie_infra.config",

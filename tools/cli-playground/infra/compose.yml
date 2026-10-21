@@ -4,7 +4,7 @@ services:
     image: ${CLI_PLAYGROUND_IMAGE:-cli-playground:local}
     build:
       context: ../../..
-      dockerfile: tools/cli-playground/infra/CliPlayground.Dockerfile
+      dockerfile: tools/cli-playground/infra/docker/CliPlayground.Dockerfile
     ports: ["127.0.0.1:8000:8000"]
     environment:
       CLI_PLAYGROUND_DATA_DIR: /var/lib/cli-playground

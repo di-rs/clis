@@ -45,13 +45,13 @@ jobs:
       - name: 🏗️ Build Boxie sandbox and native CLI
         run: |
           docker build -f packages/boxie/sandbox/Dockerfile -t boxie-sandbox:lifecycle .
-          cargo build --locked --release --package echor
+          cargo build --release --package echor
       - name: 🐳 Build Boxie image
         run: |
           docker build -f packages/boxie/infra/Boxie.Dockerfile -t boxie:lifecycle .
       - name: 🐳 Build cli-playground image (Frontend and Backend)
         run: |
-          docker build -f tools/cli-playground/infra/CliPlayground.Dockerfile -t cli-playground:lifecycle .
+          docker build -f tools/cli-playground/infra/docker/CliPlayground.Dockerfile -t cli-playground:lifecycle .
       - name: 🟢 Set up Node.js and frontend tooling
         uses: voidzero-dev/setup-vp@68f39c78aaf39be468cabd2afb09c162574c84af # v1.21.2
         with:
@@ -62,12 +62,12 @@ jobs:
           cache: true
       - name: 📦 Install locked Python workspace dependencies
         run: |
-          uv sync --locked --all-packages
+          uv sync --all-packages
       - name: 🌐 Install frontend and Chromium dependencies
         run: |
-          pnpm --dir tools/cli-playground/frontend install --frozen-lockfile
+          pnpm --dir tools/cli-playground/frontend install
           pnpm --dir tools/cli-playground/frontend exec playwright install --with-deps chromium
       - name: 🎭 Run native lifecycle and browser tests
         timeout-minutes: 20
         run: |
-          uv run --locked pytest -m integration packages/boxie/tests/integration/test_lifecycle.py tools/cli-playground/tests/test_native.py -vv --durations=10 -o faulthandler_timeout=120
+          uv run pytest -m integration packages/boxie/tests/integration/test_lifecycle.py tools/cli-playground/tests/test_native.py -vv --durations=10 -o faulthandler_timeout=120

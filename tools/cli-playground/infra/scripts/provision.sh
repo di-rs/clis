@@ -12,6 +12,6 @@ timeout 180 docker compose --env-file "$config/boxie.env" -f "$boxie/postgres/co
     up -d --no-build --wait --wait-timeout 150 postgres
 {
     printf "\\set playground_password '%s'\n" "$password"
-    cat "$owner/postgres.sql"
+    cat "$owner/postgres/postgres.sql"
 } | timeout 60 docker compose --env-file "$config/boxie.env" -f "$boxie/postgres/compose.yml" \
     exec -T postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1

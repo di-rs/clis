@@ -1,121 +1,46 @@
 # cli-log
 
-Shared configuration and command lifecycle helpers for the workspace's CLIs.
-Libraries emit standard [`log`](https://docs.rs/log/latest/log/) events.
-[`flexi_logger`](https://docs.rs/flexi_logger/latest/flexi_logger/) handles JSON
-formatting, file I/O, rotation, cleanup, filtering, and optional stderr output.
-There is no custom logging backend. Tracing spans are unnecessary for inspecting
-local command activity and errors.
+`cli-log` gives the Rust CLIs consistent log configuration and records when a
+command starts, finishes, or fails. It uses the `log` facade and `flexi_logger`
+for file output and rotation. Logs never go to stdout, so pipelines keep their
+normal command output.
 
-## Configuration
+## Configure a command
 
-| Setting | Behavior |
-| --- | --- |
-| `SANCTUARY_LOG_DIR` | Shared log directory override; relative paths use the working directory. |
-| `SANCTUARY_LOG_LEVEL` | File threshold: `off`, `error`, `warn`, `info`, `debug`, `trace`; default `info`. |
-| `SANCTUARY_LOG_STDERR` | Independent text logging to stderr; same levels, default `off`. |
-| `SANCTUARY_LOG_SESSION` | Optional shell session identifier recorded at startup. |
+| Variable | Meaning | Default |
+| --- | --- | --- |
+| `SANCTUARY_LOG_DIR` | Directory for invocation log files | Platform state/log directory |
+| `SANCTUARY_LOG_LEVEL` | File threshold | `info` |
+| `SANCTUARY_LOG_STDERR` | Independent stderr threshold | `off` |
+| `SANCTUARY_LOG_SESSION` | Optional shell session identifier | Unset |
 
-Default directory: absolute `$XDG_STATE_HOME/sanctuary/logs` on Unix when configured;
-otherwise `$HOME/Library/Logs/sanctuary` on macOS, `$HOME/.local/state/sanctuary/logs` on
-other Unix, or `$LOCALAPPDATA/sanctuary/logs` on Windows. Relative `XDG_STATE_HOME` is
-ignored. `RUST_LOG` is not used. Invalid environment levels warn and use defaults;
-unavailable storage warns without failing the command.
-
-Biggie's `-L/--log-level` overrides the file threshold. Grepr's verbosity flags
-select its console threshold. Kara disables console logging to protect its UI.
-Logging never writes to stdout. Required terminal diagnostics still print when
-logging is off, and already-reported errors are persisted without printing again.
+Levels are `off`, `error`, `warn`, `info`, `debug`, and `trace`. For example,
+from the workspace root:
 
 ```sh
-SANCTUARY_LOG_DIR=/tmp/my-cli-logs SANCTUARY_LOG_LEVEL=debug biggie bytes - -b 16
-SANCTUARY_LOG_LEVEL=off catr input.txt
+SANCTUARY_LOG_LEVEL=off cargo run -p catr -- Cargo.toml
 ```
 
-## Integrate a binary
+On Unix, an absolute `XDG_STATE_HOME` selects `sanctuary/logs` beneath it.
+Otherwise, macOS uses `~/Library/Logs/sanctuary`, other Unix systems use
+`~/.local/state/sanctuary/logs`, and Windows uses `$LOCALAPPDATA/sanctuary/logs`.
+Relative directory overrides use the command's working directory. `RUST_LOG`
+is ignored; invalid levels and unavailable storage produce warnings.
 
-Use `run` to initialize logging, parse arguments, and record the returned exit
-status. Install panic/reporting hooks first. Reusable libraries must not initialize
-a logger. Flush application data writers and join workers before returning.
+Biggie's `-L` overrides its file threshold, Grepr's verbosity controls console
+logging, and Kara disables console logging to protect its interface.
+Required command diagnostics still appear when logging is off.
 
-```rust,no_run
-use clap::Parser;
-use std::process::ExitCode;
+## Add logging or read its output
 
-#[derive(Parser)]
-struct Cli {
-    input: String,
-}
+Binary authors should follow [integration](docs/integration.md). Libraries emit
+ordinary `log` events and leave logger initialization to the binary.
+For file names, JSON fields, lifecycle events, and rotation, see
+[log-file format](docs/log-files.md).
 
-fn main() -> ExitCode {
-    cli_log::run("example", |cli: Cli| match std::fs::metadata(&cli.input) {
-        Ok(metadata) => {
-            log::info!(bytes = metadata.len(); "input inspected");
-            0
-        }
-        Err(error) => {
-            cli_log::diagnostic!("example: {error}");
-            1
-        }
-    })
-}
-```
+Each invocation retains its own rotated files; there is no directory-wide
+retention limit. Logs are not an audit trail. Arguments and file contents are not
+automatically collected, but error messages can contain paths or rejected input
+and are not automatically redacted.
 
-For a command returning a rich error report, `try_run("name", |cli| run(&cli))`
-logs failures, records status 1, and returns the original error for the existing
-reporter. Success records status 0. Both helpers handle Clap exits without running
-the operation or recording completion twice. Specialized parsing and console
-setup can still use `init`, `Session::parse`, and `Session::finish` directly.
-
-`record_error` persists an error already displayed in a rich report or message
-bar. `diagnostic!` also prints a plain stderr line. `Session::parse` preserves
-Clap output/status and records argument errors; custom parsers can use
-`Session::clap_error`. `LogArgs` and `GlobalLogArgs` provide opt-in Clap flags for
-use with `init_with_level`. Biggie does not persist help/version invocations.
-See the [complete example](examples/clap.rs).
-
-## Files and the future dashboard
-
-Each invocation gets its own files, avoiding concurrent processes rotating the
-same file. An active filename is
-`<command>_<pid>-<startup-nanoseconds>_rCURRENT.jsonl`; rotated files use numbered
-suffixes. Use command and invocation from the filename to group all its records.
-The backend rotates at 5 MiB and retains three rotated files **per invocation**.
-Retention across old invocations belongs to the future shell's log management;
-this utility does not impose a directory-wide size or age limit.
-
-Use `flexi_logger`'s native JSON Lines format: `timestamp`, uppercase `level`,
-`text`, optional source/thread details, and structured values under `kv`.
-For example, a completion record contains:
-
-```json
-{"level":"INFO","timestamp":"2026-10-12T14:00:00Z","text":"command finished","kv":{"event":"command_finished","exit_code":0,"elapsed_ms":12}}
-```
-
-The `command_started` event's `kv` includes `command`, `pid`, `invocation_id`,
-and optional `session_id`. Other boundary events are `command_finished`, `error`,
-`argument_error`, and `panic`. Ordinary library events have no required event
-field. Completion records contain numeric `exit_code` and `elapsed_ms`; an
-intentional status such as `false` returning 1 is not an error. Lifecycle and
-explicit boundary errors bypass the ordinary severity threshold, except `off`,
-which disables all persistence. Panic reporting chains the previous hook.
-
-The shell can pass a directory and session identifier, discover invocation files,
-and tail complete newline-terminated records. Read numbered files for earlier
-records after rotation. A kill or uncaught panic can leave a start without a
-finish; reconcile this with child process status. No dashboard, collector, custom
-schema, or database is included here.
-
-Writes use the backend's direct mode, without an asynchronous queue. New Unix log
-directories are private (`0700`); existing directory permissions stay unchanged.
-File permissions follow the process umask. Logging is not an fsync-backed audit trail.
-No argv, environment dump, stdin, or file contents are automatically collected.
-Application and parser errors can contain paths or rejected values; messages are
-not automatically redacted. Grepr logs match activity without matched contents.
-
-## Validation
-
-`cargo nextest run --locked -p cli-log` covers native JSON and fields, thresholds,
-configuration, output/status preservation, panic hooks, unavailable storage, and
-concurrent invocations. See the [workspace testing guide](../../docs/testing.md)
-for broader checks.
+Run package tests with `cargo nextest run -p cli-log`.

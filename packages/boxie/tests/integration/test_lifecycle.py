@@ -416,7 +416,6 @@ def test_native_generic_consumer(lifecycle_stack: LifecycleStack) -> None:
         [
             "uv",
             "run",
-            "--locked",
             "python",
             "-m",
             "boxie_infra.smoke",

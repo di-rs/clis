@@ -68,7 +68,7 @@ services:
     - 80:80
     - 443:443
     volumes:
-    - ./routes.yml:/etc/traefik/routes.yml:ro
+    - ./proxy/routes.yml:/etc/traefik/routes.yml:ro
     - certificates:/certificates
     depends_on:
       backend:

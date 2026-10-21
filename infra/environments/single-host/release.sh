@@ -72,6 +72,6 @@ scp -F "$private/config" -r "$private/registry" "deployment:$remote/registry"
 case $component in
     boxie) command="/opt/sanctuary/boxie/deploy.sh $SOURCE_SHA" ;;
     boxie-sandbox) command="/opt/sanctuary/boxie/sandbox-release.sh $IMAGE" ;;
-    cli-playground) command=/opt/sanctuary/cli-playground/deploy.sh ;;
+    cli-playground) command=/opt/sanctuary/cli-playground/scripts/deploy.sh ;;
 esac
 ssh -F "$private/config" deployment "set -e; trap 'rm -rf $remote' EXIT; install -m 0600 $remote/image.env /etc/sanctuary/$owner-image.env; DOCKER_CONFIG=$remote/registry bash $command"

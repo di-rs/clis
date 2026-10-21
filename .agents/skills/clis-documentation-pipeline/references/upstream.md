@@ -60,7 +60,7 @@ reassess the adaptations above. Update the pinned links in this file and the
 editorial research link together.
 
 Validate skill frontmatter and local references, run the Markdown checks from
-[Testing](../../../../docs/testing.md) on every imported Markdown file, and try the
+[the documentation pipeline](../SKILL.md#verify-and-deliver) on every imported Markdown file, and try the
 pipeline on a small real document. Check that it uses repository-local skills in
 the selected order, verifies examples, completes authorized edits, and keeps
 review-only work read-only.

@@ -21,7 +21,7 @@ RUST_CONFIG = {
     ".config/nextest.toml",
 }
 PYTHON_CONFIG = {"pyproject.toml", "uv.lock", ".python-version", "ruff.toml", ".ruff.toml"}
-UV = ["uv", "run", "--locked"]
+UV = ["uv", "run"]
 
 
 def owner(path: str, directories: set[str]) -> str | None:
@@ -134,7 +134,6 @@ def commands(root: Path, hook: str, paths: list[str]) -> list[list[str]]:
                 [
                     "cargo",
                     "clippy",
-                    "--locked",
                     *args,
                     "--all-targets",
                     "--all-features",
@@ -151,7 +150,6 @@ def commands(root: Path, hook: str, paths: list[str]) -> list[list[str]]:
                     "cargo",
                     "nextest",
                     "run",
-                    "--locked",
                     *args,
                     "--hide-progress-bar",
                     "--failure-output",

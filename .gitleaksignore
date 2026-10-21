@@ -1,8 +1,0 @@
-# Historical architecture prose: the generic API rule matched consumer/idempotency
-# identity after the API requests phrase. Scope this exception to that one finding.
-a15e10d7db55925abe71e39f342f63ee9e01498b:docs/superpowers/specs/2026-10-15-boxie-design.md:generic-api-key:171
-# Historical unsigned alg=none/sub=forged Access denial fixture; not a credential.
-351789d304ae40d715b4fd37f18808fdb3bb15d3:infra/ingress/ingress_infra/smoke.py:jwt:77
-# Historical upstream OAuth documentation example; replaced with a placeholder.
-# Scope this exception to that exact synthetic refresh-token finding.
-9850016f3893eb588bc5fc61566e42ad24c5f94c:.agents/skills/technical-documentation/references/api-documentation-cli-help.md:generic-api-key:610

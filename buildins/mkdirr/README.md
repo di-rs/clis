@@ -2,27 +2,21 @@
 
 `mkdirr` creates directories, including missing parent directories by default.
 
-## Supported capabilities
+## Arguments and options
 
-- Accept one or more directory paths.
-- Parent creation is enabled by default; the CLI also accepts `-p`.
-- Existing directories are accepted; existing files are errors.
-- Stop and report an error when creation fails.
+| Argument or option | Meaning |
+| --- | --- |
+| `DIRS...` | One or more required directory paths. |
+| `-p` | Create missing parents; already enabled by default. |
+| `-h, --help` | Print help. |
+| `-V, --version` | Print version. |
 
-## Example
+Existing directories are accepted. Existing files or creation failures stop the command with an error.
 
-From the workspace root, using a destination that does not already exist:
-
-```sh
-cargo run -p mkdirr -- mkdirr-example/nested
-```
-
-This creates directories on disk.
-
-## Differences and limits
+## Before using it
 
 Unlike [GNU mkdir](https://www.gnu.org/software/coreutils/manual/html_node/mkdir-invocation.html),
 parent creation needs no `-p`. No permission-mode option is implemented.
 At least one directory path is required.
 
-[Workspace README](../../README.md)
+[All commands](../../README.md)

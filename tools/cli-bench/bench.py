@@ -1,11 +1,6 @@
 #!/usr/bin/env python3.15
 """Run trusted per-CLI TOML cases with Biggie and hyperfine 2.x."""
 
-import sys
-
-if sys.version_info < (3, 15):  # noqa: UP036 -- Direct script users need the version diagnostic.
-    sys.exit("cli-bench requires Python 3.15 or newer; run it with uv run --locked python.")
-
 import argparse
 import filecmp
 import json
@@ -17,6 +12,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import tomllib
 from datetime import UTC, datetime

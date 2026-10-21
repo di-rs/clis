@@ -1,9 +1,13 @@
 # cli-testing
 
-Command setup and fixture loading for Rust CLI integration tests. Add
-`cli-testing.workspace = true` under the consuming package's `[dev-dependencies]`.
+`cli-testing` helps Rust CLI tests start the package's binary and compare its
+output with byte fixtures. Add `cli-testing.workspace = true` to the consuming
+package's `[dev-dependencies]`, then put integration tests under `tests/`.
 
-Read fixtures first, then use the ordinary `assert_cmd` assertion chain:
+## Write a fixture test
+
+Read expected output before starting the command so a missing fixture fails the
+test directly:
 
 ```rust,ignore
 use cli_testing::{cargo_bin_cmd, fixtures};
@@ -25,24 +29,22 @@ fn copies_stdin() -> std::io::Result<()> {
 }
 ```
 
-| API | Purpose |
-| --- | --- |
-| `cargo_bin_cmd!()` | The consuming package's built binary as an `assert_cmd::Command`. An explicit binary name is also accepted. |
-| `command(binary, package_dir)` | The same defaults for an explicit executable path. |
-| `fixtures!()` | A `Fixtures` reader rooted at the consuming package's `tests/`. |
-| `read_input(name)` / `read_expected(name)` | Fallible byte reads under `inputs/` / `expected/`; names must be relative. |
+Place the example's files at `tests/inputs/message.txt` and
+`tests/expected/message.out`. `fixtures!()` resolves paths from the consuming
+package; it never decodes, trims, or updates their bytes.
 
-Command defaults: package cwd, `LC_ALL=C`, `TZ=UTC`, `NO_COLOR=1`, `TERM=dumb`,
-disabled `SANCTUARY_LOG_*` logging and a 30-second `assert_cmd` timeout. Override child
-settings through its builder. Other environment variables are inherited; no
-filesystem sandbox is created. The timeout does not bound descendants or a
-blocked stdin writer; retain nextest's outer CI timeout.
+## Command defaults
 
-Fixture loading performs no decoding, trimming or updates. Reads use the fixture
-root independently of the child cwd; errors include the failed path. These are
-trusted repository files, so name validation does not restrict symlink targets.
-The example belongs in a CLI package's integration test, where Cargo exposes its
-binary path.
+`cargo_bin_cmd!()` returns an ordinary `assert_cmd::Command` for the package's
+binary. It sets the package working directory, C locale, UTC, plain terminal
+output, disabled CLI logging, and a 30-second timeout. Override child settings
+through the command builder. Use `command(binary, package_dir)` for an explicit
+executable path.
 
-See the [testing skill](../../.agents/skills/cli-testing/SKILL.md) for test-writing
-rules and the [verification map](../../docs/testing.md) for commands.
+Other environment variables are inherited, and no filesystem sandbox is created.
+The timeout does not cover descendants or a blocked stdin writer; keep nextest's
+outer timeout. Fixtures are trusted repository files, so relative-name validation
+does not prevent symlinks from pointing elsewhere.
+
+See the [CLI testing skill](../../.agents/skills/cli-testing/SKILL.md) for independent
+reference fixtures, status assertions, and verification commands.

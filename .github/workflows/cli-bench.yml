@@ -49,9 +49,9 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          uv run --locked --no-dev python tools/cli-bench/select_suites.py \
+          uv run --no-dev python tools/cli-bench/select_suites.py \
             --base "$BASE_SHA" --head "$HEAD_SHA" --event "$GITHUB_EVENT_PATH" > selection.json
-          uv run --locked --no-dev python - <<'PY'
+          uv run --no-dev python - <<'PY'
           import json
           import os
           from pathlib import Path
@@ -109,7 +109,7 @@ jobs:
         env:
           PACKAGES: ${{ needs.select.outputs.packages }}
         run: |
-          uv run --locked --no-dev python - <<'PY'
+          uv run --no-dev python - <<'PY'
           import json
           import os
           import subprocess
@@ -118,7 +118,7 @@ jobs:
           if not packages:
               raise SystemExit("No CLI packages selected")
           subprocess.run([
-              "cargo", "build", "--locked", "--release", "--bins",
+              "cargo", "build", "--release", "--bins",
               *[argument for package in packages for argument in ("-p", package)],
           ], check=True)
           PY
@@ -129,7 +129,7 @@ jobs:
           RUNS: ${{ needs.select.outputs.runs }}
           WARMUP: ${{ needs.select.outputs.warmup }}
         run: |
-          uv run --locked --no-dev python - <<'PY'
+          uv run --no-dev python - <<'PY'
           import json
           import os
           import subprocess

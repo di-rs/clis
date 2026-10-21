@@ -1,31 +1,28 @@
-# parsu
+# Parsu
 
-`parsu` parses a small XML-like language and prints the resulting element tree using Rust debug formatting.
+Parsu reads a small XML-like language and prints its element tree using Rust
+debug formatting. It is a parser-combinator exercise, not a general XML parser.
 
-## Supported capabilities
+## Arguments and options
 
-- Read one named UTF-8 file, or `-` for non-terminal stdin.
-- Parse nested elements, self-closing elements, and double-quoted attributes.
-- Names start with a letter, followed by letters, numbers, or hyphens.
-- Closing element names must match their opening names.
+| Argument or option | Meaning |
+| --- | --- |
+| `FILE` | Required UTF-8 file, or `-` for non-terminal stdin. |
+| `-h, --help` | Print help. |
+| `-V, --version` | Print version. |
 
-## Example
+## Accepted syntax
 
-From the workspace root:
+Nested elements, self-closing elements, and double-quoted attributes are supported.
+Names start with a letter and continue with letters, numbers, or hyphens. Closing
+names must match, and input must contain exactly one root.
 
-```sh
-printf '<parent><child name="demo"/></parent>\n' | cargo run -p parsu -- -
-```
+`<child/>` works, but `<child />` does not: whitespace before a closing bracket
+is rejected. Surrounding whitespace and whitespace inside empty parents are
+allowed. Additional roots or trailing non-whitespace input are errors.
 
-## Limits and credit
+Text nodes, namespaces, comments, entities, escaped quotes, and schema validation
+are not supported.
 
-This is not a general XML parser: there are no text nodes, namespaces, comments,
-entity decoding, escaped quotes, or schema validation. Whitespace before `>` or
-`/>` is rejected (`<child/>` works; `<child />` does not). Input must contain
-exactly one root element, with optional surrounding whitespace; trailing non-whitespace
-input and additional roots are rejected. Empty parents may contain whitespace.
-
-There is no direct GNU Coreutils counterpart. Based on Bodil Stokke's tutorial,
-[Learning Parser Combinators With Rust](https://bodil.lol/parser-combinators/).
-
-[Workspace README](../../README.md)
+Based on Bodil Stokke's [Learning Parser Combinators With Rust](https://bodil.lol/parser-combinators/).
+[All projects](../../README.md)
