@@ -476,3 +476,12 @@ def test_database_failure_is_unavailable_and_preserves_preview(
         finally:
             connection.execute("ALTER TABLE unavailable_preview RENAME TO preview")
     assert api_client.get(f"/api/environments/{preview['id']}").status_code == 200
+
+
+def test_json_body_limit_precedes_authentication(api_client: TestClient) -> None:
+    response = api_client.put(
+        "/api/pull-requests/123/build",
+        content=b" " * 16385,
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 413

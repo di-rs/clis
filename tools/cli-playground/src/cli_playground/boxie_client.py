@@ -13,6 +13,7 @@ from websockets.exceptions import ConnectionClosedOK, WebSocketException
 
 from cli_playground.observability import current_request_id
 from cli_playground.sandbox import (
+    AdmissionRejected,
     ArtifactReply,
     BoxieUnavailable,
     SandboxRequest,
@@ -89,6 +90,12 @@ class HttpBoxieClient:
                 headers=self._headers(headers),
                 allow_redirects=False,
             ) as response:
+                if (
+                    method == "POST"
+                    and path == "/v1/sandboxes"
+                    and response.status in {404, 409, 429}
+                ):
+                    raise AdmissionRejected("sandbox admission rejected")
                 data = await bounded_response(response)
                 if response.status not in {200, 201, 202, 204} or len(data) > 65536:
                     raise BoxieUnavailable("sandbox service unavailable")

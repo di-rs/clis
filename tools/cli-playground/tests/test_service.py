@@ -616,3 +616,43 @@ def test_staged_upload_cleanup_requires_known_rejection(
             assert archives == [service.staging.archive(pending[0].artifact.artifact_id)]
 
     asyncio.run(exercise())
+
+
+def test_rejected_admissions_are_removed_including_old_recovery_work(
+    docker_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cli_playground.sandbox import AdmissionRejected, BoxieUnavailable
+
+    async def body() -> AsyncIterator[bytes]:
+        yield binary_bundle({"echor": elf_binary()})
+
+    async def exercise() -> None:
+        service = make_service(docker_settings)
+        environment = await service.deploy(body(), "a" * 40, 123)
+
+        async def reject(key: str, spec: SandboxRequest) -> SandboxView:
+            raise AdmissionRejected("capacity reached")
+
+        monkeypatch.setattr(boxie(service), "create", reject)
+        for _ in range(40):
+            with pytest.raises(AdmissionRejected):
+                await service.create_session(environment.id, environment.revision)
+        assert await service.sessions.creates() == []
+
+        async def uncertain(key: str, spec: SandboxRequest) -> SandboxView:
+            raise BoxieUnavailable("lost response")
+
+        monkeypatch.setattr(boxie(service), "create", uncertain)
+        results = await asyncio.gather(
+            *(service.create_session(environment.id, environment.revision) for _ in range(40)),
+            return_exceptions=True,
+        )
+        assert all(isinstance(result, BoxieUnavailable) for result in results)
+        with pytest.raises(BoxieUnavailable, match="recovery is full"):
+            await service.create_session(environment.id, environment.revision)
+        assert len(await service.sessions.creates()) == 32
+        monkeypatch.setattr(boxie(service), "create", reject)
+        await service.recover()
+        assert await service.sessions.creates() == []
+
+    asyncio.run(exercise())

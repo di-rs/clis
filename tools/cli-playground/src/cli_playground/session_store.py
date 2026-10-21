@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from uuid import UUID, uuid4
 
+from sqlalchemy import func, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import col, delete, select, update
 
@@ -10,7 +11,7 @@ from cli_playground.database import SessionFactory, connection
 from cli_playground.domain import CreateIntent, SessionBinding, UploadIntent, check_build
 from cli_playground.models import BuildIdentity
 from cli_playground.observability import current_request_id
-from cli_playground.sandbox import SandboxView, validate_sandbox
+from cli_playground.sandbox import BoxieUnavailable, SandboxView, validate_sandbox
 from cli_playground.storage import artifact_value, locked_preview, preview_value
 from cli_playground.tables import Binding, Creation, Retirement, Upload
 
@@ -75,6 +76,13 @@ class SessionStore:
 
     async def create_intent(self, intent: CreateIntent) -> None:
         async with connection(self.sessions, write=True) as session:
+            # Serialize admission accounting across workers while allowing updates to
+            # existing ambiguous intents even when the queue is full.
+            await session.scalar(text("SELECT pg_advisory_xact_lock(736216, 1)"))
+            if await session.get(Creation, intent.id) is None:
+                count = await session.scalar(select(func.count()).select_from(Creation))
+                if count is not None and count >= 32:
+                    raise BoxieUnavailable("sandbox admission recovery is full")
             await session.merge(Creation.model_validate(intent.model_dump(mode="json")))
 
     async def creates(self) -> list[CreateIntent]:
