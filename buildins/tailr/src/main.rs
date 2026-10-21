@@ -42,32 +42,34 @@ fn run(cli: &Cli) -> Result<bool, CliError> {
             }
             continue;
         }
-        let result = (|| -> Result<(), CliError> {
+        let prepared = (|| -> Result<(File, u64), CliError> {
             let mut file = get_file_reader(filename)?;
-            if !cli.quiet && num_files > 1 {
-                let filename = filename.display();
-                let delim = if file_num > 0 { "\n" } else { "" };
-                writeln!(writer, "{delim}==> {filename} <==")?;
-            }
-
-            if let Some(num_bytes) = &cli.bytes {
-                let metadata = file.metadata()?;
-                let total_bytes = metadata.len();
-                print_bytes(file, &mut writer, *num_bytes, total_bytes)?;
+            let total = if cli.bytes.is_some() {
+                file.metadata()?.len()
             } else {
-                let total_lines = get_total_lines(&mut file)?;
+                let lines = get_total_lines(&mut file)?;
                 file.rewind()?;
-                let reader = BufReader::new(file);
-                print_lines(reader, &mut writer, cli.lines, total_lines)?;
-            }
-            Ok(())
+                lines
+            };
+            Ok((file, total))
         })();
-        match result {
-            Ok(()) => {}
-            Err(e) => {
+        let (file, total) = match prepared {
+            Ok(input) => input,
+            Err(error) => {
                 failed = true;
-                cli_log::diagnostic!("{}: {e}", filename.display());
+                cli_log::diagnostic!("{}: {error}", filename.display());
+                continue;
             }
+        };
+        if !cli.quiet && num_files > 1 {
+            let filename = filename.display();
+            let delim = if file_num > 0 { "\n" } else { "" };
+            writeln!(writer, "{delim}==> {filename} <==")?;
+        }
+        if let Some(num_bytes) = cli.bytes {
+            print_bytes(file, &mut writer, num_bytes, total)?;
+        } else {
+            print_lines(BufReader::new(file), &mut writer, cli.lines, total)?;
         }
     }
     writer.flush()?;
