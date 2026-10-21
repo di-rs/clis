@@ -18,6 +18,8 @@ Reference: [GNU ls](https://www.gnu.org/software/coreutils/manual/html_node/ls-i
 Output uses paths rather than a columnar filename layout and is not sorted.
 There is no recursive mode; `-a` does not synthesize `.` or `..` entries.
 Long listings follow symlink metadata rather than describing links themselves,
-and group IDs are currently looked up as user IDs, so group names may be wrong.
+and group names are resolved from group IDs, falling back to numeric IDs.
+Invalid operands go to stderr; other operands are processed and the final status
+is 1.
 
 [All commands](../../README.md)

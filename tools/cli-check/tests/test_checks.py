@@ -510,3 +510,24 @@ def test_root_index_resolves_reference_links_and_encoded_paths(workspace: Path) 
     result = run_check(workspace, "docs")
     assert result.returncode == 0, result.stderr
     assert not (workspace / "Cargo.lock").exists()
+
+
+def test_json_diagnostics_discovery_and_errors(tmp_path: Path) -> None:
+    import json
+
+    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["buildins/*", "utils/*"]\n')
+    add_cli(tmp_path)
+    command = [sys.executable, "-m", "cli_check", "--json", "--root", str(tmp_path)]
+    result = subprocess.run(command + ["tests"], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["data"]["diagnostics"] == []
+    result = subprocess.run(command + ["--list-packages"], capture_output=True, text=True)
+    assert result.returncode == 0
+    assert any(p["name"] == "echo" for p in json.loads(result.stdout)["data"]["packages"])
+    result = subprocess.run(command + ["docs"], capture_output=True, text=True)
+    assert result.returncode == 1
+    assert json.loads(result.stdout)["data"]["diagnostics"]
+    result = subprocess.run(command + ["--unknown"], capture_output=True, text=True)
+    assert result.returncode == 2
+    assert json.loads(result.stdout)["error"]["kind"] == "arguments"
+    assert result.stderr == ""

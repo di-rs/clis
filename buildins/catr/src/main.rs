@@ -11,7 +11,7 @@ mod cli;
 
 fn main() -> std::process::ExitCode {
     cli_log::run("catr", |cli| match run(&cli) {
-        Ok(()) => exitcode::OK,
+        Ok(failed) => i32::from(failed),
         Err(CliError::Config) => {
             cli_log::record_error(CliError::Config);
             exitcode::CONFIG
@@ -23,7 +23,8 @@ fn main() -> std::process::ExitCode {
     })
 }
 
-fn run(args: &Args) -> Result<(), CliError> {
+fn run(args: &Args) -> Result<bool, CliError> {
+    let mut failed = false;
     let mut writer = get_writer(args.unbuffered);
 
     for filename in &args.files {
@@ -31,11 +32,14 @@ fn run(args: &Args) -> Result<(), CliError> {
             Ok(reader) => {
                 write_lines(reader, &mut writer, &args.into())?;
             }
-            Err(e) => cli_log::diagnostic!("Failed to open {filename}: {e}"),
+            Err(e) => {
+                failed = true;
+                cli_log::diagnostic!("Failed to open {filename}: {e}");
+            }
         }
     }
     writer.flush()?;
-    Ok(())
+    Ok(failed)
 }
 
 fn get_reader(path: &str) -> Result<Box<dyn BufRead>, CliError> {
@@ -54,8 +58,8 @@ fn get_reader(path: &str) -> Result<Box<dyn BufRead>, CliError> {
 fn get_writer(unbuffered: bool) -> Box<dyn std::io::Write> {
     let stdout = std::io::stdout();
     if unbuffered {
-        Box::new(BufWriter::new(stdout.lock()))
-    } else {
         Box::new(stdout.lock())
+    } else {
+        Box::new(BufWriter::new(stdout.lock()))
     }
 }

@@ -22,7 +22,8 @@ Reference: [GNU wc](https://www.gnu.org/software/coreutils/manual/html_node/wc-i
 A final unterminated line counts as a line, unlike GNU `wc`'s newline count.
 Words use Rust Unicode whitespace splitting; characters are Unicode scalar values,
 not grapheme clusters. Even byte-only counting requires valid UTF-8 input.
-File-open errors are printed but do not by themselves make the command fail.
+File-open errors go to stderr; remaining operands are processed and the final
+exit status is 1.
 
 ## Test notes
 

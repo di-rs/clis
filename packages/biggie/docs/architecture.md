@@ -1,7 +1,7 @@
 # Biggie architecture
 
 Biggie separates command-line and filesystem handling from streaming generators.
-The binary parses and validates arguments, chooses outputs, and dispatches to the
+The binary parses and validates arguments, optionally emits a preview, chooses outputs, and dispatches to the
 library. Library callers supply typed options and writers directly.
 
 ## Generation flow

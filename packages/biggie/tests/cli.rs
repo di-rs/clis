@@ -1456,3 +1456,51 @@ fn invalid_environment_is_ignored_for_help_and_version() {
             .stderr("");
     }
 }
+
+#[test]
+#[allow(
+    clippy::panic_in_result_fn,
+    reason = "Assertions verify observable CLI behavior; Result propagates fixture errors."
+)]
+fn json_preview_preserves_outputs_and_reports_counts() -> Result<()> {
+    let dir = TempDir::new()?;
+    dir.child("output").write_str("keep")?;
+    let result = command()
+        .current_dir(dir.path())
+        .args([
+            "--json",
+            "--dry-run",
+            "records",
+            "--record",
+            "x",
+            "--repeat",
+            "2",
+            "output",
+        ])
+        .assert()
+        .code(0)
+        .stderr("");
+    let value: serde_json::Value = serde_json::from_slice(&result.get_output().stdout)?;
+    assert_eq!(
+        value,
+        serde_json::json!({"ok":true,"data":{"operation":"records","dry_run":true,"outputs":[{"path":"output","count":2,"unit":"records"}]}})
+    );
+    dir.child("output").assert("keep");
+    let result = command()
+        .current_dir(dir.path())
+        .args(["--json", "records", "--record", "x", "output"])
+        .assert()
+        .code(0)
+        .stderr("");
+    let value: serde_json::Value = serde_json::from_slice(&result.get_output().stdout)?;
+    assert_eq!(value["ok"], true);
+    dir.child("output").assert("x\n");
+    let result = command()
+        .args(["--json", "records", "--record", "x", "-"])
+        .assert()
+        .code(1)
+        .stderr("");
+    let value: serde_json::Value = serde_json::from_slice(&result.get_output().stdout)?;
+    assert_eq!(value["ok"], false);
+    Ok(())
+}

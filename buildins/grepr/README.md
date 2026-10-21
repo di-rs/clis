@@ -21,7 +21,9 @@
 
 Reference: the separate [GNU grep manual](https://www.gnu.org/software/grep/manual/grep.html).
 Regex syntax is not GNU basic regular-expression syntax. No-match results still
-exit successfully; file discovery/open errors can also leave a success status.
+exit successfully. File discovery/open errors go to stderr and make the final
+exit status 1; valid operands are still processed. SIGINT uses the operating
+system default interruption behavior without printing into search results.
 
 This is not a binary-file search tool.
 

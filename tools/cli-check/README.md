@@ -31,6 +31,9 @@ for invalid arguments.
 | `layout`, `tests`, `docs`, or `benches` | Optional check group; omit it to run all four. |
 | `-p, --package NAME` | Select a Cargo package; repeat for more packages. Default: whole workspace. |
 | `--root PATH` | Select another Cargo workspace. |
+| `--json` | Emit structured results and errors on stdout. |
+| `--list-packages` | Discover packages without running checks. |
+| `--version` | Show version. |
 | `-h, --help` | Print help. |
 
 See the [check reference](docs/checks.md) for inventory limits and benchmark
@@ -54,3 +57,28 @@ layout, test, documentation, and benchmark checks. Checks return diagnostics rat
 than modifying packages. [Affected-package selection](src/cli_check/affected.py)
 and [hook planning](src/cli_check/hooks.py) keep repository integration separate
 from the rules themselves.
+
+## Installed use and JSON
+
+From the repository root, `make install-python` installs cli-check and cli-bench
+in isolated uv environments, with commands in `~/.local/bin`. Add that directory
+to `PATH`. Installation requires uv and Python 3.15+. Checking requires Cargo;
+there is no authentication or service dependency.
+
+```sh
+cli-check --json --root /path/to/workspace --list-packages
+cli-check --json --root /path/to/workspace tests -p echor
+cli-check --json --root /path/to/workspace
+```
+
+Without `--root`, discovery starts at the current directory. JSON is a CLI
+envelope: discovery returns `{"ok":true,"data":{"packages":[...]}}`, with each
+package containing `name`, absolute `path`, and boolean `cli`. Check results use
+`{"ok":true,"data":{"root":"...","packages":["echor"],"checks":["tests"],"diagnostics":[]}}`.
+Violations set `ok: false`, exit 1, and populate diagnostics with stable `path`,
+`group`, `rule`, and `message` fields in sorted order.
+
+Operational errors return `{"ok":false,"error":{"kind":"operation","message":"..."}}`;
+argument errors use kind `arguments` and exit 2. All JSON goes to stdout;
+stderr stays available for diagnostics. Help/version remain text. Text mode
+retains the existing success and diagnostic formatting.

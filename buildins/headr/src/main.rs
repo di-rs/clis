@@ -12,7 +12,7 @@ use crate::cli::{Args, CliError};
 
 fn main() -> std::process::ExitCode {
     cli_log::run("headr", |cli| match run(&cli) {
-        Ok(()) => exitcode::OK,
+        Ok(failed) => i32::from(failed),
         Err(CliError::Config) => {
             cli_log::record_error(CliError::Config);
             exitcode::CONFIG
@@ -24,7 +24,8 @@ fn main() -> std::process::ExitCode {
     })
 }
 
-fn run(args: &Args) -> Result<(), CliError> {
+fn run(args: &Args) -> Result<bool, CliError> {
+    let mut failed = false;
     let mut writer = get_writer();
     let files_count = args.files.len();
 
@@ -44,11 +45,14 @@ fn run(args: &Args) -> Result<(), CliError> {
                     write_lines(reader, &mut writer, args.lines)?;
                 }
             }
-            Err(e) => cli_log::diagnostic!("{}: {e}", filename.display()),
+            Err(e) => {
+                failed = true;
+                cli_log::diagnostic!("{}: {e}", filename.display());
+            }
         }
     }
     writer.flush()?;
-    Ok(())
+    Ok(failed)
 }
 
 fn get_reader(path: &Path) -> Result<Box<dyn BufRead>, CliError> {

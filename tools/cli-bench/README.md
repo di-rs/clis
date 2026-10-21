@@ -10,11 +10,13 @@ reference or previous build.
 Run it from the repository root with Python 3.15 or newer through the uv
 workspace. Benchmarks require hyperfine 2.x and an existing candidate executable;
 suites with `generate` also require Biggie. The default executable paths are
-under `target/release/`.
+under `target/release/` in the workspace found above the suite. `--root` overrides
+that workspace; if none is found, defaults are relative to the caller's directory.
+Explicit relative paths are always resolved from the caller's directory.
 
 ```sh
 cargo build --release -p tailr -p biggie
-uv run python tools/cli-bench/bench.py buildins/tailr/benches/cli-bench.toml
+uv run cli-bench buildins/tailr/benches/cli-bench.toml
 ```
 
 The runner prints progress and the report directory. Use `--list` to inspect
@@ -35,6 +37,10 @@ the suite's cases without running the benchmark.
 | `--runs N` | Measured runs; must be positive | `20` |
 | `--timeout SECONDS` | Positive timeout per generator, hook, preflight command, or complete hyperfine case | `300` |
 | `--output DIR` | Report directory; must not already exist | `target/benchmarks/<binary>-<timestamp>` |
+| `--root PATH` | Workspace for default executable/report paths | Discover above suite, then cwd |
+| `--json` | Structured results; progress moves to stderr | Off |
+| `--doctor` | Check a suite's dependencies without executing its cases | Off |
+| `--version` | Show runner version | |
 | `--list` | Print selected case names without running tools | Off |
 | `-h`, `--help` | Show help | |
 
@@ -107,8 +113,43 @@ check, not evidence of a performance improvement.
 
 ## Architecture
 
-[bench.py](bench.py) validates suites, prepares a temporary working directory,
+[The runner](src/cli_bench/command.py) validates suites, prepares a temporary working directory,
 runs correctness checks, and invokes hyperfine. [Suite selection](select_suites.py)
 decides which package-owned suites CI should run; [reporting](report.py) handles
 GitHub results separately from execution. This keeps benchmark inputs and cases
 with their CLI while sharing the measurement machinery.
+
+## Installed use and JSON
+
+From the repository root, `make install-python` installs cli-bench and cli-check
+in isolated uv environments and places commands in `~/.local/bin`. Add that
+directory to `PATH`. Python 3.15+ and uv are required for installation. The old
+`uv run python tools/cli-bench/bench.py ...` entry point remains compatible.
+
+```sh
+cli-bench --json doctor
+cli-bench --json /path/to/suite.toml --list
+cli-bench --json /path/to/suite.toml --doctor --candidate /path/to/binary
+cli-bench --json /path/to/suite.toml --candidate /path/to/binary --output ./report
+```
+
+`doctor` checks hyperfine 2.x; suite `--doctor` additionally checks candidate,
+comparison, and generator availability as applicable. Only hyperfine's version
+command executes. It creates no reports and runs no hooks or benchmark cases.
+Results state `mode: "local"` and `auth: "not_required"`; a failed check exits 1.
+The separate GitHub reporting script still uses `GH_TOKEN`/`GITHUB_TOKEN` and
+requires explicit `--post` to update a comment.
+
+JSON uses CLI envelopes, not external API pass-through. Listings return
+`{"ok":true,"data":{"binary":"tailr","cases":[...]}}`. Doctor returns
+`{"ok":true,"data":{"version":"0.1.0","mode":"local","auth":"not_required","root":"...","checks":[...]}}`;
+each check includes `name`, `ok`, and either `path` or `message`. Failed checks
+set the outer `ok` to false. Successful runs return
+`{"ok":true,"data":{"output":"...","metadata":"...","completed_cases":["last-lines"]}}`.
+Read the referenced files for measurements.
+
+Errors return `{"ok":false,"error":{"kind":"operation","message":"..."}}`;
+argument errors use `arguments`, interruption uses `interrupted`. Existing exit
+codes are preserved. Help/version remain text. In JSON mode, runner progress and
+inherited generator/hook/hyperfine stdout go to stderr so stdout contains one JSON
+object. A failed run can leave its documented partial report directory.

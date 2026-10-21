@@ -270,3 +270,12 @@ fn dies_long_year_and_explicit_year_in_either_order() {
             .stderr(predicate::str::contains("cannot be used with"));
     }
 }
+
+#[test]
+fn redirected_calendar_has_no_ansi() {
+    cargo_bin_cmd!()
+        .assert()
+        .code(0)
+        .stderr("")
+        .stdout(predicate::str::contains("\u{1b}").not());
+}

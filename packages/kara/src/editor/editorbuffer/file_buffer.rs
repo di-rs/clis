@@ -25,10 +25,28 @@ impl FileBuffer {
     }
 
     pub fn save(&self) -> Result<(), std::io::Error> {
-        let mut file = std::fs::File::create(&self.fileinfo.path)?;
+        let path = &self.fileinfo.path;
+        // Resolve existing symlinks so saving updates their target, not the link.
+        let destination = match std::fs::canonicalize(path) {
+            Ok(path) => path,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => path.clone(),
+            Err(error) => return Err(error),
+        };
+        let parent = destination
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let mut file = tempfile::NamedTempFile::new_in(parent)?;
+        match std::fs::metadata(&destination) {
+            Ok(metadata) => file.as_file().set_permissions(metadata.permissions())?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
         for line in &self.buffer.lines {
             writeln!(file, "{line}")?;
         }
+        file.as_file().sync_all()?;
+        file.persist(destination).map_err(|error| error.error)?;
         Ok(())
     }
 }

@@ -1,7 +1,7 @@
 # Kara architecture
 
 Kara is a single-process terminal editor. Its entry point initializes logging,
-selects the optional filename, and constructs an editor. The editor owns the event
+uses clap to parse help, version, and the optional filename before terminal setup, and constructs an editor. The editor owns the event
 loop and terminal lifecycle; there is no service or database behind it.
 
 ## Input, state, and rendering
@@ -11,7 +11,10 @@ to the current mode. Its view and buffer hold document and cursor state, while
 command, status, and message bars provide separate parts of the screen.
 The terminal adapter contains terminal I/O. Editor teardown restores the terminal.
 
-File loading and saving operate on local files. Unsaved edits live in memory;
+File loading and saving operate on local files. Command parsing does not open files.
+Saving writes and syncs a temporary file before replacing the destination, and
+only a successful save changes the buffer identity. Terminal initialization rolls
+back on failure; teardown attempts every restoration step, including raw mode. Unsaved edits live in memory;
 there is no recovery journal or undo system. The [README](../README.md) documents
 controls and current saving limitations, which matter before using real files.
 

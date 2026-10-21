@@ -74,6 +74,7 @@ fn skips_bad_file() -> Result<()> {
     cargo_bin_cmd!()
         .args([ONE, &bad, TWO])
         .assert()
+        .code(1)
         .stderr(predicate::str::is_match(expected)?);
     Ok(())
 }
@@ -930,4 +931,14 @@ fn multiple_files_c_minus_3() -> Result<()> {
 #[test]
 fn multiple_files_c_plus_3() -> Result<()> {
     run(&["-c", "+3", TWELVE, EMPTY, ONE, THREE, TWO], "all.c+3.out")
+}
+
+#[test]
+fn missing_operand_returns_failure() {
+    cli_testing::cargo_bin_cmd!()
+        .args(["/sanctuary-audit-missing/path"])
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr(predicates::str::contains("/sanctuary-audit-missing/path"));
 }

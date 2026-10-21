@@ -9,7 +9,7 @@ use tabular::{Row, Table};
 
 mod owner;
 use owner::Owner;
-use uzers::get_user_by_uid;
+use uzers::{get_group_by_gid, get_user_by_uid};
 
 /// # Errors
 /// Throws error is unable to read path
@@ -17,14 +17,7 @@ pub fn find_files(paths: &[PathBuf], show_hidden: bool) -> Result<Vec<PathBuf>, 
     let mut results = Vec::new();
 
     for path in paths {
-        let metadata = match path.metadata() {
-            Ok(metadata) => metadata,
-            Err(error) => {
-                log::error!("{}: {error}", path.display());
-                eprintln!("{}: {error}", path.display());
-                continue;
-            }
-        };
+        let metadata = path.metadata()?;
 
         if metadata.is_dir() {
             for entry in fs::read_dir(path)? {
@@ -69,7 +62,7 @@ pub fn get_formatted_output(paths: &[PathBuf]) -> Result<impl Display, std::io::
         );
 
         let gid = metadata.gid();
-        let group = get_user_by_uid(gid).map_or_else(
+        let group = get_group_by_gid(gid).map_or_else(
             || gid.to_string(),
             |u| u.name().to_string_lossy().to_string(),
         );

@@ -10,7 +10,7 @@
 | `-n, --number` | Number every line; conflicts with `-b`. |
 | `-b, --number-nonblank` | Number nonblank lines. |
 | `-s, --squeeze-blank` | Collapse adjacent empty lines. |
-| `-u, --unbuffered` | Currently enables buffering, despite its name; see the limitation below. |
+| `-u, --unbuffered` | Write without the additional output buffer. |
 | `-h, --help` | Print help. |
 | `-V, --version` | Print version. |
 
@@ -18,9 +18,8 @@
 
 Compared with [GNU cat](https://www.gnu.org/software/coreutils/manual/html_node/cat-invocation.html),
 input must be UTF-8 and numbering restarts for each file.
-The advertised `-u`/`--unbuffered` flag actually
-selects a buffered writer; it does not disable buffering. File-open errors are
-printed but do not by themselves make the command fail.
+Output is buffered by default; `-u` disables that buffer. File-open errors go to
+stderr; remaining operands are processed and the final exit status is 1.
 
 ## Test notes
 

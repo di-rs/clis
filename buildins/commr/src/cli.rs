@@ -60,7 +60,8 @@ pub enum CliError {
 }
 
 impl Reporter for Cli {
-    fn report(&self, col: Column) {
+    fn report(&self, col: Column) -> std::io::Result<()> {
+        use std::io::Write;
         let mut columns = vec![];
 
         match col {
@@ -91,7 +92,12 @@ impl Reporter for Cli {
         }
 
         if !columns.is_empty() {
-            println!("{}", columns.join(&self.delimiter));
+            writeln!(
+                std::io::stdout().lock(),
+                "{}",
+                columns.join(&self.delimiter)
+            )?;
         }
+        Ok(())
     }
 }

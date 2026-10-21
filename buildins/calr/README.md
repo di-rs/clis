@@ -20,12 +20,12 @@ Reference: [util-linux cal(1)](https://man7.org/linux/man-pages/man1/cal.1.html)
 The argument layout is different: the month is an option, not a positional value.
 Calendars use proleptic Gregorian dates and fixed English labels; there is no
 historical calendar-reform switch, Monday-first option, or week-number display.
-Today's highlight uses ANSI escapes even when output is redirected.
+Today's highlight uses ANSI escapes only on a terminal when `NO_COLOR` is unset.
 
 ## Test notes
 
 Fixed-date fixtures use BSD `cal` layout. No-argument output and `--year`
-depend on the current local date, and today's highlight adds ANSI escapes.
+depend on the current local date, and terminal output can include today's highlight.
 Keep those assertions date-aware; use explicit months and years for stable
 calendar fixtures.
 

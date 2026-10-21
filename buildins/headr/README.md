@@ -17,7 +17,8 @@
 Reference: [GNU head](https://www.gnu.org/software/coreutils/manual/html_node/head-invocation.html).
 Zero and negative counts and size suffixes are not supported. Line mode requires
 UTF-8; byte mode uses lossy UTF-8 decoding, so it does not preserve arbitrary bytes.
-File-open errors are printed but do not by themselves make the command fail.
+File-open errors go to stderr; remaining operands are processed and the final
+exit status is 1.
 
 ## Test notes
 

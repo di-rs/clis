@@ -10,7 +10,7 @@ use tailr::{get_total_lines, print_bytes, print_lines, print_stream_bytes, print
 
 fn main() -> std::process::ExitCode {
     cli_log::run("tailr", |cli| match run(&cli) {
-        Ok(()) => exitcode::OK,
+        Ok(failed) => i32::from(failed),
         Err(CliError::FileOpen(_, e)) => {
             cli_log::diagnostic!("{e}");
             exitcode::CONFIG
@@ -22,7 +22,8 @@ fn main() -> std::process::ExitCode {
     })
 }
 
-fn run(cli: &Cli) -> Result<(), CliError> {
+fn run(cli: &Cli) -> Result<bool, CliError> {
+    let mut failed = false;
     let mut writer = get_writer();
     let num_files = cli.files.len();
     let stdin = std::io::stdin();
@@ -59,11 +60,14 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                     print_lines(reader, &mut writer, cli.lines, total_lines)?;
                 }
             }
-            Err(e) => cli_log::diagnostic!("{}: {e}", filename.display()),
+            Err(e) => {
+                failed = true;
+                cli_log::diagnostic!("{}: {e}", filename.display());
+            }
         }
     }
     writer.flush()?;
-    Ok(())
+    Ok(failed)
 }
 
 fn get_writer() -> impl Write {

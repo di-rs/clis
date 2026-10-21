@@ -12,7 +12,7 @@ pub struct Cli {
     #[arg(short = 'c')]
     pub skip_create: bool,
 
-    /// Set custom timestamp in the format `[[CC]YY]MMDDhhmm[.ss]`
+    /// Set custom timestamp in the format `YYYYMMDDhhmm or YYYYMMDDhhmmss (UTC)`
     #[arg(short = 't', value_parser(Cli::parse_custom_timestamp))]
     pub timestamp: Option<NaiveDateTime>,
 
@@ -30,7 +30,8 @@ impl Cli {
             timestamp.to_string()
         };
 
-        NaiveDateTime::parse_from_str(&full_timestamp, format)
-            .map_err(|_| eyre!("Invalid timestamp format. Use [[CC]YY]MMDDhhmm[.ss]"))
+        NaiveDateTime::parse_from_str(&full_timestamp, format).map_err(|_| {
+            eyre!("Invalid timestamp format. Use YYYYMMDDhhmm or YYYYMMDDhhmmss (UTC)")
+        })
     }
 }

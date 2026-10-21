@@ -24,6 +24,9 @@ counts. Open-ended ranges and equal-endpoint ranges such as `2-2` are rejected;
 selections retain the requested order and duplicates. Input must be UTF-8;
 byte selections that split a character are decoded with replacement characters.
 
+File-open errors go to stderr; remaining operands are processed and the final
+exit status is 1.
+
 ## Test notes
 
 Character fixtures require a multibyte-aware BSD `cut` and a supported UTF-8

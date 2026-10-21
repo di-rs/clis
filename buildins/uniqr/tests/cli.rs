@@ -647,3 +647,29 @@ fn t6_outfile_count() -> Result<()> {
 fn t6_stdin_outfile_count() -> Result<()> {
     run_outfile_stdin_count(&T6)
 }
+
+#[test]
+#[allow(
+    clippy::panic_in_result_fn,
+    reason = "Assertions verify observable CLI behavior; Result propagates fixture errors."
+)]
+fn rejects_output_aliases_without_truncating() -> Result<()> {
+    let dir = assert_fs::TempDir::new()?;
+    let input = dir.path().join("input");
+    let alias = dir.path().join("alias");
+    std::fs::write(&input, b"a\na\n")?;
+    std::fs::hard_link(&input, &alias)?;
+    let symlink = dir.path().join("symlink");
+    std::os::unix::fs::symlink(&input, &symlink)?;
+    for output in [&input, &alias, &symlink] {
+        cli_testing::cargo_bin_cmd!()
+            .arg(&input)
+            .arg(output)
+            .assert()
+            .code(65)
+            .stdout("")
+            .stderr(predicates::str::contains("same file"));
+        assert_eq!(std::fs::read(&input)?, b"a\na\n");
+    }
+    Ok(())
+}

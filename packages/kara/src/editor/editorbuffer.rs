@@ -52,14 +52,11 @@ impl EditorBuffer {
     }
 
     pub fn save_as(&mut self, filename: &str) -> Result<(), std::io::Error> {
-        if let BufferKind::Buffer(buffer) = &self.buffer {
-            let file_buffer = FileBuffer::new(buffer.clone(), filename);
-            self.buffer = BufferKind::File(file_buffer);
-        }
-
-        self.buffer.save().inspect(|()| {
-            self.modified_at = None;
-        })
+        let file_buffer = FileBuffer::new((*self.buffer).clone(), filename);
+        file_buffer.save()?;
+        self.buffer = BufferKind::File(file_buffer);
+        self.modified_at = None;
+        Ok(())
     }
 
     pub fn filename(&self) -> Option<&Path> {

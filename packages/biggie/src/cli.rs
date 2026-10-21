@@ -33,6 +33,12 @@ pub struct EndingArgs {
 #[derive(Parser, Debug)]
 #[command(author, version, about, propagate_version = true)]
 pub struct Cli {
+    /// Validate and describe generation without opening output files
+    #[arg(long, global = true)]
+    pub dry_run: bool,
+    /// Emit JSON metadata (requires named outputs unless used with --dry-run)
+    #[arg(long, global = true)]
+    pub json: bool,
     #[command(subcommand)]
     pub command: Option<Command>,
     #[command(flatten)]
@@ -42,6 +48,8 @@ pub struct Cli {
 }
 /// Validated command and resolved diagnostics; parsing details stay at the edge.
 pub struct ParsedCli {
+    pub dry_run: bool,
+    pub json: bool,
     pub command: Command,
     pub logging: cli_log::LogArgs,
 }
@@ -157,6 +165,8 @@ impl Cli {
             return Err(command.error(clap::error::ErrorKind::ValueValidation, error));
         }
         Ok(ParsedCli {
+            dry_run: cli.dry_run,
+            json: cli.json,
             command: selected,
             logging,
         })
