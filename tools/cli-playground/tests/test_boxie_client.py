@@ -273,3 +273,30 @@ def test_pooled_client_forwards_context_for_all_transports(tmp_path: Path) -> No
                 await client.close()
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("status", [404, 409, 429, 500, 503])
+def test_only_definitive_create_rejections_are_distinguished(status: int) -> None:
+    from cli_playground.sandbox import AdmissionRejected
+    from fastapi.responses import Response
+
+    async def exercise() -> None:
+        peer = FastAPI()
+
+        @peer.api_route("/v1/{path:path}", methods=["POST", "GET"])
+        async def reject(path: str) -> Response:
+            return Response(status_code=status)
+
+        async with serve(peer) as url:
+            client = HttpBoxieClient(url, "private-consumer-secret")
+            try:
+                with pytest.raises(BoxieUnavailable) as error:
+                    await client.create(str(uuid4()), SandboxRequest(artifact_id=uuid4()))
+                assert isinstance(error.value, AdmissionRejected) == (status in {404, 409, 429})
+                with pytest.raises(BoxieUnavailable) as error:
+                    await client.get(uuid4())
+                assert not isinstance(error.value, AdmissionRejected)
+            finally:
+                await client.close()
+
+    asyncio.run(exercise())

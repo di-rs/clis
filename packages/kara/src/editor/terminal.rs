@@ -1,6 +1,6 @@
 use crossterm::cursor::SetCursorStyle::BlinkingBlock;
 use crossterm::cursor::{self, Hide, MoveTo, Show};
-use crossterm::style::{Attribute, Print};
+use crossterm::style::{Attribute, Print, SetAttribute};
 use crossterm::terminal::{
     self, DisableLineWrap, EnableLineWrap, EnterAlternateScreen, LeaveAlternateScreen, SetTitle,
 };
@@ -87,7 +87,7 @@ impl Terminal {
     }
 
     pub fn set_title(title: &str) -> Result<()> {
-        queue!(SetTitle(title))
+        queue!(SetTitle(display_text(title)))
     }
 
     pub fn print(data: impl Display) -> Result<()> {
@@ -97,19 +97,18 @@ impl Terminal {
     pub fn print_row(row: usize, line_text: impl Display) -> Result<()> {
         Self::move_to(Position { col: 0, row })?;
         Self::clear_line()?;
-        Self::print(line_text)
+        Self::print(display_text(&line_text.to_string()))
     }
 
     pub fn print_inverted_row(row: usize, line_text: impl Display) -> Result<()> {
         let width = Self::size()?.width;
-        Self::print_row(
-            row,
-            format!(
-                "{}{:width$.width$}{}",
-                Attribute::Reverse,
-                line_text,
-                Attribute::Reset
-            ),
+        Self::move_to(Position { col: 0, row })?;
+        Self::clear_line()?;
+        let text = display_text(&line_text.to_string());
+        queue!(
+            SetAttribute(Attribute::Reverse),
+            Print(format!("{text:width$.width$}")),
+            SetAttribute(Attribute::Reset)
         )
     }
 
@@ -124,5 +123,31 @@ impl Terminal {
     pub fn execute() -> Result<()> {
         stdout().flush()?;
         Ok(())
+    }
+}
+
+fn display_text(text: &str) -> String {
+    text.chars()
+        .map(|character| {
+            if character.is_control() {
+                character.escape_default().to_string()
+            } else {
+                character.to_string()
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::display_text;
+
+    #[test]
+    fn escapes_terminal_controls_and_preserves_unicode() {
+        assert_eq!(display_text("café 東京"), "café 東京");
+        assert_eq!(
+            display_text("\x1b\x07\r\n\x7f\u{009b}"),
+            r"\u{1b}\u{7}\r\n\u{7f}\u{9b}"
+        );
     }
 }

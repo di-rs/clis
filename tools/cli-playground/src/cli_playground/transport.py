@@ -12,7 +12,7 @@ from fastapi import (
 )
 from fastapi.responses import PlainTextResponse
 from starlette.datastructures import Headers
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from cli_playground.config import Settings
 from cli_playground.sandbox import TerminalPort, TerminalWriteClosed
@@ -28,6 +28,45 @@ from cli_playground.terminal_protocol import (
 )
 
 MAX_TERMINAL_OUTPUT_BYTES = 16 * 1024 * 1024
+
+
+class RequestBodyBoundary:
+    """Bound ordinary HTTP bodies before any framework parsing."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        # Artifact uploads authenticate before streaming through their own byte limiter.
+        if scope["type"] != "http" or (
+            scope["method"] == "POST" and scope["path"] == "/api/environments"
+        ):
+            await self.app(scope, receive, send)
+            return
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            chunk = message.get("body", b"")
+            if len(body) + len(chunk) > 16384:
+                await PlainTextResponse("Request body too large", status_code=413)(
+                    scope, receive, send
+                )
+                return
+            body.extend(chunk)
+            if not message.get("more_body", False):
+                break
+        delivered = False
+
+        async def bounded_receive() -> Message:
+            nonlocal delivered
+            if delivered:
+                return await receive()
+            delivered = True
+            return {"type": "http.request", "body": bytes(body), "more_body": False}
+
+        await self.app(scope, bounded_receive, send)
 
 
 class RequestHostBoundary:
