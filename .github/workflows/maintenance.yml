@@ -19,6 +19,8 @@ defaults:
 
 jobs:
   audit:
+    # The daily schedule already audits dependencies before Tuesday's extended checks.
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '17 4 * * *'
     name: 📦 Refresh dependency vulnerability and license checks
     runs-on: ubuntu-24.04
     timeout-minutes: 15

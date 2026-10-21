@@ -4,6 +4,16 @@ on:
   pull_request:
     branches: [master]
     types: [opened, synchronize, reopened, ready_for_review, labeled]
+    # Analyze Rust and Actions inputs on PRs; master and scheduled scans remain complete.
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '**/rust-toolchain*'
+      - '.cargo/**'
+      - '.github/**'
+      - '**/action.yml'
+      - '**/action.yaml'
   push:
     branches: [master]
   schedule:
