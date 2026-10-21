@@ -87,8 +87,6 @@ jobs:
         with:
           tool: prek@0.5.5
           fallback: none
-      - name: 🦀 Prepare Cargo metadata toolchain
-        run: cargo --version
       - name: 📦 Install locked Python workspace dependencies
         run: uv sync --locked --all-packages
       - name: 🔍 Lint Python with Ruff
