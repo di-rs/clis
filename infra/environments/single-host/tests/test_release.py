@@ -105,7 +105,7 @@ def run_release(component: str, env: dict[str, str]) -> subprocess.CompletedProc
             "cli-playground",
             "CLI_PLAYGROUND_IMAGE",
             (),
-            "deploy.sh",
+            "scripts/deploy.sh",
         ),
     ],
 )

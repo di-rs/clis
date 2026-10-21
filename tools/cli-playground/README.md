@@ -1,126 +1,123 @@
-# cli-playground
+# CLI playground
 
-Run a PR's native Rust CLIs in a browser terminal. Each PR has one stable URL
-containing all affected CLIs; each tab gets Bash, sample files and a disposable
-workspace. The selector changes starter commands without reconnecting or losing
-files. All CLIs share `PATH` for pipelines. A new PR build leaves existing
-terminals and files intact; the page offers **Switch to latest build**. Reset ends the session. Reconnect resumes the same terminal on the current page; a detected disconnection starts a two-minute cleanup deadline.
+Try a pull request's Rust commands in a browser terminal. Each PR gets a stable
+preview URL, and each browser tab gets Bash, sample files, and a disposable
+workspace. All included CLIs share `PATH`, so you can try pipelines.
 
-The page shows the latest build state independently of the running revision.
-Building, failed and cancelled builds can retain an explicitly labeled last
-successful build. A revision with no affected CLIs opens a status page instead
-of a new terminal. The page checks for updates every ten seconds.
+## Use a preview
 
-PR builds select CLIs with source changes, changed resolved dependencies, or a
-changed shared library in their dependency graph. Lockfile edits for another CLI
-do not select unrelated binaries. Global build settings, including the root
-Cargo manifest and Rust toolchain, still select all CLIs. Dependency analysis uses
-the same [lockfile rules as benchmarks](../../docs/benchmarking.md#verification-and-scope).
+Open the PR's playground link and choose a command to see a starter example.
+Changing the selection keeps your terminal and files. A new build offers
+**Switch to latest build** without replacing a running session automatically.
+**Reset** ends the session.
 
-Architecture: Svelte + strict TypeScript + Vite+ static SPA, plain CSS, Python/FastAPI;
-no SSR, production Node server or Tailwind.
+A connection drop can resume the same terminal on the current page. Reloading the
+page starts fresh. Sessions expire after 60 minutes, ten idle minutes, or two
+minutes disconnected, whichever limit applies first. Sandboxes have no network.
 
-Defaults: seven-day previews, 60-minute absolute sessions, 10-minute idle timeout,
-two-minute disconnected timeout, eight concurrent sandboxes;
-per session: one CPU, 512 MiB RAM, 64 MiB workspace, 16 MiB terminal output, no network.
+## How a preview reaches the browser
+
+The [PR build workflow](../../.github/workflows/cli-playground.yml) compiles the
+affected CLIs. A separate [trusted publisher](../../.github/workflows/cli-playground-preview.yml)
+uploads the binaries and updates the PR link. Neither step creates a browser
+sandbox; Boxie starts one when a visitor opens a terminal.
+
+Build selection includes changes to a CLI's source or resolved dependencies.
+Global build settings can select all CLIs. This differs from benchmark selection,
+which requires changes to the CLI's own implementation.
 
 ## Run locally
 
-cli-playground connects to an independently operated private Boxie endpoint. Follow
-[local infrastructure](infra/README.md) and the [Boxie setup](../../packages/boxie/infra/README.md).
-Use native Linux with gVisor for interactive sandboxes. Docker Desktop can build
-images and run the product UI against an independently supplied Boxie service,
-but does not provide the required sandbox runtime.
+The UI uses Svelte and TypeScript; the server uses Python/FastAPI. Before starting
+the backend, provision a private [Boxie service](../../packages/boxie/infra/README.md)
+and a separate PostgreSQL database. [Playground infrastructure](infra/README.md)
+covers Compose and production deployment.
+
+Interactive sandboxes require native Linux with gVisor. Docker Desktop can build
+images and run the UI against a separately operated Boxie service, but cannot
+provide the required sandbox runtime.
+
+### Build the frontend
+
+Run from the repository root:
 
 ```sh
-uv sync --locked --all-packages
-pnpm --dir tools/cli-playground/frontend install --frozen-lockfile
+uv sync --all-packages
+pnpm --dir tools/cli-playground/frontend install
 pnpm --dir tools/cli-playground/frontend build
 ```
 
-The Python package lives in `src/cli_playground/`. The frontend build places real assets
-in `src/cli_playground/static/`, included in the installed
-wheel and sdist. To run the installed service, set `CLI_PLAYGROUND_DATA_DIR`,
-`CLI_PLAYGROUND_PUBLIC_URL`, `CLI_PLAYGROUND_DEPLOY_TOKEN`, `CLI_PLAYGROUND_BOXIE_URL`,
-`CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE` and `CLI_PLAYGROUND_DATABASE_URL`. Keep the
-Boxie credential in a private regular file with mode `0600`. The database URL uses
-`postgresql+psycopg://USER:PASSWORD@HOST/DATABASE`; Pydantic Settings also reads it
-from `/run/secrets/CLI_PLAYGROUND_DATABASE_URL`. Provision a separate PostgreSQL
-database and apply its schema before startup:
+The build writes assets to `src/cli_playground/static/` within this package.
+Those assets are included in the Python wheel and sdist.
+
+### Configure the backend
+
+Set these values before starting the service:
+
+| Variable | Purpose |
+| --- | --- |
+| `CLI_PLAYGROUND_DATA_DIR` | Storage for pending upload ZIPs |
+| `CLI_PLAYGROUND_PUBLIC_URL` | Public playground URL |
+| `CLI_PLAYGROUND_DEPLOY_TOKEN` | Credential for publishing previews |
+| `CLI_PLAYGROUND_BOXIE_URL` | Private Boxie API URL |
+| `CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE` | Consumer secret in a private regular file, mode `0600` |
+| `CLI_PLAYGROUND_DATABASE_URL` | PostgreSQL connection URL, using `postgresql+psycopg://USER:PASSWORD@HOST/DATABASE` |
+
+The database URL can instead be stored in
+`/run/secrets/CLI_PLAYGROUND_DATABASE_URL`. Environment values take precedence.
+Use a database login separate from Boxie's.
+
+### Migrate and start
+
+Apply the schema before starting the gateway:
 
 ```sh
-uv run --locked --package cli-playground alembic \
+uv run --package cli-playground alembic \
   -c tools/cli-playground/alembic.ini upgrade head
-uv run --locked --package cli-playground uvicorn cli_playground.app:create_app \
+uv run --package cli-playground uvicorn cli_playground.app:create_app \
   --factory --host 127.0.0.1 --port 8000 --workers 1 --no-proxy-headers
 ```
 
-No Docker client, Docker socket or Boxie implementation is installed in the
-cli-playground image. Its server-side consumer credential is not sent to the browser.
-The terminal keeps credentials, applied output sequence and screen in page memory.
-Reconnect drains pending xterm writes, resumes retained output exactly once and
-synchronizes geometry before enabling user input. Input typed while disconnected
-is discarded. An expired session or output history gap offers a fresh sandbox.
-A page reload always starts fresh; there is no persisted cursor or screen snapshot.
+Keep one worker. Upload serialization and startup recovery assume a single
+gateway; PostgreSQL alone does not make multiple replicas safe.
 
-Input provenance uses the isolated `terminal/input-intent.ts` adapter against the
-pinned xterm 6.0.0 internal `triggerDataEvent` source flag. It checks version and
-runtime shape and fails clearly on unsupported bundles. Revalidate keyboard,
-paste, asynchronous composition and parser replies with the actual browser suite
-when upgrading xterm. This private dependency keeps terminal-generated replies
-working during replay without counting them as user activity. Browser tests drive
-DOM composition events; they do not claim OS-native IME coverage.
+The playground talks to Boxie through its API. Its image contains no Docker
+client, Docker socket, or Boxie implementation, and the consumer secret stays
+on the server.
 
-See [persistence](docs/persistence.md) for the synchronous domain, async ports and
-PostgreSQL adapters, recovery rules and schema workflow. Metadata belongs to
-PostgreSQL; the data directory retains pending upload ZIPs.
+## Terminal recovery
 
-## Production releases
+The browser keeps terminal credentials, the last applied output sequence, and
+screen contents in page memory. On reconnect, it drains pending xterm writes,
+replays retained output exactly once, and synchronizes terminal dimensions before
+enabling input. Input typed while disconnected is discarded.
 
-Use the [shared-host guide](../../infra/environments/single-host/README.md) for
-setup, deployment gates and failure inspection. Releases are manual. The cli-playground release builds and deploys its backend and
-frontend together. A separate Boxie release delivers the Boxie and sandbox images.
-Preview publication retains its separate trust boundary.
+The server allocates Boxie's increasing attachment order from its persisted page
+claim. Browser frames cannot select or override that order.
 
-## Diagnose a failed request
+An expired session or a gap in retained output offers a fresh sandbox. There is
+no persisted cursor or screen snapshot to restore after a page reload.
 
-Copy the `X-Request-ID` response header from the failed HTTP request and search
-`request_id:="<UUID>"` in Grafana Explore's VictoriaLogs datasource. The public
-boundary always generates this ID, forwards it to Boxie and the supervisor, and
-includes it in bounded JSON service logs. Internal URLs, credentials, terminal
-content and exception text are omitted. Logging drops diagnostics under pressure
-without blocking requests.
+## Develop the service
 
-WebSocket connections also have one server-generated ID, forwarded on the
-internal handshake. Browser JavaScript cannot read handshake headers. A reconnect
-starts a new action; `sandbox_id` still identifies the same terminal resource.
+### Change terminal input handling
 
-Saved admission, upload, stop and retirement operations retain their first
-request IDs in PostgreSQL so later retries can be traced to the action that
-started them. These optional diagnostic fields leave existing rows with an
-unknown origin. Apply the [schema upgrade](docs/persistence.md#schema-changes)
-before starting the gateway. The
-[host guide](../../infra/environments/single-host/README.md#search-across-services)
-covers the optional collector extension and rollout order.
+The `terminal/input-intent.ts` adapter uses the pinned xterm 6.0.0 internal
+`triggerDataEvent` source flag to distinguish user input from terminal-generated
+replies. Those replies must keep working during replay without renewing idle time.
+The adapter checks the version and runtime shape and fails on unsupported bundles.
 
-## Workflow responsibilities
+When upgrading xterm, run the browser suite for keyboard input, paste, asynchronous
+composition, and parser replies. Its DOM composition tests do not cover OS-native
+input method editors (IMEs).
 
-| Workflow | Responsibility |
-| --- | --- |
-| [🏗️ cli-playground PR binary builds](../../.github/workflows/cli-playground.yml) | Compile affected PR binaries without deployment credentials |
-| [🌐 cli-playground PR previews](../../.github/workflows/cli-playground-preview.yml) | Trusted build-state updates, artifact publication and PR close/reopen reconciliation |
-| [🚀 cli-playground Release](../../.github/workflows/cli-playground-release.yml) | Manually build and deploy cli-playground Backend and Frontend |
-| [🚀 Boxie and Sandbox Release](../../.github/workflows/boxie-release.yml) | Manually build and deploy the Boxie and sandbox images together |
-| [☁️ Single-host Sanctuary setup](../../.github/workflows/sanctuary-setup.yml) | Manually provision infrastructure and install services |
-| [🧪 Boxie lifecycle integration](../../.github/workflows/boxie-lifecycle.yml) | Verify PostgreSQL/Temporal recovery and native Linux/gVisor lifecycle faults |
+### Change storage or diagnose failures
 
-PR publication stores a binary batch and preview metadata. It does not deploy
-Boxie or start a sandbox; each browser terminal starts its own sandbox.
-The build and preview workflows remain separate because they execute with
-different trust and credentials.
+Read [persistence](docs/persistence.md) before changing session recovery or
+metadata storage, and [request tracing](docs/requests.md) to diagnose an action
+across services. The [PR workflow](../../.github/workflows/pull-request-check.yml)
+checks Python, frontend, and browser behavior; the
+[native lifecycle workflow](../../.github/workflows/sanctuary-lifecycle.yml)
+checks the Linux/gVisor deployment.
 
-See [Testing](../../docs/testing.md) for Python, frontend and browser checks,
-and the [🧪 Boxie lifecycle integration workflow](../../.github/workflows/boxie-lifecycle.yml)
-for real PostgreSQL/Temporal recovery. The separate
-[shared-system lifecycle workflow](../../.github/workflows/sanctuary-lifecycle.yml)
-adds native Linux/gVisor browser checks.
+[Repository architecture](../../docs/architecture.md)

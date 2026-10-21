@@ -62,12 +62,12 @@ jobs:
           docker build -f packages/boxie/infra/Boxie.Dockerfile -t boxie:lifecycle .
       - name: 📦 Install locked Python workspace dependencies
         run: |
-          uv sync --locked --package sanctuary-tools --package boxie --package boxie-infra
+          uv sync --package sanctuary-tools --package boxie --package boxie-infra
       - name: ⏳ Verify Python imports and pinned Temporal test server
         timeout-minutes: 3
         run: |
-          uv run --locked python -c 'import temporalio.bridge.temporal_sdk_bridge; import boxie.bootstrap.workers'
-          uv run --locked python - <<'PYTHON'
+          uv run python -c 'import temporalio.bridge.temporal_sdk_bridge; import boxie.bootstrap.workers'
+          uv run python - <<'PYTHON'
           import hashlib, io, json, os, pathlib, tarfile, urllib.request
           pins = json.loads(pathlib.Path("packages/boxie/tests/test-server-pins.json").read_text())
           pin = next(p for p in pins["artifacts"] if p["variant"] == "linux_amd64")
@@ -86,7 +86,7 @@ jobs:
               output.write(f"BOXIE_TEST_SERVER={path}\n")
           PYTHON
           export BOXIE_TEST_SERVER="$RUNNER_TEMP/boxie-test-server"
-          uv run --locked pytest -m integration packages/boxie/tests/test_temporal_lifecycle.py -vv --durations=10
+          uv run pytest -m integration packages/boxie/tests/test_temporal_lifecycle.py -vv --durations=10
       - name: 🗂️ Enable persistent journal for the collector smoke
         run: |
           sudo mkdir -p /var/log/journal
@@ -95,18 +95,18 @@ jobs:
       - name: 🧪 Test PostgreSQL and Temporal cancellation, replay and diagnostics
         timeout-minutes: 9
         run: |
-          uv run --locked pytest -m integration packages/boxie/tests/test_temporal_deployment.py packages/boxie/tests/test_outbox.py packages/boxie/tests/integration/test_artifact_commit.py packages/boxie/tests/test_migrations.py packages/boxie/tests/test_observability_lifecycle.py packages/boxie/tests/test_observability_logging.py packages/boxie/tests/test_observability_native.py -vv --durations=10
+          uv run pytest -m integration packages/boxie/tests/test_temporal_deployment.py packages/boxie/tests/test_outbox.py packages/boxie/tests/integration/test_artifact_commit.py packages/boxie/tests/test_migrations.py packages/boxie/tests/test_observability_lifecycle.py packages/boxie/tests/test_observability_logging.py packages/boxie/tests/test_observability_native.py -vv --durations=10
       - name: 🔐 Test native credential permissions and endpoint restarts
         timeout-minutes: 3
         run: |
-          uv run --locked pytest -m integration packages/boxie/tests/test_native_permissions.py packages/boxie/tests/test_native_scenarios.py -vv --durations=10
+          uv run pytest -m integration packages/boxie/tests/test_native_permissions.py packages/boxie/tests/test_native_scenarios.py -vv --durations=10
       - name: 🗃️ Test PostgreSQL restart journal recovery
         timeout-minutes: 3
         run: |
-          uv run --locked pytest -m integration packages/boxie/tests/test_postgres.py -k failed_restart_journal -vv --durations=10
+          uv run pytest -m integration packages/boxie/tests/test_postgres.py -k failed_restart_journal -vv --durations=10
       # Optional until the native suite's hang is resolved; never blocks a PR.
       - name: 🎭 Run optional native lifecycle tests
         if: github.event_name == 'workflow_dispatch'
         timeout-minutes: 20
         run: |
-          uv run --locked python packages/boxie/tests/run_integration.py --runtime runsc -- -vv --durations=10 -o faulthandler_timeout=120
+          uv run python packages/boxie/tests/run_integration.py --runtime runsc -- -vv --durations=10 -o faulthandler_timeout=120

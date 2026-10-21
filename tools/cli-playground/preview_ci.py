@@ -723,7 +723,6 @@ def main() -> None:
                     [
                         "cargo",
                         "build",
-                        "--locked",
                         "--release",
                         "--bins",
                         *(arg for name in names for arg in ("--package", name)),

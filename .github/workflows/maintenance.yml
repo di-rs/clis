@@ -35,7 +35,7 @@ jobs:
       - name: 🛡️ Refresh vulnerability, license and dependency checks
         run: |
           cargo audit --db "$RUNNER_TEMP/advisory-db" --file Cargo.lock --deny yanked
-          cargo deny --locked check licenses sources bans
+          cargo deny check licenses sources bans
           cargo machete --with-metadata
 
   remote-links:
@@ -85,7 +85,7 @@ jobs:
           uname -a >> target/coverage/environment.txt
           git rev-parse HEAD >> target/coverage/environment.txt
       - name: 📊 Collect workspace test coverage
-        run: cargo llvm-cov nextest --locked --workspace --all-features --lcov --output-path target/coverage/lcov.info
+        run: cargo llvm-cov nextest --workspace --all-features --lcov --output-path target/coverage/lcov.info
       - name: 📊 Generate HTML coverage report
         run: cargo llvm-cov report --html --output-dir target/coverage
       - name: 📤 Upload coverage data and HTML report
@@ -131,13 +131,13 @@ jobs:
           RUSTUP_TOOLCHAIN: ${{ matrix.toolchain }}
         run: |
           rustc -Vv
-          cargo check --locked --workspace --all-targets
+          cargo check --workspace --all-targets
       - name: 🧪 Run tests and doctests on selected toolchain
         env:
           RUSTUP_TOOLCHAIN: ${{ matrix.toolchain }}
         run: |
-          cargo nextest run --locked --workspace --profile ci
-          cargo test --locked --workspace --doc
+          cargo nextest run --workspace --profile ci
+          cargo test --workspace --doc
 
   optimized-tests:
     name: ⚡ Rust release-mode tests and doctests
@@ -159,9 +159,9 @@ jobs:
         with:
           cache-bin: false
       - name: ⚡ Run optimized Rust workspace tests
-        run: cargo nextest run --locked --workspace --release --profile ci
+        run: cargo nextest run --workspace --release --profile ci
       - name: 📚 Run optimized Rust documentation examples
-        run: cargo test --locked --workspace --release --doc
+        run: cargo test --workspace --release --doc
 
   miri:
     name: 🔬 Check Rust memory safety with Miri
@@ -178,6 +178,6 @@ jobs:
       - name: 🔬 Prepare Miri interpreter
         run: cargo miri setup
       - name: 🔬 Check parser library with Miri
-        run: cargo miri test --locked -p parsu --lib
+        run: cargo miri test -p parsu --lib
       - name: 🔬 Check tail library consumer with Miri
-        run: cargo miri test --locked -p tailr --test library
+        run: cargo miri test -p tailr --test library

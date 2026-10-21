@@ -96,12 +96,12 @@ behind library choices and byte/status handling, read [research](references/rese
 
 ## Select verification
 
-Start with `cargo nextest run --locked -p PACKAGE --profile ci`; run
-`cargo test --locked -p PACKAGE --doc` only when that package has a library.
-Include affected consumers for shared changes. The [verification map](../../../docs/testing.md)
-links formatting, lint, platform and tooling checks and their configuration.
+Start with `cargo nextest run -p PACKAGE --profile ci`; run
+`cargo test -p PACKAGE --doc` only when that package has a library.
+Include affected consumers for shared changes. The [PR workflow](../../../.github/workflows/pull-request-check.yml)
+defines CI checks; run relevant formatting, lint, and test tools directly locally.
 
-Run `uv run --locked cli-check -p PACKAGE` after structural test changes. Its
+Run `uv run cli-check -p PACKAGE` after structural test changes. Its
 [documented checks](../../../tools/cli-check/README.md) verify package boundaries,
 test registration, documentation and benchmark layout, not assertion quality or
 reference correctness. Select `cli-check tests -p PACKAGE` to inspect only test conventions.

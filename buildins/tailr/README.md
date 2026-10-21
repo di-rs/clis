@@ -2,23 +2,18 @@
 
 `tailr` prints the end of files or stdin, or their contents starting at a chosen line or byte.
 
-## Supported capabilities
+## Arguments and options
 
-- Print the last 10 lines by default; `-n`/`--lines` changes the count.
-- `-c`/`--bytes` selects bytes instead; `+N` starts at one-based position N.
-- Read multiple files and explicit stdin (`-`); `-q`/`--quiet` suppresses their headers.
-- Copy selected content without UTF-8 decoding.
+| Argument or option | Meaning |
+| --- | --- |
+| `FILES...` | One or more required inputs; use `-` explicitly for stdin. |
+| `-n, --lines N` | Last N lines; default 10. `+N` starts at one-based line N. |
+| `-c, --bytes N` | Last N bytes, or start at `+N`; conflicts with explicit `-n`. |
+| `-q, --quiet` | Suppress multi-file headers. |
+| `-h, --help` | Print help. |
+| `-V, --version` | Print version. |
 
-## Examples
-
-From the workspace root:
-
-```sh
-cargo run -p tailr -- -n 5 Cargo.toml
-printf 'first\nlast\n' | cargo run -p tailr -- -n 1 -
-```
-
-## Differences and limits
+## Before using it
 
 Reference: [GNU tail](https://www.gnu.org/software/coreutils/manual/html_node/tail-invocation.html).
 At least one filename or `-` is required; omitting operands does not select stdin.
@@ -32,15 +27,13 @@ There is no follow (`-f`) mode or size suffix syntax. File-open errors do not by
 themselves make the command fail.
 
 Benchmark suite: [benches/cli-bench.toml](benches/cli-bench.toml).
-See [Benchmarking](../../docs/benchmarking.md) for system and previous-version comparisons.
+Use [cli-bench](../../tools/cli-bench/README.md) with `--reference` for a system
+command or `--baseline` for a previous executable.
 
-## Testing
-
-Follow the [CLI testing skill](../../.agents/skills/cli-testing/SKILL.md)
-for setup and reference-generation procedure.
+## Test notes
 
 Existing multi-file fixtures use BSD `tail` header and empty-file behavior.
 Keep byte-mode output as raw bytes and review the selected reference's behavior
 before replacing those expectations.
 
-[Workspace README](../../README.md)
+[All commands](../../README.md)

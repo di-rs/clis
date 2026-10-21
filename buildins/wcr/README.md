@@ -2,23 +2,21 @@
 
 `wcr` counts lines, words, characters, and bytes in UTF-8 text.
 
-## Supported capabilities
+## Arguments and options
 
-- Default output reports lines, words, and bytes.
-- Select counts with `-l`/`--lines`, `-w`/`--words`, `-m`/`--chars`, or `-c`/`--bytes`.
-- Read multiple files and print totals, or use non-terminal stdin (`-` or no filenames).
-- Character and byte flags are mutually exclusive.
+| Argument or option | Meaning |
+| --- | --- |
+| `FILE...` | Input files; default `-` reads non-terminal stdin. Multiple files get totals. |
+| `-l, --lines` | Show line count. |
+| `-w, --words` | Show word count. |
+| `-m, --chars` | Show Unicode scalar count; conflicts with `-c`. |
+| `-c, --bytes` | Show byte count; conflicts with `-m`. |
+| `-h, --help` | Print help. |
+| `-V, --version` | Print version. |
 
-## Examples
+With no count flags, show lines, words, and bytes.
 
-From the workspace root:
-
-```sh
-cargo run -p wcr -- Cargo.toml
-printf 'hello world\n' | cargo run -p wcr -- -lw
-```
-
-## Differences and limits
+## Before using it
 
 Reference: [GNU wc](https://www.gnu.org/software/coreutils/manual/html_node/wc-invocation.html).
 A final unterminated line counts as a line, unlike GNU `wc`'s newline count.
@@ -26,14 +24,11 @@ Words use Rust Unicode whitespace splitting; characters are Unicode scalar value
 not grapheme clusters. Even byte-only counting requires valid UTF-8 input.
 File-open errors are printed but do not by themselves make the command fail.
 
-## Testing
-
-Follow the [CLI testing skill](../../.agents/skills/cli-testing/SKILL.md)
-for setup and reference-generation procedure.
+## Test notes
 
 The existing reference fixtures use BSD `wc` column widths. Use a UTF-8
 locale supported by the reference when regenerating `-m` character counts;
 `LC_ALL=C` changes those counts. GNU `wc` formatting is not interchangeable
 with these fixtures.
 
-[Workspace README](../../README.md)
+[All commands](../../README.md)

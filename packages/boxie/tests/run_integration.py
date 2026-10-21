@@ -1,6 +1,6 @@
 """Isolated production-image deployment harness. No dev server and no silent skips.
 
-Run with ``uv run --locked python packages/boxie/tests/run_integration.py``.
+Run with ``uv run python packages/boxie/tests/run_integration.py``.
 Only this harness's randomly named projects and volumes are removed.
 """
 
@@ -329,7 +329,6 @@ def main() -> None:
             [
                 "uv",
                 "run",
-                "--locked",
                 "pytest",
                 "-m",
                 "integration",

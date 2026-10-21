@@ -25,6 +25,14 @@ references, and evaluation cases are included.
 
 ## Local adaptations
 
+- README guidance is adapted to Sanctuary: no fixed length, mandatory section
+  inventory, or automatic page splitting. Important technical detail remains;
+  audience, task, and navigation determine its placement.
+- Technical completeness is scoped to the page's promise. The editorial pass
+  checks repetition across related pages as well as within one document.
+- The repository-owned [writing patterns](writing-patterns.md) collect public
+  examples and their applications without copying their product-specific content.
+
 - Both Flagrare skills link to their installed writing/editorial counterpart
   instead of requiring a Flagrare slash command. References to other Flagrare
   skills remain upstream context; the wrapper does not require them.
@@ -60,7 +68,7 @@ reassess the adaptations above. Update the pinned links in this file and the
 editorial research link together.
 
 Validate skill frontmatter and local references, run the Markdown checks from
-[Testing](../../../../docs/testing.md) on every imported Markdown file, and try the
+[the documentation pipeline](../SKILL.md#verify-and-deliver) on every imported Markdown file, and try the
 pipeline on a small real document. Check that it uses repository-local skills in
 the selected order, verifies examples, completes authorized edits, and keeps
 review-only work read-only.

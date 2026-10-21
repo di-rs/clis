@@ -1,36 +1,59 @@
 # Biggie
 
-`biggie` generates text, literal records, delimited/CSV fields, exact-size bytes
-and sorted overlapping pairs. It uses Clap, rand, optional csv, anyhow and the
-workspace's shared logging setup.
+Biggie generates test and benchmark inputs: random text, repeated records,
+delimited or CSV fields, exact-size bytes, and sorted overlapping pairs.
 
-## Usage
+## Try it
 
-Run from the workspace root:
+From the repository root, generate four records without creating a file:
 
 ```sh
-cargo run --locked -p biggie -- text -s 42 -n 100 example.txt
-cargo run --locked -p biggie -- text -A 猫 -u scalars -n 2 -w 2 -l 3 -
-cargo run --locked -p biggie -- records -r miss -r Hit -r '' -p 2 -c 2 -
-cargo run --locked -p biggie -- fields -n 2 -F csv -d , -v 'a,b' -v '' -v 'a"b' -
-cargo run --locked -p biggie -- bytes -b 8193 -p 00ff1b0d0a boundary.bin
-cargo run --locked -p biggie -- pair -l left.txt -r right.txt -a 2 -j 3 -b 1 -c 2
+cargo run -p biggie -- records --record apple --record pear --repeat 2 -
 ```
 
-Omitting the command selects `text`. Single-stream commands default to `out.txt`;
-`-` sends data to stdout and `./-` names a literal file. Named files are created
-or truncated; success prints a completion message. Failures can leave partial output.
+```text
+apple
+apple
+pear
+pear
+```
 
-Command-specific flags follow the command. Command names are reserved at root:
-use `biggie text records`, `biggie ./records` or `biggie -- records` for a file
-named `records`. Use `biggie COMMAND --help` for command help.
+For repeated use, build with `cargo build --release -p biggie`. The examples
+below use the resulting `./target/release/biggie` executable from the repository root.
 
-All commands accept `-h/--help`, `-V/--version`, and `-L/--log-level`
-(`off`, `error`, `warn`, `info`, `debug`, `trace`). Logging goes to stderr;
-explicit flags override `SANCTUARY_LOG_LEVEL`, then default to off. Parsing errors
-exit 2, operation errors exit 1, and success exits 0.
+| Generate | Example |
+| --- | --- |
+| Repeatable random text | `./target/release/biggie text --seed 42 --lines 1000 sample.txt` |
+| CSV rows | `./target/release/biggie fields --format csv --delimiter , --lines 3 --field-value apple --field-value pear -` |
+| Exactly 1 KiB of bytes | `./target/release/biggie bytes --bytes 1024 sample.bin` |
+| Two inputs for a sorted comparison | `./target/release/biggie pair --left left.txt --right right.txt --left-only 2 --shared 3 --right-only 2` |
 
-## Text
+## Output and command syntax
+
+Use `biggie [COMMAND] [OPTIONS] [FILE]`. Omitting COMMAND selects `text`.
+Single-output commands default to `out.txt`; `-` means stdout. Named outputs
+are created or truncated, and failures can leave partial files. `pair` requires
+two named destinations instead.
+
+Command-specific flags follow the command. To write to a file named like a
+command, use `biggie text records`, `biggie ./records`, or `biggie -- records`.
+
+## Common options
+
+These options work at the root and on every command.
+
+| Option | Meaning |
+| --- | --- |
+| `-L, --log-level LEVEL` | File logging threshold: `off`, `error`, `warn`, `info`, `debug`, or `trace`; overrides `SANCTUARY_LOG_LEVEL`. |
+| `-h, --help` | Print help. |
+| `-V, --version` | Print version. |
+| `help [COMMAND]` | Show command help. |
+
+Exit codes are 0 for success, 1 for operation failures, and 2 for argument errors.
+See [logging configuration](../../utils/cli-log/README.md) for file locations,
+defaults, and independent stderr logging.
+
+## Text (`text`, the default)
 
 | Short | Long | Meaning and default |
 | --- | --- | --- |
@@ -46,10 +69,9 @@ exit 2, operation errors exit 1, and success exits 0.
 | `-N` | `--no-final-newline` | Omit only the final record terminator. |
 
 Ranges accept fixed `N` or inclusive `MIN..=MAX`. ASCII words are alphanumeric.
-Non-ASCII alphabets require scalar lengths; scalars are not graphemes or display
-columns. Custom alphabets reject duplicates and CR/LF; separators reject CR/LF.
+A scalar is a Unicode code point, not a grapheme or display column.
 
-## Literal records
+## Literal records (`records`)
 
 | Short | Long | Meaning and default |
 | --- | --- | --- |
@@ -64,7 +86,7 @@ Each record repeats `repeat` times, then the full schedule repeats `cycles`
 times. Corpus files are UTF-8 and LF-delimited; CR remains literal. Content is
 limited to 8 MiB and 100,000 entries. Input/output aliases are rejected.
 
-## Fields
+## Fields (`fields`)
 
 | Short | Long | Meaning and default |
 | --- | --- | --- |
@@ -84,7 +106,7 @@ Literal cells cycle across rows. Plain cells cannot contain delimiters or CR/LF;
 CSV quotes and escapes them. No headers are emitted. Rows and literal content
 are bounded to 8 MiB. CSV counts logical records, including embedded newlines.
 
-## Bytes
+## Bytes (`bytes`)
 
 | Short | Long | Meaning and default |
 | --- | --- | --- |
@@ -95,7 +117,7 @@ are bounded to 8 MiB. CSV counts logical records, including embedded newlines.
 Without a pattern, output contains random bytes 0–255. The budget can end
 inside a pattern, UTF-8 sequence or CRLF. No terminator is added.
 
-## Sorted pairs
+## Sorted pairs (`pair`)
 
 | Short | Long | Meaning and default |
 | --- | --- | --- |
@@ -113,10 +135,16 @@ Default keys are zero-padded 16-digit lowercase hex ordinals. A seed adds a
 shared random hex prefix. Left-only, shared and right-only blocks are byte-sorted;
 `copies` repeats each key. Both destinations must be named, distinct files.
 
-## Cargo features and Rust API
+## Reproducibility
+
+The same seed, options, build, and platform reproduce the same random data.
+Changing dependencies or platforms may change it. Biggie has no direct GNU/BSD
+counterpart.
+
+## Cargo features and library use
 
 CSV is enabled by default. Disable it with
-`cargo build --locked --release -p biggie --no-default-features`, or enable it
+`cargo build --release -p biggie --no-default-features`, or enable it
 explicitly with `--no-default-features --features csv`. A build without CSV
 supports plain fields and rejects `--format csv` before touching output.
 
@@ -127,7 +155,4 @@ before writing, retain I/O causes for downcasting and never flush caller writers
 The older ASCII entry points `generate` and `gen_random_lines` retain `io::Result`.
 See the [API examples](src/lib.rs) and operation-module doctests.
 
-The same seed/options/build/platform reproduce the same random data; bytes may
-change across rand versions or platforms. Biggie has no direct GNU/BSD counterpart.
-
-[Workspace README](../../README.md)
+[All projects](../../README.md)

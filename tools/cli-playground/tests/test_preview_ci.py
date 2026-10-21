@@ -1002,7 +1002,6 @@ def test_build_command_invokes_cargo_once_for_the_selected_batch(
         [
             "cargo",
             "build",
-            "--locked",
             "--release",
             "--bins",
             *(arg for name in names for arg in ("--package", name)),

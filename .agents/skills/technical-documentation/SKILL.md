@@ -39,13 +39,13 @@ For documentation site structure, use the core principles below: organize around
 
 ## Core Principles
 
-**Document the interface, not the implementation** — Users need to know what a function does, what it expects, and what it returns. How it works internally is for the source code.
+**Match detail to the reader’s task.** Explain interfaces through inputs, outputs, examples, and observable behavior. Retain internal mechanisms when readers need them to understand guarantees, debug failures, operate the system, or extend it. Organize them separately from first-use instructions.
 
 **Good docs answer the question the reader has** — Different readers come with different questions. Getting started? Reference? Troubleshooting? Structure docs to route each reader to their answer fast.
 
-**Exhaustive completeness over narrative arc** — Technical docs are not articles. Readers skip to the part they need. Cover every parameter, every edge case, every error code. Don't skip the boring bits — those are the ones people need.
+**Be complete within the page’s promise.** A reference covers the parameters and behavior it promises to document. A guide gives readers everything needed to finish its task, with links to deeper reference. Do not turn every introduction into an exhaustive catalog.
 
-**Every doc is a liability** — Every page you write must be maintained. Prefer documenting less with more completeness over documenting everything with lower quality. Maintenance cost is proportional to surface area.
+**Maintain one explanation of each detailed contract.** Keep closely related material together. Use headings to make long pages navigable, and separate pages only when they improve a reader’s path. Repeat brief context when needed, but avoid parallel versions of the same rules.
 
 **Show, don't just tell** — Every concept needs a worked example. Every API endpoint needs a request and response. Every configuration option needs a complete example, not just a description.
 

@@ -1,48 +1,52 @@
 # Kara
 
-Kara is a small terminal text editor with navigation, editing, and command modes.
+Kara is a small terminal text editor. It starts in navigation mode; switch to
+editing mode to type, then return to navigation to save or quit.
 
-## Run
+## Edit a file
 
-From the workspace root, in an interactive terminal:
+From the repository root, open a disposable file in an interactive terminal:
 
 ```sh
-cargo run -p kara
+cargo run -p kara -- scratch.txt
 ```
 
-To open an existing file, pass its path after `--`; saving
-changes overwrites it.
+Press `i` to type, Esc to return to navigation, Ctrl-S to save, and Ctrl-Q to quit.
+Saving overwrites the named file, and there is no undo.
 
-## Basic controls
+## Arguments
 
-- Start in navigation mode; arrow keys and vim-like motions.
-- Press `i` to edit, then type text, Enter, Tab, Backspace, or Delete.
-- Press Esc or Ctrl-C to return to navigation mode.
-- Ctrl-S saves; an unnamed buffer prompts for a filename via the command bar.
-- From navigation mode, `:` enters command mode. Type `w filename` to name and
-  save an unnamed buffer, `w` to save the current file, `q` to request quit, or
-  `q!` to discard changes and quit; press Enter to run the command.
-- Ctrl-Q quits; with unsaved changes, a second consecutive Ctrl-Q discards them.
+| Argument | Meaning |
+| --- | --- |
+| `FILE` | Optional first argument: file to edit. Omit it for an unnamed buffer. |
+| Further arguments | Ignored. There is no help/version option parser; `--help` is treated as a filename. |
 
-## Limits and credit
+## Controls
 
-There is no undo command. Command-bar filenames cannot contain spaces, and saving
-writes newline-terminated lines rather than preserving the original line endings.
+| Action | Keys |
+| --- | --- |
+| Move | Arrow keys or vim-like motions in navigation mode |
+| Start editing | `i` |
+| Return to navigation | Esc or Ctrl-C |
+| Save | Ctrl-S; unnamed buffers prompt for a filename |
+| Enter a command | `:` from navigation, then Enter to run it |
+| Quit | Ctrl-Q; press again consecutively to discard unsaved changes |
+
+Commands include `w` to save, `w filename` to name an unnamed buffer, `q` to
+request quit, and `q!` to discard changes and quit.
+
+## Known limitations
+
 Do not use `w other-file` on an already named buffer: it truncates `other-file`
-without saving into it, then writes to the original file instead. Use disposable
-files when experimenting. Kara has no direct GNU Coreutils counterpart.
+without saving there, then writes to the original file. Command-bar filenames
+cannot contain spaces. Saving adds line terminators rather than preserving the
+original line endings.
 
-Tutorial credit: [Philipp Flenker's Hecto guide](https://philippflenker.com/hecto/).
+## Develop Kara
 
-## Testing
+For editor changes, test navigation, typing, saving, quitting, and terminal
+restoration in a PTY or real terminal. The startup E2E only checks failure when
+there is no usable terminal; it does not cover editing.
 
-Follow the [CLI testing skill](../../.agents/skills/cli-testing/SKILL.md)
-for test-writing rules.
-
-The Unix startup test runs only when `/dev/tty` cannot be opened; it skips when
-there is a controlling terminal because Crossterm can use it even with piped
-stdin. It checks startup failure, not editor interaction. For editor changes,
-use a PTY or an interactive terminal with disposable files to check navigation,
-editing, saving, quitting, and restoration of the terminal.
-
-[Workspace README](../../README.md)
+Based on [Philipp Flenker's Hecto guide](https://philippflenker.com/hecto/).
+[All projects](../../README.md)

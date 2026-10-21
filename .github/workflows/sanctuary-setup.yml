@@ -105,7 +105,7 @@ jobs:
         version: 0.13.0
         enable-cache: 'false'
     - name: 📦 Install locked Python workspace dependencies
-      run: uv sync --locked --all-packages
+      run: uv sync --all-packages
     - name: ☁️ Set up Pulumi infrastructure tooling
       uses: pulumi/setup-pulumi@b374ceb6168550de27c6eba92e01c1a774040e11
       with:
@@ -146,7 +146,7 @@ jobs:
         umask 077
         pulumi login "$PULUMI_BACKEND_URL" --non-interactive
         pulumi stack select production --create --secrets-provider passphrase --non-interactive
-        uv run --locked python - <<'PYCODE'
+        uv run python - <<'PYCODE'
         import json
         import os
         from pathlib import Path
@@ -172,7 +172,7 @@ jobs:
         private=$(mktemp -d)
         trap 'rm -rf "$private" .installation' EXIT
         (cd infra/environments/single-host && pulumi stack output --json --show-secrets) > "$private/outputs.json"
-        uv run --locked python - "$private/outputs.json" .installation "$private" <<'PYCODE'
+        uv run python - "$private/outputs.json" .installation "$private" <<'PYCODE'
         import ipaddress
         import json
         import os

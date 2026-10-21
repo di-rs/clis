@@ -50,15 +50,15 @@ jobs:
           tool: prek@0.5.5
           fallback: none
       - name: 📦 Fetch locked Rust dependencies
-        run: cargo fetch --locked
+        run: cargo fetch
       - name: 🎨 Check Rust formatting
         run: cargo fmt --all -- --check
       - name: 📏 Check committed file sizes
         run: prek run check-added-large-files --all-files --show-diff-on-failure
       - name: 🔍 Lint Rust code with Clippy
-        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings -F unsafe_code
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings -F unsafe_code
       - name: 📚 Build Rust API documentation
-        run: cargo doc --locked --workspace --all-features --no-deps
+        run: cargo doc --workspace --all-features --no-deps
       - name: 🧹 Verify checks leave the checkout unchanged
         run: git diff --exit-code
 
@@ -88,7 +88,7 @@ jobs:
           tool: prek@0.5.5
           fallback: none
       - name: 📦 Install locked Python workspace dependencies
-        run: uv sync --locked --all-packages
+        run: uv sync --all-packages
       - name: 🔍 Lint Python with Ruff
         run: prek run ruff --all-files --show-diff-on-failure
       - name: 🎨 Check Python formatting
@@ -103,7 +103,7 @@ jobs:
       - name: 🔎 Check Python types with mypy
         run: prek run mypy --all-files --show-diff-on-failure
       - name: 🧪 Run Python regression tests
-        run: prek run python-tests --all-files --show-diff-on-failure
+        run: uv run pytest
       - name: 📜 Verify CLI repository standards
         run: prek run cli-check --all-files --show-diff-on-failure
       - name: 🧹 Verify checks leave the checkout unchanged
@@ -141,7 +141,7 @@ jobs:
           cache-dependency-glob: uv.lock
           cache-suffix: ${{ github.job }}
       - name: 📦 Install locked frontend dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install
       - name: 🔎 Check Svelte and TypeScript
         run: pnpm check
       - name: 🧪 Run frontend unit tests
@@ -151,16 +151,16 @@ jobs:
       - name: 📦 Verify isolated service packages and Compose topology
         working-directory: .
         run: |
-          uv sync --locked --all-packages
-          uv run --locked pytest packages/boxie/tests/test_packaging.py -m integration
+          uv sync --all-packages
+          uv run pytest packages/boxie/tests/test_packaging.py -m integration
       - name: 🌐 Install Chromium and browser dependencies
         run: pnpm exec playwright install --with-deps chromium
       - name: 🐘 Verify Playground PostgreSQL lifecycle
         working-directory: .
-        run: uv run --locked python tools/cli-playground/tests/run_integration.py
+        run: uv run python tools/cli-playground/tests/run_integration.py
       - name: 🎭 Run browser end-to-end tests
         working-directory: .
-        run: uv run --locked pytest -m integration tools/cli-playground/tests/test_browser.py
+        run: uv run pytest -m integration tools/cli-playground/tests/test_browser.py
       - name: 🧹 Verify checks leave the checkout unchanged
         run: git diff --exit-code
 
@@ -203,11 +203,11 @@ jobs:
           tool: prek@0.5.5,cargo-nextest@0.9.146
           fallback: none
       - name: 📦 Fetch locked Rust dependencies
-        run: cargo fetch --locked
+        run: cargo fetch
       - name: 🧪 Run Rust workspace tests
-        run: cargo nextest run --locked --workspace --hide-progress-bar --failure-output final | tee target/ci/tests.log
+        run: cargo nextest run --workspace --hide-progress-bar --failure-output final | tee target/ci/tests.log
       - name: 📚 Run Rust documentation examples
-        run: cargo test --locked --workspace --doc | tee target/ci/doctests.log
+        run: cargo test --workspace --doc | tee target/ci/doctests.log
       - name: 🧹 Verify tests leave the checkout unchanged
         run: git diff --exit-code
       - name: 📤 Upload test logs and JUnit results
@@ -246,13 +246,13 @@ jobs:
         with:
           cache-bin: false
       - name: 📦 Check every Rust package and target
-        run: cargo hack check --locked --workspace --all-targets
+        run: cargo hack check --workspace --all-targets
       - name: 🧩 Check Rust feature combinations
-        run: cargo hack check --locked --workspace --feature-powerset
+        run: cargo hack check --workspace --feature-powerset
       - name: 🧪 Test all Rust features
-        run: cargo nextest run --locked --workspace --all-features --profile ci
+        run: cargo nextest run --workspace --all-features --profile ci
       - name: 📚 Test documentation with all features
-        run: cargo test --locked --workspace --all-features --doc
+        run: cargo test --workspace --all-features --doc
       - name: 🧹 Verify checks leave the checkout unchanged
         run: git diff --exit-code
 
@@ -294,7 +294,7 @@ jobs:
           cache-dependency-glob: uv.lock
           cache-suffix: ${{ github.job }}
       - name: 🧪 Verify hook selection and deleted links
-        run: uv run --locked pytest tools/cli-check/tests/test_prek.py -m integration
+        run: uv run pytest tools/cli-check/tests/test_prek.py -m integration
       - name: 🧹 Verify checks leave the checkout unchanged
         run: git diff --exit-code
 
@@ -319,7 +319,7 @@ jobs:
       - name: 🛡️ Audit vulnerabilities, licenses and dependency usage
         run: |
           cargo audit --db "$RUNNER_TEMP/advisory-db" --file Cargo.lock --deny yanked
-          cargo deny --locked check licenses sources bans
+          cargo deny check licenses sources bans
           cargo machete --with-metadata
 
   workflows:

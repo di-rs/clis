@@ -29,7 +29,7 @@ def test_backend_release_targets_only_backend(tmp_path: Path, readiness_status: 
     owner = tmp_path / "owner"
     owner.mkdir()
     result = subprocess.run(
-        ["bash", str(ROOT / "tools/cli-playground/infra/deploy.sh")],
+        ["bash", str(ROOT / "tools/cli-playground/infra/scripts/deploy.sh")],
         env={
             **os.environ,
             "PATH": str(tmp_path) + ":" + os.environ["PATH"],
@@ -76,7 +76,7 @@ def test_readiness_waits_for_public_tls(
 
     monkeypatch.setattr("time.sleep", before_retry)
     script = (
-        (ROOT / "tools/cli-playground/infra/deploy.sh")
+        (ROOT / "tools/cli-playground/infra/scripts/deploy.sh")
         .read_text()
         .split("<<'PY'\n")[1]
         .split("\nPY")[0]
@@ -103,7 +103,7 @@ def test_readiness_deadline_reports_public_https(
     )
     monkeypatch.setattr("time.monotonic", MagicMock(side_effect=[0, 301]))
     script = (
-        (ROOT / "tools/cli-playground/infra/deploy.sh")
+        (ROOT / "tools/cli-playground/infra/scripts/deploy.sh")
         .read_text()
         .split("<<'PY'\n")[1]
         .split("\nPY")[0]
@@ -120,7 +120,7 @@ def test_migration_failure_prevents_backend_replacement(tmp_path: Path) -> None:
     )
     docker.chmod(0o755)
     result = subprocess.run(
-        ["bash", str(ROOT / "tools/cli-playground/infra/deploy.sh")],
+        ["bash", str(ROOT / "tools/cli-playground/infra/scripts/deploy.sh")],
         env={
             **os.environ,
             "PATH": str(tmp_path) + ":" + os.environ["PATH"],

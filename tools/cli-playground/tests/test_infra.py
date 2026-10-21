@@ -225,7 +225,7 @@ def test_production_routes_preview_hosts_with_dns_challenge_and_proxy_only_crede
     assert set(proxy["environment"]) == {"CLI_PLAYGROUND_DOMAIN", "CF_DNS_API_TOKEN"}
     assert "CLOUDFLARE_DNS_API_TOKEN" in proxy["environment"]["CF_DNS_API_TOKEN"]
 
-    routes = yaml.safe_load((root / "infra/routes.yml").read_text())
+    routes = yaml.safe_load((root / "infra/proxy/routes.yml").read_text())
     router = routes["http"]["routers"]["cli-playground"]
     assert router["rule"] == (
         'Host(`{{ env "CLI_PLAYGROUND_DOMAIN" }}`) || '

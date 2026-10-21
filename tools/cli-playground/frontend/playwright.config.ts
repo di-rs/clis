@@ -26,7 +26,7 @@ export default defineConfig({
     { name: "mobile", use: { ...devices["Pixel 7"] } },
   ],
   webServer: {
-    command: "uv run --locked --package cli-playground python -m tests.browser_server",
+    command: "uv run --package cli-playground python -m tests.browser_server",
     cwd: fileURLToPath(new URL("../", import.meta.url)),
     env: {
       CLI_PLAYGROUND_DATA_DIR: fileURLToPath(

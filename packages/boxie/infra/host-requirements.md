@@ -16,7 +16,7 @@ Migration sources live in `packages/boxie/alembic/`, alongside `alembic.ini`, an
 included in the installed Boxie package. Apply them explicitly:
 
 ```sh
-uv run --locked --package boxie python -m boxie.persistence.migrate --dsn-file /etc/boxie/postgres-dsn.secret
+uv run --package boxie python -m boxie.persistence.migrate --dsn-file /etc/boxie/postgres-dsn.secret
 ```
 
 Keep Boxie, Temporal persistence and visibility database credentials separate.
@@ -124,7 +124,7 @@ Time-skipping workflow tests use the checksum-pinned 1.40.0 executable in
 mTLS and real PostgreSQL. Run the isolated native lifecycle harness using:
 
 ```sh
-uv run --locked python packages/boxie/tests/run_integration.py --runtime runsc
+uv run python packages/boxie/tests/run_integration.py --runtime runsc
 ```
 
 The [native lifecycle workflow](../../../.github/workflows/boxie-lifecycle.yml)

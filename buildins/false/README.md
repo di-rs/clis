@@ -1,22 +1,10 @@
 # false
 
-Return failure without output.
+`false` exits with status 1 and produces no output.
 
-## Behavior
+| Argument or option | Meaning |
+| --- | --- |
+| Any arguments | Ignored, including `--help` and `--version`; status remains 1. |
 
-- Exits normally with status 1 without output.
-- Ignores arguments and does not implement help/version flags.
-
-## Example
-
-From the workspace root:
-
-```sh
-cargo run -p false
-```
-
-The command returns status 1; this is its intended result.
-
-Reference: GNU Coreutils manual for [false](https://www.gnu.org/software/coreutils/manual/html_node/false-invocation.html).
-
-[Workspace README](../../README.md)
+Reference: [GNU false](https://www.gnu.org/software/coreutils/manual/html_node/false-invocation.html).
+[All commands](../../README.md)

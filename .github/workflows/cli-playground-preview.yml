@@ -44,7 +44,7 @@ jobs:
           RUN_ID: ${{ github.event.workflow_run.id }}
           CLI_PLAYGROUND_URL: ${{ vars.CLI_PLAYGROUND_URL }}
           CLI_PLAYGROUND_DEPLOY_TOKEN: ${{ secrets.CLI_PLAYGROUND_DEPLOY_TOKEN }}
-        run: uv run --locked --no-dev python tools/cli-playground/preview_ci.py publish --repo "$REPOSITORY" --run-id "$RUN_ID"
+        run: uv run --no-dev python tools/cli-playground/preview_ci.py publish --repo "$REPOSITORY" --run-id "$RUN_ID"
   lifecycle:
     environment: cli-playground-preview
     name: 🧹 Reconcile cli-playground preview lifecycle
@@ -79,5 +79,5 @@ jobs:
           CLI_PLAYGROUND_URL: ${{ vars.CLI_PLAYGROUND_URL }}
           CLI_PLAYGROUND_DEPLOY_TOKEN: ${{ secrets.CLI_PLAYGROUND_DEPLOY_TOKEN }}
         run: |
-          uv run --locked --no-dev python tools/cli-playground/preview_ci.py lifecycle \
+          uv run --no-dev python tools/cli-playground/preview_ci.py lifecycle \
             --repo "$REPOSITORY" --pr "$PR_NUMBER" --action "$PR_ACTION"

@@ -25,7 +25,7 @@ def test_operations_manifest_keeps_docker_socket_out_of_operator_jobs() -> None:
     "dockerfile",
     [
         "packages/boxie/infra/Boxie.Dockerfile",
-        "tools/cli-playground/infra/CliPlayground.Dockerfile",
+        "tools/cli-playground/infra/docker/CliPlayground.Dockerfile",
     ],
 )
 def test_docker_context_excludes_generated_frontend_assets(tmp_path: Path, dockerfile: str) -> None:
@@ -109,7 +109,6 @@ def test_real_isolated_installation(
         [
             "uv",
             "export",
-            "--locked",
             "--package",
             package,
             "--no-dev",

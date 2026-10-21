@@ -100,7 +100,6 @@ def test_native_application_and_browser(tmp_path: Path) -> None:
             [
                 "uv",
                 "run",
-                "--locked",
                 "python",
                 "-m",
                 "cli_playground_infra.smoke",

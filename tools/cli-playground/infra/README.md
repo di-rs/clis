@@ -1,176 +1,47 @@
-# cli-playground infrastructure
+# Playground infrastructure
 
-Use the [shared-host guide](../../../infra/environments/single-host/README.md) for
-setup, SSH credential handoff, release gates and failure inspection. Routine
-application releases leave the proxy and Boxie alone. The application image contains
-both Frontend and Backend.
+The playground deployment runs a Python backend with its built browser assets.
+It connects to a separately operated Boxie service to create terminals. It never
+receives the Docker socket or Boxie's supervisor credentials.
 
-## Independent local unit
+## Choose a setup
 
-Obtain a private Boxie URL and consumer credential from its operator; see
-[Boxie infrastructure](../../../packages/boxie/infra/README.md). Boxie owns its
-default shell, sandbox image and built-in sample files. cli-playground uploads
-validated native binaries and requests a sandbox using only their artifact ID.
-It does not select an environment or modify Boxie's configuration.
+| Task | Guide |
+| --- | --- |
+| Set up or release on the shared production host | [Shared-host deployment](../../../infra/environments/single-host/README.md) |
+| Run a local Compose deployment against an existing Boxie service | [Local setup](docs/local-setup.md) |
+| Provision PostgreSQL, migrate, back up, or restore | [Database operations](docs/database.md) |
+| Configure GitHub credentials and publish live PR links | [Preview publication](docs/previews.md) |
 
-```sh
-docker build -f tools/cli-playground/infra/CliPlayground.Dockerfile -t cli-playground:local .
-```
+## Directory layout
 
-From the repository root, create an external product-data volume and set the
-consumer connection. The network must already exist; it can belong to a separate
-Boxie installation. There is no cross-project `depends_on`.
+| Path | Contents |
+| --- | --- |
+| `compose*.yml` | Local, production, and integration-test service definitions |
+| `Pulumi*.yaml`, `__main__.py` | Pulumi project and stack entry points |
+| `cli_playground_infra/` | Python provisioning and operator helpers |
+| `docker/` | Application Dockerfile and its build-context exclusions |
+| `scripts/` | Host bootstrap, installation, database provisioning, and releases |
+| `postgres/` | Database provisioning SQL |
+| `proxy/` | Traefik routing configuration |
+| `observability/` | Log validation and collection configuration |
+| `docs/` | Setup, database, and preview-publication guides |
 
-```sh
-docker volume create cli-playground-data
-export CLI_PLAYGROUND_PROJECT_NAME=cli-playground
-export CLI_PLAYGROUND_DATA_VOLUME=cli-playground-data
-export CLI_PLAYGROUND_CONSUMER_NETWORK=boxie-consumers
-export CLI_PLAYGROUND_DATABASE_NETWORK=boxie-postgres_playground
-export CLI_PLAYGROUND_DATABASE_URL_FILE=/private/path/playground-database-url.secret
-export CLI_PLAYGROUND_BOXIE_URL=http://boxie-api:8090
-export CLI_PLAYGROUND_BOXIE_CREDENTIAL_FILE=/private/path/consumer.secret
-export CLI_PLAYGROUND_DEPLOY_TOKEN=local-deploy-token
-export CLI_PLAYGROUND_PUBLIC_URL=http://localhost:8000
-docker compose -f tools/cli-playground/infra/compose.yml run --rm --no-deps backend \
-  alembic upgrade head
-docker compose -f tools/cli-playground/infra/compose.yml up --build -d
-```
+Local setup requires a private Boxie URL and consumer credential, a dedicated
+playground database, and their external Docker networks. Production additionally
+uses Traefik for HTTPS. Only the proxy publishes ports 80 and 443.
 
-Both local and production manifests default to project `cli-playground`. Override
-`CLI_PLAYGROUND_PROJECT_NAME` for another installation; keep it distinct from Boxie's
-`BOXIE_PROJECT_NAME` (default `boxie`). Do not give the two units a shared
-`COMPOSE_PROJECT_NAME` or `--project-name`, which overrides the manifest identity.
-Their external network and volume identifiers remain independently configured.
+## Keep ownership clear
 
-The credential must be a regular non-symlink file, mode `0600`, containing a
-16–4096-character printable token. The local unit publishes only localhost:8000.
-The independently resolvable production manifest uses an explicit immutable
-`CLI_PLAYGROUND_IMAGE`, external `CLI_PLAYGROUND_PROXY_NETWORK` and
-`CLI_PLAYGROUND_CERTIFICATES_VOLUME`; only Traefik publishes 80/443 and receives the
-Cloudflare certificate-renewal credential. Boxie's artifact data and supervisor
-credential never enter cli-playground. Runtime images contain only their own installed
-package/dependencies and, for cli-playground, its real built frontend assets.
+The playground owns preview metadata and browser sessions in its PostgreSQL
+database. Its data volume holds ZIPs waiting for upload. Boxie owns execution,
+artifact storage, sandbox images, and sample files.
 
-Operator modules are installed separately from runtime images. Run
-`uv sync --locked --all-packages` for local infrastructure checks. Application
-release jobs use native OpenSSH and do not read Pulumi state.
+Use separate Compose project names for Boxie and the playground. The playground
+defaults to `cli-playground`; do not override both projects with the same
+`COMPOSE_PROJECT_NAME`. An application release updates the backend/frontend
+image while leaving the proxy and Boxie running.
 
-## Database and cutover
-
-Provision a dedicated `cli_playground` database and login on the existing
-PostgreSQL service. For the independent local unit, have its operator create the
-database, grant ownership to that login, revoke public database access, and provide
-a mode-`0600` file containing `postgresql+psycopg://USER:PASSWORD@postgres/cli_playground`.
-`CLI_PLAYGROUND_DATABASE_URL_FILE` names that host file; Compose mounts it at
-`/run/secrets/CLI_PLAYGROUND_DATABASE_URL` for Pydantic Settings. PostgreSQL must
-be reachable through `CLI_PLAYGROUND_DATABASE_NETWORK`.
-The database network contains only PostgreSQL and the gateway. Keep it separate
-from Boxie's control network; the proxy does not join it.
-
-Shared-host setup generates a separate password and database URL under
-`/etc/sanctuary/cli-playground/`. Its `provision.sh` adds the database using the
-existing PostgreSQL administrator inside the database container. This works with
-already-initialized PostgreSQL volumes; it does not depend on first-boot scripts.
-The application receives only its own database URL, never the administrator password.
-
-`install.sh` reconciles the PostgreSQL Compose service to attach its internal
-`playground` network, which may restart PostgreSQL on an existing host. Schedule
-this first installation during the cutover window. It then provisions the database
-and runs Alembic before startup. `deploy.sh`
-runs the migration command from the new image before replacing the backend. A
-failed upgrade stops the deployment. Neither path enables multiple workers.
-For an existing host receiving this change, install the updated owner scripts and
-rendered settings before its first database-backed release.
-
-There is no importer for old metadata files. For the initial cutover:
-
-1. Pause preview publication and new browser sessions at the ingress.
-2. Let the old backend finish pending uploads and stops. Drain its sessions or
-   wait for their bounded sandbox lifetimes before stopping it.
-3. Keep the old data volume for rollback. Provision the new database, apply its
-   schema and select a fresh data volume for ZIP staging.
-4. Start the new backend, verify readiness, then re-enable traffic and rerun the
-   PR builds to republish previews. Old session bindings are not carried over.
-
-Back up the database and staging volume together while the gateway is stopped.
-Restore both from the same backup before starting recovery. Boxie's artifact
-storage and database retain their separate backup requirements. Database backups
-alone cannot recover bytes for an upload Boxie has not acknowledged.
-
-Rollback is a coordinated state restore, not an Alembic downgrade: drain any new
-sessions and pending operations, stop the new backend, then restore the prior
-application/configuration and its matching old data volume. Old metadata files
-cannot describe sessions or previews created after cutover. A schema downgrade
-on a disposable test database is only a migration check.
-
-## Enable PR comments and live previews
-
-Benchmark comments need no custom secret. The
-[reporting workflow](../../../.github/workflows/cli-bench-report.yml) uses GitHub's
-automatic `GITHUB_TOKEN` with `contents: read`, `actions: read` and
-`pull-requests: write`. It reports completed benchmark jobs for the PR's current
-commit. A run with no selected suites leaves the existing comment unchanged.
-
-For a live cli-playground link, first deploy the backend and its Boxie sandbox using
-the [shared-host setup guide](../../../infra/environments/single-host/README.md).
-The backend must be reachable from Actions over HTTPS, with working preview DNS
-and certificates. In repository **Settings → Environments**, create
-`cli-playground-preview` and allow deployments from `master`. Add these settings to
-that environment:
-
-| Kind | Name | Value |
-| --- | --- | --- |
-| Variable | `CLI_PLAYGROUND_URL` | The backend's public HTTPS origin, for example `https://play.example.com`, without a path, query or trailing slash. Use the same origin as the backend's `CLI_PLAYGROUND_PUBLIC_URL`. |
-| Secret | `CLI_PLAYGROUND_DEPLOY_TOKEN` | The exact token configured as `CLI_PLAYGROUND_DEPLOY_TOKEN` on the backend. Shared-host setup stores it at `/etc/sanctuary/cli-playground/preview-token`. |
-
-Use the shared-host guide's
-[credential handoff](../../../infra/environments/single-host/README.md#give-application-workflows-their-ssh-credentials)
-to retrieve the existing token over pinned SSH and copy it into GitHub. Creating
-an unrelated token in GitHub will cause authentication to fail. Settings placed
-only in the `cli-playground` release environment are unavailable to preview jobs.
-
-If you already have the token in a private local file, set the two values with an
-authenticated `gh` session that can manage repository environment settings:
-
-```sh
-gh variable set CLI_PLAYGROUND_URL --repo di-rs/sanctuary --env cli-playground-preview \
-  --body 'https://play.example.com'
-gh secret set CLI_PLAYGROUND_DEPLOY_TOKEN --repo di-rs/sanctuary --env cli-playground-preview \
-  < /private/path/preview-token
-```
-
-Replace the example origin and file path. The
-[preview workflow](../../../.github/workflows/cli-playground-preview.yml) also
-uses the automatic GitHub token with `contents: read`, `actions: read`,
-`pull-requests: write` and `deployments: write`; no personal access token is needed
-by either publisher. PR builds receive neither the preview token nor host SSH
-credentials. If the environment requires approval, publication waits for it.
-
-### Verify publication
-
-Merge publisher changes into `master` before triggering new builds: publication
-runs trusted default-branch code. Push a CLI change to a ready PR, or add `run-ci`
-to a draft as described in [Testing](../../../docs/testing.md#draft-pull-requests).
-An ordinary PR description edit does not trigger cli-playground builds.
-
-After the benchmark and cli-playground build workflows complete, check their separate
-**CLI benchmark reporting** and **cli-playground PR previews** runs in Actions. The PR
-should have a benchmark results comment and a cli-playground comment with a working
-preview link. Open the preview and run the changed CLI to verify the sandbox.
-
-If either cli-playground setting is absent, the publisher posts **Configuration
-needed** with build artifact links instead of a live preview. A green build alone
-does not prove publication succeeded. Check publisher logs for skipped stale
-commits, and check the `cli-playground-preview` environment for pending approval or
-missing settings. After configuring the environment, rerun the cli-playground binary
-build for the current PR commit to trigger publication again.
-
-## Validation
-
-Build the real frontend before `uv run --locked pytest
-packages/boxie/tests/test_packaging.py -m integration`. The required PR frontend job
-checks isolated packaging and static responses. The separate
-[shared-system lifecycle workflow](../../../.github/workflows/sanctuary-lifecycle.yml)
-checks native runsc security and both generic and product terminals through the
-private API. Missing runsc is a failure, never a successful runc substitute.
+A green PR build does not prove a preview was published. Check the separate
+publisher workflow, its environment approval, and the resulting browser link.
+The preview guide explains missing configuration and retry behavior.

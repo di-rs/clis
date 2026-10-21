@@ -78,7 +78,7 @@ def test_python_tests_skip_rust_hooks_but_rust_fixtures_select_them(
     hook_repo: tuple[Path, dict[str, str]],
 ) -> None:
     root, env = hook_repo
-    configure(root, "cargo-clippy", "cargo-nexttest", "cli-check")
+    configure(root, "cargo-clippy", "cli-check")
     env = stub_tools(root, env, "uv")
     for name in ("packages/boxie/tests/test_app.py", "buildins/echor/tests/inputs/data.txt"):
         path = root / name
@@ -89,7 +89,7 @@ def test_python_tests_skip_rust_hooks_but_rust_fixtures_select_them(
     assert not (root / "trace").exists()
     result = run(root, env, "--files", "buildins/echor/tests/inputs/data.txt")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert len((root / "trace").read_text().splitlines()) == 3
+    assert len((root / "trace").read_text().splitlines()) == 2
 
 
 @pytest.mark.parametrize("config_file", ["lychee.toml", "typos.toml", "prek.toml"])
