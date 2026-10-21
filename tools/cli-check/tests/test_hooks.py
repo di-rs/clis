@@ -229,3 +229,12 @@ def test_mypy_resolves_workspace_dependencies_without_adding_them_as_targets(
     assert captured["args"] == ["run", "--locked", "mypy", "apps/client"]
     assert str(workspace / "apps/api/src") in captured["paths"]
     assert str(workspace / "apps/api/tests") in captured["paths"]
+
+
+@pytest.mark.parametrize("hook", ["ruff", "ruff-format"])
+def test_ruff_scopes_source_and_configuration(workspace: Path, hook: str) -> None:
+    source = "apps/api/tests/test_app.py"
+    assert plan(workspace, hook, source)[0][-2:] == ["--", source]
+    assert plan(workspace, hook, source, "apps/api/ruff.toml")[0][-2:] == ["--", "apps/api"]
+    assert plan(workspace, hook, source, "prek.toml")[0][-2:] == ["--", "."]
+    assert plan(workspace, hook, "apps/api/deleted.py") == []

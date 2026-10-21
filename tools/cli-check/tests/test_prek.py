@@ -161,4 +161,16 @@ def test_mixed_code_and_config_runs_each_checker_once(
     calls = [json.loads(line) for line in (root / "trace").read_text().splitlines()]
     assert len(calls) == 4
     assert sum(call[0] == "uv" for call in calls) == 2
-    assert all("app.py" not in call for call in calls)
+    assert all("app.py" in call for call in calls if call[0] == "uv")
+
+
+def test_deleted_markdown_input_is_skipped(hook_repo: tuple[Path, dict[str, str]]) -> None:
+    assert shutil.which("lychee"), "Install lychee to run link integration tests"
+    root, env = hook_repo
+    configure(root, "lychee")
+    (root / "gone.md").write_text("# Removed\n")
+    (root / "README.md").write_text("# Remaining\n")
+    git(root, env, "add", "gone.md", "README.md")
+    (root / "gone.md").unlink()
+    result = run(root, env, "--files", "README.md")
+    assert result.returncode == 0, result.stdout + result.stderr
