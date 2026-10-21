@@ -168,7 +168,7 @@ def test_hook_config_passes_paths_and_serializes_package_checks() -> None:
             if "cli_check.hooks" in hook.get("entry", ""):
                 assert hook.get("pass_filenames", True)
                 assert hook["require_serial"]
-    rust = next(h for r in config["repos"] for h in r["hooks"] if h["id"] == "cargo-nexttest")
+    rust = next(h for r in config["repos"] for h in r["hooks"] if h["id"] == "cargo-clippy")
     assert not re.search(rust["files"], "infra/environments/single-host/tests/test_reset.py")
 
 

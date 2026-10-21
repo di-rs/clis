@@ -7,6 +7,8 @@ to VictoriaLogs. Grafana queries VictoriaLogs and Prometheus. Request, sandbox,
 workflow and run IDs are searchable fields; they never become stream labels or
 metric labels. Sandbox PTY output is never collected. Vector has no Docker socket.
 
+## Collector compatibility
+
 The [collector Dockerfile](collector/Dockerfile) copies the pinned upstream
 Vector 0.59.0 binary onto pinned Ubuntu 26.04 with systemd/journalctl and its runtime
 libraries. The official Vector Debian image bundles journalctl 257; Vector rejects
@@ -27,6 +29,8 @@ docker network create --internal boxie-grafana-origin
 docker network create --internal boxie-temporal-ui-origin
 ```
 
+### Configure identity and journal access
+
 Copy `observability.env.example` to a private environment file, set the Boxie
 installation UUID, host ID and Temporal namespace to the actual application
 configuration, and source/export it. Use a UUID for the installation and only
@@ -36,11 +40,15 @@ journal group using `getent group systemd-journal`. Verify that this group can r
 the persistent host journal. Install `journald.conf` as a systemd drop-in, enable
 persistent storage, restart journald, and check `journalctl --disk-usage`.
 
+### Configure Grafana
+
 Provision a private Grafana admin password file readable by UID 472. Install the
 VictoriaLogs datasource plugin from the URL in `versions.json`, verify its SHA256,
 and unpack it to `OBS_GRAFANA_PLUGIN_DIR`, preserving the archive executable bits
 for its backend binaries. Grafana uses only this mounted plugin;
 startup downloads and anonymous access are disabled.
+
+### Start the stack
 
 Substitute the three nonsecret Prometheus values with the system `envsubst` tool.
 Prometheus does not expand environment variables in YAML. The queue filter covers
@@ -74,6 +82,8 @@ plus `packages/boxie/infra/temporal/compose.observability.yml`. Base deployments
 `OBS_*` values or monitoring bridges. Grafana and Temporal UI have no published
 ports. Follow the [operator ingress guide](../ingress/README.md) for Access/Tunnel.
 
+### Preserve existing volumes
+
 For an existing deployment, preserve its four current volumes and checkpoints.
 Add a Compose override setting each matching volume key (`vector-data`, `logs-data`,
 `prometheus-data`, `grafana-data`) to `external: true` and `name: <existing-name>`.
@@ -84,16 +94,25 @@ Compose-owned storage only after an explicit data migration and verification.
 
 ## Resource and failure behavior
 
-Grafana has a fixed hard 256 MiB memory cap. VictoriaLogs has a seven-day maximum
-searchable age and a 256 MiB cleanup target. Its newest two daily partitions are
-protected and may exceed the target; seven days of history is not guaranteed.
-The journal has a 1 GiB persistent/128 MiB runtime budget, keeps 4 GiB free and has
-a two-day age limit. Vector's disk buffer is 512 MiB, separate from the journal
-and store; the final one-event memory stage drops under pressure. Vector reserves
-a 128 MiB segment internally, so usable unread capacity is smaller than the
-configured allocation. Prometheus has seven-day/2 GiB retention; reserve at least
-3 GiB for its WAL and compaction. Monitor every backing filesystem, adding its
-mount to node-exporter filters and disk alert selectors when storage is not on `/`.
+### Storage and memory budgets
+
+| Component | Budget and retention |
+| --- | --- |
+| Grafana | Hard memory cap of 256 MiB |
+| VictoriaLogs | Seven-day maximum searchable age and a 256 MiB cleanup target |
+| journald | 1 GiB persistent and 128 MiB runtime storage; keeps 4 GiB free; two-day age limit |
+| Vector | 512 MiB disk buffer, separate from the journal and log store |
+| Prometheus | Seven-day / 2 GiB retention; reserve at least 3 GiB for WAL and compaction |
+
+VictoriaLogs protects its newest two daily partitions, which may exceed the
+cleanup target. Seven days of searchable history is not guaranteed. Vector
+reserves a 128 MiB segment internally, leaving less usable unread capacity; its
+final one-event memory stage drops under pressure.
+
+Monitor every backing filesystem. When storage is not on `/`, add its mount to
+node-exporter filters and disk alert selectors.
+
+### Application logging under pressure
 
 Logging producers sanitize before a stdlib QueueHandler/QueueListener queue,
 count drops and drain for at most two seconds at shutdown. Events over the byte
@@ -104,12 +123,16 @@ Raw `print`/fd writes are not telemetry APIs; application and dependency logging
 must go through the configured handlers for sanitization. During collection loss,
 Boxie continues provisioning and terminal work. Logs/counters are best effort.
 
+### Probe and maintenance logs
+
 Successful `/healthz` and `/readyz` requests emit no request logs. HTTPX uses a
 WARNING threshold, so routine probe responses do not become dependency events.
 Failed probes and ordinary application requests remain visible, and every request
 still updates HTTP metrics. Empty command-recovery and cleanup passes emit no
 per-run log events; the [host requirements](../host-requirements.md#native-maintenance) describes
 their cadence and recovery behavior.
+
+### Metrics availability
 
 The supported `prometheus-client` HTTP server serves cached process/SQL gauges
 on private unpublished ports. Its request threads are upstream-owned and bounded
@@ -148,8 +171,8 @@ actual Linux deployment. Ordinary tests do not establish those activation claims
 
 ## Request correlation
 
-For a failed authenticated request, copy its `X-Request-ID` response header and
-search `request_id:="<UUID>"` in Grafana Explore's VictoriaLogs datasource. The
+Use the [request search instructions](README.md#find-a-failed-request) to locate
+a failed action. The
 [consumer contract](../../docs/consumer-api.md#follow-a-request-through-logs) describes
 accepted IDs and separate creation, stop and connection actions. Use `sandbox_id`
 to inspect a sandbox across all of those actions.

@@ -3,6 +3,16 @@
 Parsu reads a small XML-like language and prints its element tree using Rust
 debug formatting. It is a parser-combinator exercise, not a general XML parser.
 
+## Parse an element
+
+Run from the repository root with the pinned Rust toolchain installed:
+
+```sh
+printf '%s\n' '<parent><child/></parent>' | cargo run -p parsu -- -
+```
+
+The output is a debug representation of the parent element and its child.
+
 ## Arguments and options
 
 | Argument or option | Meaning |

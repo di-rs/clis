@@ -12,6 +12,8 @@ be reachable through `CLI_PLAYGROUND_DATABASE_NETWORK`.
 The database network contains only PostgreSQL and the gateway. Keep it separate
 from Boxie's control network; the proxy does not join it.
 
+### Shared-host provisioning
+
 Shared-host setup generates a separate password and database URL under
 `/etc/sanctuary/cli-playground/`. Its `provision.sh` adds the database using the
 existing PostgreSQL administrator inside the database container. This works with
@@ -27,6 +29,8 @@ failed upgrade stops the deployment. Neither path enables multiple workers.
 For an existing host receiving this change, install the updated owner scripts and
 rendered settings before its first database-backed release.
 
+### Replace file-based metadata
+
 There is no importer for old metadata files. For the initial cutover:
 
 1. Pause preview publication and new browser sessions at the ingress.
@@ -37,10 +41,14 @@ There is no importer for old metadata files. For the initial cutover:
 4. Start the new backend, verify readiness, then re-enable traffic and rerun the
    PR builds to republish previews. Old session bindings are not carried over.
 
+## Back up and restore
+
 Back up the database and staging volume together while the gateway is stopped.
 Restore both from the same backup before starting recovery. Boxie's artifact
 storage and database retain their separate backup requirements. Database backups
 alone cannot recover bytes for an upload Boxie has not acknowledged.
+
+## Roll back the initial cutover
 
 Rollback is a coordinated state restore, not an Alembic downgrade: drain any new
 sessions and pending operations, stop the new backend, then restore the prior

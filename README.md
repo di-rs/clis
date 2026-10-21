@@ -19,19 +19,11 @@ For Python tools, install the workspace dependencies with
 `uv sync --all-packages`, then run commands through `uv run`.
 Frontend development has its own prerequisites in the playground guide.
 
-## Find your way around
+## Try the browser playground
 
-The [architecture overview](docs/architecture.md) explains how local commands, PR
-builds, the playground, and Boxie fit together. The
-[threat model](docs/thread-model.md) describes security boundaries.
-
-| Directory | Contents |
-| --- | --- |
-| `buildins/` | Small standalone Rust CLIs |
-| `packages/` | Larger applications and Boxie |
-| `utils/` | Shared Rust libraries |
-| `tools/` | Repository checks, benchmarks, and browser playground |
-| `infra/` | Host provisioning and service composition |
+Open a pull request's playground link to try its commands without building them
+locally. The [playground guide](tools/cli-playground/README.md#use-a-preview)
+explains sessions, sample files, and switching builds.
 
 ## Applications
 
@@ -78,6 +70,20 @@ builds, the playground, and Boxie fit together. The
 | --- | --- |
 | [cli-log](utils/cli-log/README.md) | Shared structured file logging and error reporting |
 | [cli-testing](utils/cli-testing/README.md) | Shared CLI test setup and byte fixture loading |
+
+## Find your way around
+
+The [architecture overview](docs/architecture.md) explains how local commands, PR
+builds, the playground, and Boxie fit together. The
+[threat model](docs/thread-model.md) describes security boundaries.
+
+| Directory | Contents |
+| --- | --- |
+| `buildins/` | Small standalone Rust CLIs |
+| `packages/` | Larger applications and Boxie |
+| `utils/` | Shared Rust libraries |
+| `tools/` | Repository checks, benchmarks, and browser playground |
+| `infra/` | Host provisioning and service composition |
 
 ## Make a change
 

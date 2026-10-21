@@ -1,9 +1,7 @@
 # cli-log
 
 `cli-log` gives the Rust CLIs consistent log configuration and records when a
-command starts, finishes, or fails. It uses the `log` facade and `flexi_logger`
-for file output and rotation. Logs never go to stdout, so pipelines keep their
-normal command output.
+command starts, finishes, or fails. Logs never go to stdout, so pipelines keep their normal command output.
 
 ## Configure a command
 
@@ -21,11 +19,15 @@ from the workspace root:
 SANCTUARY_LOG_LEVEL=off cargo run -p catr -- Cargo.toml
 ```
 
+## Find log files
+
 On Unix, an absolute `XDG_STATE_HOME` selects `sanctuary/logs` beneath it.
 Otherwise, macOS uses `~/Library/Logs/sanctuary`, other Unix systems use
 `~/.local/state/sanctuary/logs`, and Windows uses `$LOCALAPPDATA/sanctuary/logs`.
 Relative directory overrides use the command's working directory. `RUST_LOG`
 is ignored; invalid levels and unavailable storage produce warnings.
+
+## Command-specific controls
 
 Biggie's `-L` overrides its file threshold, Grepr's verbosity controls console
 logging, and Kara disables console logging to protect its interface.
@@ -38,9 +40,14 @@ ordinary `log` events and leave logger initialization to the binary.
 For file names, JSON fields, lifecycle events, and rotation, see
 [log-file format](docs/log-files.md).
 
+## Retention and privacy
+
 Each invocation retains its own rotated files; there is no directory-wide
 retention limit. Logs are not an audit trail. Arguments and file contents are not
 automatically collected, but error messages can contain paths or rejected input
 and are not automatically redacted.
 
+## Development
+
+The library uses the `log` facade and `flexi_logger` for file output and rotation.
 Run package tests with `cargo nextest run -p cli-log`.

@@ -103,7 +103,7 @@ jobs:
       - name: 🔎 Check Python types with mypy
         run: prek run mypy --all-files --show-diff-on-failure
       - name: 🧪 Run Python regression tests
-        run: prek run python-tests --all-files --show-diff-on-failure
+        run: uv run pytest
       - name: 📜 Verify CLI repository standards
         run: prek run cli-check --all-files --show-diff-on-failure
       - name: 🧹 Verify checks leave the checkout unchanged

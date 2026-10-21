@@ -25,6 +25,14 @@ references, and evaluation cases are included.
 
 ## Local adaptations
 
+- README guidance is adapted to Sanctuary: no fixed length, mandatory section
+  inventory, or automatic page splitting. Important technical detail remains;
+  audience, task, and navigation determine its placement.
+- Technical completeness is scoped to the page's promise. The editorial pass
+  checks repetition across related pages as well as within one document.
+- The repository-owned [writing patterns](writing-patterns.md) collect public
+  examples and their applications without copying their product-specific content.
+
 - Both Flagrare skills link to their installed writing/editorial counterpart
   instead of requiring a Flagrare slash command. References to other Flagrare
   skills remain upstream context; the wrapper does not require them.

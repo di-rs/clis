@@ -11,19 +11,14 @@ service. The deployment code brings those services together on a Linux host.
 
 ## Local commands and shared libraries
 
-[buildins/](../buildins/) contains commands such as `catr`, `grepr`, and `tailr`.
-Each directory is a Cargo package with one executable of the same name, its own
-tests, and its own README. These are limited implementations; package docs state
-where their behavior differs from familiar system tools.
+Each CLI is a Cargo package with one executable, its own tests, and its own
+README. The [project index](../README.md#commands) lists the available commands
+and applications. Package docs explain supported behavior and differences from
+familiar system tools.
 
-[packages/](../packages) holds larger projects: Biggie generates test and
-benchmark data, Kara edits text in a terminal, and Parsu parses a small XML-like
-language. Boxie is also here, but it is a Python service rather than a Rust CLI.
-
-Two libraries avoid repeating common support code. [cli-log](../utils/cli-log/README.md)
-handles command logging and lifecycle records.
-[cli-testing](../utils/cli-testing/README.md) starts binaries with predictable
-test settings and reads fixtures without changing their bytes.
+Shared libraries provide logging (`cli-log`) and predictable test execution with
+byte fixtures (`cli-testing`). Command implementations depend on those libraries;
+they do not require the playground or Boxie to run locally.
 
 Cargo manages the Rust workspace. uv manages the Python services and tools with
 a shared lockfile. Sharing a repository and lockfile does not mean the services

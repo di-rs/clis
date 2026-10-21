@@ -37,6 +37,12 @@ Structure before flow, flow before paragraphs, paragraphs before lines. An edito
 
 **Pacing and proportion.** Space in a document is emphasis. Does the amount of text each idea gets match its importance to the spine? The two standard failures are opposites: the load-bearing risk compressed into one six-clause sentence, and a minor mechanism sprawled across three paragraphs because the author found it interesting to figure out. Watch also for the sagging middle, where consecutive sections restate one idea in different clothes, and for repeated information (the same fact introduced twice usually means two drafts were merged and nobody reread the whole).
 
+**Cross-page repetition.** Read linked pages as a journey. Find repeated setup,
+defaults, architecture descriptions, and caveats. Keep the detailed explanation
+in its most useful home and use brief context elsewhere. Prefer consolidation
+when readers keep jumping between short pages to complete one task. Length alone
+is not a defect; important technical depth should survive the edit.
+
 **Consistency.** One name per concept for the whole document; synonym-cycling reads as elegant variation to the writer and as a second concept to the reader. Check that numbers, claims, and terminology agree across sections, that nothing promised ("discussed below") is missing, and that tone doesn't lurch register mid-document.
 
 ### 3. Hunt the four noise categories

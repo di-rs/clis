@@ -5,14 +5,20 @@ inputs with [Biggie](../../packages/biggie/README.md), checks each case before
 timing it, and saves hyperfine reports for the candidate and an optional system
 reference or previous build.
 
+## Run a benchmark
+
 Run it from the repository root with Python 3.15 or newer through the uv
 workspace. Benchmarks require hyperfine 2.x and an existing candidate executable;
 suites with `generate` also require Biggie. The default executable paths are
 under `target/release/`.
 
 ```sh
+cargo build --release -p tailr -p biggie
 uv run python tools/cli-bench/bench.py buildins/tailr/benches/cli-bench.toml
 ```
+
+The runner prints progress and the report directory. Use `--list` to inspect
+the suite's cases without running the benchmark.
 
 ## Arguments and options
 
@@ -69,6 +75,8 @@ args = ["-n", "1000", "input.txt"]
 | `check` | Shell command after each preflight command, for checking side effects |
 | `expected_exit` | Expected exit status, from 0 to 255; defaults to `0` |
 
+### Input preparation and environment
+
 Unknown fields are rejected. Generation and cases share a temporary working
 directory, so a case that modifies inputs should restore them in `prepare`.
 Hooks execute shell commands: run only trusted suites. `stdin` benchmarks read
@@ -84,6 +92,8 @@ Before timing, the runner verifies exit statuses and compares candidate and
 comparison stdout byte for byte. It does not compare stderr. A `check` hook runs
 only during this preflight, outside timing. Measured exit statuses are checked
 again in the hyperfine report.
+
+### Read reports
 
 Each completed case produces `<name>.json` and `<name>.md`. The output directory
 also contains `suite.toml` and `metadata.json`, which records settings, executable

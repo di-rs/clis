@@ -1,8 +1,30 @@
 # Boxie
 
-Boxie runs uploaded files in short-lived Linux sandboxes. Other services use its
-private API to upload an archive, start a sandbox, attach a terminal, and stop it.
-The browser playground is one consumer; Boxie can run independently.
+Boxie runs uploaded files in short-lived Linux sandboxes. Services connect through
+its private API; the browser playground is one consumer.
+Boxie can also run independently.
+
+## Use the API
+
+An integration uploads a ZIP, creates a sandbox from that artifact, connects a
+terminal, then stops the sandbox when finished. Start with the
+[consumer API guide](docs/consumer-api.md) for the request sequence and terminal
+protocol. You need a private API URL and consumer credential from the operator.
+
+The default sandbox provides Bash and sample files. It has no network and limits
+CPU, memory, disk, and lifetime. Consumers select uploaded files; they cannot
+choose arbitrary commands, environment settings, or isolation profiles.
+
+## Run a deployment
+
+Start with the [infrastructure guide](infra/README.md). You need PostgreSQL,
+Temporal, private credentials, and a native Linux host with gVisor (`runsc`).
+Docker Desktop can build images, but it cannot validate the required isolation.
+
+The [configuration guide](docs/configuration.md) contains supervisor and API
+configuration examples and startup commands. Run one supervisor per data directory,
+and make artifact storage visible at the same absolute path to the supervisor
+and Docker.
 
 ## How it works
 
@@ -14,36 +36,11 @@ Temporal workers inside the supervisor carry out provisioning, cleanup, and
 recovery. PostgreSQL records ownership and capacity so retries do not create a
 second sandbox or free a slot before deletion is confirmed.
 
-## Run a deployment
+For resource limits and the mechanisms behind these guarantees, read
+[execution and recovery](docs/execution.md). For logs and metrics, see
+[monitoring](infra/observability/README.md).
 
-Start with the [infrastructure guide](infra/README.md). You need PostgreSQL,
-Temporal, private credentials, and a native Linux host with gVisor (`runsc`).
-Docker Desktop can build images, but it cannot validate the required isolation.
-
-After provisioning those dependencies and process configuration files, run from
-the workspace root in separate terminals:
-
-```sh
-uv run --package boxie boxie-supervisor --config /etc/boxie/supervisor.json
-uv run --package boxie boxie-api --config /etc/boxie/api.json
-```
-
-Run one supervisor per data directory. Keep both endpoints private and make the
-artifact directory visible at the same absolute path to the supervisor and Docker.
-
-## Use or change Boxie
-
-| Task | Guide |
-| --- | --- |
-| Upload files, start sandboxes, or implement a terminal client | [Consumer API](docs/consumer-api.md) |
-| Configure processes, credentials, or the default sandbox | [Configuration](docs/configuration.md) |
-| Understand isolation, storage, cleanup, and recovery | [Execution](docs/execution.md) |
-| Deploy or inspect logs | [Infrastructure](infra/README.md) and [monitoring](infra/observability/README.md) |
-
-Consumers cannot choose arbitrary commands, environment settings, or isolation
-profiles. The default sandbox provides Bash and sample files, has no network,
-and limits CPU, memory, disk, and lifetime. A supervisor restart can end terminals.
-See the execution guide for exact limits and recovery behavior.
+## Develop Boxie
 
 Run focused tests with `uv run pytest packages/boxie/tests`.
 Integration tests require their external dependencies; native isolation checks

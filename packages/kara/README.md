@@ -3,15 +3,23 @@
 Kara is a small terminal text editor. It starts in navigation mode; switch to
 editing mode to type, then return to navigation to save or quit.
 
+## Edit a file
+
+From the repository root, open a disposable file in an interactive terminal:
+
+```sh
+cargo run -p kara -- scratch.txt
+```
+
+Press `i` to type, Esc to return to navigation, Ctrl-S to save, and Ctrl-Q to quit.
+Saving overwrites the named file, and there is no undo.
+
 ## Arguments
 
 | Argument | Meaning |
 | --- | --- |
 | `FILE` | Optional first argument: file to edit. Omit it for an unnamed buffer. |
 | Further arguments | Ignored. There is no help/version option parser; `--help` is treated as a filename. |
-
-Kara requires an interactive terminal. Saving overwrites the named file, and
-there is no undo. Use disposable files while experimenting.
 
 ## Controls
 
@@ -33,6 +41,8 @@ Do not use `w other-file` on an already named buffer: it truncates `other-file`
 without saving there, then writes to the original file. Command-bar filenames
 cannot contain spaces. Saving adds line terminators rather than preserving the
 original line endings.
+
+## Develop Kara
 
 For editor changes, test navigation, typing, saving, quitting, and terminal
 restoration in a PTY or real terminal. The startup E2E only checks failure when

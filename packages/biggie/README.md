@@ -3,6 +3,33 @@
 Biggie generates test and benchmark inputs: random text, repeated records,
 delimited or CSV fields, exact-size bytes, and sorted overlapping pairs.
 
+## Try it
+
+From the repository root, generate four records without creating a file:
+
+```sh
+cargo run -p biggie -- records --record apple --record pear --repeat 2 -
+```
+
+```text
+apple
+apple
+pear
+pear
+```
+
+For repeated use, build with `cargo build --release -p biggie`. The examples
+below use the resulting `./target/release/biggie` executable from the repository root.
+
+| Generate | Example |
+| --- | --- |
+| Repeatable random text | `./target/release/biggie text --seed 42 --lines 1000 sample.txt` |
+| CSV rows | `./target/release/biggie fields --format csv --delimiter , --lines 3 --field-value apple --field-value pear -` |
+| Exactly 1 KiB of bytes | `./target/release/biggie bytes --bytes 1024 sample.bin` |
+| Two inputs for a sorted comparison | `./target/release/biggie pair --left left.txt --right right.txt --left-only 2 --shared 3 --right-only 2` |
+
+## Output and command syntax
+
 Use `biggie [COMMAND] [OPTIONS] [FILE]`. Omitting COMMAND selects `text`.
 Single-output commands default to `out.txt`; `-` means stdout. Named outputs
 are created or truncated, and failures can leave partial files. `pair` requires
@@ -28,8 +55,6 @@ defaults, and independent stderr logging.
 
 ## Text (`text`, the default)
 
-Positional `FILE` is optional (default `out.txt`); use `-` for stdout.
-
 | Short | Long | Meaning and default |
 | --- | --- | --- |
 | `-n` | `--lines N` | u64 record count, default 100,000; zero emits empty output. |
@@ -44,12 +69,9 @@ Positional `FILE` is optional (default `out.txt`); use `-` for stdout.
 | `-N` | `--no-final-newline` | Omit only the final record terminator. |
 
 Ranges accept fixed `N` or inclusive `MIN..=MAX`. ASCII words are alphanumeric.
-Non-ASCII alphabets require scalar lengths; scalars are not graphemes or display
-columns. Custom alphabets reject duplicates and CR/LF; separators reject CR/LF.
+A scalar is a Unicode code point, not a grapheme or display column.
 
 ## Literal records (`records`)
-
-Positional `FILE` is optional (default `out.txt`); use `-` for stdout.
 
 | Short | Long | Meaning and default |
 | --- | --- | --- |
@@ -65,8 +87,6 @@ times. Corpus files are UTF-8 and LF-delimited; CR remains literal. Content is
 limited to 8 MiB and 100,000 entries. Input/output aliases are rejected.
 
 ## Fields (`fields`)
-
-Positional `FILE` is optional (default `out.txt`); use `-` for stdout.
 
 | Short | Long | Meaning and default |
 | --- | --- | --- |
@@ -87,8 +107,6 @@ CSV quotes and escapes them. No headers are emitted. Rows and literal content
 are bounded to 8 MiB. CSV counts logical records, including embedded newlines.
 
 ## Bytes (`bytes`)
-
-Positional `FILE` is optional (default `out.txt`); use `-` for stdout.
 
 | Short | Long | Meaning and default |
 | --- | --- | --- |
@@ -117,10 +135,24 @@ Default keys are zero-padded 16-digit lowercase hex ordinals. A seed adds a
 shared random hex prefix. Left-only, shared and right-only blocks are byte-sorted;
 `copies` repeats each key. Both destinations must be named, distinct files.
 
-## Reproducibility and library use
+## Reproducibility
 
 The same seed, options, build, and platform reproduce the same random data.
-Changing dependencies or platforms may change it. See
-[library and Cargo features](docs/library.md) for the Rust API and optional CSV support.
+Changing dependencies or platforms may change it. Biggie has no direct GNU/BSD
+counterpart.
+
+## Cargo features and library use
+
+CSV is enabled by default. Disable it with
+`cargo build --release -p biggie --no-default-features`, or enable it
+explicitly with `--no-default-features --features csv`. A build without CSV
+supports plain fields and rejects `--format csv` before touching output.
+
+Rust callers use `generate_text`, `generate_records`, `generate_fields`,
+`generate_bytes` and `generate_pair` with their corresponding typed options and
+caller-owned writers. These operations return `anyhow::Result<()>`, validate
+before writing, retain I/O causes for downcasting and never flush caller writers.
+The older ASCII entry points `generate` and `gen_random_lines` retain `io::Result`.
+See the [API examples](src/lib.rs) and operation-module doctests.
 
 [All projects](../../README.md)

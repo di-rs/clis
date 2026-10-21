@@ -1,6 +1,10 @@
 # Configure Boxie processes
 
-## Run
+Configure the supervisor and API separately. Provision PostgreSQL, Temporal,
+and a native Linux/gVisor host using the [infrastructure guide](../infra/README.md)
+before running these commands. Both endpoints must remain private.
+
+## Start the supervisor
 
 Use the root workspace and lockfile:
 
@@ -34,12 +38,15 @@ An operator configuration file contains:
 }
 ```
 
+### Identity and credentials
+
 Generate a unique installation UUID once and preserve it with the data directory.
 The credential is a separate supervisor-control secret, at least 16 printable ASCII
 bytes, in a private regular file (mode `0600`). Consumer API credentials must not
-be reused here. Only trusted services on a private network may reach the supervisor;
-there is no public endpoint. Access logging is disabled by the entry point and
-credentials are never accepted in URLs.
+be reused here. Access logging is disabled by the entry point; credentials are
+never accepted in URLs.
+
+## Start the API
 
 Run the separate consumer API without a Docker socket or artifact host mounts:
 
@@ -75,11 +82,13 @@ Its operator configuration contains:
 }
 ```
 
+### Consumer credentials and transport
+
 Each credential is a private regular file with the same restrictions as the supervisor
 secret. Consumer credentials must be unique and distinct from the supervisor secret.
-Only composition roots read secrets; transports receive injected credentials.
 The API resolves consumer identity from Bearer authentication and never accepts
-consumer identity in a sandbox request body. Neither API nor supervisor is public.
+consumer identity in a sandbox request body.
+
 HTTP and WebSocket redirects are disabled for supervisor calls. HTTP control bodies
 and responses are bounded to 64 KiB; uploads stream in chunks of at most 64 KiB
 with an actual-byte ceiling of 512 MiB and a configured total request deadline.
@@ -87,15 +96,15 @@ with an actual-byte ceiling of 512 MiB and a configured total request deadline.
 ## Default environment
 
 Boxie owns one Ubuntu 24.04 Linux x86_64 environment with Bash, standard utilities
-and built-in file fixtures. Uploads retain the existing flat ZIP format. Files are
-mounted read-only at `/opt/artifact`, which is on PATH; built-in fixtures seed the
+and built-in file fixtures. Uploaded files are mounted read-only at `/opt/artifact`, which is on PATH; built-in fixtures seed the
 writable `/workspace`. Uploaded files never replace shell startup configuration.
 The shell disables Bash's `true` and `false` builtins when uploaded executables
 use those names. Workspace files remain non-executable.
 
+### Choose the sandbox image
+
 The operator installs the Boxie sandbox image using `BOXIE_SANDBOX_IMAGE`. The
 internal profile file is not a consumer interface. It contains one `default`:
-
 
 ```json
 {
@@ -112,11 +121,11 @@ Replace the example image digest with the approved Boxie sandbox image. Local co
 image IDs (`sha256:` plus 64 lowercase hex digits) are also accepted. Commands
 are exact argument-vector allowlists; environment keys and values are allowlists.
 The artifact mount must be a normalized path under `/opt/`. Optional `limits`
-may lower the defaults but cannot increase them. Send `SIGHUP` to validate and
-atomically reload all profiles. A failed reload keeps the last valid version.
+may lower the defaults but cannot increase them.
+
+### Reload profiles
+
+Send `SIGHUP` to validate and atomically reload all profiles. A failed reload keeps the last valid version.
 Approved versions are retained by configuration hash, including across supervisor
 restarts, so delayed requests can validate their original snapshot. Reloads never
 change an admitted sandbox's image, command, environment, or limits.
-
-Template selection and consumer-supplied templates require a separate design;
-the current API exposes no template configuration.

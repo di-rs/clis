@@ -51,7 +51,7 @@ There are four. They are not interchangeable, and most documentation problems ar
 
 When the call is close, ask the decisive question. *Tutorial or how-to?* Is the reader learning the domain, or already trying to do something specific. *How-to or reference?* Does the reader know why they're here. *Reference or explanation?* Is this what it is, or why it matters. *Explanation or tutorial?* Is this building understanding, or capability.
 
-If you can't pick one mode for the page, the page is trying to do two jobs. Split it.
+If a page mixes modes, give each section a clear job and sequence. Split only when a separate task or audience needs its own destination; a coherent README or guide can contain examples, explanations, and reference together.
 
 ### 3. Write to be seen through, not at
 
@@ -132,38 +132,30 @@ Avoid two specific failure modes. **Performed casualness**: *"So, basically, you
 
 ### 6. The README is a special form
 
-A README is not a docs page. It is the project's storefront, the only thing many readers will ever see. It compresses all four Diátaxis modes into one page, plus does brand work the rest of the docs don't have to. It has a different shape than anything else you'll write, and the shape is non-negotiable because every celebrated example converges on roughly the same one.
+A README is often the first documentation a reader encounters. It can introduce
+the project and remain a substantial guide, combining examples, explanations,
+and reference in a useful sequence.
 
-The shape that wins (verified across SpacetimeDB, Tokio, RocksDB, Qdrant, Stripe's homepage, dvc, choo, gofiber):
+A useful README answers what the project does, how to try it, and where to go
+next. Choose the remaining sections for the actual product and reader. A small
+CLI may need only an example and option table; a service may need prerequisites,
+configuration, API usage, operational constraints, and recovery guidance.
 
-```
-1. Title + ≤6 badges (one row, no vanity badges)              ~5 lines
-2. Status line + 2-3 sentence pitch                           ~10 lines
-3. Hero example, runnable, real, copy-pasteable              ~20 lines
-4. Why / decision criterion ("use this when / reach for X     ~15 lines
-   else when")
-5. Features table (Capability → Status → Where to learn more) ~20 lines
-6. Performance snapshot (3-5 honest numbers, link to bench)   ~20 lines
-7. Architecture diagram + one paragraph                       ~25 lines
-8. Quick start (one path per audience, audience-tagged)       ~30 lines
-9. Project status (current version, what's stable, what's     ~15 lines
-   experimental, one-sentence audit link if relevant)
-10. Documentation map (Architecture, Guides, Community,       ~15 lines
-    Roadmap)
-11. FAQ (name origin, recurring questions, design principles, ~30 lines
-    terse comparison), short, scannable
-12. Acknowledgments + License + Citation                      ~10 lines
+Put a runnable example near the beginning when there is a supported path to one.
+State its prerequisites and show the expected result. Do not invent a package
+installation, deployment shortcut, stability label, or performance claim to fill
+a template. When setup is substantial, explain what the reader needs and link to
+the actual setup procedure.
 
-Target total: 200-300 lines.
-```
+There is no required length or section count. A long, well-organized README is
+better than ten pages that repeat context. Use descriptive headings and a short
+contents list when it helps readers jump between tasks. Keep related examples
+and references together; move material only when it has a distinct reader or job.
 
-The first 80 lines are the only part that matters to most readers. They must answer *what is this, why should I care, how do I try it.* No retraction walls. No research diary entries. No 30-item milestone checklists. If your project has a benchmark methodology that's currently under audit, that lives in the Project Status section near the bottom, behind a one-sentence link, not at the top of the page.
-
-The hero example is the single most load-bearing section. If you cannot write a 10-to-20-line snippet that does something *real* on a fresh install, `pip install <name> && python -`, your project's onboarding is broken before the docs are. Fix the onboarding before you ship the README.
-
-Several things stay out, no matter how tempted you are. Long narrative introductions. Generic motivational language, *"revolutionise"*, *"game-changer"*, *"next-generation"*. A Table of Contents in a ≤500-line doc (it just clutters the top). The full changelog (link to `CHANGELOG.md`). The full roadmap (link to `docs/roadmap.md`). Detailed installation steps (link to the contributor or user guide). Multiple "Getting Started" sections aimed at different audiences without explicit audience tagging.
-
-Several things are mandatory and easy to forget. A link to `LICENSE`, `CHANGELOG.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, and `CITATION.cff` if the project is research-adjacent. A truthful status line, pick one of *Research-grade preview*, *Beta*, *Stable*, *Archived*, and own it. And the hero example, again, because it's that important.
+Include badges, diagrams, comparisons, FAQs, or status sections only when they
+help the reader. Preserve credits and applicable license links. Link to existing
+contributing or security guidance where useful; do not create placeholder files
+or links merely to satisfy an outline.
 
 #### Label Quick-Start paths by intent, not by audience
 
@@ -177,9 +169,9 @@ The cheapest, most reliable craft check is to read the page out loud. Sentences 
 
 Pinker's second remedy is to show the draft to a representative reader, someone who genuinely doesn't already know the answer. This is harder to arrange but more valuable. The version-of-you that already knows the answer is the worst reader you can imagine; the colleague who started yesterday is the best.
 
-Before you ship a doc, run two passes. First: for every page, name in one sentence which Diátaxis mode it occupies and what the reader was doing two minutes before they arrived. If you can't, the page isn't ready. Second: for every section of the page, check that the opening sentence does some work, names the reader's situation, states a conclusion, asks a question, rather than describing what the section is about.
+Before you ship a doc, run two passes. First: for every page, name the reader's goal and the jobs of its major sections. Use Diátaxis to clarify those jobs without requiring a separate file for each mode. Second: for every section of the page, check that the opening sentence does some work, names the reader's situation, states a conclusion, asks a question, rather than describing what the section is about.
 
-If the page is a README, run the additional check that the first 80 lines tell a stranger what the project is, who it's for, and how to try it. If they don't, restructure.
+If the page is a README, run the additional check that the opening sections tell a stranger what the project is, who it's for, and how to try it. If they don't, restructure.
 
 ## Anti-patterns
 
@@ -189,7 +181,7 @@ Three failure modes show up in every documentation review. They are all forms of
 
 **Tutorial-as-tour.** The page says it's teaching the reader how to use the library, but there's no project the reader actually finishes. The page walks through features in the order the writer thought of them, with no destination. A tutorial without a finished artifact is a brochure. The fix is to commit to building one specific thing end-to-end, even something small, and to make every step land the reader closer to it.
 
-**Reference-that-lectures.** An API reference entry that spends two paragraphs explaining the design philosophy of the endpoint before listing its parameters. Reference catalogs; explanation contextualises. Move the philosophy to an explanation page and link to it. The reference entry should be scannable: signature, one-paragraph description, parameters, returns, exceptions, example. Done.
+**Reference-that-lectures.** An API reference entry that spends two paragraphs explaining the design philosophy of the endpoint before listing its parameters. Reference catalogs; explanation contextualises. Move the philosophy to a later explanation section, or a separate page if it serves a distinct reader task. The reference entry should be scannable: signature, one-paragraph description, parameters, returns, exceptions, example. Done.
 
 **The endless useless enumeration.** A page that converts every paragraph into a five-bullet list. The reader gets through the page faster but learns less, because all the causality has been flattened. Use lists for things that are genuinely parallel; use prose for things that depend on each other. If you find yourself writing a list where each bullet starts with a verb and the next one assumes the previous one happened, that's a procedure, not a list, it can be prose.
 

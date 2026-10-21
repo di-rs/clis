@@ -1,6 +1,6 @@
 # Release and maintain the shared host
 
-## Release and inspect failures
+## Choose a release
 
 Run either release manually from Actions on `master`:
 
@@ -16,6 +16,8 @@ the cli-playground release uses `cli-playground`.
 Each stage calls the shared [release transport](release.sh) for SSH, image settings
 and temporary registry credentials; service scripts own migration and readiness checks.
 
+## What a release changes
+
 The Boxie stage pulls its image, stops API and supervisor, runs Alembic migration,
 and starts both services with the metrics overlay. PostgreSQL and Temporal stay
 up. Authenticated readiness must pass before the next stage. Pending requests may
@@ -26,6 +28,8 @@ The sandbox stage changes Boxie's default profile digest and recreates
 Boxie's supervisor, preserving other profile fields. The backend stage pulls
 and recreates only `backend`; its proxy stays up.
 
+## Queue and retry behavior
+
 Setup and release workflows share one `sanctuary-production` queue. Each run selects
 current `master` after entering the queue, then builds and deploys that checkout.
 If a run fails, choose **Re-run all jobs** or start a new workflow run. Re-running
@@ -35,6 +39,8 @@ deployment or provisioning starts.
 Builds can run before production activation; deployments still require
 `DEPLOYMENT_ACCEPTANCE_PASSED`. Pushes do not
 trigger releases.
+
+## Inspect a failed release
 
 An unsuccessful SSH or Compose command fails the Actions run. On the host, inspect
 services and recent logs before rerunning the workflow:
@@ -73,6 +79,8 @@ rerun, both release workflows, migration failure and retry, metrics, tunnel
 configuration and preview publication. The local command tests cannot establish
 those host behaviors. The [host requirements](../../../packages/boxie/infra/host-requirements.md)
 include the runsc and backup checks.
+
+## Certificates and backups
 
 The generated Boxie TLS leaf certificates last 90 days and the CAs last 365 days.
 Plan renewal separately. Maintain an off-host backup and rehearse restoration
