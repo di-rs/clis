@@ -11,9 +11,17 @@ on:
   pull_request:
     branches: [master]
     types: [opened, synchronize, reopened, ready_for_review, labeled]
+    # The package selector below remains authoritative; avoid starting it for non-code PRs.
+    paths:
+      - '**/src/**/*.rs'
+      - '**/build.rs'
 
 permissions:
   contents: read
+
+concurrency:
+  group: cli-bench-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   select:
@@ -73,9 +81,6 @@ jobs:
     name: ⏱️ Run CLI benchmarks (${{ matrix.os }})
     needs: select
     if: needs.select.outputs.suites != '[]'
-    concurrency:
-      group: cli-bench-${{ github.event.pull_request.number }}-${{ matrix.os }}
-      cancel-in-progress: true
     strategy:
       fail-fast: false
       matrix:
