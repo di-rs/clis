@@ -64,6 +64,12 @@ def test_runs_every_suite_before_reporting_failures(
     suite_workflow: Path, failed: list[str]
 ) -> None:
     suites = ["one/suite.toml", "two/suite.toml", "three/suite.toml"]
+    # Simulate report directories restored alongside cached Cargo build artifacts.
+    for suite in suites:
+        stale = suite_workflow.parent / "target/benchmarks" / suite.replace("/", "-")
+        stale.mkdir(parents=True)
+        (stale / "sentinel").write_text("cached report")
+    output = suite_workflow.parent / "runner-temp/current-run"
     result = subprocess.run(
         [sys.executable, str(suite_workflow)],
         cwd=suite_workflow.parent,
@@ -73,6 +79,7 @@ def test_runs_every_suite_before_reporting_failures(
             "RUNS": "20",
             "WARMUP": "3",
             "FAILED_SUITES": json.dumps(failed),
+            "BENCHMARK_OUTPUT": str(output),
         },
         capture_output=True,
         text=True,
@@ -90,9 +97,13 @@ def test_runs_every_suite_before_reporting_failures(
         "--runs",
         "20",
         "--output",
-        "target/benchmarks/one-suite.toml",
+        str(output / "one-suite.toml"),
     ]
     assert result.returncode == (1 if failed else 0), result.stderr
+    for suite in suites:
+        assert (output / suite.replace("/", "-")).is_dir()
+        stale = suite_workflow.parent / "target/benchmarks" / suite.replace("/", "-")
+        assert (stale / "sentinel").read_text() == "cached report"
     if failed:
         assert "Failed suites:" in result.stderr
         assert all(suite in result.stderr for suite in failed)
