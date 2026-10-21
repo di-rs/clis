@@ -1,5 +1,6 @@
 """Exercise the policy command against small, real Cargo workspace trees."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -12,7 +13,7 @@ def test_workspace_records_validate_discovered_targets(tmp_path: Path) -> None:
     write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["buildins/*"]\n')
     add_cli(tmp_path)
     packages = discover(tmp_path)
-    assert [package.name for package in packages] == ["echo"]
+    assert [package.name for package in packages] == ["echo", "cli-testing"]
     assert [binary.name for binary in packages[0].binaries] == ["echo"]
     assert packages[0].directory == (tmp_path / "buildins/echo").resolve()
     with pytest.raises(ValueError):
@@ -40,12 +41,15 @@ def add_cli(
     package_options: str = "",
     test_targets: str = "",
 ) -> None:
+    write(root, "utils/cli-testing/Cargo.toml", '[package]\nname = "cli-testing"\n')
+    write(root, "utils/cli-testing/src/lib.rs", "")
+    helper = os.path.relpath(root / "utils/cli-testing", root / directory)
     write(
         root,
         f"{directory}/Cargo.toml",
         '[package]\nname = "echo"\nversion = "0.1.0"\nedition = "2024"\n'
         + package_options
-        + '[dev-dependencies]\ncli-testing = { path = "../../utils/cli-testing" }\n'
+        + f'[dev-dependencies]\ncli-testing = {{ path = "{helper}" }}\n'
         + test_targets,
     )
     write(root, f"{directory}/src/main.rs", "fn main() {}\n")
@@ -67,6 +71,7 @@ def test_package_selection_ignores_unselected_violations_and_rejects_unknown(
     write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["buildins/*"]\n')
     add_cli(tmp_path)
     write(tmp_path, "buildins/broken/Cargo.toml", '[package]\nname = "broken"\n')
+    write(tmp_path, "buildins/broken/src/main.rs", "fn main() {}")
     command = [sys.executable, "-m", "cli_check", "tests", "--root", str(tmp_path), "-p"]
     result = subprocess.run(command + ["echo"], capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
@@ -361,7 +366,7 @@ def test_root_readme_must_link_each_cli(workspace: Path) -> None:
     assert "root README" in result.stderr
 
 
-def test_docs_resolve_references_images_and_encoded_paths(workspace: Path) -> None:
+def test_docs_leave_general_links_to_lychee(workspace: Path) -> None:
     write(workspace, "buildins/echo/a b.md", "# Details\n")
     write(workspace, "buildins/echo/logo.svg", "<svg/>\n")
     write(
@@ -375,8 +380,7 @@ def test_docs_resolve_references_images_and_encoded_paths(workspace: Path) -> No
     (workspace / "buildins/echo/a b.md").unlink()
     (workspace / "buildins/echo/logo.svg").unlink()
     result = run_check(workspace, "docs")
-    assert result.returncode == 1
-    assert "a%20b.md#details" in result.stderr and "logo.svg" in result.stderr
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.parametrize(
@@ -386,12 +390,12 @@ def test_docs_resolve_references_images_and_encoded_paths(workspace: Path) -> No
         ('binary = "other"\n[[cases]]\nname = "a"\nargs = []\n', "owning package"),
         ('binary = "echo"\n', "at least one case"),
         ('binary = "echo"\n[[cases]]\nname = ""\nargs = []\n', "case name"),
-        ('binary = "echo"\n[[cases]]\nname = "a"\nargs = "bad"\n', "argument array"),
+        ('binary = "echo"\n[[cases]]\nname = "a"\nargs = "bad"\n', "array of strings"),
         (
             'binary = "echo"\n[[cases]]\nname = "a"\nargs = []\n[[cases]]\nname = "a"\nargs = []\n',
-            "unique",
+            "duplicate case name",
         ),
-        ("binary = [", "Cannot read"),
+        ("binary = [", "suite-data"),
     ],
 )
 def test_benchmarks_report_missing_or_malformed_suites(
@@ -439,3 +443,70 @@ def test_root_cli_readme_is_already_indexed(tmp_path: Path) -> None:
     write(root, "benches/basic.toml", 'binary = "echo"\n[[cases]]\nname = "basic"\nargs = []\n')
     result = run_check(root)
     assert result.returncode == 0, result.stderr
+
+
+def test_implicit_workspace_member_is_checked(tmp_path: Path) -> None:
+    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["app"]\n')
+    write(
+        tmp_path,
+        "app/Cargo.toml",
+        '[package]\nname = "app"\n[dependencies]\nhelper = { path = "../helper" }\n',
+    )
+    write(tmp_path, "app/src/main.rs", "fn main() {}\n")
+    write(tmp_path, "helper/Cargo.toml", '[package]\nname = "helper"\n')
+    write(tmp_path, "helper/src/lib.rs", "")
+    write(tmp_path, "helper/src/bin/extra.rs", "fn main() {}\n")
+    result = run_check(tmp_path, "layout")
+    assert result.returncode == 1
+    assert "helper/Cargo.toml" in result.stderr
+    assert "src/main.rs" in result.stderr
+
+
+def test_invalid_cargo_target_reports_cargo_error(tmp_path: Path) -> None:
+    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["broken"]\n')
+    write(tmp_path, "broken/Cargo.toml", '[package]\nname = "broken"\n')
+    result = run_check(tmp_path)
+    assert result.returncode == 1
+    assert "cargo metadata" in result.stderr
+    assert "no targets" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        'name = "metadata"\nargs = []',
+        'name = "valid"\nargs = []\nunknown = true',
+        'name = "valid"\nargs = []\nexpected_exit = 256',
+    ],
+)
+def test_benchmarks_reject_runner_invalid_cases(workspace: Path, case: str) -> None:
+    write(
+        workspace,
+        "buildins/echo/benches/cli-bench.toml",
+        'binary = "echo"\n[[cases]]\n' + case + "\n",
+    )
+    result = run_check(workspace, "benches")
+    assert result.returncode == 1
+    assert "suite-data" in result.stderr
+
+
+def test_missing_cargo_is_actionable(tmp_path: Path) -> None:
+    write(tmp_path, "Cargo.toml", "[workspace]\nmembers = []\n")
+    result = subprocess.run(
+        [sys.executable, "-m", "cli_check", "--root", str(tmp_path)],
+        env=os.environ | {"PATH": str(tmp_path)},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "Cannot run cargo metadata" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_root_index_resolves_reference_links_and_encoded_paths(workspace: Path) -> None:
+    write(workspace, "README.md", "[echo][cli]\n\n[cli]: buildins/%65cho/README.md#echo\n")
+    result = run_check(workspace, "docs")
+    assert result.returncode == 0, result.stderr
+    assert not (workspace / "Cargo.lock").exists()

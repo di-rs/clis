@@ -154,7 +154,8 @@ def test_build_packages_only_affected_clis(tmp_path: Path, change: str) -> None:
     commands.mkdir()
     cargo = commands / "cargo"
     cargo.write_text(
-        f"#!{sys.executable}\n" + "import sys\nfrom pathlib import Path\n"
+        f"#!{sys.executable}\n" + "import os, sys\nfrom pathlib import Path\n"
+        f"if sys.argv[1] == 'metadata': os.execv({shutil.which('cargo')!r}, ['cargo', *sys.argv[1:]])\n"
         "target = Path('target/release')\ntarget.mkdir(parents=True)\n"
         "for index, arg in enumerate(sys.argv):\n"
         "    if arg == '--package':\n"

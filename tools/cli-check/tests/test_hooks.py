@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -103,9 +104,6 @@ def test_shared_configs_select_only_their_language(workspace: Path) -> None:
         "apps/client/tests",
         "apps/other/tests",
     ]
-    assert plan(workspace, "ruff-config", "apps/api/pyproject.toml") == [
-        ["uv", "run", "ruff", "check", "apps/api"]
-    ]
     assert plan(workspace, "cli-check", "README.md")[0].count("-p") == 3
     assert plan(workspace, "cargo-fmt", "crates/one/src/lib.rs") == [
         ["cargo", "fmt", "-p", "one", "--", "--check"]
@@ -177,7 +175,8 @@ def test_runner_preserves_failure_and_no_selection_runs_nothing(workspace: Path)
     bin_dir.mkdir()
     stub = bin_dir / "cargo"
     stub.write_text(
-        f"#!{sys.executable}\nimport json, pathlib, sys\n"
+        f"#!{sys.executable}\nimport json, os, pathlib, sys\n"
+        f"if sys.argv[1] == 'metadata': os.execv({shutil.which('cargo')!r}, ['cargo', *sys.argv[1:]])\n"
         "pathlib.Path('called.json').write_text(json.dumps(sys.argv[1:]))\nsys.exit(7)\n"
     )
     stub.chmod(0o755)
@@ -229,3 +228,12 @@ def test_mypy_resolves_workspace_dependencies_without_adding_them_as_targets(
     assert captured["args"] == ["run", "mypy", "apps/client"]
     assert str(workspace / "apps/api/src") in captured["paths"]
     assert str(workspace / "apps/api/tests") in captured["paths"]
+
+
+@pytest.mark.parametrize("hook", ["ruff", "ruff-format"])
+def test_ruff_scopes_source_and_configuration(workspace: Path, hook: str) -> None:
+    source = "apps/api/tests/test_app.py"
+    assert plan(workspace, hook, source)[0][-2:] == ["--", source]
+    assert plan(workspace, hook, source, "apps/api/ruff.toml")[0][-2:] == ["--", "apps/api"]
+    assert plan(workspace, hook, source, "prek.toml")[0][-2:] == ["--", "."]
+    assert plan(workspace, hook, "apps/api/deleted.py") == []
