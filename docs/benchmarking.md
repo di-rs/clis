@@ -9,10 +9,9 @@ records a reason in its manifest's `package.metadata.cli-check.benchmark-exempti
 see [cli-check](../tools/cli-check/README.md#record-a-benchmark-exemption).
 [Biggie](../packages/biggie/README.md) generates inputs once; [hyperfine 2](https://github.com/sharkdp/hyperfine/releases/tag/v2.0.0)
 measures the executables directly, including warmups, timing and peak RSS.
-The [runner](../tools/cli-bench/bench.py) requires Python 3.15+ and shares suite validation
-with cli-check. The root [uv workspace](testing.md#python-tooling) installs this
-local dependency and manages its interpreter and development checks. Suite
-selection also requires Cargo for workspace discovery.
+The [runner](../tools/cli-bench/bench.py) requires Python 3.15+ and uses only the
+standard library. The root [uv workspace](testing.md#python-tooling) manages its
+interpreter and development checks.
 
 ## Run a suite
 
