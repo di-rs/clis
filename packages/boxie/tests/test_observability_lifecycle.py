@@ -112,8 +112,8 @@ def test_committed_outcomes_and_rebuilt_gauges(
                     resource_present=False,
                     cleanup_pending=False,
                 )
-                assert await life.confirm_removed(final)
-                assert not await life.confirm_removed(final)
+                assert await life.record_observation(final)
+                assert not await life.record_observation(final)
                 assert not await life.record_observation(
                     replace(final, event_version=4, ready_at=datetime.now(UTC))
                 )

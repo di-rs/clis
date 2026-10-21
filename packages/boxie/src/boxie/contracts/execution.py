@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import Field
 
-from boxie.contracts.common import ConsumerId, Positive, WireModel
+from boxie.contracts.common import Positive, WireModel
 from boxie.contracts.consumer import PolicyWire, ProfileRequest
 from boxie.domain.models import (
     ProfileSnapshot,
@@ -68,12 +68,6 @@ class IdentityWire(WireModel):
 
     def domain(self) -> SupervisorIdentity:
         return SupervisorIdentity(self.installation_id, self.host_id)
-
-
-class ControlRequest(WireModel):
-    consumer_id: ConsumerId
-    identity: IdentityWire
-    generation: Positive
 
 
 class ReadyWire(WireModel):

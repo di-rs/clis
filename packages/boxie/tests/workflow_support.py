@@ -106,14 +106,6 @@ class Decisions:
             )
         raise BoxieError(int(fault), "SECRET-CLEANUP-DETAIL")
 
-    @activity.defn(name="record_observation")
-    async def record(self, sandbox_id: str) -> None:
-        pass
-
-    @activity.defn(name="confirm_removed")
-    async def confirm(self, sandbox_id: str) -> bool:
-        return self.facts.cleaned
-
     def activities(self) -> list[Any]:
         return [
             self.load,
@@ -122,6 +114,4 @@ class Decisions:
             self.expire,
             self.stop,
             self.remove,
-            self.record,
-            self.confirm,
         ]

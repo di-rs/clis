@@ -19,8 +19,6 @@ from websockets.exceptions import (
 from boxie.application.ports import TerminalConnection
 from boxie.contracts.consumer import ArtifactWire, spec_wire
 from boxie.contracts.execution import (
-    ControlRequest,
-    IdentityWire,
     ReadyWire,
     SnapshotWire,
 )
@@ -30,7 +28,6 @@ from boxie.domain.models import (
     Principal,
     ProfileSnapshot,
     SandboxSpec,
-    SupervisorIdentity,
 )
 from boxie.observability.telemetry.context import current_request_id
 from boxie.sandbox.transport.terminal import (
@@ -164,17 +161,6 @@ class SupervisorClient:
             return SnapshotWire.model_validate_json(response).domain()
         except ValidationError:
             raise dependency_error() from None
-
-    def _control(
-        self, principal: Principal, identity: SupervisorIdentity, generation: int
-    ) -> dict[str, Any]:
-        return ControlRequest(
-            consumer_id=principal.consumer_id,
-            identity=IdentityWire(
-                installation_id=identity.installation_id, host_id=identity.host_id
-            ),
-            generation=generation,
-        ).model_dump(mode="json")
 
     @asynccontextmanager
     async def attach(
