@@ -49,7 +49,9 @@ buffer identity and modified state intact and display an error.
 
 Saving uses a temporary file in the destination directory and an atomic rename.
 Existing symlinks with valid targets are resolved; permissions are preserved.
-Read-only destinations are rejected. On Unix, the parent directory is synced
+Dangling symlinks are rejected without replacing the link or creating its target.
+Read-only destinations and existing non-regular files (including FIFOs, sockets,
+and devices) are rejected. On Unix, the parent directory is synced
 after replacement.
 Replacement breaks hard-link identity and does not preserve all extended metadata.
 New files are private to their owner. Saving adds line terminators rather than

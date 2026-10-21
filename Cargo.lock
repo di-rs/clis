@@ -923,7 +923,6 @@ dependencies = [
  "cli-log",
  "cli-testing",
  "exitcode",
- "log",
  "predicates",
  "pretty_assertions",
  "serde_json",

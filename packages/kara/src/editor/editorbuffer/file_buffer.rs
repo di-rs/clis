@@ -29,23 +29,44 @@ impl FileBuffer {
         // Resolve existing symlinks so saving updates their target, not the link.
         let destination = match std::fs::canonicalize(path) {
             Ok(path) => path,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => path.clone(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                match std::fs::symlink_metadata(path) {
+                    Ok(metadata) if metadata.file_type().is_symlink() => {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "save destination is a dangling symlink",
+                        ));
+                    }
+                    Ok(_) => return Err(error),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => path.clone(),
+                    Err(error) => return Err(error),
+                }
+            }
             Err(error) => return Err(error),
         };
         let parent = destination
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or_else(|| std::path::Path::new("."));
-        let mut file = tempfile::NamedTempFile::new_in(parent)?;
-        match std::fs::metadata(&destination) {
+        let permissions = match std::fs::metadata(&destination) {
             Ok(metadata) => {
+                if !metadata.is_file() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "save destination is not a regular file",
+                    ));
+                }
                 if metadata.permissions().readonly() {
                     return Err(std::io::ErrorKind::PermissionDenied.into());
                 }
-                file.as_file().set_permissions(metadata.permissions())?;
+                Some(metadata.permissions())
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(error),
+        };
+        let mut file = tempfile::NamedTempFile::new_in(parent)?;
+        if let Some(permissions) = permissions {
+            file.as_file().set_permissions(permissions)?;
         }
         for line in &self.buffer.lines {
             writeln!(file, "{line}")?;

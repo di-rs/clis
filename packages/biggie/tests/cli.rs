@@ -1562,17 +1562,14 @@ fn json_pair_reports_both_outputs() -> Result<()> {
             dir.child("left").assert("keep left");
             dir.child("right").assert("keep right");
         } else {
+            // Unseeded pair keys are 16-digit hex ordinals: left 0..3, right 1..6.
             assert_eq!(
-                std::fs::read_to_string(dir.path().join("left"))?
-                    .lines()
-                    .count(),
-                3
+                std::fs::read(dir.path().join("left"))?,
+                b"0000000000000000\n0000000000000001\n0000000000000002\n"
             );
             assert_eq!(
-                std::fs::read_to_string(dir.path().join("right"))?
-                    .lines()
-                    .count(),
-                5
+                std::fs::read(dir.path().join("right"))?,
+                b"0000000000000001\n0000000000000002\n0000000000000003\n0000000000000004\n0000000000000005\n"
             );
         }
     }

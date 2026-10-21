@@ -5,6 +5,8 @@ import os
 import pty
 import select
 import signal
+import socket
+import stat
 import struct
 import sys
 import tempfile
@@ -81,6 +83,32 @@ def main() -> None:
             assert b"denied" in captured.lower(), "save error was not displayed"
         finally:
             target.chmod(0o644)
+        for name, missing in (("dangling", "missing-target"), ("nested", "missing/target")):
+            dangling = directory / name
+            dangling.symlink_to(missing)
+            captured = session(binary, directory, [f":w {name}\r".encode(), b"\x11"])
+            assert dangling.is_symlink(), "replaced a dangling symlink"
+            assert os.readlink(dangling) == missing
+            assert not (directory / missing).exists()
+            assert b"dangling symlink" in captured, "save error was not displayed"
+        fifo = directory / "output.fifo"
+        os.mkfifo(fifo)
+        sock = directory / "output.sock"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+            listener.bind(str(sock))
+            link = directory / "fifo-link"
+            link.symlink_to(fifo)
+            for destination in (fifo, sock, link, Path("/dev/null")):
+                before = destination.stat()
+                captured = session(binary, directory, [f":w {destination}\r".encode(), b"\x11"])
+                after = destination.stat()
+                assert (after.st_dev, after.st_ino, stat.S_IFMT(after.st_mode)) == (
+                    before.st_dev,
+                    before.st_ino,
+                    stat.S_IFMT(before.st_mode),
+                ), "replaced a special file"
+                assert b"not a regular file" in captured, "save error was not displayed"
+            assert link.is_symlink()
     print("Kara PTY save, failed-save recovery, and terminal cleanup checks passed")
 
 
