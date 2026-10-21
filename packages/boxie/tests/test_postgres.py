@@ -255,10 +255,10 @@ def test_only_fenced_confirmed_removal_releases_capacity_and_references(
                 replace(confirmed, identity=SupervisorIdentity(uuid4(), config.identity.host_id)),
                 replace(confirmed, event_version=1),
             ):
-                assert not await life.confirm_removed(bad)
+                assert not await life.record_observation(bad)
             assert await counts(sessions) == (1, 1, 1, 1)
-            assert await life.confirm_removed(confirmed)
-            assert not await life.confirm_removed(confirmed)
+            assert await life.record_observation(confirmed)
+            assert not await life.record_observation(confirmed)
             assert await counts(sessions) == (1, 0, 0, 1)
             assert not (await life.get(OWNER, view.id)).cleanup_pending
             assert not await life.record_observation(
@@ -284,7 +284,7 @@ def test_retention_never_ages_out_pending_cleanup_or_undelivered_commands(
             boot = uuid4()
             assert hasattr(life, "purge_retained"), "safe retention missing"
             await life.bind_supervisor_boot(OWNER, config.identity, cleaned.id, 1, None, boot)
-            await life.confirm_removed(
+            await life.record_observation(
                 SupervisorObservation(
                     cleaned.id,
                     OWNER,
@@ -660,7 +660,7 @@ def test_supervisor_and_postgres_release_only_after_reconciled_absence(
             await supervisor.reconcile()
             removed = await supervisor.inspect(request.ref)
             assert removed.removal_confirmed
-            assert await life.confirm_removed(removed)
+            assert await life.record_observation(removed)
             assert await counts(sessions) == (1, 0, 0, 1)
             await supervisor.close()
 
@@ -740,12 +740,10 @@ def test_journal_outage_expires_container_but_retains_sql_accounting_until_journ
                 assert not supervisor.execution_ready
                 assert await life.record_observation(pending)
                 assert await counts(sessions) == (1, 1, 1, 1)
-                with pytest.raises(ValueError, match="explicit physical removal"):
-                    await life.confirm_removed(pending)
                 monkeypatch.setattr(supervisor.journal, "save", original_save)
                 removed = await settled(supervisor, request.ref, SandboxState.TERMINATED)
                 assert removed.removal_confirmed and not removed.cleanup_pending
-                assert await life.confirm_removed(removed)
+                assert await life.record_observation(removed)
                 assert await counts(sessions) == (1, 0, 0, 1)
             finally:
                 monkeypatch.setattr(supervisor.journal, "save", original_save)

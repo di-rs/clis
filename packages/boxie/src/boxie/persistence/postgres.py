@@ -460,11 +460,6 @@ class PostgresLifecycle:
         deliver(self.diagnostics, *events)
         return True
 
-    async def confirm_removed(self, observation: SupervisorObservation) -> bool:
-        if not observation.removal_confirmed:
-            raise ValueError("explicit physical removal confirmation required")
-        return await self.record_observation(observation)
-
     async def purge_retained(self) -> int:
         """Keep retry identity seven days after cleanup; never age out ownership."""
         async with self.sessions() as session, session.begin():
