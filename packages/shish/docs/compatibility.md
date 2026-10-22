@@ -212,8 +212,8 @@ The task numbers are stable even when implementation order changes.
 | 09 | Navigation: pwd | sh; pwd/cd | Verified: initial and changed working directories; [task_09](../tests/audit.rs) | [09 PR](https://github.com/di-rs/sanctuary/pull/114) |
 | 10 | Navigation: absolute cd | sh; pwd/cd | Verified: absolute cd updates shell cwd while host test cwd is unchanged; [task_10](../tests/audit.rs) | [10 PR](https://github.com/di-rs/sanctuary/pull/115) |
 | 11 | Navigation: relative cd | sh; pwd/cd | Verified: relative paths and parent traversal; [task_11](../tests/audit.rs) | [11 PR](https://github.com/di-rs/sanctuary/pull/116) |
-| 12 | Navigation: home-directory cd | sh; pwd/cd | Verified: cd without operands and tilde expansion; [task_12](../tests/audit.rs) | Current task PR |
-| 13 | Quoting: single quotes | sh; §2.2 | Unverified; dedicated audit pending | Planned task 13 |
+| 12 | Navigation: home-directory cd | sh; pwd/cd | Verified: cd without operands and tilde expansion; [task_12](../tests/audit.rs) | [12 PR](https://github.com/di-rs/sanctuary/pull/117) |
+| 13 | Quoting: single quotes | sh; §2.2 | Verified: single quotes retain whitespace, empty words, metacharacters, and joined quote segments; [task_13](../tests/audit.rs) | Current task PR |
 | 14 | Quoting: double quotes | sh; §2.2 | Unverified; dedicated audit pending | Planned task 14 |
 | 15 | Quoting: unquoted backslashes | sh; §2.2 | Unverified; dedicated audit pending | Planned task 15 |
 | 16 | Quoting: backslashes in single quotes | sh; §2.2 | Unverified; dedicated audit pending | Planned task 16 |
