@@ -1051,3 +1051,22 @@ fn task_42_completer_environment() -> anyhow::Result<()> {
         .assert("pick env\n8\nvisible\n");
     Ok(())
 }
+
+#[test]
+fn task_43_multiple_programmed_completions() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["--bash", "-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("complete -W 'alpha_candidate beta_candidate' pick; echo setup-ready\n")?;
+    terminal.expect("\nsetup-ready\n")?;
+    terminal.expect_line("shish-test> ")?;
+    // Clear setup text so candidate assertions cannot match the registration command.
+    terminal.send("\x0cpick \t")?;
+    terminal.expect("shish-test> pick ")?;
+    terminal.expect("alpha_candidate")?;
+    terminal.expect("beta_candidate")?;
+    terminal.send("\x03")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("exit 0\n")?;
+    terminal.finish(0)
+}
