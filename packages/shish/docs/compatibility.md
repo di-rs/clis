@@ -256,8 +256,8 @@ The task numbers are stable even when implementation order changes.
 | 53 | Background jobs: reap before prompt | interactive sh; §2.11/jobs/wait | Unverified; dedicated audit pending | Planned task 53 |
 | 54 | Background jobs: recycle job numbers | interactive sh; §2.11/jobs/wait | Unverified; dedicated audit pending | Planned task 54 |
 | 55 | Pipelines: two commands | sh; §2.9.2 | Verified: pipeline output, final status, and bounded fixture execution; [task_55](../tests/audit.rs) | [55 PR](https://github.com/di-rs/sanctuary/pull/128) |
-| 56 | Pipelines: builtins | sh; §2.9.2 | Verified: pipeline output, final status, and bounded fixture execution; [task_56](../tests/audit.rs) | Current task PR |
-| 57 | Pipelines: multiple commands | sh; §2.9.2 | Unverified; dedicated audit pending | Planned task 57 |
+| 56 | Pipelines: builtins | sh; §2.9.2 | Verified: pipeline output, final status, and bounded fixture execution; [task_56](../tests/audit.rs) | [56 PR](https://github.com/di-rs/sanctuary/pull/129) |
+| 57 | Pipelines: multiple commands | sh; §2.9.2 | Verified: pipeline output, final status, and bounded fixture execution; [task_57](../tests/audit.rs) | Current task PR |
 | 58 | History: builtin | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 58 |
 | 59 | History: listing | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 59 |
 | 60 | History: entry limits | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 60 |

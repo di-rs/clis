@@ -650,3 +650,14 @@ fn task_56_builtin_pipeline() {
     command(home.path()).args(["-c", "false | true; printf '%s\\n' \"$?\"; true | false; printf '%s\\n' \"$?\"; v=parent; printf child | read v; printf '%s\\n' \"$v\""])
         .assert().code(0).stdout("0\n1\nparent\n").stderr("");
 }
+
+#[test]
+fn task_57_multi_command_pipeline() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args(["-c", "printf 'alpha\\nbeta\\n' | tr a-z A-Z | sed -n '2p'"])
+        .assert()
+        .code(0)
+        .stdout("BETA\n")
+        .stderr("");
+}
