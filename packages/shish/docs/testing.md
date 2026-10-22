@@ -35,7 +35,7 @@ cursor movement matters.
 
 ## Deferred POSIX acceptance cases
 
-P01–P04 in the [compatibility inventory](compatibility.md#confirmed-gaps-and-focused-follow-ups)
+P01–P04 and P06 in the [compatibility inventory](compatibility.md#confirmed-gaps-and-focused-follow-ups)
 are explicit ignored tests asserting the required behavior. They are known to
 fail; ignored cases are never counted as verified support. To reproduce them:
 
