@@ -1145,7 +1145,7 @@ fn task_44_programmed_common_prefix() -> anyhow::Result<()> {
     terminal.expect("\nsetup-ready\n")?;
     terminal.expect_line("shish-test> ")?;
     terminal.send("pick pre\t")?;
-    terminal.expect("shish-test> pick prefix_")?;
+    terminal.expect_screen_line("shish-test> pick prefix_")?;
     terminal.send("\x03")?;
     terminal.expect_line("shish-test> ")?;
     terminal.send("exit 0\n")?;
