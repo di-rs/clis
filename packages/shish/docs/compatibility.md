@@ -347,9 +347,9 @@ The task numbers are stable even when implementation order changes.
 | 41 | Programmable completion: command-line arguments | bash; Bash §8.6–8.7 | Verified: completer receives command name, current word, and previous word in Bash mode; [task_41](../tests/audit.rs) | [41 PR](https://github.com/di-rs/sanctuary/pull/153) |
 | 42 | Programmable completion: environment variables | bash; Bash §8.6–8.7 | Verified: external completer receives COMP_LINE, COMP_POINT, and exported environment; [task_42](../tests/audit.rs) | [42 PR](https://github.com/di-rs/sanctuary/pull/154) |
 | 43 | Programmable completion: multiple candidates | bash; Bash §8.6–8.7 | Verified: registered word-list candidates appear in the terminal menu; [task_43](../tests/audit.rs) | [43 PR](https://github.com/di-rs/sanctuary/pull/155) |
-| 44 | Programmable completion: longest common prefix | bash; Bash §8.6–8.7 | Missing: programmed candidates are listed without inserting their longest common prefix (C44); [task_44](../tests/audit.rs) | Current task PR |
+| 44 | Programmable completion: longest common prefix | bash; Bash §8.6–8.7 | Missing: programmed candidates are listed without inserting their longest common prefix (C44); [task_44](../tests/audit.rs) | [44 PR](https://github.com/di-rs/sanctuary/pull/160) |
 | 45 | Programmable completion: unregistration | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_45](../tests/audit.rs) | [45 PR](https://github.com/di-rs/sanctuary/pull/156) |
-| 46 | Background jobs: jobs | interactive sh; §2.11/jobs/wait | Unverified; dedicated audit pending | Planned task 46 |
+| 46 | Background jobs: jobs | interactive sh; §2.11/jobs/wait | Verified: empty job table, builtin lookup, status and streams; [task_46](../tests/audit.rs) | Current task PR |
 | 47 | Background jobs: launch | interactive sh; §2.11/jobs/wait | Unverified; dedicated audit pending | Planned task 47 |
 | 48 | Background jobs: output | interactive sh; §2.11/jobs/wait | Unverified; dedicated audit pending | Planned task 48 |
 | 49 | Background jobs: list one | interactive sh; §2.11/jobs/wait | Unverified; dedicated audit pending | Planned task 49 |

@@ -1151,3 +1151,20 @@ fn task_44_programmed_common_prefix() -> anyhow::Result<()> {
     terminal.send("exit 0\n")?;
     terminal.finish(0)
 }
+
+#[test]
+fn task_46_jobs_builtin() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send(
+        "PATH=/missing; jobs > jobs.out 2> jobs.err; /usr/bin/printf 'status=%s\\n' \"$?\"\n",
+    )?;
+    terminal.expect("\nstatus=0\n")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("exit 0\n")?;
+    terminal.finish(0)?;
+    home.child("jobs.out").assert("");
+    home.child("jobs.err").assert("");
+    Ok(())
+}
