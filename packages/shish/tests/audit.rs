@@ -623,3 +623,12 @@ fn task_21_stdout_append() {
     home.child("out").assert("firstsecond");
     home.child("created").assert("new");
 }
+
+#[test]
+fn task_22_stderr_append() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path()).args(["-c", "/bin/sh -c 'printf first >&2' 2> err; /bin/sh -c 'printf visible; printf second >&2' 2>> err; /bin/sh -c 'printf new >&2' 2>> created"])
+        .assert().code(0).stdout("visible").stderr("");
+    home.child("err").assert("firstsecond");
+    home.child("created").assert("new");
+}
