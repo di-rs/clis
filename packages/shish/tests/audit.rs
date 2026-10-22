@@ -661,3 +661,18 @@ fn task_57_multi_command_pipeline() {
         .stdout("BETA\n")
         .stderr("");
 }
+
+#[test]
+fn task_70_declare() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args([
+            "--bash",
+            "-c",
+            "declare answer='a b'; printf '<%s>\\n' \"$answer\"",
+        ])
+        .assert()
+        .code(0)
+        .stdout("<a b>\n")
+        .stderr("");
+}
