@@ -7,9 +7,10 @@ model.
 
 ## Platform responsibilities
 
-Boxie is the platform runtime. It owns sandbox execution and isolation. The shell
-will be a builtin in this repository, with the repository's other builtins baked
-into its environment. The shell is work in progress and does not exist yet.
+Boxie is the platform runtime. It owns sandbox execution and isolation. Shish
+will be a shell application in this repository, with selected repository builtins
+integrated into its environment. The shell migration is planned; it is not yet
+available in Sanctuary.
 
 Separate applications and services will manage consumer accounts, consumer API
 tokens, and environment setup. Their names, interfaces, and deployment boundaries
@@ -33,6 +34,42 @@ The [current architecture](architecture.md) describes these implemented boundari
 The target platform does not change today's operating requirements or imply that
 the future shell and management services are available.
 
+## Compatibility and product priorities
+
+The platform's goal is isolated shell workloads with explicit, tested recovery
+guarantees. Four contracts contribute to that goal:
+
+| Contract | Responsibility |
+| --- | --- |
+| Shell compatibility | Predictable arguments, quoting, expansion, pipelines, redirection, and exit statuses |
+| Sandbox isolation | Enforced filesystem, network, process, resource, and ownership boundaries |
+| Execution durability | Defined outcomes after disconnects, crashes, cancellation, and retries |
+| Interactive experience | Prompts, completion, history, and job controls |
+
+POSIX is a compatibility reference for the shell. Full conformance is not a
+prerequisite for platform delivery. Prioritize correct common shell operations and
+clear recovery semantics; retain the complete shell-feature roadmap without making
+every interactive feature or compatibility edge case a platform release gate.
+
+The initial shish integration will use Brush and document the behavior verified
+through shish itself. Parser and runtime integration stay inside the shish package
+until another component needs a shared API. Selecting a library or enabling its
+POSIX mode does not establish conformance.
+
+Shish's package documentation will own the detailed compatibility inventory.
+Record verified, partial, missing, and unverified behavior against the tested
+library version, shell mode, and platform. For a gap, retain the applicable
+standard section, a reproducer, expected and observed results, its cause and user
+impact, any workaround, and test and follow-up links. Track Bash extensions
+separately. Upstream-reported limitations require reproduction before they become
+confirmed shish defects.
+
+If strict POSIX conformance becomes a product requirement, explicitly select the
+standard edition, shell and builtin scope, and supported platforms. Expand the
+test matrix and make the relevant recorded gaps acceptance criteria. Shell
+compatibility alone makes no operating-system-wide or complete utility-conformance
+claim.
+
 ## Open design question: shell durability
 
 The shell needs a Temporal-backed execution design, but the division of work
@@ -47,6 +84,16 @@ Temporal service placement is a separate choice. A shared service outside
 sandboxes centralizes operations but needs an explicit trust and isolation model.
 A service inside each sandbox would couple its storage and recovery to the sandbox
 and add per-environment operating cost. Neither placement is selected here.
+
+Reconnecting to a surviving process, restarting an entire job, and resuming from a
+checkpoint are different guarantees. Ordinary background jobs do not implicitly
+become durable workflows. An AST describes shell syntax; it does not establish safe
+checkpoint or replay boundaries.
+
+For example, a command that appends to a file may finish its write before a worker
+crashes without recording success. Retrying can duplicate the write. The durable
+execution contract must define retry eligibility and uncertain outcomes; arbitrary
+shell side effects cannot be assumed idempotent.
 
 Before choosing, define what survives failure: command progress, filesystem state,
 shell variables, external side effects, and terminal connections are different
