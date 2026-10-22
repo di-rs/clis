@@ -16,6 +16,16 @@ link updated contracts or audit records when relevant. -->
 or what is affected. Mention mitigation or accepted regressions when relevant.
 A short sentence is enough. -->
 
+## Impact
+
+<!-- Describe the expected effect on the repository as a whole after merge.
+Quantify relevant outcomes, such as CI duration, failure rate, resource usage,
+dependency count, or maintenance effort, with a baseline and expected change.
+Distinguish measured results from estimates; if no useful metric is available,
+state the observable outcome and how it can be verified. Explain consequences
+for contributors, consumers, or ongoing maintenance, including trade-offs.
+Keep this focused on outcomes rather than repeating implementation details. -->
+
 ## Testing/Validation
 
 <!-- Summarize checks and outcomes in one or two short bullets. Mention material
