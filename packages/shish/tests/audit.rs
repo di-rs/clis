@@ -460,3 +460,17 @@ fn task_09_pwd_reflects_shell_directory() {
         .stdout(expected)
         .stderr("");
 }
+
+#[test]
+fn task_10_cd_accepts_absolute_paths_with_spaces() {
+    let home = assert_fs::TempDir::new().unwrap();
+    home.child("target space").create_dir_all().unwrap();
+    let target = home.child("target space").path().canonicalize().unwrap();
+    command(home.path())
+        .args(["-c", "cd \"$1\"; pwd", "shish"])
+        .arg(&target)
+        .assert()
+        .code(0)
+        .stdout(format!("{}\n", target.display()))
+        .stderr("");
+}
