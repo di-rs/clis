@@ -1070,3 +1070,18 @@ fn task_43_multiple_programmed_completions() -> anyhow::Result<()> {
     terminal.send("exit 0\n")?;
     terminal.finish(0)
 }
+
+#[test]
+fn task_45_unregister_completion() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args([
+            "--bash",
+            "-c",
+            "complete -W alpha pick; complete -r pick; complete -p pick",
+        ])
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr("no completion found for command\n");
+}
