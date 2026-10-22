@@ -8,113 +8,109 @@ minimum_prek_version = "0.5.5"
 
 [[repos]]
 repo = "builtin"
-hooks = [
-    {
-      id = "require-pattern",
-      name = "Gitmoji commit subject",
-      # Official emoji and shortcode catalogue: https://gitmoji.dev/
-      args = ["--multiline", '\A(:twisted_rightwards_arrows:|:chart_with_upwards_trend:|:triangular_flag_on_post:|:building_construction:|:closed_lock_with_key:|:globe_with_meridians:|:busts_in_silhouette:|:construction_worker:|:children_crossing:|:adhesive_bandage:|:heavy_minus_sign:|:money_with_wings:|:passport_control:|:white_check_mark:|:heavy_plus_sign:|:page_facing_up:|:rotating_light:|:speech_balloon:|:card_file_box:|:camera_flash:|:construction:|:monocle_face:|:technologist:|:green_heart:|:safety_vest:|:see_no_evil:|:stethoscope:|:wastebasket:|:arrow_down:|:clown_face:|:loud_sound:|:wheelchair:|:ambulance:|:test_tube:|:airplane:|:arrow_up:|:bookmark:|:goal_net:|:lipstick:|:seedling:|:sparkles:|:alembic:|:necktie:|:package:|:pencil2:|:pushpin:|:recycle:|:bricks:|:coffin:|:hammer:|:iphone:|:rewind:|:rocket:|:thread:|:wrench:|:alien:|:beers:|:bento:|:dizzy:|:label:|:t\-rex:|:truck:|:boom:|:bulb:|:fire:|:lock:|:memo:|:mute:|:poop:|:tada:|:art:|:bug:|:egg:|:mag:|:zap:|🧑‍💻|⏪️|♻️|♿️|⚗️|⚡️|⚰️|✈️|✏️|⬆️|⬇️|🏗️|🏷️|👽️|📦️|🔍️|🔒️|🗃️|🗑️|🚑️|⏪|♻|♿|⚗|⚡|⚰|✅|✈|✏|✨|➕|➖|⬆|⬇|🌐|🌱|🍱|🍻|🎉|🎨|🏗|🏷|🐛|👔|👥|👷|👽|💄|💚|💡|💥|💩|💫|💬|💸|📄|📈|📌|📝|📦|📱|📸|🔀|🔇|🔊|🔍|🔐|🔒|🔖|🔥|🔧|🔨|🗃|🗑|🙈|🚀|🚑|🚚|🚧|🚨|🚩|🚸|🛂|🤡|🥅|🥚|🦖|🦺|🧐|🧪|🧱|🧵|🩹|🩺) [^\s]'],
-      stages = ["commit-msg"],
-      always_run = true,
-    },
-    {
-      id = "check-added-large-files",
-      args = ["--enforce-all"],
-    },
-]
+
+[[repos.hooks]]
+id = "require-pattern"
+name = "Gitmoji commit subject"
+# Official emoji and shortcode catalogue: https://gitmoji.dev/
+args = ["--multiline", '\A(:twisted_rightwards_arrows:|:chart_with_upwards_trend:|:triangular_flag_on_post:|:building_construction:|:closed_lock_with_key:|:globe_with_meridians:|:busts_in_silhouette:|:construction_worker:|:children_crossing:|:adhesive_bandage:|:heavy_minus_sign:|:money_with_wings:|:passport_control:|:white_check_mark:|:heavy_plus_sign:|:page_facing_up:|:rotating_light:|:speech_balloon:|:card_file_box:|:camera_flash:|:construction:|:monocle_face:|:technologist:|:green_heart:|:safety_vest:|:see_no_evil:|:stethoscope:|:wastebasket:|:arrow_down:|:clown_face:|:loud_sound:|:wheelchair:|:ambulance:|:test_tube:|:airplane:|:arrow_up:|:bookmark:|:goal_net:|:lipstick:|:seedling:|:sparkles:|:alembic:|:necktie:|:package:|:pencil2:|:pushpin:|:recycle:|:bricks:|:coffin:|:hammer:|:iphone:|:rewind:|:rocket:|:thread:|:wrench:|:alien:|:beers:|:bento:|:dizzy:|:label:|:t\-rex:|:truck:|:boom:|:bulb:|:fire:|:lock:|:memo:|:mute:|:poop:|:tada:|:art:|:bug:|:egg:|:mag:|:zap:|🧑‍💻|⏪️|♻️|♿️|⚗️|⚡️|⚰️|✈️|✏️|⬆️|⬇️|🏗️|🏷️|👽️|📦️|🔍️|🔒️|🗃️|🗑️|🚑️|⏪|♻|♿|⚗|⚡|⚰|✅|✈|✏|✨|➕|➖|⬆|⬇|🌐|🌱|🍱|🍻|🎉|🎨|🏗|🏷|🐛|👔|👥|👷|👽|💄|💚|💡|💥|💩|💫|💬|💸|📄|📈|📌|📝|📦|📱|📸|🔀|🔇|🔊|🔍|🔐|🔒|🔖|🔥|🔧|🔨|🗃|🗑|🙈|🚀|🚑|🚚|🚧|🚨|🚩|🚸|🛂|🤡|🥅|🥚|🦖|🦺|🧐|🧪|🧱|🧵|🩹|🩺) [^\s]']
+stages = ["commit-msg"]
+always_run = true
+
+[[repos.hooks]]
+id = "check-added-large-files"
+args = ["--enforce-all"]
 
 [[repos]]
 repo = "local"
-hooks = [
-  {
-    id = "cargo-fmt",
-    name = "cargo fmt",
-    language = "system",
-    entry = "uv run python -m cli_check.hooks cargo-fmt",
-    files = '(\.rs$|(^|/)Cargo\.toml$|(^|/)\.?(rustfmt|rust-toolchain)\.toml$)',
-    require_serial = true,
-    include_deleted = true,
-  },
-  {
-    id = "cargo-clippy",
-    name = "cargo clippy",
-    language = "system",
-    entry = "uv run python -m cli_check.hooks cargo-clippy",
-    files = '(\.rs$|(^|/)Cargo\.(toml|lock)$|(^|/)\.?(rust-toolchain|clippy|rustfmt)\.toml$|^(buildins/[^/]+|utils/[^/]+|packages/(biggie|kara|parsu))/(tests|benches)/|^\.(config/nextest|cargo/config)\.toml$)',
-    require_serial = true,
-    include_deleted = true,
-  },
-  {
-    id = "cli-check",
-    name = "CLI repository standards",
-    language = "system",
-    entry = "uv run python -m cli_check.hooks cli-check",
-    files = '\.rs$|(^|/)(Cargo\.toml|README\.md|mk-outs\.nu|mk-outputs\.nu)$|^(buildins/[^/]+|utils/[^/]+|packages/(biggie|kara|parsu))/(tests|benches)/|^tools/cli-check/|^(pyproject\.toml|uv\.lock|prek\.toml)$',
-    require_serial = true,
-    include_deleted = true,
-  },
-  {
-    id = "ruff",
-    name = "Python lint",
-    language = "system",
-    entry = "uv run python -m cli_check.hooks ruff",
-    files = '(\.pyi?$|(^|/)(pyproject\.toml|\.?ruff\.toml)$|^(uv\.lock|\.python-version|prek\.toml)$)',
-    require_serial = true,
-    include_deleted = true,
-  },
-  {
-    id = "ruff-format",
-    name = "Python format check",
-    language = "system",
-    entry = "uv run python -m cli_check.hooks ruff-format",
-    files = '(\.pyi?$|(^|/)(pyproject\.toml|\.?ruff\.toml)$|^(uv\.lock|\.python-version|prek\.toml)$)',
-    require_serial = true,
-    include_deleted = true,
-  },
-  {
-    id = "mypy",
-    name = "Python type check",
-    language = "system",
-    entry = "uv run python -m cli_check.hooks mypy",
-    files = '(\.pyi?$|(^|/)pyproject\.toml$|^(uv\.lock|\.python-version)$)',
-    require_serial = true,
-    include_deleted = true,
-  },
-  {
-    id = "lychee",
-    name = "local Markdown links and anchors",
-    language = "system",
-    entry = '''git ls-files -z -- '*.md' '*.markdown' | while IFS= read -r -d '' path; do if [ -f "$path" ]; then printf '%s\0' "$path"; fi; done | xargs -0 -r lychee --offline --include-fragments=anchor-only --''',
-    shell = "bash",
-    pass_filenames = false,
-    always_run = true,
-  },
-  {
-    id = "typos",
-    name = "Markdown spelling",
-    language = "system",
-    entry = "git ls-files -z -- '*.md' '*.markdown' | xargs -0 -r typos --force-exclude --",
-    shell = "bash",
-    files = '(\.(md|markdown)$|(^|/)(\.?typos\.toml|_typos\.toml)$|^prek\.toml$)',
-    pass_filenames = false,
-    include_deleted = true,
-  },
-  {
-    id = "actionlint",
-    name = "workflow syntax and shell linting",
-    language = "system",
-    entry = "actionlint -color",
-    files = '^\.github/(workflows/[^/]+|actionlint)\.ya?ml$|^prek\.toml$',
-    pass_filenames = false,
-    include_deleted = true,
-  },
-  {
-    id = "zizmor",
-    name = "zizmor workflow security",
-    language = "system",
-    entry = "zizmor --offline --no-progress --collect workflows actions -- .github",
-    files = '^\.github/(workflows/[^/]+|.*/action)\.ya?ml$|^zizmor\.ya?ml$|^prek\.toml$',
-    pass_filenames = false,
-    include_deleted = true,
-  }
-]
+
+[[repos.hooks]]
+id = "cargo-fmt"
+name = "cargo fmt"
+language = "system"
+entry = "uv run python -m cli_check.hooks cargo-fmt"
+files = '(\.rs$|(^|/)Cargo\.toml$|(^|/)\.?(rustfmt|rust-toolchain)\.toml$)'
+require_serial = true
+include_deleted = true
+
+[[repos.hooks]]
+id = "cargo-clippy"
+name = "cargo clippy"
+language = "system"
+entry = "uv run python -m cli_check.hooks cargo-clippy"
+files = '(\.rs$|(^|/)Cargo\.(toml|lock)$|(^|/)\.?(rust-toolchain|clippy|rustfmt)\.toml$|^(buildins/[^/]+|utils/[^/]+|packages/(biggie|kara|parsu))/(tests|benches)/|^\.(config/nextest|cargo/config)\.toml$)'
+require_serial = true
+include_deleted = true
+
+[[repos.hooks]]
+id = "cli-check"
+name = "CLI repository standards"
+language = "system"
+entry = "uv run python -m cli_check.hooks cli-check"
+files = '\.rs$|(^|/)(Cargo\.toml|README\.md|mk-outs\.nu|mk-outputs\.nu)$|^(buildins/[^/]+|utils/[^/]+|packages/(biggie|kara|parsu))/(tests|benches)/|^tools/cli-check/|^(pyproject\.toml|uv\.lock|prek\.toml)$'
+require_serial = true
+include_deleted = true
+
+[[repos.hooks]]
+id = "ruff"
+name = "Python lint"
+language = "system"
+entry = "uv run python -m cli_check.hooks ruff"
+files = '(\.pyi?$|(^|/)(pyproject\.toml|\.?ruff\.toml)$|^(uv\.lock|\.python-version|prek\.toml)$)'
+require_serial = true
+include_deleted = true
+
+[[repos.hooks]]
+id = "ruff-format"
+name = "Python format check"
+language = "system"
+entry = "uv run python -m cli_check.hooks ruff-format"
+files = '(\.pyi?$|(^|/)(pyproject\.toml|\.?ruff\.toml)$|^(uv\.lock|\.python-version|prek\.toml)$)'
+require_serial = true
+include_deleted = true
+
+[[repos.hooks]]
+id = "mypy"
+name = "Python type check"
+language = "system"
+entry = "uv run python -m cli_check.hooks mypy"
+files = '(\.pyi?$|(^|/)pyproject\.toml$|^(uv\.lock|\.python-version)$)'
+require_serial = true
+include_deleted = true
+
+[[repos.hooks]]
+id = "lychee"
+name = "local Markdown links and anchors"
+language = "system"
+entry = '''git ls-files -z -- '*.md' '*.markdown' | while IFS= read -r -d '' path; do if [ -f "$path" ]; then printf '%s\0' "$path"; fi; done | xargs -0 -r lychee --offline --include-fragments=anchor-only --'''
+shell = "bash"
+pass_filenames = false
+always_run = true
+
+[[repos.hooks]]
+id = "typos"
+name = "Markdown spelling"
+language = "system"
+entry = "git ls-files -z -- '*.md' '*.markdown' | xargs -0 -r typos --force-exclude --"
+shell = "bash"
+files = '(\.(md|markdown)$|(^|/)(\.?typos\.toml|_typos\.toml)$|^prek\.toml$)'
+pass_filenames = false
+include_deleted = true
+
+[[repos.hooks]]
+id = "actionlint"
+name = "workflow syntax and shell linting"
+language = "system"
+entry = "actionlint -color"
+files = '^\.github/(workflows/[^/]+|actionlint)\.ya?ml$|^prek\.toml$'
+pass_filenames = false
+include_deleted = true
+
+[[repos.hooks]]
+id = "zizmor"
+name = "zizmor workflow security"
+language = "system"
+entry = "zizmor --offline --no-progress --collect workflows actions -- .github"
+files = '^\.github/(workflows/[^/]+|.*/action)\.ya?ml$|^zizmor\.ya?ml$|^prek\.toml$'
+pass_filenames = false
+include_deleted = true
