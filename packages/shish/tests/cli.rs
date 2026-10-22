@@ -70,3 +70,36 @@ fn evaluates_mixed_conditional_chains_after_skipping() {
             .stderr("");
     }
 }
+
+#[test]
+fn exits_on_eof_without_prompt() {
+    cargo_bin_cmd!()
+        .write_stdin("")
+        .timeout(std::time::Duration::from_secs(1))
+        .assert()
+        .code(0)
+        .stdout("")
+        .stderr("");
+}
+
+#[test]
+fn piped_input_has_no_prompt() {
+    cargo_bin_cmd!()
+        .write_stdin("/bin/echo piped\n")
+        .timeout(std::time::Duration::from_secs(1))
+        .assert()
+        .code(0)
+        .stdout("piped\n")
+        .stderr("");
+}
+
+#[test]
+fn invalid_command_reports_a_diagnostic_without_panicking() {
+    cargo_bin_cmd!()
+        .args(["-c", "shish_missing_command"])
+        .env("PATH", "")
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr("Error: shish_missing_command: command not found\n");
+}
