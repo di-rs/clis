@@ -432,3 +432,17 @@ fn task_07_path_finds_executable_without_build_directory_discovery() {
         .stdout("")
         .stderr("error: command not found: shish_lookup_fixture\n");
 }
+
+#[test]
+fn task_08_external_program_preserves_arguments_streams_and_status() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args([
+            "-c",
+            "/bin/sh -c 'printf \"<%s>\\n\" \"$1\"; printf diagnostic >&2; exit 19' name 'a b'",
+        ])
+        .assert()
+        .code(19)
+        .stdout("<a b>\n")
+        .stderr("diagnostic");
+}
