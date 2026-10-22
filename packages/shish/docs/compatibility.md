@@ -28,7 +28,10 @@ Bash is a comparison implementation, not the standard; its differences and
 unspecified behavior do not automatically become requirements. New 2024-only
 requirements need specification-derived expectations or another suitable reference.
 Expected bytes are written from the specification/reference, never regenerated
-from shish. External utility output depends on the image's tools: Brush's default
+from shish. M01 adds explicit `--bash` with the same dependency versions; mode-selection,
+parse-only, registry, and conflict tests are in [audit.rs](../tests/audit.rs).
+This does not verify the entire Bash feature set. External utility output depends
+on the image's tools: Brush's default
 sh registry does not include `echo` or `printf`, so those names currently use PATH.
 
 See [audit tests](../tests/audit.rs), [invocation tests](../tests/runtime.rs), and
@@ -63,7 +66,7 @@ These are bounded checks, not a conformance suite. Upstream's
 [compatibility reference](https://github.com/reubeno/brush/blob/main/docs/reference/compatibility.md)
 provides audit candidates, not confirmed shish defects. `select`, `wait -n`,
 `disown`, advanced key bindings, and other Bash-specific gaps need reproduction
-in the future Bash mode and stay outside the POSIX gap count.
+in explicit Bash mode and stay outside the POSIX gap count.
 
 ## Confirmed gaps and focused follow-ups
 
@@ -167,8 +170,8 @@ features; it does not change the default mode.
 | F05 | [#100](https://github.com/di-rs/sanctuary/pull/100) | Brush runtime and invocation modes |
 | F06 | [#101](https://github.com/di-rs/sanctuary/pull/101) | Sanctuary builtin integration and installation |
 | F07 | [#102](https://github.com/di-rs/sanctuary/pull/102) | Temporal/Boxie research and recovery design |
-| F08 | Current stage | Compatibility inventory and CLI/PTY infrastructure |
-| M01 | Planned separate PR | Explicit opt-in Bash mode |
+| F08 | [#103](https://github.com/di-rs/sanctuary/pull/103) | Compatibility inventory and CLI/PTY infrastructure |
+| M01 | Current stage | Explicit opt-in Bash mode |
 
 ## Screenshot task inventory
 

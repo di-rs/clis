@@ -238,3 +238,59 @@ fn pty_cursor_reply_backpressure_is_bounded() -> anyhow::Result<()> {
     anyhow::ensure!(started.elapsed() < std::time::Duration::from_secs(8));
     Ok(())
 }
+
+#[test]
+fn bash_extensions_require_explicit_mode() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args(["--posix", "-c", "command -v declare"])
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr("");
+    command(home.path())
+        .args([
+            "--bash",
+            "-c",
+            "command -v declare; command -v complete; command -v history",
+        ])
+        .assert()
+        .code(0)
+        .stdout("declare\ncomplete\nhistory\n")
+        .stderr("");
+}
+
+#[test]
+fn conflicting_shell_modes_are_rejected() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args(["--bash", "--posix", "-c", "true"])
+        .assert()
+        .code(2)
+        .stdout("")
+        .stderr(predicates::str::contains("cannot be used with"));
+}
+
+#[test]
+fn bash_parse_only_has_no_effects() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args([
+            "--bash",
+            "-n",
+            "-c",
+            "values=(one two); printf '%s' \"${values[1]}\" > result",
+        ])
+        .assert()
+        .code(0)
+        .stdout("")
+        .stderr("");
+    home.child("result").assert(predicates::path::missing());
+}
+
+#[test]
+fn bash_mode_keeps_sanctuary_status_registrations() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path()).args(["--bash", "-c", "help true; help false"])
+        .assert().code(0).stdout("true: Sanctuary builtin; ignore arguments and return 0.\nfalse: Sanctuary builtin; ignore arguments and return 1.\n").stderr("");
+}

@@ -26,8 +26,11 @@ struct Args {
     #[arg(short = 'n')]
     no_execute: bool,
     /// Select Brush's sh/POSIX settings (the default, not a conformance claim).
-    #[arg(long = "posix")]
+    #[arg(long = "posix", conflicts_with = "bash")]
     _posix: bool,
+    /// Opt into Brush's Bash settings and extension builtins.
+    #[arg(long)]
+    bash: bool,
     /// Script filename and arguments, or parameters for -c/-s.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     operands: Vec<String>,
@@ -66,7 +69,7 @@ impl Args {
 fn main() -> anyhow::Result<ExitCode> {
     let args = Args::parse();
     if args.no_execute {
-        return match syntax::parse(&args.syntax_input()?) {
+        return match syntax::parse(&args.syntax_input()?, args.bash) {
             Ok(_) => Ok(ExitCode::SUCCESS),
             Err(error) => {
                 eprintln!("shish: {error}");

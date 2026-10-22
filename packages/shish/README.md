@@ -27,6 +27,7 @@ The root `make install-rust` target also installs shish into `~/.local/bin` (or
 | `-s [ARG...]` | Read commands from stdin with operands as positional parameters. |
 | `-n` | Check the selected command, script, or stdin without execution or redirection effects. |
 | `--posix` | Explicitly select the default sh/POSIX settings. |
+| `--bash` | Opt into Brush's Bash settings and builtins such as `declare`, `complete`, and `history`; conflicts with `--posix`. |
 
 Noninteractive execution prints no prompt. Interactive sessions use `PS1` when
 provided, otherwise the current directory's basename followed by ` > `. Builtin
