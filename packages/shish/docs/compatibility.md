@@ -210,8 +210,8 @@ The task numbers are stable even when implementation order changes.
 | 07 | Basics: executable lookup | sh; invocation/§2.9.1 | Verified: custom PATH, executable permission, and missing lookup; [task_07](../tests/audit.rs) | [07 PR](https://github.com/di-rs/sanctuary/pull/112) |
 | 08 | Basics: program execution | sh; invocation/§2.9.1 | Verified: argv boundaries, stdout/stderr, and external status; [task_08](../tests/audit.rs) | [08 PR](https://github.com/di-rs/sanctuary/pull/113) |
 | 09 | Navigation: pwd | sh; pwd/cd | Verified: initial and changed working directories; [task_09](../tests/audit.rs) | [09 PR](https://github.com/di-rs/sanctuary/pull/114) |
-| 10 | Navigation: absolute cd | sh; pwd/cd | Verified: absolute cd updates shell cwd while host test cwd is unchanged; [task_10](../tests/audit.rs) | Current task PR |
-| 11 | Navigation: relative cd | sh; pwd/cd | Unverified; dedicated audit pending | Planned task 11 |
+| 10 | Navigation: absolute cd | sh; pwd/cd | Verified: absolute cd updates shell cwd while host test cwd is unchanged; [task_10](../tests/audit.rs) | [10 PR](https://github.com/di-rs/sanctuary/pull/115) |
+| 11 | Navigation: relative cd | sh; pwd/cd | Verified: relative paths and parent traversal; [task_11](../tests/audit.rs) | Current task PR |
 | 12 | Navigation: home-directory cd | sh; pwd/cd | Unverified; dedicated audit pending | Planned task 12 |
 | 13 | Quoting: single quotes | sh; §2.2 | Unverified; dedicated audit pending | Planned task 13 |
 | 14 | Quoting: double quotes | sh; §2.2 | Unverified; dedicated audit pending | Planned task 14 |
