@@ -305,7 +305,7 @@ fn task_01_prompt_tracks_directory_and_ps1() -> anyhow::Result<()> {
     terminal.send("cd nested\n")?;
     terminal.expect("nested > ")?;
     terminal.send("PS1='custom> '\n")?;
-    terminal.expect("custom> ")?;
+    terminal.expect("\ncustom> ")?;
     terminal.send("exit\n")?;
     terminal.finish(0)?;
     command(home.path())
