@@ -12,47 +12,62 @@ pub fn handle_user_input(input: &str) -> anyhow::Result<i32> {
         return Ok(0);
     }
 
-    let args = parser::args(input);
-
-    let mut command_args = vec![];
-    let mut previous_command = None;
-
-    for arg in args {
-        match arg.as_str() {
-            "|" => {
-                let _stdout = get_stdout(&mut command_args)?;
-                let c = execute_command(&command_args, previous_command, Stdio::piped())?;
-                previous_command = Some(c);
-                command_args.clear();
+    let mut pipeline = Vec::new();
+    let mut status = 0;
+    let mut should_run = true;
+    for arg in parser::args(input) {
+        if matches!(arg.as_str(), "&&" | "||") {
+            if should_run {
+                status = execute_pipeline(&pipeline)?;
             }
-            "&&" | "||" => {
-                let stdout = get_stdout(&mut command_args)?.unwrap_or_else(Stdio::inherit);
-                let mut c = execute_command(&command_args, previous_command, stdout)?;
-
-                if arg == "&&" {
-                    let res = c.wait()?;
-                    if !res.success() {
-                        return Ok(res.code().unwrap_or(1));
-                    }
-                } else if arg == "||" && c.wait()?.success() {
-                    return Ok(0);
-                }
-                previous_command = None;
-                command_args.clear();
-            }
-            _ => command_args.push(arg),
+            should_run = if arg == "&&" {
+                status == 0
+            } else {
+                status != 0
+            };
+            pipeline.clear();
+        } else {
+            pipeline.push(arg);
         }
     }
+    if should_run && !pipeline.is_empty() {
+        status = execute_pipeline(&pipeline)?;
+    }
+    Ok(status)
+}
 
-    if command_args.is_empty() {
-        return Ok(0);
+fn execute_pipeline(args: &[String]) -> anyhow::Result<i32> {
+    let mut commands = args.split(|arg| arg == "|").peekable();
+    let mut children: Vec<std::process::Child> = Vec::new();
+    while let Some(args) = commands.next() {
+        let mut args = args.to_vec();
+        let stdout = get_stdout(&mut args)?.unwrap_or_else(|| {
+            if commands.peek().is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::inherit()
+            }
+        });
+        let stdin = children
+            .last_mut()
+            .and_then(|child| child.stdout.take())
+            .map_or_else(Stdio::inherit, Stdio::from);
+        match execute_command(&args, stdin, stdout) {
+            Ok(child) => children.push(child),
+            Err(error) => {
+                for child in &mut children {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+                return Err(error);
+            }
+        }
     }
-    {
-        let stdout = get_stdout(&mut command_args)?.unwrap_or_else(Stdio::inherit);
-        let mut c = execute_command(&command_args, previous_command, stdout)?;
-        let res = c.wait()?;
-        Ok(res.code().unwrap_or(1))
+    let mut status = 0;
+    for mut child in children {
+        status = child.wait()?.code().unwrap_or(1);
     }
+    Ok(status)
 }
 
 fn get_stdout(args: &mut Vec<String>) -> anyhow::Result<Option<Stdio>> {
