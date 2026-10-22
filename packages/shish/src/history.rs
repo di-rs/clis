@@ -30,6 +30,9 @@ fn execute<SE: ShellExtensions>(
         if let [_, CommandArg::String(option), rest @ ..] = args.as_slice()
             && option == "-r"
             && rest.len() <= 1
+            && rest
+                .first()
+                .is_none_or(|arg| !arg.to_string().starts_with('-'))
         {
             return read_history(&mut context, rest.first().map(ToString::to_string));
         }
