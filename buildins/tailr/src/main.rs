@@ -45,7 +45,11 @@ fn run(cli: &Cli) -> Result<bool, CliError> {
         let prepared = (|| -> Result<(File, u64), CliError> {
             let mut file = get_file_reader(filename)?;
             let total = if cli.bytes.is_some() {
-                file.metadata()?.len()
+                let metadata = file.metadata()?;
+                if metadata.is_dir() {
+                    return Err(std::io::Error::from(std::io::ErrorKind::IsADirectory).into());
+                }
+                metadata.len()
             } else {
                 let lines = get_total_lines(&mut file)?;
                 file.rewind()?;

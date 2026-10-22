@@ -960,6 +960,24 @@ fn unreadable_operand_continues_to_later_files() -> Result<()> {
 }
 
 #[test]
+fn directory_byte_operand_continues_to_later_files() -> Result<()> {
+    let dir = assert_fs::TempDir::new()?;
+    let valid = dir.path().join("valid");
+    std::fs::write(&valid, b"later\n")?;
+    for (count, expected) in [("3", "er\n"), ("+2", "ater\n"), ("0", "")] {
+        cargo_bin_cmd!()
+            .args(["-q", "-c", count])
+            .arg(dir.path())
+            .arg(&valid)
+            .assert()
+            .code(1)
+            .stdout(expected)
+            .stderr(predicate::str::contains("directory"));
+    }
+    Ok(())
+}
+
+#[test]
 #[allow(
     clippy::panic_in_result_fn,
     reason = "Assertions verify observable CLI behavior."
