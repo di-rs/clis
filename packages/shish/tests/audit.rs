@@ -925,3 +925,27 @@ fn task_25_enter_executes_after_no_completion() -> anyhow::Result<()> {
     terminal.send("exit $?\n")?;
     terminal.finish(127)
 }
+
+#[test]
+#[ignore = "C28: Brush does not enable Reedline partial completions"]
+fn task_28_command_common_prefix() -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    let home = assert_fs::TempDir::new()?;
+    for name in ["shish_pick_one", "shish_pick_two"] {
+        let tool = home.child(name);
+        tool.write_str("#!/bin/sh\nexit 0\n")?;
+        std::fs::set_permissions(tool.path(), std::fs::Permissions::from_mode(0o755))?;
+    }
+    let mut terminal = support::pty::Pty::new(
+        home.path(),
+        &["-i"],
+        &[("PATH", home.path().to_str().unwrap())],
+    )?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("shish_p\t")?;
+    terminal.expect("shish-test> shish_pick_")?;
+    terminal.send("\x03")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("exit 0\n")?;
+    terminal.finish(0)
+}
