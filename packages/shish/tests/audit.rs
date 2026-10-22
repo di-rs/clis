@@ -1420,3 +1420,24 @@ fn task_61_history_up_arrow() -> anyhow::Result<()> {
     terminal.send("exit 0\n")?;
     terminal.finish(0)
 }
+
+#[test]
+fn task_62_history_down_arrow() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["--bash", "-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("echo older-entry\n")?;
+    terminal.expect("\nolder-entry\n")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("echo newer-entry\n")?;
+    terminal.expect("\nnewer-entry\n")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("\x1b[A\x1b[A")?;
+    terminal.expect_line("shish-test> echo older-entry")?;
+    terminal.send("\x1b[B")?;
+    terminal.expect_line("shish-test> echo newer-entry")?;
+    terminal.send("\x1b[B")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("exit 0\n")?;
+    terminal.finish(0)
+}
