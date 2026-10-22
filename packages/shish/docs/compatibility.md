@@ -222,7 +222,7 @@ The task numbers are stable even when implementation order changes.
 | 19 | Redirection: stdout | sh; §2.7 | Verified: exact file contents, unaffected output stream, and success status; [task_19](../tests/audit.rs) | [19 PR](https://github.com/di-rs/sanctuary/pull/124) |
 | 20 | Redirection: stderr | sh; §2.7 | Verified: exact file contents, unaffected output stream, and success status; [task_20](../tests/audit.rs) | [20 PR](https://github.com/di-rs/sanctuary/pull/125) |
 | 21 | Redirection: append stdout | sh; §2.7 | Verified: exact file contents, unaffected output stream, and success status; [task_21](../tests/audit.rs) | [21 PR](https://github.com/di-rs/sanctuary/pull/126) |
-| 22 | Redirection: append stderr | sh; §2.7 | Verified: exact file contents, unaffected output stream, and success status; [task_22](../tests/audit.rs) | Current task PR |
+| 22 | Redirection: append stderr | sh; §2.7 | Verified: exact file contents, unaffected output stream, and success status; [task_22](../tests/audit.rs) | [22 PR](https://github.com/di-rs/sanctuary/pull/127) |
 | 23 | Command completion: builtins | interactive; product UI | Unverified; dedicated audit pending | Planned task 23 |
 | 24 | Command completion: arguments | interactive; product UI | Unverified; dedicated audit pending | Planned task 24 |
 | 25 | Command completion: no matches | interactive; product UI | Unverified; dedicated audit pending | Planned task 25 |
@@ -255,7 +255,7 @@ The task numbers are stable even when implementation order changes.
 | 52 | Background jobs: reap multiple | interactive sh; §2.11/jobs/wait | Unverified; dedicated audit pending | Planned task 52 |
 | 53 | Background jobs: reap before prompt | interactive sh; §2.11/jobs/wait | Unverified; dedicated audit pending | Planned task 53 |
 | 54 | Background jobs: recycle job numbers | interactive sh; §2.11/jobs/wait | Unverified; dedicated audit pending | Planned task 54 |
-| 55 | Pipelines: two commands | sh; §2.9.2 | Unverified; dedicated audit pending | Planned task 55 |
+| 55 | Pipelines: two commands | sh; §2.9.2 | Verified: pipeline output, final status, and bounded fixture execution; [task_55](../tests/audit.rs) | Current task PR |
 | 56 | Pipelines: builtins | sh; §2.9.2 | Unverified; dedicated audit pending | Planned task 56 |
 | 57 | Pipelines: multiple commands | sh; §2.9.2 | Unverified; dedicated audit pending | Planned task 57 |
 | 58 | History: builtin | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 58 |
