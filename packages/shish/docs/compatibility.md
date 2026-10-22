@@ -282,8 +282,8 @@ The task numbers are stable even when implementation order changes.
 | 33 | Filename completion: multiple matches | interactive; product UI | Verified: both filename candidates appear in the completion menu; [task_33](../tests/audit.rs) | [33 PR](https://github.com/di-rs/sanctuary/pull/145) |
 | 34 | Filename completion: partial matches | interactive; product UI | Unverified; dedicated audit pending | Planned task 34 |
 | 35 | Filename completion: multiple arguments | interactive; product UI | Verified: completing the next argument preserves an already completed filename; [task_35](../tests/audit.rs) | [35 PR](https://github.com/di-rs/sanctuary/pull/146) |
-| 36 | Programmable completion: registration | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_36](../tests/audit.rs) | Current task PR |
-| 37 | Programmable completion: missing specifications | bash; Bash §8.6–8.7 | Unverified; dedicated audit pending | Planned task 37 |
+| 36 | Programmable completion: registration | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_36](../tests/audit.rs) | [36 PR](https://github.com/di-rs/sanctuary/pull/149) |
+| 37 | Programmable completion: missing specifications | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_37](../tests/audit.rs) | Current task PR |
 | 38 | Programmable completion: display specifications | bash; Bash §8.6–8.7 | Unverified; dedicated audit pending | Planned task 38 |
 | 39 | Programmable completion: single candidate | bash; Bash §8.6–8.7 | Unverified; dedicated audit pending | Planned task 39 |
 | 40 | Programmable completion: no candidates | bash; Bash §8.6–8.7 | Unverified; dedicated audit pending | Planned task 40 |
