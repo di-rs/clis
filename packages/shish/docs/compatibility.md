@@ -285,9 +285,9 @@ The task numbers are stable even when implementation order changes.
 | 36 | Programmable completion: registration | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_36](../tests/audit.rs) | [36 PR](https://github.com/di-rs/sanctuary/pull/149) |
 | 37 | Programmable completion: missing specifications | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_37](../tests/audit.rs) | [37 PR](https://github.com/di-rs/sanctuary/pull/150) |
 | 38 | Programmable completion: display specifications | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_38](../tests/audit.rs) | [38 PR](https://github.com/di-rs/sanctuary/pull/151) |
-| 39 | Programmable completion: single candidate | bash; Bash §8.6–8.7 | Verified: COMPREPLY supplies one candidate that is completed and passed to the command; [task_39](../tests/audit.rs) | Current task PR |
+| 39 | Programmable completion: single candidate | bash; Bash §8.6–8.7 | Verified: COMPREPLY supplies one candidate that is completed and passed to the command; [task_39](../tests/audit.rs) | [39 PR](https://github.com/di-rs/sanctuary/pull/152) |
 | 40 | Programmable completion: no candidates | bash; Bash §8.6–8.7 | Unverified; dedicated audit pending | Planned task 40 |
-| 41 | Programmable completion: command-line arguments | bash; Bash §8.6–8.7 | Unverified; dedicated audit pending | Planned task 41 |
+| 41 | Programmable completion: command-line arguments | bash; Bash §8.6–8.7 | Verified: completer receives command name, current word, and previous word in Bash mode; [task_41](../tests/audit.rs) | Current task PR |
 | 42 | Programmable completion: environment variables | bash; Bash §8.6–8.7 | Unverified; dedicated audit pending | Planned task 42 |
 | 43 | Programmable completion: multiple candidates | bash; Bash §8.6–8.7 | Unverified; dedicated audit pending | Planned task 43 |
 | 44 | Programmable completion: longest common prefix | bash; Bash §8.6–8.7 | Unverified; dedicated audit pending | Planned task 44 |
