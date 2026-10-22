@@ -552,3 +552,17 @@ fn task_16_single_quote_backslashes() {
         .stdout("<a\\b>\n<\\$HOME>\n<\\\\>\n<\\n>\n")
         .stderr("");
 }
+
+#[test]
+fn task_17_double_quote_backslashes() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args([
+            "-c",
+            "v=ok; printf '<%s>\\n' \"\\\\$v\" \"\\$v\" \"\\q\" \"\\\"\" \"a\\\nb\"",
+        ])
+        .assert()
+        .code(0)
+        .stdout("<\\ok>\n<$v>\n<\\q>\n<\">\n<ab>\n")
+        .stderr("");
+}
