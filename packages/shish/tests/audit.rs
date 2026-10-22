@@ -591,7 +591,7 @@ fn task_19_stdout_redirection() {
     command(home.path())
         .args([
             "-c",
-            "printf first > out; printf second > out; printf visible",
+            "printf first-longer-value > out; printf second > out; printf visible",
         ])
         .assert()
         .code(0)
