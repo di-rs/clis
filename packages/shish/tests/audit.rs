@@ -877,3 +877,21 @@ fn task_33_multiple_file_completions() -> anyhow::Result<()> {
     terminal.send("exit 0\n")?;
     terminal.finish(0)
 }
+
+#[test]
+fn task_35_multiple_argument_completion() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    home.child("first.txt").write_str("first-content\n")?;
+    home.child("second.txt").write_str("second-content\n")?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("/bin/cat fir\t")?;
+    terminal.expect("shish-test> /bin/cat first.txt ")?;
+    terminal.send("sec\t")?;
+    terminal.expect("shish-test> /bin/cat first.txt second.txt ")?;
+    terminal.send("\n")?;
+    terminal.expect("\nfirst-content\nsecond-content\n")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("exit 0\n")?;
+    terminal.finish(0)
+}
