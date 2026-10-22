@@ -1100,3 +1100,19 @@ fn task_32_missing_file_completion() -> anyhow::Result<()> {
     terminal.send("exit 0\n")?;
     terminal.finish(0)
 }
+
+#[test]
+#[ignore = "C34: Brush leaves Reedline partial filename completion disabled"]
+fn task_34_file_common_prefix() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    home.child("shared_one").touch()?;
+    home.child("shared_two").touch()?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("/bin/cat sha\t")?;
+    terminal.expect("shish-test> /bin/cat shared_")?;
+    terminal.send("\x03")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("exit 0\n")?;
+    terminal.finish(0)
+}

@@ -231,6 +231,19 @@ retype the full command without Tab. Ignored acceptance:
 Separate task 32 follow-up: adopt published empty-menu handling and enable the
 filename-specific case; passing the command-name case alone does not close it.
 
+### C34: filename completion does not insert the common prefix
+
+Reference: screenshot task 34 and Readline completion behavior linked under C28.
+Create files `shared_one` and `shared_two`. In default `shish -i`, type
+`/bin/cat sha` and Tab. Expected input: `/bin/cat shared_`. Observed input:
+`/bin/cat sha`, with both filenames listed.
+
+Owner: Brush's disabled Reedline partial-completion setting (C28). Impact: the
+shared filename suffix must be entered manually. Workaround: cancel and type the
+full filename without Tab. Ignored acceptance: `task_34_file_common_prefix` in
+[audit.rs](../tests/audit.rs). Separate task 34 follow-up: enable a published
+partial-completion option and this filename-specific acceptance case.
+
 ## Foundation stack
 
 Each row is independently reviewable and targets its predecessor. No PR is merged
@@ -293,9 +306,9 @@ The task numbers are stable even when implementation order changes.
 | 29 | Filename completion: files | interactive; product UI | Verified: a completed filename containing a space opens the intended file; [task_29](../tests/audit.rs) | [29 PR](https://github.com/di-rs/sanctuary/pull/142) |
 | 30 | Filename completion: nested files | interactive; product UI | Verified: directory continuation and a nested file are completed and opened; [task_30](../tests/audit.rs) | [30 PR](https://github.com/di-rs/sanctuary/pull/143) |
 | 31 | Filename completion: directories | interactive; product UI | Verified: completion appends a directory separator and cd enters the result; [task_31](../tests/audit.rs) | [31 PR](https://github.com/di-rs/sanctuary/pull/144) |
-| 32 | Filename completion: no matches | interactive; product UI | Partial: unmatched filename is preserved; first Enter is consumed by the empty menu (C32); [task_32](../tests/audit.rs) | Current task PR |
+| 32 | Filename completion: no matches | interactive; product UI | Partial: unmatched filename is preserved; first Enter is consumed by the empty menu (C32); [task_32](../tests/audit.rs) | [32 PR](https://github.com/di-rs/sanctuary/pull/157) |
 | 33 | Filename completion: multiple matches | interactive; product UI | Verified: both filename candidates appear in the completion menu; [task_33](../tests/audit.rs) | [33 PR](https://github.com/di-rs/sanctuary/pull/145) |
-| 34 | Filename completion: partial matches | interactive; product UI | Unverified; dedicated audit pending | Planned task 34 |
+| 34 | Filename completion: partial matches | interactive; product UI | Missing: filename candidates are displayed without insertion of their common prefix (C34); [task_34](../tests/audit.rs) | Current task PR |
 | 35 | Filename completion: multiple arguments | interactive; product UI | Verified: completing the next argument preserves an already completed filename; [task_35](../tests/audit.rs) | [35 PR](https://github.com/di-rs/sanctuary/pull/146) |
 | 36 | Programmable completion: registration | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_36](../tests/audit.rs) | [36 PR](https://github.com/di-rs/sanctuary/pull/149) |
 | 37 | Programmable completion: missing specifications | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_37](../tests/audit.rs) | [37 PR](https://github.com/di-rs/sanctuary/pull/150) |
