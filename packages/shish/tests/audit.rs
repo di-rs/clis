@@ -716,3 +716,21 @@ fn task_74_variable_expansion() {
         .stdout("<a>\n<b>\n<a b>\n")
         .stderr("");
 }
+
+#[test]
+#[expect(
+    clippy::literal_string_with_formatting_args,
+    reason = "Shell parameter operators use braces, not Rust formatting"
+)]
+fn task_75_braced_expansion() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args([
+            "-c",
+            "v=value; printf '%s/%s\\n' \"${v}_tail\" \"${shish_unset:-fallback}\"",
+        ])
+        .assert()
+        .code(0)
+        .stdout("value_tail/fallback\n")
+        .stderr("");
+}
