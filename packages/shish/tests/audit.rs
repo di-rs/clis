@@ -990,3 +990,20 @@ fn task_38_display_completion_spec() {
         .stdout("complete -o nospace -W 'alpha beta' pick\n")
         .stderr("");
 }
+
+#[test]
+fn task_39_single_programmed_completion() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["--bash", "-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("_pick() { COMPREPLY=(unique_candidate); }; pick() { printf '<%s>\\n' \"$1\"; }; complete -F _pick pick; echo setup-ready\n")?;
+    terminal.expect("\nsetup-ready\n")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("pick uni\t")?;
+    terminal.expect("shish-test> pick unique_candidate ")?;
+    terminal.send("\n")?;
+    terminal.expect("\n<unique_candidate>\n")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("exit 0\n")?;
+    terminal.finish(0)
+}
