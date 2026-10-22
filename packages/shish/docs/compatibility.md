@@ -217,8 +217,8 @@ The task numbers are stable even when implementation order changes.
 | 14 | Quoting: double quotes | sh; §2.2 | Verified: double quotes preserve whitespace and empty expansions without globbing; [task_14](../tests/audit.rs) | [14 PR](https://github.com/di-rs/sanctuary/pull/119) |
 | 15 | Quoting: unquoted backslashes | sh; §2.2 | Verified: escaped spaces and metacharacters, plus backslash-newline joining; [task_15](../tests/audit.rs) | [15 PR](https://github.com/di-rs/sanctuary/pull/120) |
 | 16 | Quoting: backslashes in single quotes | sh; §2.2 | Verified: backslashes remain literal inside single quotes; [task_16](../tests/audit.rs) | [16 PR](https://github.com/di-rs/sanctuary/pull/121) |
-| 17 | Quoting: backslashes in double quotes | sh; §2.2 | Verified: double-quote escape rules preserve unknown escapes and remove continued newlines; [task_17](../tests/audit.rs) | Current task PR |
-| 18 | Quoting: quoted executables | sh; §2.2 | Unverified; dedicated audit pending | Planned task 18 |
+| 17 | Quoting: backslashes in double quotes | sh; §2.2 | Verified: double-quote escape rules preserve unknown escapes and remove continued newlines; [task_17](../tests/audit.rs) | [17 PR](https://github.com/di-rs/sanctuary/pull/122) |
+| 18 | Quoting: quoted executables | sh; §2.2 | Verified: executable paths containing spaces retain argument boundaries; [task_18](../tests/audit.rs) | Current task PR |
 | 19 | Redirection: stdout | sh; §2.7 | Unverified; dedicated audit pending | Planned task 19 |
 | 20 | Redirection: stderr | sh; §2.7 | Unverified; dedicated audit pending | Planned task 20 |
 | 21 | Redirection: append stdout | sh; §2.7 | Unverified; dedicated audit pending | Planned task 21 |
