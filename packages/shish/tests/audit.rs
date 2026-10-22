@@ -603,7 +603,7 @@ fn task_19_stdout_redirection() {
 #[test]
 fn task_20_stderr_redirection() {
     let home = assert_fs::TempDir::new().unwrap();
-    command(home.path()).args(["-c", "/bin/sh -c 'printf visible; printf first >&2' 2> err; /bin/sh -c 'printf second >&2' 2> err"])
+    command(home.path()).args(["-c", "/bin/sh -c 'printf visible; printf first-longer-value >&2' 2> err; /bin/sh -c 'printf second >&2' 2> err"])
         .assert().code(0).stdout("visible").stderr("");
     home.child("err").assert("second");
 }
