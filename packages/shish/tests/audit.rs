@@ -949,3 +949,18 @@ fn task_28_command_common_prefix() -> anyhow::Result<()> {
     terminal.send("exit 0\n")?;
     terminal.finish(0)
 }
+
+#[test]
+fn task_36_complete_registration() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args([
+            "--bash",
+            "-c",
+            "complete -W alpha pick; complete -W beta pick; complete -p pick",
+        ])
+        .assert()
+        .code(0)
+        .stdout("complete -W 'beta' pick\n")
+        .stderr("");
+}

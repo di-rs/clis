@@ -274,7 +274,7 @@ The task numbers are stable even when implementation order changes.
 | 25 | Command completion: no matches | interactive; product UI | Partial: unmatched input is preserved and cancellation works; Enter handling remains missing (C25); [task_25](../tests/audit.rs) | [25 PR](https://github.com/di-rs/sanctuary/pull/147) |
 | 26 | Command completion: executables | interactive; product UI | Verified: custom PATH executable is completed and executed; [task_26](../tests/audit.rs) | [26 PR](https://github.com/di-rs/sanctuary/pull/140) |
 | 27 | Command completion: multiple matches | interactive; product UI | Verified: completion menu lists both executable candidates and can be cancelled; [task_27](../tests/audit.rs) | [27 PR](https://github.com/di-rs/sanctuary/pull/141) |
-| 28 | Command completion: partial matches | interactive; product UI | Missing: multiple candidates are listed but the common prefix is not inserted (C28); [task_28](../tests/audit.rs) | Current task PR |
+| 28 | Command completion: partial matches | interactive; product UI | Missing: multiple candidates are listed but the common prefix is not inserted (C28); [task_28](../tests/audit.rs) | [28 PR](https://github.com/di-rs/sanctuary/pull/148) |
 | 29 | Filename completion: files | interactive; product UI | Verified: a completed filename containing a space opens the intended file; [task_29](../tests/audit.rs) | [29 PR](https://github.com/di-rs/sanctuary/pull/142) |
 | 30 | Filename completion: nested files | interactive; product UI | Verified: directory continuation and a nested file are completed and opened; [task_30](../tests/audit.rs) | [30 PR](https://github.com/di-rs/sanctuary/pull/143) |
 | 31 | Filename completion: directories | interactive; product UI | Verified: completion appends a directory separator and cd enters the result; [task_31](../tests/audit.rs) | [31 PR](https://github.com/di-rs/sanctuary/pull/144) |
@@ -282,7 +282,7 @@ The task numbers are stable even when implementation order changes.
 | 33 | Filename completion: multiple matches | interactive; product UI | Verified: both filename candidates appear in the completion menu; [task_33](../tests/audit.rs) | [33 PR](https://github.com/di-rs/sanctuary/pull/145) |
 | 34 | Filename completion: partial matches | interactive; product UI | Unverified; dedicated audit pending | Planned task 34 |
 | 35 | Filename completion: multiple arguments | interactive; product UI | Verified: completing the next argument preserves an already completed filename; [task_35](../tests/audit.rs) | [35 PR](https://github.com/di-rs/sanctuary/pull/146) |
-| 36 | Programmable completion: registration | bash; Bash §8.6–8.7 | Unverified; dedicated audit pending | Planned task 36 |
+| 36 | Programmable completion: registration | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_36](../tests/audit.rs) | Current task PR |
 | 37 | Programmable completion: missing specifications | bash; Bash §8.6–8.7 | Unverified; dedicated audit pending | Planned task 37 |
 | 38 | Programmable completion: display specifications | bash; Bash §8.6–8.7 | Unverified; dedicated audit pending | Planned task 38 |
 | 39 | Programmable completion: single candidate | bash; Bash §8.6–8.7 | Unverified; dedicated audit pending | Planned task 39 |
