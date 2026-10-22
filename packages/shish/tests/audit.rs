@@ -1188,3 +1188,19 @@ fn task_47_background_launch() -> anyhow::Result<()> {
     terminal.send("exit 0\n")?;
     terminal.finish(0)
 }
+
+#[test]
+fn task_48_background_output() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    home.child("worker").write_str("while [ ! -e release ]; do /bin/sleep 0.02; done\nprintf 'worker-stdout\\n'\nprintf 'worker-stderr\\n' >&2\n")?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("/bin/sh worker & echo launched\n")?;
+    terminal.expect("\nlaunched\n")?;
+    terminal.expect_line("shish-test> ")?;
+    home.child("release").touch()?;
+    terminal.expect("worker-stdout")?;
+    terminal.expect("worker-stderr")?;
+    terminal.send("wait; exit 0\n")?;
+    terminal.finish(0)
+}
