@@ -317,3 +317,15 @@ fn task_01_prompt_tracks_directory_and_ps1() -> anyhow::Result<()> {
         .stderr("");
     Ok(())
 }
+
+#[test]
+fn task_02_invalid_command_preserves_repl_execution() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .arg("-s")
+        .write_stdin("shish_missing_command\nprintf '%s\\n' \"$?\"\n")
+        .assert()
+        .code(0)
+        .stdout("127\n")
+        .stderr("error: command not found: shish_missing_command\n");
+}
