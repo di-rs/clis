@@ -533,6 +533,7 @@ fn task_14_double_quotes() {
 #[test]
 fn task_15_unquoted_backslashes() {
     let home = assert_fs::TempDir::new().unwrap();
+    home.child("matching-file").touch().unwrap();
     command(home.path())
         .args(["-c", "printf '<%s>\\n' a\\ b \\$HOME \\* a\\\nb"])
         .assert()
