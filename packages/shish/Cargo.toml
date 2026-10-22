@@ -18,6 +18,8 @@ brush-core = "0.5"
 brush-interactive = { version = "0.4", features = ["reedline", "minimal"] }
 brush-parser = "0.4"
 clap = { workspace = true, features = ["derive"] }
+sanctuary-false = { version = "0.1.0", path = "../../buildins/false", package = "false" }
+sanctuary-true = { version = "0.1.0", path = "../../buildins/true", package = "true" }
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "sync"] }
 
 [dev-dependencies]

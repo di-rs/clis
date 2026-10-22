@@ -29,6 +29,14 @@ pub async fn run(args: &Args) -> anyhow::Result<u8> {
         .builtins(brush_builtins::default_builtins(
             brush_builtins::BuiltinSet::ShMode,
         ))
+        .builtin(
+            "true",
+            brush_core::builtins::simple_builtin::<crate::builtins::Status<true>, _>(),
+        )
+        .builtin(
+            "false",
+            brush_core::builtins::simple_builtin::<crate::builtins::Status<false>, _>(),
+        )
         .shell_name(shell_name.to_owned())
         .shell_args(shell_args)
         .shell_product_display_str(format!("shish {}", env!("CARGO_PKG_VERSION")))

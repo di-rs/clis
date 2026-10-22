@@ -12,10 +12,10 @@ From the repository root with the pinned Rust toolchain installed:
 cargo run -p echor -- hello world
 ```
 
-For installed commands, `make install-local` installs Biggie, Parsu, Kara, cli-bench,
+For installed commands, `make install-local` installs Biggie, Parsu, Kara, Shish, cli-bench,
 and cli-check into `~/.local/bin`. Add it to `PATH`; use `PREFIX=/path` to override.
 The Rust tools are release binaries; the Python tools use isolated uv tool environments.
-The target replaces installations with these five names; built-ins are not installed.
+The target replaces installations with these six names; built-ins are not installed.
 
 Choose another package from the tables below. These commands implement selected
 behaviors, not complete GNU/BSD replacements; each README explains the differences.

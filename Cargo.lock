@@ -2508,8 +2508,10 @@ dependencies = [
  "brush-parser",
  "clap",
  "cli-testing",
+ "false",
  "predicates",
  "tokio",
+ "true",
 ]
 
 [[package]]
