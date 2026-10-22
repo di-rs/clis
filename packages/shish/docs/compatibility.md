@@ -170,6 +170,35 @@ Acceptance test: `posix_command_v_reports_functions` in [audit.rs](../tests/audi
 currently ignored. Proposed separate PR P06: upstream function/alias description
 lookup, published dependency update, and acceptance tests. No upstream issue linked yet.
 
+## Interactive compatibility gaps
+
+These are product/Readline behaviors, separate from the POSIX scope. They use the
+recorded shish 0.1.0, Brush 0.5.0/interactive 0.4.0, Reedline 0.47.0, and Darwin
+27 arm64 environment, with `-i`; Bash mode is stated when required. Terminal
+output combines stdout/stderr. Acceptance tests assert the intended behavior and
+remain ignored until a published dependency or integration fix makes them pass.
+The platform keeps published dependencies instead of introducing patches for these
+gaps. No upstream issue is linked yet.
+
+### C25: Enter after an empty command-completion menu
+
+Reference: screenshot task 25 and
+[Readline completion commands](https://www.gnu.org/software/bash/manual/html_node/Commands-For-Completion.html).
+In an isolated PATH, type `shish_missing_completion`, Tab, then Enter. Expected:
+the unchanged command executes, reports command-not-found, and returns status 127.
+Observed: the input remains visible without execution; the first Enter dismisses
+the empty menu. The acceptance test times out waiting for the diagnostic.
+
+Owner: Brush/Reedline integration. Brush activates a completion menu even with no
+candidates. Unmatched text preservation and Ctrl-C cancellation are verified.
+Impact: an extra interaction is needed to submit the command. Workaround: cancel
+with Ctrl-C and type the full command without Tab.
+
+Tests: `task_25_unmatched_input_can_be_cancelled` and the ignored
+`task_25_enter_executes_after_no_completion` in [audit.rs](../tests/audit.rs).
+Separate follow-up for task 25: adopt published empty-menu handling, enable this
+acceptance case, and retain the cancellation regression.
+
 ## Foundation stack
 
 Each row is independently reviewable and targets its predecessor. No PR is merged
@@ -225,7 +254,7 @@ The task numbers are stable even when implementation order changes.
 | 22 | Redirection: append stderr | sh; §2.7 | Verified: exact file contents, unaffected output stream, and success status; [task_22](../tests/audit.rs) | [22 PR](https://github.com/di-rs/sanctuary/pull/127) |
 | 23 | Command completion: builtins | interactive; product UI | Verified: bounded PTY Tab interaction with isolated PATH; [task_23](../tests/audit.rs) | [23 PR](https://github.com/di-rs/sanctuary/pull/138) |
 | 24 | Command completion: arguments | interactive; product UI | Verified: bounded PTY Tab interaction with isolated PATH; [task_24](../tests/audit.rs) | [24 PR](https://github.com/di-rs/sanctuary/pull/139) |
-| 25 | Command completion: no matches | interactive; product UI | Unverified; dedicated audit pending | Planned task 25 |
+| 25 | Command completion: no matches | interactive; product UI | Partial: unmatched input is preserved and cancellation works; Enter handling remains missing (C25); [task_25](../tests/audit.rs) | Current task PR |
 | 26 | Command completion: executables | interactive; product UI | Verified: custom PATH executable is completed and executed; [task_26](../tests/audit.rs) | [26 PR](https://github.com/di-rs/sanctuary/pull/140) |
 | 27 | Command completion: multiple matches | interactive; product UI | Verified: completion menu lists both executable candidates and can be cancelled; [task_27](../tests/audit.rs) | [27 PR](https://github.com/di-rs/sanctuary/pull/141) |
 | 28 | Command completion: partial matches | interactive; product UI | Unverified; dedicated audit pending | Planned task 28 |
@@ -235,7 +264,7 @@ The task numbers are stable even when implementation order changes.
 | 32 | Filename completion: no matches | interactive; product UI | Unverified; dedicated audit pending | Planned task 32 |
 | 33 | Filename completion: multiple matches | interactive; product UI | Verified: both filename candidates appear in the completion menu; [task_33](../tests/audit.rs) | [33 PR](https://github.com/di-rs/sanctuary/pull/145) |
 | 34 | Filename completion: partial matches | interactive; product UI | Unverified; dedicated audit pending | Planned task 34 |
-| 35 | Filename completion: multiple arguments | interactive; product UI | Verified: completing the next argument preserves an already completed filename; [task_35](../tests/audit.rs) | Current task PR |
+| 35 | Filename completion: multiple arguments | interactive; product UI | Verified: completing the next argument preserves an already completed filename; [task_35](../tests/audit.rs) | [35 PR](https://github.com/di-rs/sanctuary/pull/146) |
 | 36 | Programmable completion: registration | bash; Bash §8.6–8.7 | Unverified; dedicated audit pending | Planned task 36 |
 | 37 | Programmable completion: missing specifications | bash; Bash §8.6–8.7 | Unverified; dedicated audit pending | Planned task 37 |
 | 38 | Programmable completion: display specifications | bash; Bash §8.6–8.7 | Unverified; dedicated audit pending | Planned task 38 |
