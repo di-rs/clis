@@ -975,3 +975,18 @@ fn task_37_missing_completion_spec() {
         .stdout("")
         .stderr("no completion found for command\n");
 }
+
+#[test]
+fn task_38_display_completion_spec() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args([
+            "--bash",
+            "-c",
+            "complete -o nospace -W 'alpha beta' pick; complete -p pick",
+        ])
+        .assert()
+        .code(0)
+        .stdout("complete -o nospace -W 'alpha beta' pick\n")
+        .stderr("");
+}
