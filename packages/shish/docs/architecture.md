@@ -32,7 +32,11 @@ not establish conformance or disable every Brush extension.
 builtin, and interactive libraries. Its existing interactive shell and extensible
 builtin registry fit the migration more directly than
 [Flash](https://github.com/raphamorim/flash), another Rust parser and interpreter.
-Brush uses the MIT license; Flash uses GPL-3.0. Upstream compatibility claims and
+Brush uses the MIT license; Flash uses GPL-3.0. Brush also requires transitive
+dependencies under other licenses. The repository policy has exact-version
+exceptions for `check_elevation` 0.2.7 (BSD-2-Clause), `foldhash` 0.2.0 (Zlib), and
+`terminfo` 0.9.0 (WTFPL), with their [notices](../THIRD-PARTY-NOTICES.md).
+Dependency updates must recheck these exceptions. Upstream compatibility claims and
 reported limitations still require reproduction against the integrated binary.
 
 Keeping integration in this package avoids introducing a shared API before
