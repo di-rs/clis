@@ -518,6 +518,7 @@ fn task_13_single_quotes() {
 #[test]
 fn task_14_double_quotes() {
     let home = assert_fs::TempDir::new().unwrap();
+    home.child("matching-file").touch().unwrap();
     command(home.path())
         .args([
             "-c",
