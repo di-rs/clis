@@ -1294,3 +1294,19 @@ fn task_52_reap_multiple_jobs() -> anyhow::Result<()> {
     home.child("errors").assert("");
     Ok(())
 }
+
+#[test]
+fn task_53_reap_before_prompt() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("true & /bin/sleep 0.1; echo foreground-finished\n")?;
+    terminal.expect("\nforeground-finished\n")?;
+    terminal.expect("Done")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("jobs > remaining 2> errors; exit $?\n")?;
+    terminal.finish(0)?;
+    home.child("remaining").assert("");
+    home.child("errors").assert("");
+    Ok(())
+}
