@@ -28,5 +28,11 @@ serde_json.workspace = true
 [lints]
 workspace = true
 
+[target.'cfg(target_os = "macos")'.dependencies]
+exacl = { version = "0.13.0", default-features = false }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+xattr = "1.6.1"
+
 [package.metadata.cli-check]
 benchmark-exemption = "Interactive terminal editor; no finite command benchmark."

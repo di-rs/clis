@@ -1,6 +1,17 @@
-use std::io::Write;
+use std::{
+    fs::File,
+    io::{self, Write},
+};
 
 use super::{Buffer, fileinfo::FileInfo};
+
+mod security;
+
+#[derive(Debug)]
+pub enum SaveOutcome {
+    Saved,
+    DurabilityWarning(io::Error),
+}
 
 #[derive(Default)]
 pub struct FileBuffer {
@@ -24,7 +35,14 @@ impl FileBuffer {
         })
     }
 
-    pub fn save(&self) -> Result<(), std::io::Error> {
+    pub fn save(&self) -> io::Result<SaveOutcome> {
+        self.save_with_sync(File::sync_all)
+    }
+
+    pub(super) fn save_with_sync(
+        &self,
+        sync_directory: impl FnOnce(&File) -> io::Result<()>,
+    ) -> io::Result<SaveOutcome> {
         let path = &self.fileinfo.path;
         // Resolve existing symlinks so saving updates their target, not the link.
         let destination = match std::fs::canonicalize(path) {
@@ -48,7 +66,7 @@ impl FileBuffer {
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or_else(|| std::path::Path::new("."));
-        let permissions = match std::fs::metadata(&destination) {
+        let security = match std::fs::metadata(&destination) {
             Ok(metadata) => {
                 if !metadata.is_file() {
                     return Err(std::io::Error::new(
@@ -59,23 +77,31 @@ impl FileBuffer {
                 if metadata.permissions().readonly() {
                     return Err(std::io::ErrorKind::PermissionDenied.into());
                 }
-                Some(metadata.permissions())
+                // Check effective write access without truncating the original.
+                let original = File::options().write(true).open(&destination)?;
+                Some(security::Security::read(&destination, &original)?)
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(error),
         };
-        let mut file = tempfile::NamedTempFile::new_in(parent)?;
-        if let Some(permissions) = permissions {
-            file.as_file().set_permissions(permissions)?;
-        }
+        // Opening the directory can fail; do so before committing any changes.
+        let directory = File::open(parent)?;
+        let staging = tempfile::tempdir_in(parent)?;
+        security::make_private_directory(staging.path())?;
+        let mut file = tempfile::NamedTempFile::new_in(staging.path())?;
+        security::make_private(file.path(), file.as_file())?;
         for line in &self.buffer.lines {
             writeln!(file, "{line}")?;
         }
+        if let Some(security) = security {
+            security.apply(file.path(), file.as_file())?;
+        }
         file.as_file().sync_all()?;
         file.persist(&destination).map_err(|error| error.error)?;
-        #[cfg(unix)]
-        std::fs::File::open(parent)?.sync_all()?;
-        Ok(())
+        Ok(match sync_directory(&directory) {
+            Ok(()) => SaveOutcome::Saved,
+            Err(error) => SaveOutcome::DurabilityWarning(error),
+        })
     }
 }
 

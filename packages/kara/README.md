@@ -44,11 +44,20 @@ request quit, and `q!` to discard changes and quit.
 
 `w other-file` saves to that destination and makes it the active file only after
 success. Command-bar filenames may contain spaces; everything after the first
-space following `w` is the literal filename, without shell quoting or expansion. Failed saves leave the
-buffer identity and modified state intact and display an error.
+space following `w` is the literal filename, without shell quoting or expansion.
+Failures before replacement leave the buffer identity and modified state intact.
+If replacement succeeds but syncing its directory fails, Kara switches to the saved
+file, clears the modified state, and warns that the file was saved but directory
+sync failed. The new contents are visible, but may not survive a crash or power loss.
 
-Saving uses a temporary file in the destination directory and an atomic rename.
-Existing symlinks with valid targets are resolved; permissions are preserved.
+Saving uses a temporary file inside a private staging directory beside the
+destination, followed by an atomic rename.
+Existing symlinks with valid targets are resolved. On Linux and macOS, existing
+owner, group, mode bits, and access ACLs are preserved and verified before replacement.
+Kara checks write access to the destination and rejects saves when it cannot preserve
+that access metadata. The staging directory's inherited access ACL is removed before
+creating the temporary file; its contents stay private while permissions are restored.
+Other platforms reject saves until ACL preservation is supported.
 Dangling symlinks are rejected without replacing the link or creating its target.
 Read-only destinations and existing non-regular files (including FIFOs, sockets,
 and devices) are rejected. On Unix, the parent directory is synced
@@ -74,7 +83,8 @@ From the repository root, `make install-rust` installs Biggie, Parsu, and Kara i
 `~/.local/bin` (override with `PREFIX=/path`). Add that directory to `PATH`.
 Run `kara --help` from any directory. Kara is local and requires no authentication.
 
-Run the Unix PTY regressions from the repository root after building Kara:
+The CLI tests include the PTY save regressions. Run them separately from the
+repository root after building Kara:
 
 ```sh
 python3 packages/kara/tests/pty_smoke.py "$PWD/target/debug/kara"

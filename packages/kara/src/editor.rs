@@ -186,7 +186,7 @@ impl Editor {
             System(Quit | QuitForce | Resize(_)) => {}
             System(Save) => self.save(),
             System(SaveAs(filename)) => match self.buffer.save_as(&filename) {
-                Ok(()) => self.messagebar.set("File saved successfully.".to_owned()),
+                Ok(outcome) => self.report_save(outcome),
                 Err(error) => {
                     cli_log::record_error(&error);
                     self.messagebar
@@ -285,7 +285,7 @@ impl Editor {
     fn save(&mut self) {
         if self.buffer.has_file() {
             match self.buffer.save() {
-                Ok(()) => self.messagebar.set("File saved successfully.".to_owned()),
+                Ok(outcome) => self.report_save(outcome),
                 Err(e) => {
                     let message = format!("Error writing file! {e}");
                     cli_log::record_error(&message);
@@ -296,6 +296,18 @@ impl Editor {
             self.commandbar = Some(CommandBar::new("w "));
             self.mode = EditorMode::Command;
         }
+    }
+
+    fn report_save(&mut self, outcome: editorbuffer::SaveOutcome) {
+        let message = match outcome {
+            editorbuffer::SaveOutcome::Saved => "File saved successfully.".to_owned(),
+            editorbuffer::SaveOutcome::DurabilityWarning(error) => {
+                let message = format!("WARNING: File saved, but directory sync failed: {error}");
+                cli_log::record_error(&message);
+                message
+            }
+        };
+        self.messagebar.set(message);
     }
 
     fn quit(&mut self, force: bool) {

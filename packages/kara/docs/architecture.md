@@ -12,8 +12,11 @@ command, status, and message bars provide separate parts of the screen.
 The terminal adapter contains terminal I/O. Editor teardown restores the terminal.
 
 File loading and saving operate on local files. Command parsing does not open files.
-Saving writes and syncs a temporary file before replacing the destination, and
-only a successful save changes the buffer identity. Terminal initialization rolls
+Saving writes a temporary file inside a private directory, restores and verifies the destination's
+access metadata, then syncs and replaces the destination. The save result separates
+failure before replacement from a committed save whose directory sync failed.
+Both committed outcomes update buffer identity; the latter displays a durability
+warning. Terminal initialization rolls
 back on failure; teardown attempts every restoration step, including raw mode. Unsaved edits live in memory;
 there is no recovery journal or undo system. The [README](../README.md) documents
 controls and current saving limitations, which matter before using real files.

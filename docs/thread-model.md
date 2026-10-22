@@ -10,6 +10,10 @@ service availability. User files and terminal contents may contain sensitive dat
 - **Local CLIs:** Arguments, stdin, files, and filenames are untrusted. Commands
   run with the invoking user's permissions; parsing must not cause unintended
   reads, writes, or execution.
+  Kara's atomic saves must preserve existing owner, group, mode, and access ACLs
+  or fail before replacement. Staging files must not expose content through inherited
+  access rules. Errors after replacement must report committed data with uncertain
+  durability rather than an unchanged destination.
 - **Browser to playground:** HTTP requests and terminal frames are untrusted.
   [Routes](../tools/cli-playground/src/cli_playground/routes.py) check origins and
   session bindings. Preserve session authorization across reconnects and revision

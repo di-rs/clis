@@ -54,3 +54,18 @@ fn filenames_cannot_inject_terminal_commands() {
         String::from_utf8_lossy(&result.stderr)
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn saves_preserve_permissions_and_editor_state() {
+    let result = std::process::Command::new("python3")
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/pty_smoke.py"))
+        .arg(env!("CARGO_BIN_EXE_kara"))
+        .output()
+        .expect("run PTY save regression driver");
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}

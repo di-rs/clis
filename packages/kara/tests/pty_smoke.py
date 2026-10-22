@@ -1,18 +1,48 @@
 """Run with python tests/pty_smoke.py /absolute/path/to/kara on Unix."""
 
+import errno
 import fcntl
 import os
 import pty
+import pwd
 import select
 import signal
 import socket
 import stat
 import struct
+import subprocess
 import sys
 import tempfile
 import termios
 import time
 from pathlib import Path
+
+
+def acl(path: Path) -> bytes:
+    if sys.platform == "darwin":
+        result = subprocess.check_output(["ls", "-lde", str(path)])
+        return b"\n".join(result.splitlines()[1:])
+    try:
+        return os.getxattr(path, "system.posix_acl_access")
+    except OSError as error:
+        if error.errno != errno.ENODATA:
+            raise
+        return b""
+
+
+def restrict_acl(path: Path) -> None:
+    if sys.platform == "darwin":
+        subprocess.run(["chmod", "+a", "user:nobody deny read", str(path)], check=True)
+    else:
+        entries = [
+            (1, 6, 0xFFFFFFFF),
+            (2, 0, 65534),
+            (4, 4, 0xFFFFFFFF),
+            (16, 4, 0xFFFFFFFF),
+            (32, 0, 0xFFFFFFFF),
+        ]
+        value = struct.pack("<I", 2) + b"".join(struct.pack("<HHI", *e) for e in entries)
+        os.setxattr(path, "system.posix_acl_access", value)
 
 
 def session(binary: str, directory: Path, keys: list[bytes]) -> bytes:
@@ -49,7 +79,7 @@ def session(binary: str, directory: Path, keys: list[bytes]) -> bytes:
                 assert os.waitstatus_to_exitcode(status) == 0
                 break
             drain()
-        assert reaped, "editor did not exit"
+        assert reaped, f"editor did not exit: {bytes(captured)!r}"
         assert b"\x1b[?1049l" in captured, "alternate screen not restored"
         assert captured.rfind(b"\x1b[?7h") > captured.rfind(b"\x1b[?7l"), (
             "line wrapping not restored"
@@ -73,6 +103,85 @@ def main() -> None:
         session(binary, directory, [b":w other file\r", b"iX\x1b", b"\x13", b"\x11"])
         assert original.read_bytes() == b"original\n"
         assert target.read_bytes() == b"Xoriginal\n"
+        write_only = directory / "write-only"
+        write_only.write_bytes(b"KEEP\n")
+        write_only.chmod(0o200)
+        try:
+            session(binary, directory, [b":w write-only\r", b"\x11"])
+            assert stat.S_IMODE(write_only.stat().st_mode) == 0o200
+        finally:
+            write_only.chmod(0o600)
+        assert write_only.read_bytes() == b"original\n", "save-as rejected a write-only destination"
+        secured = directory / "secured"
+        secured.write_bytes(b"KEEP\n")
+        alternate_groups = [gid for gid in os.getgroups() if gid != directory.stat().st_gid]
+        if alternate_groups:
+            os.chown(secured, -1, alternate_groups[0])
+        else:
+            print("Skipping distinct-group case: no supplementary group available")
+        secured.chmod(0o640)
+        restrict_acl(secured)
+        before = secured.stat()
+        before_acl = acl(secured)
+        assert before_acl, "restrictive ACL fixture is missing"
+        session(binary, directory, [b":w secured\r", b"iS\x1b", b"\x13", b"\x11"])
+        after = secured.stat()
+        assert secured.read_bytes() == b"Soriginal\n"
+        assert (after.st_uid, after.st_gid, stat.S_IMODE(after.st_mode)) == (
+            before.st_uid,
+            before.st_gid,
+            stat.S_IMODE(before.st_mode),
+        ), "save changed file ownership or mode"
+        assert acl(secured) == before_acl, "save changed the access ACL"
+        link = directory / "secured-link"
+        link.symlink_to(secured)
+        session(binary, directory, [b":w secured-link\r", b"\x11"])
+        assert link.is_symlink(), "save replaced the symlink"
+        assert secured.read_bytes() == b"original\n"
+        assert secured.stat().st_gid == before.st_gid
+        assert acl(secured) == before_acl, "save through symlink changed the access ACL"
+        inherited = directory / "inherited"
+        inherited.mkdir()
+        if sys.platform == "darwin":
+            subprocess.run(
+                ["chmod", "+a", "everyone allow read,file_inherit", str(inherited)], check=True
+            )
+        else:
+            restrict_acl(inherited)
+            os.setxattr(inherited, "system.posix_acl_default", acl(inherited))
+            inherited.chmod(0o700)
+        plain = inherited / "plain"
+        plain.write_bytes(b"KEEP\n")
+        if sys.platform == "darwin":
+            subprocess.run(["chmod", "-N", str(plain)], check=True)
+        else:
+            os.removexattr(plain, "system.posix_acl_access")
+        plain.chmod(0o600)
+        session(binary, directory, [b":w inherited/plain\r", b"\x11"])
+        assert plain.read_bytes() == b"original\n"
+        assert not acl(plain), "replacement gained inherited access"
+        session(binary, directory, [b":w inherited/new\r", b"\x11"])
+        new = inherited / "new"
+        assert new.read_bytes() == b"original\n"
+        assert stat.S_IMODE(new.stat().st_mode) == 0o600
+        assert not acl(new), "new private file gained inherited access"
+        if sys.platform == "darwin":
+            denied = directory / "denied"
+            denied.write_bytes(b"KEEP\n")
+            user = pwd.getpwuid(os.getuid()).pw_name
+            subprocess.run(
+                ["chmod", "+a", f"user:{user} deny write,append", str(denied)], check=True
+            )
+            try:
+                captured = session(binary, directory, [b":w denied\r", b"iD\x1b", b"\x13", b"\x11"])
+                assert denied.read_bytes() == b"KEEP\n", "save bypassed the write ACL"
+                assert original.read_bytes() == b"Doriginal\n", (
+                    "failed save changed active filename"
+                )
+                assert b"denied" in captured.lower()
+            finally:
+                subprocess.run(["chmod", "-N", str(denied)], check=True)
+            original.write_bytes(b"original\n")
         session(binary, directory, [b"iY\x1b", b":w missing/target\r", b"\x13", b"\x11"])
         assert original.read_bytes() == b"Yoriginal\n", "failed save changed buffer identity"
         assert not (directory / "missing").exists()
