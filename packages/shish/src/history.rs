@@ -1,6 +1,8 @@
 //! Narrow adapters around published Brush history APIs.
 
 use std::collections::HashMap;
+use std::fs::File;
+use std::path::PathBuf;
 
 use brush_core::builtins::{BoxFuture, Registration};
 use brush_core::{CommandArg, Error, ExecutionContext, ExecutionResult, ShellExtensions};
@@ -16,10 +18,16 @@ pub fn builtins<SE: ShellExtensions>(
 }
 
 fn execute<SE: ShellExtensions>(
-    context: ExecutionContext<'_, SE>,
+    mut context: ExecutionContext<'_, SE>,
     mut args: Vec<CommandArg>,
 ) -> BoxFuture<'_, Result<ExecutionResult, Error>> {
     Box::pin(async move {
+        if let [_, CommandArg::String(option), rest @ ..] = args.as_slice()
+            && option == "-r"
+            && rest.len() <= 1
+        {
+            return read_history(&mut context, rest.first().map(ToString::to_string));
+        }
         // Brush 0.2.0 subtracts the requested count without saturating. Clamp
         // only display operands; numeric filenames and delete offsets retain
         // their original meaning. Preserve Brush's formatting and diagnostics.
@@ -50,4 +58,34 @@ fn execute<SE: ShellExtensions>(
         };
         (original.execute_func)(context, args).await
     })
+}
+
+fn read_history<SE: ShellExtensions>(
+    context: &mut ExecutionContext<'_, SE>,
+    filename: Option<String>,
+) -> Result<ExecutionResult, Error> {
+    if context.shell.history().is_none() {
+        return Err(brush_core::ErrorKind::HistoryNotEnabled.into());
+    }
+    let path = filename
+        .map(PathBuf::from)
+        .or_else(|| context.shell.history_file_path());
+    let Some(path) = path else {
+        return Ok(ExecutionResult::success());
+    };
+    let file = File::open(context.shell.working_dir().join(path))?;
+    // Match Brush's startup import size policy. Parse before changing the
+    // current history so an I/O failure cannot partially append entries.
+    if file.metadata()?.len() > 1024 * 1024 * 1024 {
+        return Err(brush_core::ErrorKind::HistoryFileTooLargeToImport.into());
+    }
+    let imported = brush_core::history::History::import(file)?;
+    let history = context
+        .shell
+        .history_mut()
+        .ok_or(brush_core::ErrorKind::HistoryNotEnabled)?;
+    for item in imported.iter() {
+        history.add(item.clone())?;
+    }
+    Ok(ExecutionResult::success())
 }

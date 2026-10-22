@@ -1459,3 +1459,44 @@ fn task_63_recalled_execution() -> anyhow::Result<()> {
     home.child("executions").assert("run\nrun\n");
     Ok(())
 }
+
+#[test]
+fn task_64_read_history_file() -> anyhow::Result<()> {
+    for default_file in [false, true] {
+        let home = assert_fs::TempDir::new()?;
+        home.child("sub").create_dir_all()?;
+        home.child("sub/incoming")
+            .write_str("echo restored\ntouch must-not-execute\n")?;
+        let mut terminal = support::pty::Pty::new(home.path(), &["--bash", "-i"], &[])?;
+        terminal.expect("shish-test> ")?;
+        let read = if default_file {
+            "HISTFILE=incoming; history -r"
+        } else {
+            "history -r incoming"
+        };
+        terminal.send(&format!(
+            "history -c; cd sub; {read}; history > listing 2> errors; unset HISTFILE; exit $?\n"
+        ))?;
+        terminal.finish(0)?;
+        home.child("sub/listing")
+            .assert("    1  echo restored\n    2  touch must-not-execute\n");
+        home.child("sub/errors").assert("");
+        home.child("sub/must-not-execute")
+            .assert(predicates::path::missing());
+    }
+    Ok(())
+}
+
+#[test]
+fn task_64_missing_history_file_preserves_entries() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["--bash", "-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("history -c; history -s kept; history -r absent 2> errors; printf '%s' \"$?\" > status; history > listing; exit 0\n")?;
+    terminal.finish(0)?;
+    home.child("status").assert("1");
+    home.child("listing").assert("    1  kept\n");
+    home.child("errors")
+        .assert(predicates::str::contains("No such file"));
+    Ok(())
+}
