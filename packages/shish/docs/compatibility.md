@@ -260,6 +260,19 @@ Workaround: cancel and retype the command without Tab. Ignored acceptance:
 Separate task 40 follow-up: adopt published empty-menu handling and enable the
 programmable-completion case.
 
+### C44: programmable completion does not insert the longest common prefix
+
+Reference: screenshot task 44 and Bash/Readline completion references above.
+In `shish --bash -i`, run `complete -W 'prefix_one prefix_two' pick`, then type
+`pick pre` and Tab. Expected input: `pick prefix_`. Observed input:
+`pick pre`, with both programmed candidates listed.
+
+Owner: Brush's disabled Reedline partial-completion setting (C28). Impact: users
+must enter the shared suffix themselves. Workaround: cancel and type the full
+argument without Tab. Ignored acceptance: `task_44_programmed_common_prefix` in
+[audit.rs](../tests/audit.rs). Separate task 44 follow-up: adopt published
+configuration support and enable this programmed-candidate acceptance case.
+
 ## Foundation stack
 
 Each row is independently reviewable and targets its predecessor. No PR is merged
@@ -330,11 +343,11 @@ The task numbers are stable even when implementation order changes.
 | 37 | Programmable completion: missing specifications | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_37](../tests/audit.rs) | [37 PR](https://github.com/di-rs/sanctuary/pull/150) |
 | 38 | Programmable completion: display specifications | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_38](../tests/audit.rs) | [38 PR](https://github.com/di-rs/sanctuary/pull/151) |
 | 39 | Programmable completion: single candidate | bash; Bash §8.6–8.7 | Verified: COMPREPLY supplies one candidate that is completed and passed to the command; [task_39](../tests/audit.rs) | [39 PR](https://github.com/di-rs/sanctuary/pull/152) |
-| 40 | Programmable completion: no candidates | bash; Bash §8.6–8.7 | Partial: empty COMPREPLY leaves input unchanged; Enter handling remains missing (C40); [task_40](../tests/audit.rs) | Current task PR |
+| 40 | Programmable completion: no candidates | bash; Bash §8.6–8.7 | Partial: empty COMPREPLY leaves input unchanged; Enter handling remains missing (C40); [task_40](../tests/audit.rs) | [40 PR](https://github.com/di-rs/sanctuary/pull/159) |
 | 41 | Programmable completion: command-line arguments | bash; Bash §8.6–8.7 | Verified: completer receives command name, current word, and previous word in Bash mode; [task_41](../tests/audit.rs) | [41 PR](https://github.com/di-rs/sanctuary/pull/153) |
 | 42 | Programmable completion: environment variables | bash; Bash §8.6–8.7 | Verified: external completer receives COMP_LINE, COMP_POINT, and exported environment; [task_42](../tests/audit.rs) | [42 PR](https://github.com/di-rs/sanctuary/pull/154) |
 | 43 | Programmable completion: multiple candidates | bash; Bash §8.6–8.7 | Verified: registered word-list candidates appear in the terminal menu; [task_43](../tests/audit.rs) | [43 PR](https://github.com/di-rs/sanctuary/pull/155) |
-| 44 | Programmable completion: longest common prefix | bash; Bash §8.6–8.7 | Unverified; dedicated audit pending | Planned task 44 |
+| 44 | Programmable completion: longest common prefix | bash; Bash §8.6–8.7 | Missing: programmed candidates are listed without inserting their longest common prefix (C44); [task_44](../tests/audit.rs) | Current task PR |
 | 45 | Programmable completion: unregistration | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_45](../tests/audit.rs) | [45 PR](https://github.com/di-rs/sanctuary/pull/156) |
 | 46 | Background jobs: jobs | interactive sh; §2.11/jobs/wait | Unverified; dedicated audit pending | Planned task 46 |
 | 47 | Background jobs: launch | interactive sh; §2.11/jobs/wait | Unverified; dedicated audit pending | Planned task 47 |

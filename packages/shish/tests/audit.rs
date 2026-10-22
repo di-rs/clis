@@ -1134,3 +1134,20 @@ fn task_40_empty_programmed_completion() -> anyhow::Result<()> {
     terminal.send("exit 0\n")?;
     terminal.finish(0)
 }
+
+#[test]
+#[ignore = "C44: Brush leaves Reedline partial programmable completion disabled"]
+fn task_44_programmed_common_prefix() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["--bash", "-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("complete -W 'prefix_one prefix_two' pick; echo setup-ready\n")?;
+    terminal.expect("\nsetup-ready\n")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("pick pre\t")?;
+    terminal.expect("shish-test> pick prefix_")?;
+    terminal.send("\x03")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("exit 0\n")?;
+    terminal.finish(0)
+}
