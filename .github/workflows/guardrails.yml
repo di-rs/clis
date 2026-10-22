@@ -1,0 +1,276 @@
+name: PR guardrails
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+permissions:
+  contents: read
+concurrency:
+  group: guardrails-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+env:
+  PYTHONPATH: tools
+jobs:
+  select:
+    name: Select affected checks
+    if: ${{ !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.paths.outputs.rust }}
+      python: ${{ steps.paths.outputs.python }}
+      frontend: ${{ steps.paths.outputs.frontend }}
+      source: ${{ steps.paths.outputs.source }}
+      shell: ${{ steps.paths.outputs.shell }}
+      yaml: ${{ steps.paths.outputs.yaml }}
+      markdown: ${{ steps.paths.outputs.markdown }}
+      spelling: ${{ steps.paths.outputs.spelling }}
+      python_audit: ${{ steps.paths.outputs.python_audit }}
+      frontend_audit: ${{ steps.paths.outputs.frontend_audit }}
+      actions: ${{ steps.paths.outputs.actions }}
+      languages: ${{ steps.paths.outputs.languages }}
+      base: ${{ steps.paths.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: paths
+        env:
+          PYTHONPATH: tools
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASE" ] || [ "$BASE" = 0000000000000000000000000000000000000000 ]; then
+            BASE=$(git rev-parse HEAD^)
+          fi
+          python3 -m guardrails select --base "$BASE"
+  policy:
+    needs: select
+    if: needs.select.outputs.source == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BASE: ${{ needs.select.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: '0.13.0'
+      - run: uv sync --frozen --all-packages
+      - run: uv run --frozen python -m guardrails policy --base "$BASE"
+  size:
+    needs: select
+    if: needs.select.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BASE: ${{ needs.select.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: '0.13.0'
+      - run: uv sync --frozen --all-packages
+      - run: uv run --frozen python -m guardrails size --base "$BASE"
+  duplication:
+    needs: select
+    if: needs.select.outputs.source == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BASE: ${{ needs.select.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: '0.13.0'
+      - run: uv sync --frozen --all-packages
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - run: uv run --frozen python -m guardrails duplication --base "$BASE"
+  shell:
+    needs: select
+    if: needs.select.outputs.shell == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BASE: ${{ needs.select.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: '0.13.0'
+      - run: uv sync --frozen --all-packages
+      - run: uv run --frozen python -m guardrails shell --base "$BASE"
+  yaml:
+    needs: select
+    if: needs.select.outputs.yaml == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BASE: ${{ needs.select.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: '0.13.0'
+      - run: uv sync --frozen --all-packages
+      - run: uv run --frozen python -m guardrails yaml --base "$BASE"
+  markdown:
+    needs: select
+    if: needs.select.outputs.markdown == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BASE: ${{ needs.select.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: '0.13.0'
+      - run: uv sync --frozen --all-packages
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - run: uv run --frozen python -m guardrails markdown --base "$BASE"
+  spelling:
+    needs: select
+    if: needs.select.outputs.spelling == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BASE: ${{ needs.select.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: '0.13.0'
+      - run: uv sync --frozen --all-packages
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283
+        with:
+          tool: typos@1.50.3
+          fallback: none
+      - run: uv run --frozen python -m guardrails spelling --base "$BASE"
+  python-audit:
+    needs: select
+    if: needs.select.outputs.python_audit == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BASE: ${{ needs.select.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: '0.13.0'
+      - run: uv sync --frozen --all-packages
+      - run: uv run --frozen python -m guardrails python-audit --base "$BASE"
+  frontend-audit:
+    needs: select
+    if: needs.select.outputs.frontend_audit == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BASE: ${{ needs.select.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: '0.13.0'
+      - run: uv sync --frozen --all-packages
+      - uses: voidzero-dev/setup-vp@68f39c78aaf39be468cabd2afb09c162574c84af
+        with:
+          working-directory: tools/cli-playground/frontend
+          node-version-file: .node-version
+          version-file: package.json
+          run-install: false
+      - run: uv run --frozen python -m guardrails frontend-audit --base "$BASE"
+  rust-coverage:
+    needs: select
+    if: needs.select.outputs.rust == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      BASE: ${{ needs.select.outputs.base }}
+      NEXTEST_PROFILE: ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: '0.13.0'
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283
+        with:
+          tool: cargo-nextest@0.9.146,cargo-llvm-cov@0.9.1
+          fallback: none
+      - run: rustup component add llvm-tools-preview
+      - run: |
+          mkdir -p target/coverage
+          cargo llvm-cov nextest --workspace --all-features --lcov --output-path target/coverage/lcov.info
+      - run: uv run --frozen python -m guardrails coverage --base "$BASE"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: rust-pr-coverage
+          path: target/coverage/lcov.info
+          retention-days: 14
+  trufflehog-evaluation:
+    needs: select
+    if: needs.select.outputs.spelling == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BASE: ${{ needs.select.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # No --fail: this evaluates the scanner, without introducing a second gate.
+      # Do not upload raw findings or print credential material.
+      - name: Evaluate without credential verification
+        run: |
+          status=0
+          docker run --rm --network none -v "$PWD:/repo:ro" \
+            trufflesecurity/trufflehog:3.99.4 git file:///repo \
+            --since-commit "$BASE" --branch HEAD --no-verification --no-update --json \
+            > "$RUNNER_TEMP/trufflehog.jsonl" 2> "$RUNNER_TEMP/trufflehog-errors.txt" || status=$?
+          if [ "$status" -eq 0 ]; then
+            count=$(wc -l < "$RUNNER_TEMP/trufflehog.jsonl")
+            echo "TruffleHog evaluation: $count unverified candidates; credential verification disabled." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'TruffleHog evaluation incomplete; Gitleaks remains the secret gate.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          rm -f "$RUNNER_TEMP/trufflehog.jsonl" "$RUNNER_TEMP/trufflehog-errors.txt"

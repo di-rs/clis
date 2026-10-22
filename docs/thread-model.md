@@ -35,7 +35,10 @@ service availability. User files and terminal contents may contain sensitive dat
   The [privileged controller](../.github/workflows/cli-playground-preview.yml)
   uses default-branch code. Never execute PR-controlled scripts or binaries with
   publication or deployment credentials. Apply the same boundary to benchmark
-  reporting and release automation.
+  reporting and release automation. Guardrail labels use GitHub metadata only;
+  badge generation runs read-only and its publisher never executes artifact
+  contents. Advisory secret scans must not publish credential values and run
+  without credential verification or network access.
 
 ## Review priorities
 

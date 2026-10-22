@@ -25,9 +25,44 @@ env:
   RUSTDOCFLAGS: -D warnings
 
 jobs:
+  select:
+    name: Select affected checks
+    if: ${{ !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.paths.outputs.rust }}
+      python: ${{ steps.paths.outputs.python }}
+      frontend: ${{ steps.paths.outputs.frontend }}
+      source: ${{ steps.paths.outputs.source }}
+      shell: ${{ steps.paths.outputs.shell }}
+      yaml: ${{ steps.paths.outputs.yaml }}
+      markdown: ${{ steps.paths.outputs.markdown }}
+      spelling: ${{ steps.paths.outputs.spelling }}
+      python_audit: ${{ steps.paths.outputs.python_audit }}
+      frontend_audit: ${{ steps.paths.outputs.frontend_audit }}
+      actions: ${{ steps.paths.outputs.actions }}
+      languages: ${{ steps.paths.outputs.languages }}
+      base: ${{ steps.paths.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: paths
+        env:
+          PYTHONPATH: tools
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASE" ] || [ "$BASE" = 0000000000000000000000000000000000000000 ]; then
+            BASE=$(git rev-parse HEAD^)
+          fi
+          python3 -m guardrails select --base "$BASE"
   quality:
+    needs: select
     if: >-
       ${{
+        needs.select.outputs.rust == 'true' &&
         (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
       }}
     name: 🦀 Rust formatting, linting and documentation
@@ -53,8 +88,6 @@ jobs:
         run: cargo fetch
       - name: 🎨 Check Rust formatting
         run: cargo fmt --all -- --check
-      - name: 📏 Check committed file sizes
-        run: prek run check-added-large-files --all-files --show-diff-on-failure
       - name: 🔍 Lint Rust code with Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings -F unsafe_code
       - name: 📚 Build Rust API documentation
@@ -63,8 +96,10 @@ jobs:
         run: git diff --exit-code
 
   python:
+    needs: select
     if: >-
       ${{
+        needs.select.outputs.python == 'true' &&
         (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
       }}
     name: 🐍 Python lint, types and tests (3.15)
@@ -104,14 +139,14 @@ jobs:
         run: prek run mypy --all-files --show-diff-on-failure
       - name: 🧪 Run Python regression tests
         run: uv run pytest
-      - name: 📜 Verify CLI repository standards
-        run: prek run cli-check --all-files --show-diff-on-failure
       - name: 🧹 Verify checks leave the checkout unchanged
         run: git diff --exit-code
 
   frontend:
+    needs: select
     if: >-
       ${{
+        needs.select.outputs.frontend == 'true' &&
         (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
       }}
     name: 🎨 Frontend checks, builds and browser tests
@@ -165,8 +200,10 @@ jobs:
         run: git diff --exit-code
 
   tests:
+    needs: select
     if: >-
       ${{
+        needs.select.outputs.rust == 'true' &&
         (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
       }}
     name: 🧪 Rust tests and doctests (${{ matrix.platform }})
@@ -222,8 +259,10 @@ jobs:
           if-no-files-found: error
 
   packages:
+    needs: select
     if: >-
       ${{
+        needs.select.outputs.rust == 'true' &&
         (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
       }}
     name: 📦 Rust package and feature compatibility
@@ -257,8 +296,10 @@ jobs:
         run: git diff --exit-code
 
   docs-policy:
+    needs: select
     if: >-
       ${{
+        needs.select.outputs.markdown == 'true' &&
         (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
       }}
     name: 📚 Documentation links and spelling
@@ -299,8 +340,10 @@ jobs:
         run: git diff --exit-code
 
   dependencies:
+    needs: select
     if: >-
       ${{
+        needs.select.outputs.rust == 'true' &&
         (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
       }}
     name: 📦 Dependency vulnerabilities and license policy
@@ -323,8 +366,10 @@ jobs:
           cargo machete --with-metadata
 
   workflows:
+    needs: select
     if: >-
       ${{
+        needs.select.outputs.actions == 'true' &&
         (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
       }}
     name: 🛡️ Workflow syntax and security
@@ -354,6 +399,7 @@ jobs:
         run: prek run zizmor --all-files --show-diff-on-failure
 
   secrets:
+    needs: select
     if: >-
       ${{
         (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
@@ -376,3 +422,24 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           GITLEAKS_VERSION: '8.30.1'
           GITLEAKS_ENABLE_COMMENTS: 'false'
+
+  repository-policy:
+    needs: select
+    if: needs.select.result == 'success'
+    name: Repository file and CLI policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: '0.13.0'
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283
+        with:
+          tool: prek@0.5.5
+          fallback: none
+      - run: prek run check-added-large-files --all-files --show-diff-on-failure
+      - if: needs.select.outputs.rust == 'true' || needs.select.outputs.markdown == 'true' || needs.select.outputs.python == 'true'
+        run: uv run --frozen cli-check

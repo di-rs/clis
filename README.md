@@ -1,8 +1,11 @@
 # Sanctuary
 
+![Source lines](https://raw.githubusercontent.com/di-rs/sanctuary/badges/loc.svg)
+
 Sanctuary is a platform for shell sandboxes, with Rust command-line tools, shared
 libraries, and Python services. Each CLI is its own Cargo package.
 Python services and repository tools share a uv workspace.
+See [PR guardrails](tools/guardrails/README.md) for change-based checks and reports.
 
 ## Try a command
 

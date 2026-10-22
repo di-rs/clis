@@ -8,6 +8,7 @@ dependencies = ["cli-bench", "cli-check", "githubkit>=0.16.1,<0.17", "httpx", "a
 dev = [
     "boxie-test-support",
     "mypy",
+    "pip-audit>=2.10.1",
     "pulumi==3.268.0",
     "pulumi-cloudflare==6.22.1",
     "pulumi-hcloud==1.43.1",
@@ -15,7 +16,14 @@ dev = [
     "pytest>=9.1.1",
     "pyyaml>=6.0.3",
     "ruff",
+    # 0.26.0 crashes on large Rust syntax trees under Python 3.15.
+    "tree-sitter==0.25.2",
+    "tree-sitter-javascript>=0.25.0",
+    "tree-sitter-python>=0.25.0",
+    "tree-sitter-rust>=0.24.2",
+    "tree-sitter-typescript>=0.23.2",
     "types-pyyaml>=6.0.12.20260906",
+    "yamllint>=1.38.0",
 ]
 
 [tool.uv]
@@ -42,7 +50,7 @@ strict = true
 exclude = ["infra/environments/single-host/__main__.py"]
 
 [tool.pytest]
-testpaths = ["infra/host/tests", "infra/environments/single-host/tests", "packages/boxie/tests", "tools/cli-bench/tests", "tools/cli-playground/tests", "tools/cli-check/tests"]
+testpaths = ["infra/host/tests", "infra/environments/single-host/tests", "packages/boxie/tests", "tools/cli-bench/tests", "tools/cli-playground/tests", "tools/cli-check/tests", "tools/guardrails/tests"]
 pythonpath = ["tools", "tools/cli-bench", "infra/host/tests", "packages/boxie/tests"]
 addopts = ["--strict-config", "--strict-markers", "-p", "boxie_test_support.dependencies", "-m", "not integration"]
 markers = ["integration: real isolated builds/installations and external-tool checks; prerequisites required"]
