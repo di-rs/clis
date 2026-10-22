@@ -100,9 +100,9 @@ fn invalid_command_reports_a_diagnostic_without_panicking() {
         .args(["-c", "shish_missing_command"])
         .env("PATH", "")
         .assert()
-        .code(1)
+        .code(127)
         .stdout("")
-        .stderr("Error: shish_missing_command: command not found\n");
+        .stderr("error: command not found: shish_missing_command\n");
 }
 
 #[test]

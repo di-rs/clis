@@ -8,8 +8,9 @@ model.
 ## Platform responsibilities
 
 Boxie is the platform runtime. It owns sandbox execution and isolation. Shish
-is a shell application in this repository. Its initial source import runs external
-commands; library-backed execution and selected repository builtins are planned.
+is a shell application in this repository. It embeds Brush for local shell
+execution; compatibility verification and durable-execution integration remain
+separate work.
 
 Separate applications and services will manage consumer accounts, consumer API
 tokens, and environment setup. Their names, interfaces, and deployment boundaries
@@ -50,8 +51,7 @@ prerequisite for platform delivery. Prioritize correct common shell operations a
 clear recovery semantics; retain the complete shell-feature roadmap without making
 every interactive feature or compatibility edge case a platform release gate.
 
-The initial shish integration will use Brush and document the behavior verified
-through shish itself. Parser and runtime integration stay inside the shish package
+Shish embeds Brush and tracks the behavior verified through shish itself. Parser and runtime integration stay inside the shish package
 until another component needs a shared API. Selecting a library or enabling its
 POSIX mode does not establish conformance.
 

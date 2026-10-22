@@ -1,36 +1,49 @@
 # Shish architecture
 
-The imported shell contains a prompt, token processing, external command lookup,
-and process execution. The binary accepts a command string or reads stdin.
-The private `syntax` module uses published `brush-parser` 0.4.0 for `-n` checks,
-returning an AST or a diagnostic with a source position (or end-of-input marker).
-It cannot execute commands. Normal execution still uses the imported evaluator
-until the next foundation PR replaces it.
+Shish embeds Brush in a single application package. The CLI selects input and
+shell settings; Brush owns runtime parsing, expansion, command lookup, variables,
+builtins, pipelines, redirections, process execution, and jobs. The terminal loop
+uses `brush-interactive` with its Reedline backend. No second evaluator remains.
 
-The source was imported from
-[di-rs/shish](https://github.com/di-rs/shish/tree/46c41468d4105a238c439aa68b4ff0e3248a964e)
-without its utility crates or Git history. Changes in this import adapt package
-layout, lint requirements, and a command-string entry point for reproducible tests.
-The root Cargo lockfile records dependency versions; there is no vendored fork.
+The root Cargo lockfile records published `brush-parser` 0.4.0, `brush-core` 0.5.0,
+`brush-builtins` 0.2.0, and `brush-interactive` 0.4.0. There is no fork or vendored
+patch. The private `syntax` module provides parse-only inspection, returning an
+AST or a located diagnostic without evaluation. Runtime execution uses Brush's
+own parsing APIs.
+
+## Input and execution boundary
+
+Command strings and scripts use Brush's corresponding execution APIs. For stdin,
+shish accumulates lines until Brush reports a complete command, then asks Brush
+to execute that text. An unbuffered stdin descriptor and a one-byte input buffer
+prevent reading ahead into data intended for `read` or external programs.
+Incomplete input at EOF is passed to Brush for a syntax diagnostic. This adapter
+handles input delivery only; it does not interpret shell AST nodes.
+
+Shish preserves the last status and delegates exit handling and traps to Brush.
+A Tokio runtime supports asynchronous execution and the blocking terminal editor.
+Startup configuration files are skipped intentionally; see the
+[invocation reference](../README.md#run-commands). The default sh/POSIX flags do
+not establish conformance or disable every Brush extension.
 
 ## Runtime selection
 
 [Brush](https://github.com/reubeno/brush) provides separable parser, runtime,
-builtin, and interactive libraries. Shish will delegate runtime parsing,
-expansion, shell state, and execution to those libraries, retaining only CLI and
-Sanctuary utility integration. Keeping that integration in this package avoids a
-shared API before another component needs one.
+builtin, and interactive libraries. Its existing interactive shell and extensible
+builtin registry fit the migration more directly than
+[Flash](https://github.com/raphamorim/flash), another Rust parser and interpreter.
+Brush uses the MIT license; Flash uses GPL-3.0. Upstream compatibility claims and
+reported limitations still require reproduction against the integrated binary.
 
-[Flash](https://github.com/raphamorim/flash) is another Rust parser and interpreter,
-but Brush's existing interactive shell and extensible builtin registry fit this
-migration more directly. Brush uses the MIT license; Flash uses GPL-3.0. This
-choice does not establish POSIX conformance: upstream compatibility claims and
-limitations still require reproducing against the integrated shish binary.
-
-Shish configures sh/POSIX mode by default. The parser facade is for syntax
-inspection; its AST is neither a second evaluator nor a durable execution plan.
-Runtime replay and recovery require explicit contracts outside shell syntax.
-
-Shish itself supplies neither isolation nor crash recovery. Those contracts belong
+Keeping integration in this package avoids introducing a shared API before
+another component needs one. A shell AST is neither a second evaluator nor a
+durable execution plan: recovery requires explicit contracts outside syntax.
+Shish supplies neither isolation nor crash recovery. Those responsibilities belong
 to Boxie and the future durable-execution design.
 
+## Migration provenance
+
+The initial shell was imported from
+[di-rs/shish](https://github.com/di-rs/shish/tree/46c41468d4105a238c439aa68b4ff0e3248a964e)
+without its utility crates or Git history. The original evaluator, expansion,
+prompt loop, and `target/debug` command discovery have now been removed.
