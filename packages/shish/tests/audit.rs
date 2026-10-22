@@ -294,3 +294,26 @@ fn bash_mode_keeps_sanctuary_status_registrations() {
     command(home.path()).args(["--bash", "-c", "help true; help false"])
         .assert().code(0).stdout("true: Sanctuary builtin; ignore arguments and return 0.\nfalse: Sanctuary builtin; ignore arguments and return 1.\n").stderr("");
 }
+
+#[test]
+fn task_01_prompt_tracks_directory_and_ps1() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    home.child("nested").create_dir_all()?;
+    let mut terminal =
+        support::pty::Pty::with_prompt(&home.path().canonicalize()?, &[], &[], None)?;
+    terminal.expect("~ > ")?;
+    terminal.send("cd nested\n")?;
+    terminal.expect("nested > ")?;
+    terminal.send("PS1='custom> '\n")?;
+    terminal.expect("custom> ")?;
+    terminal.send("exit\n")?;
+    terminal.finish(0)?;
+    command(home.path())
+        .env("PS1", "must-not-print> ")
+        .args(["-c", "printf output"])
+        .assert()
+        .code(0)
+        .stdout("output")
+        .stderr("");
+    Ok(())
+}
