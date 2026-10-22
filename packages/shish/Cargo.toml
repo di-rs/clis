@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+brush-parser = "0.4"
 clap = { workspace = true, features = ["derive"] }
 glob = "0.3"
 shlex = "1.3"
