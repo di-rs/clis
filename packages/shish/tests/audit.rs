@@ -1085,3 +1085,18 @@ fn task_45_unregister_completion() {
         .stdout("")
         .stderr("no completion found for command\n");
 }
+
+#[test]
+#[ignore = "C32: an empty filename-completion menu consumes Enter"]
+fn task_32_missing_file_completion() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("/bin/echo shish_missing_filename\t")?;
+    terminal.expect("shish-test> /bin/echo shish_missing_filename")?;
+    terminal.send("\n")?;
+    terminal.expect("\nshish_missing_filename\n")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("exit 0\n")?;
+    terminal.finish(0)
+}

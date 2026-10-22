@@ -216,6 +216,21 @@ Ignored acceptance: `task_28_command_common_prefix` in [audit.rs](../tests/audit
 Separate follow-up for task 28: adopt a published partial-completion setting,
 enable it in shish, and enable this acceptance test.
 
+### C32: Enter after unmatched filename completion
+
+Reference: screenshot task 32 and Readline completion behavior linked under C25.
+In an empty directory, start default `shish -i`, type
+`/bin/echo shish_missing_filename`, Tab, then Enter. Expected: the unchanged
+argument is printed, followed by a new prompt. Observed: the input remains visible
+without execution; the acceptance test times out waiting for the output.
+
+Owner: the same Brush/Reedline empty-menu handling as C25. Impact: filename
+completion adds an extra submission step. Workaround: cancel with Ctrl-C and
+retype the full command without Tab. Ignored acceptance:
+`task_32_missing_file_completion` in [audit.rs](../tests/audit.rs).
+Separate task 32 follow-up: adopt published empty-menu handling and enable the
+filename-specific case; passing the command-name case alone does not close it.
+
 ## Foundation stack
 
 Each row is independently reviewable and targets its predecessor. No PR is merged
@@ -278,7 +293,7 @@ The task numbers are stable even when implementation order changes.
 | 29 | Filename completion: files | interactive; product UI | Verified: a completed filename containing a space opens the intended file; [task_29](../tests/audit.rs) | [29 PR](https://github.com/di-rs/sanctuary/pull/142) |
 | 30 | Filename completion: nested files | interactive; product UI | Verified: directory continuation and a nested file are completed and opened; [task_30](../tests/audit.rs) | [30 PR](https://github.com/di-rs/sanctuary/pull/143) |
 | 31 | Filename completion: directories | interactive; product UI | Verified: completion appends a directory separator and cd enters the result; [task_31](../tests/audit.rs) | [31 PR](https://github.com/di-rs/sanctuary/pull/144) |
-| 32 | Filename completion: no matches | interactive; product UI | Unverified; dedicated audit pending | Planned task 32 |
+| 32 | Filename completion: no matches | interactive; product UI | Partial: unmatched filename is preserved; first Enter is consumed by the empty menu (C32); [task_32](../tests/audit.rs) | Current task PR |
 | 33 | Filename completion: multiple matches | interactive; product UI | Verified: both filename candidates appear in the completion menu; [task_33](../tests/audit.rs) | [33 PR](https://github.com/di-rs/sanctuary/pull/145) |
 | 34 | Filename completion: partial matches | interactive; product UI | Unverified; dedicated audit pending | Planned task 34 |
 | 35 | Filename completion: multiple arguments | interactive; product UI | Verified: completing the next argument preserves an already completed filename; [task_35](../tests/audit.rs) | [35 PR](https://github.com/di-rs/sanctuary/pull/146) |
@@ -291,7 +306,7 @@ The task numbers are stable even when implementation order changes.
 | 42 | Programmable completion: environment variables | bash; Bash §8.6–8.7 | Verified: external completer receives COMP_LINE, COMP_POINT, and exported environment; [task_42](../tests/audit.rs) | [42 PR](https://github.com/di-rs/sanctuary/pull/154) |
 | 43 | Programmable completion: multiple candidates | bash; Bash §8.6–8.7 | Verified: registered word-list candidates appear in the terminal menu; [task_43](../tests/audit.rs) | [43 PR](https://github.com/di-rs/sanctuary/pull/155) |
 | 44 | Programmable completion: longest common prefix | bash; Bash §8.6–8.7 | Unverified; dedicated audit pending | Planned task 44 |
-| 45 | Programmable completion: unregistration | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_45](../tests/audit.rs) | Current task PR |
+| 45 | Programmable completion: unregistration | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_45](../tests/audit.rs) | [45 PR](https://github.com/di-rs/sanctuary/pull/156) |
 | 46 | Background jobs: jobs | interactive sh; §2.11/jobs/wait | Unverified; dedicated audit pending | Planned task 46 |
 | 47 | Background jobs: launch | interactive sh; §2.11/jobs/wait | Unverified; dedicated audit pending | Planned task 47 |
 | 48 | Background jobs: output | interactive sh; §2.11/jobs/wait | Unverified; dedicated audit pending | Planned task 48 |
