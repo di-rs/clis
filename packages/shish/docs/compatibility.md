@@ -293,6 +293,29 @@ Follow-up: fix allocation upstream, adopt a published release, and enable the
 acceptance test; no fork or upstream issue has been created. Public shish builtin
 adapters cannot intercept Brush's asynchronous job allocation safely.
 
+### H68: exit persistence ignores overwrite mode
+
+Reference: [Bash history facilities](https://www.gnu.org/software/bash/manual/html_node/Bash-History-Facilities.html),
+`histappend` unset means overwrite. In the recorded Darwin/Brush environment with
+`--bash -i`, start with `obsolete\n` in HISTFILE, then run:
+
+```sh
+shopt -u histappend; history -c; history -s replacement; exit 0
+```
+
+Expected `replacement\n`; observed `obsolete\nreplacement\n`. Fresh-file saving
+works, but cleared entries remain on disk. Owner: Brush core's exit-history save
+always appends dirty entries; the interactive loop invokes it internally regardless
+of the option. Workaround: explicitly run `history -w; unset HISTFILE` before exit
+when replacement is required. This also disables the later automatic save.
+
+Acceptance: `task_68_exit_history_overwrite` in [audit.rs](../tests/audit.rs),
+ignored after reproducing the failure; fresh-file saving has a passing test.
+Task 68 tracks this gap in its own PR. Follow-up: honor the option upstream, adopt
+a published release, and enable the acceptance test. No upstream issue is linked.
+Rewriting the file after Brush's exit hook would change ordering and risk overwriting
+hook effects; shish does not introduce that workaround internally.
+
 ## Foundation stack
 
 Each row is independently reviewable and targets its predecessor. No PR is merged
@@ -390,8 +413,8 @@ The task numbers are stable even when implementation order changes.
 | 64 | History persistence: read file | bash; Bash §9 | Verified in Bash mode: explicit and default history files load without executing entries; [task_64](../tests/audit.rs) | [64 PR](https://github.com/di-rs/sanctuary/pull/176) |
 | 65 | History persistence: write file | bash; Bash §9 | Verified in Bash mode: history -w replaces explicit/default files after cd; [task_65](../tests/audit.rs) | [65 PR](https://github.com/di-rs/sanctuary/pull/177) |
 | 66 | History persistence: append file | bash; Bash §9 | Verified in Bash mode: history -a preserves existing contents and appends each new entry once; [task_66](../tests/audit.rs) | [66 PR](https://github.com/di-rs/sanctuary/pull/178) |
-| 67 | History persistence: startup read | bash; Bash §9 | Verified in Bash mode: HISTFILE loads before the first command without executing entries; [task_67](../tests/audit.rs) | Current task PR |
-| 68 | History persistence: exit write | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 68 |
+| 67 | History persistence: startup read | bash; Bash §9 | Verified in Bash mode: HISTFILE loads before the first command without executing entries; [task_67](../tests/audit.rs) | [67 PR](https://github.com/di-rs/sanctuary/pull/179) |
+| 68 | History persistence: exit write | bash; Bash §9 | Partial: fresh-file exit persistence verified; H68 reproduces ignored overwrite mode; [task_68](../tests/audit.rs) | Current task PR |
 | 69 | History persistence: exit append | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 69 |
 | 70 | Parameters: declare | bash declare; sh §2.5–2.6 | Verified: declare creates a shell variable (bash mode); [task_70](../tests/audit.rs) | [70 PR](https://github.com/di-rs/sanctuary/pull/131) |
 | 71 | Parameters: missing-variable diagnostics | bash declare; sh §2.5–2.6 | Verified: missing variable diagnostics (bash mode); [task_71](../tests/audit.rs) | [71 PR](https://github.com/di-rs/sanctuary/pull/132) |
