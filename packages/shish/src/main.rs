@@ -1,4 +1,5 @@
 mod builtins;
+mod history;
 mod runtime;
 mod syntax;
 

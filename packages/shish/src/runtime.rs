@@ -26,7 +26,7 @@ pub async fn run(args: &Args) -> anyhow::Result<u8> {
     // must not consume bytes intended for the next shell command.
     let stdin = File::from(io::stdin().as_fd().try_clone_to_owned()?);
     let mut shell = Shell::builder()
-        .builtins(brush_builtins::default_builtins(if args.bash {
+        .builtins(crate::history::builtins(if args.bash {
             brush_builtins::BuiltinSet::BashMode
         } else {
             brush_builtins::BuiltinSet::ShMode

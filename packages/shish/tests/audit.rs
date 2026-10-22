@@ -1390,3 +1390,17 @@ fn task_59_history_listing() -> anyhow::Result<()> {
     home.child("errors").assert("");
     Ok(())
 }
+
+#[test]
+fn task_60_history_entry_limits() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["--bash", "-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("history -c; history -s first; history -s second; history 1 > last; history 0 > zero; history 999 > all 2> errors; exit $?\n")?;
+    terminal.finish(0)?;
+    home.child("last").assert("    2  second\n");
+    home.child("zero").assert("");
+    home.child("all").assert("    1  first\n    2  second\n");
+    home.child("errors").assert("");
+    Ok(())
+}
