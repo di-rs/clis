@@ -54,5 +54,8 @@ See [known compatibility gaps](docs/compatibility-gaps.md) for limitations and
 workarounds, [architecture](docs/architecture.md) for implementation boundaries,
 and [platform direction](../../docs/platform-direction.md) for the platform goals.
 Untested features are not yet a support promise.
+The [durability design](docs/durability.md) describes recovery limits and planned
+integration with Boxie.
+
 
 [All projects](../../README.md)
