@@ -120,8 +120,22 @@ impl Pty {
     }
 
     pub fn expect(&mut self, text: &str) -> anyhow::Result<()> {
+        self.wait_for(text, |contents| contents.contains(text))
+    }
+
+    /// Wait for the current input line, excluding only terminal padding.
+    pub fn expect_line(&mut self, text: &str) -> anyhow::Result<()> {
+        self.wait_for(text, |contents| {
+            contents
+                .lines()
+                .last()
+                .is_some_and(|line| line.trim_end() == text.trim_end())
+        })
+    }
+
+    fn wait_for(&mut self, text: &str, matches: impl Fn(&str) -> bool) -> anyhow::Result<()> {
         let started = Instant::now();
-        while !self.terminal.screen().contents().contains(text) {
+        while !matches(&self.terminal.screen().contents()) {
             if started.elapsed() >= Duration::from_secs(6) {
                 bail!(
                     "timed out waiting for {text:?}; screen: {:?}",
@@ -146,7 +160,8 @@ impl Pty {
             }
             anyhow::ensure!(
                 started.elapsed() < Duration::from_secs(6),
-                "shell did not exit"
+                "shell did not exit; screen: {:?}",
+                self.terminal.screen().contents()
             );
             self.pump()?;
         }

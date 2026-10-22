@@ -741,3 +741,17 @@ fn task_76_empty_expansion() {
     command(home.path()).args(["-c", "unset v; empty=; set -- $v \"$v\" $empty \"$empty\"; printf '%s\\n' \"$#\"; printf '<%s>\\n' \"$@\""])
         .assert().code(0).stdout("2\n<>\n<>\n").stderr("");
 }
+
+#[test]
+fn task_23_builtin_completion() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut terminal =
+        support::pty::Pty::new(home.path(), &["-i"], &[("PATH", "/shish-no-tools")])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("fals\t")?;
+    terminal.expect("shish-test> false ")?;
+    terminal.send("\n")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("exit $?\n")?;
+    terminal.finish(1)
+}
