@@ -529,3 +529,14 @@ fn task_14_double_quotes() {
         .stdout("<a b>\n<>\n<*>\n<prea bpost>\n")
         .stderr("");
 }
+
+#[test]
+fn task_15_unquoted_backslashes() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args(["-c", "printf '<%s>\\n' a\\ b \\$HOME \\* a\\\nb"])
+        .assert()
+        .code(0)
+        .stdout("<a b>\n<$HOME>\n<*>\n<ab>\n")
+        .stderr("");
+}
