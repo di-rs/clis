@@ -599,3 +599,11 @@ fn task_19_stdout_redirection() {
         .stderr("");
     home.child("out").assert("second");
 }
+
+#[test]
+fn task_20_stderr_redirection() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path()).args(["-c", "/bin/sh -c 'printf visible; printf first >&2' 2> err; /bin/sh -c 'printf second >&2' 2> err"])
+        .assert().code(0).stdout("visible").stderr("");
+    home.child("err").assert("second");
+}
