@@ -273,6 +273,26 @@ argument without Tab. Ignored acceptance: `task_44_programmed_common_prefix` in
 [audit.rs](../tests/audit.rs). Separate task 44 follow-up: adopt published
 configuration support and enable this programmed-candidate acceptance case.
 
+### J54: job numbers collide after selective reaping
+
+Reference: POSIX §2.11 job-control job IDs must identify jobs unambiguously.
+Reproduced with the recorded default interactive sh mode on Darwin and Brush 0.5.0:
+launch two workers blocked on separate release files, release and `wait %1`,
+then launch a third worker while job 2 is still running.
+
+Expected two distinct active job IDs. Observed two entries numbered `[2]`,
+one for the surviving worker and one for the new worker. A subsequent jobspec can
+select the wrong job. Owner: Brush's job manager assigns `jobs.len() + 1` rather
+than an unused ID. Reusing 1 after the entire table is empty works separately.
+Workaround: avoid launching additional jobs while a partially reaped table still
+contains active jobs; use an external supervisor for reliable job identity.
+
+Acceptance: `task_54_job_number_recycling` in [audit.rs](../tests/audit.rs)
+is ignored after reproducing the collision. Task 54 keeps this gap in its own PR.
+Follow-up: fix allocation upstream, adopt a published release, and enable the
+acceptance test; no fork or upstream issue has been created. Public shish builtin
+adapters cannot intercept Brush's asynchronous job allocation safely.
+
 ## Foundation stack
 
 Each row is independently reviewable and targets its predecessor. No PR is merged
@@ -356,8 +376,8 @@ The task numbers are stable even when implementation order changes.
 | 50 | Background jobs: list multiple | interactive sh; §2.11/jobs/wait | Verified: two active jobs have distinct IDs and current/previous annotations; [task_50](../tests/audit.rs) | [50 PR](https://github.com/di-rs/sanctuary/pull/165) |
 | 51 | Background jobs: reap one | interactive sh; §2.11/jobs/wait | Verified: wait %1 completes the worker and removes it before the next command; [task_51](../tests/audit.rs) | [51 PR](https://github.com/di-rs/sanctuary/pull/166) |
 | 52 | Background jobs: reap multiple | interactive sh; §2.11/jobs/wait | Verified: bare wait completes both workers and clears the job table; [task_52](../tests/audit.rs) | [52 PR](https://github.com/di-rs/sanctuary/pull/167) |
-| 53 | Background jobs: reap before prompt | interactive sh; §2.11/jobs/wait | Verified: completion notice and job removal before the next command; [task_53](../tests/audit.rs) | Current task PR |
-| 54 | Background jobs: recycle job numbers | interactive sh; §2.11/jobs/wait | Unverified; dedicated audit pending | Planned task 54 |
+| 53 | Background jobs: reap before prompt | interactive sh; §2.11/jobs/wait | Verified: completion notice and job removal before the next command; [task_53](../tests/audit.rs) | [53 PR](https://github.com/di-rs/sanctuary/pull/168) |
+| 54 | Background jobs: recycle job numbers | interactive sh; §2.11/jobs/wait | Partial: empty-table recycling works; live-ID collision acceptance pending; [task_54](../tests/audit.rs) | Current task PR |
 | 55 | Pipelines: two commands | sh; §2.9.2 | Verified: pipeline output, final status, and bounded fixture execution; [task_55](../tests/audit.rs) | [55 PR](https://github.com/di-rs/sanctuary/pull/128) |
 | 56 | Pipelines: builtins | sh; §2.9.2 | Verified: pipeline output, final status, and bounded fixture execution; [task_56](../tests/audit.rs) | [56 PR](https://github.com/di-rs/sanctuary/pull/129) |
 | 57 | Pipelines: multiple commands | sh; §2.9.2 | Verified: pipeline output, final status, and bounded fixture execution; [task_57](../tests/audit.rs) | [57 PR](https://github.com/di-rs/sanctuary/pull/130) |

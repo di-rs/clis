@@ -1310,3 +1310,55 @@ fn task_53_reap_before_prompt() -> anyhow::Result<()> {
     home.child("errors").assert("");
     Ok(())
 }
+
+#[test]
+#[ignore = "J54: Brush assigns duplicate live job IDs after selective reaping"]
+fn task_54_job_number_recycling() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    home.child("worker")
+        .write_str("while [ ! -e \"$1\" ]; do /bin/sleep 0.02; done\n")?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("/bin/sh worker first & /bin/sh worker second & echo launched\n")?;
+    terminal.expect("\nlaunched\n")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send(": > first; wait %1; echo first-reaped\n")?;
+    terminal.expect("\nfirst-reaped\n")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("/bin/sh worker third & jobs > listing; echo listed\n")?;
+    terminal.expect("\nlisted\n")?;
+    terminal.expect_line("shish-test> ")?;
+    let listing = std::fs::read_to_string(home.child("listing").path())?;
+    let ids: Vec<_> = listing
+        .lines()
+        .filter_map(|line| line.split(']').next())
+        .collect();
+    anyhow::ensure!(
+        ids.len() == 2 && ids.first() != ids.get(1),
+        "job IDs must remain distinct: {listing:?}"
+    );
+    terminal.send(": > second; : > third; wait; exit 0\n")?;
+    terminal.finish(0)
+}
+
+#[test]
+fn task_54_recycle_after_empty_table() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    home.child("worker")
+        .write_str("while [ ! -e release ]; do /bin/sleep 0.02; done\n")?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("true & wait; echo emptied\n")?;
+    terminal.expect("\nemptied\n")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("/bin/sh worker & jobs > listing; echo listed\n")?;
+    terminal.expect("\nlisted\n")?;
+    terminal.expect_line("shish-test> ")?;
+    let listing = std::fs::read_to_string(home.child("listing").path())?;
+    anyhow::ensure!(
+        listing.starts_with("[1]+"),
+        "expected recycled ID 1: {listing:?}"
+    );
+    terminal.send(": > release; wait; exit 0\n")?;
+    terminal.finish(0)
+}
