@@ -1168,3 +1168,23 @@ fn task_46_jobs_builtin() -> anyhow::Result<()> {
     home.child("jobs.err").assert("");
     Ok(())
 }
+
+#[test]
+fn task_47_background_launch() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    home.child("worker").write_str(
+        "while [ ! -e release ]; do /bin/sleep 0.02; done\nprintf finished > result\n",
+    )?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("/bin/sh worker & echo launched\n")?;
+    terminal.expect("\nlaunched\n")?;
+    terminal.expect_line("shish-test> ")?;
+    home.child("result").assert(predicates::path::missing());
+    terminal.send(": > release; wait; echo joined\n")?;
+    terminal.expect("\njoined\n")?;
+    terminal.expect_line("shish-test> ")?;
+    home.child("result").assert("finished");
+    terminal.send("exit 0\n")?;
+    terminal.finish(0)
+}
