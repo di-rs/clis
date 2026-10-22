@@ -387,8 +387,8 @@ The task numbers are stable even when implementation order changes.
 | 61 | History: up-arrow | bash; Bash §9 | Verified in Bash mode: up-arrow recalls the preceding command; [task_61](../tests/audit.rs) | [61 PR](https://github.com/di-rs/sanctuary/pull/173) |
 | 62 | History: down-arrow | bash; Bash §9 | Verified in Bash mode: down-arrow advances from older to newer history and returns to an empty line; [task_62](../tests/audit.rs) | [62 PR](https://github.com/di-rs/sanctuary/pull/174) |
 | 63 | History: recalled execution | bash; Bash §9 | Verified in Bash mode: recalling and submitting repeats the command's filesystem effect; [task_63](../tests/audit.rs) | [63 PR](https://github.com/di-rs/sanctuary/pull/175) |
-| 64 | History persistence: read file | bash; Bash §9 | Verified in Bash mode: explicit and default history files load without executing entries; [task_64](../tests/audit.rs) | Current task PR |
-| 65 | History persistence: write file | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 65 |
+| 64 | History persistence: read file | bash; Bash §9 | Verified in Bash mode: explicit and default history files load without executing entries; [task_64](../tests/audit.rs) | [64 PR](https://github.com/di-rs/sanctuary/pull/176) |
+| 65 | History persistence: write file | bash; Bash §9 | Verified in Bash mode: history -w replaces explicit/default files after cd; [task_65](../tests/audit.rs) | Current task PR |
 | 66 | History persistence: append file | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 66 |
 | 67 | History persistence: startup read | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 67 |
 | 68 | History persistence: exit write | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 68 |
