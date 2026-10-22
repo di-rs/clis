@@ -4,6 +4,9 @@ name = "false"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "sanctuary_false"
+
 [dependencies]
 cli-log.workspace = true
 
