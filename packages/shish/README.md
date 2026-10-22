@@ -44,12 +44,20 @@ the shell; `exit` ends execution. Missing commands return 127. Syntax errors ret
 Startup deliberately skips profile and rc files, including inherited `ENV` and
 `BASH_ENV`. Source configuration explicitly with the `.` command if needed. This
 is a known difference from strict shell compatibility.
-The initial integration targets Unix platforms; local verification is on macOS,
-with Linux verification delegated to CI.
+The integration targets Unix platforms. The
+[compatibility inventory](docs/compatibility.md#reading-the-evidence) records
+Linux and macOS CI evidence. gVisor integration remains unverified.
 
 Shish runs with the invoking user's privileges. It supplies neither sandbox
 isolation nor recovery of interrupted processes. Boxie owns isolation and lifecycle
 recovery; its integration with shish remains a separate design stage.
+
+Use `--bash` for completion specifications and history commands. The current
+history adapter supports `history -r [file]`, `-w [file]`, and `-a [file]` with
+paths relative to the shell directory. Automatic exit saving currently appends,
+even when `histappend` is unset; use `history -w && unset HISTFILE` before exit when
+you need replacement. History is a plaintext convenience, not a durable execution
+record, and can contain command-line secrets. Keep its location private.
 
 The [compatibility inventory](docs/compatibility.md) records verified behavior and
 planned features. See [known gaps](docs/compatibility-gaps.md) for limitations and

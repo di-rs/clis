@@ -6,7 +6,7 @@ license.workspace = true
 description = "Sanctuary shell"
 
 [package.metadata.cli-check]
-benchmark-exemption = "Imported shell baseline; runtime replacement precedes a representative benchmark suite"
+benchmark-exemption = "Representative interactive and process-launch workloads are not selected; no performance claim"
 
 [lints]
 workspace = true
