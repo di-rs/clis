@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{BufReader, BufWriter, Read, Seek, Write},
+    io::{BufReader, BufWriter, Seek, Write},
     path::Path,
 };
 
@@ -10,7 +10,7 @@ use tailr::{get_total_lines, print_bytes, print_lines, print_stream_bytes, print
 
 fn main() -> std::process::ExitCode {
     cli_log::run("tailr", |cli| match run(&cli) {
-        Ok(()) => exitcode::OK,
+        Ok(failed) => i32::from(failed),
         Err(CliError::FileOpen(_, e)) => {
             cli_log::diagnostic!("{e}");
             exitcode::CONFIG
@@ -22,7 +22,8 @@ fn main() -> std::process::ExitCode {
     })
 }
 
-fn run(cli: &Cli) -> Result<(), CliError> {
+fn run(cli: &Cli) -> Result<bool, CliError> {
+    let mut failed = false;
     let mut writer = get_writer();
     let num_files = cli.files.len();
     let stdin = std::io::stdin();
@@ -41,29 +42,42 @@ fn run(cli: &Cli) -> Result<(), CliError> {
             }
             continue;
         }
-        match get_file_reader(filename) {
-            Ok(file) => {
-                if !cli.quiet && num_files > 1 {
-                    let filename = filename.display();
-                    let delim = if file_num > 0 { "\n" } else { "" };
-                    writeln!(writer, "{delim}==> {filename} <==")?;
+        let prepared = (|| -> Result<(File, u64), CliError> {
+            let mut file = get_file_reader(filename)?;
+            let total = if cli.bytes.is_some() {
+                let metadata = file.metadata()?;
+                if metadata.is_dir() {
+                    return Err(std::io::Error::from(std::io::ErrorKind::IsADirectory).into());
                 }
-
-                if let Some(num_bytes) = &cli.bytes {
-                    let metadata = std::fs::metadata(filename)?;
-                    let total_bytes = metadata.len();
-                    print_bytes(file, &mut writer, *num_bytes, total_bytes)?;
-                } else {
-                    let total_lines = get_file_lines_count(filename)?;
-                    let reader = BufReader::new(file);
-                    print_lines(reader, &mut writer, cli.lines, total_lines)?;
-                }
+                metadata.len()
+            } else {
+                let lines = get_total_lines(&mut file)?;
+                file.rewind()?;
+                lines
+            };
+            Ok((file, total))
+        })();
+        let (file, total) = match prepared {
+            Ok(input) => input,
+            Err(error) => {
+                failed = true;
+                cli_log::diagnostic!("{}: {error}", filename.display());
+                continue;
             }
-            Err(e) => cli_log::diagnostic!("{}: {e}", filename.display()),
+        };
+        if !cli.quiet && num_files > 1 {
+            let filename = filename.display();
+            let delim = if file_num > 0 { "\n" } else { "" };
+            writeln!(writer, "{delim}==> {filename} <==")?;
+        }
+        if let Some(num_bytes) = cli.bytes {
+            print_bytes(file, &mut writer, num_bytes, total)?;
+        } else {
+            print_lines(BufReader::new(file), &mut writer, cli.lines, total)?;
         }
     }
     writer.flush()?;
-    Ok(())
+    Ok(failed)
 }
 
 fn get_writer() -> impl Write {
@@ -71,13 +85,7 @@ fn get_writer() -> impl Write {
     BufWriter::new(stdout.lock())
 }
 
-fn get_file_reader(path: &Path) -> Result<impl Read + Seek, CliError> {
+fn get_file_reader(path: &Path) -> Result<File, CliError> {
     let file = File::open(path).map_err(|e| CliError::FileOpen(path.to_owned(), e))?;
     Ok(file)
-}
-
-fn get_file_lines_count(path: &Path) -> Result<u64, CliError> {
-    let file = get_file_reader(path)?;
-    let lines_count = get_total_lines(file)?;
-    Ok(lines_count)
 }

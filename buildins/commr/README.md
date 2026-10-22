@@ -20,7 +20,8 @@
 Reference: [GNU comm](https://www.gnu.org/software/coreutils/manual/html_node/comm-invocation.html).
 Inputs must already be sorted using Rust string ordering, not locale collation;
 there is no sortedness check. Case-insensitive mode changes the printed text.
-Reading stops at the first decoding or I/O error in each input without reporting it.
+Decoding, read, and output errors are reported on stderr with exit status 65.
+Output already written before an error is retained; it is not a complete comparison.
 
 ## Test notes
 

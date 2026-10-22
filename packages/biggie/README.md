@@ -45,6 +45,8 @@ These options work at the root and on every command.
 | Option | Meaning |
 | --- | --- |
 | `-L, --log-level LEVEL` | File logging threshold: `off`, `error`, `warn`, `info`, `debug`, or `trace`; overrides `SANCTUARY_LOG_LEVEL`. |
+| `--dry-run` | Validate and describe generation without opening outputs. |
+| `--json` | Emit completion/preview metadata; named outputs required unless previewing. |
 | `-h, --help` | Print help. |
 | `-V, --version` | Print version. |
 | `help [COMMAND]` | Show command help. |
@@ -158,3 +160,33 @@ See the [API examples](src/lib.rs) and operation-module doctests.
 [Architecture](docs/architecture.md) explains the implementation and boundaries.
 
 [All projects](../../README.md)
+
+## Install, preview, and consume metadata
+
+From the repository root, `make install-rust` installs Biggie, Parsu, and Kara in
+`~/.local/bin`; add it to `PATH`. Biggie runs locally without auth or network access.
+
+```sh
+biggie --json --dry-run records --record apple --repeat 2 output.txt
+biggie --json bytes --bytes 1024 output.bin
+biggie records --record apple --repeat 2 -
+```
+
+JSON is a CLI envelope. Each generator reports `operation`, `dry_run`, and an
+`outputs` array containing `path`, `count`, and `unit` (`records` or `bytes`).
+`pair` reports both destinations. A preview example is:
+
+```json
+{"ok":true,"data":{"operation":"records","dry_run":true,"outputs":[{"path":"output.txt","count":2,"unit":"records"}]}}
+```
+
+Completed generation has the same shape with `dry_run: false`. Errors use
+`{"ok":false,"error":{"kind":"operation","message":"..."}}`; invalid arguments
+use kind `arguments`. Existing exit codes remain unchanged. JSON occupies stdout;
+logs remain separate. Help/version remain text. JSON paths use replacement
+characters for non-Unicode bytes. For raw stdout generation, omit `--json`.
+
+Preview reads and validates a record corpus and checks aliases, but does not open
+outputs, check available disk space, or guarantee that a subsequent write will
+succeed. Existing files remain untouched. Without `--json`, preview prints the
+plan object directly. Normal generation retains its existing completion messages.

@@ -10,12 +10,14 @@ categories = ["pratice", "pet"]
 
 [dependencies]
 crossterm = "0.29.0"
-color-eyre = "0.6"
 unicode-segmentation = "1.13.3"
 unicode-width = "0.2.2"
 
 log.workspace = true
 cli-log.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+tempfile = "3.27.0"
 
 [dev-dependencies]
 cli-testing.workspace = true
@@ -25,6 +27,12 @@ serde_json.workspace = true
 
 [lints]
 workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+exacl = { version = "0.13.0", default-features = false }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+xattr = "1.6.1"
 
 [package.metadata.cli-check]
 benchmark-exemption = "Interactive terminal editor; no finite command benchmark."

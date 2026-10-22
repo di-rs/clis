@@ -2,4 +2,4 @@ version = 1
 name = "Sanctuary"
 
 [setup]
-script = "uv sync --all-packages && prek install && cargo agents sync"
+script = "uv sync --all-packages && prek install && sh .codex/environments/link-rust-skills.sh"

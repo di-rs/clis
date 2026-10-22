@@ -38,7 +38,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
     let reader1 = get_reader(file1)?;
     let reader2 = get_reader(file2)?;
 
-    get_lines(reader1, reader2, cli.insensitive, cli);
+    get_lines(reader1, reader2, cli.insensitive, cli)?;
 
     Ok(())
 }

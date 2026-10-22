@@ -217,7 +217,7 @@ fn unreadable_dir() -> Result<()> {
 
     let cmd = cargo_bin_cmd!().arg(dir.path()).assert();
     fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o700))?;
-    let cmd = cmd.success();
+    let cmd = cmd.code(1);
 
     let out = cmd.get_output();
     let stdout = String::from_utf8(out.stdout.clone())?;
@@ -244,7 +244,7 @@ fn run_tree(dir: &TempDir, args: &[&str], expected: &[&str]) -> Result<()> {
         .current_dir(dir.path())
         .args(args)
         .assert()
-        .success()
+        .code(0)
         .stderr("");
     let stdout = String::from_utf8(cmd.get_output().stdout.clone())?;
     let mut lines: Vec<_> = stdout.lines().collect();
@@ -341,4 +341,14 @@ fn symlink_filter_does_not_follow_directory_targets() -> Result<()> {
         &[".", "-t", "f", "-n", "^inside[.]csv$"],
         &["./reports.txt/inside.csv"],
     )
+}
+
+#[test]
+fn missing_operand_returns_failure() {
+    cli_testing::cargo_bin_cmd!()
+        .args(["/sanctuary-audit-missing/path"])
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr(predicates::str::contains("/sanctuary-audit-missing/path"));
 }

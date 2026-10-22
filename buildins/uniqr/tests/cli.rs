@@ -647,3 +647,70 @@ fn t6_outfile_count() -> Result<()> {
 fn t6_stdin_outfile_count() -> Result<()> {
     run_outfile_stdin_count(&T6)
 }
+
+#[test]
+#[allow(
+    clippy::panic_in_result_fn,
+    reason = "Assertions verify observable CLI behavior; Result propagates fixture errors."
+)]
+fn rejects_output_aliases_without_truncating() -> Result<()> {
+    let dir = assert_fs::TempDir::new()?;
+    let input = dir.path().join("input");
+    let alias = dir.path().join("alias");
+    std::fs::write(&input, b"a\na\n")?;
+    std::fs::hard_link(&input, &alias)?;
+    let symlink = dir.path().join("symlink");
+    std::os::unix::fs::symlink(&input, &symlink)?;
+    for output in [&input, &alias, &symlink] {
+        cli_testing::cargo_bin_cmd!()
+            .arg(&input)
+            .arg(output)
+            .assert()
+            .code(65)
+            .stdout("")
+            .stderr(predicates::str::contains("same file"));
+        assert_eq!(std::fs::read(&input)?, b"a\na\n");
+    }
+    Ok(())
+}
+
+#[test]
+fn writes_to_non_regular_outputs() {
+    cli_testing::cargo_bin_cmd!()
+        .args(["-", "/dev/null"])
+        .write_stdin("a\na\nb\n")
+        .assert()
+        .code(0)
+        .stdout("")
+        .stderr("");
+}
+
+#[test]
+#[allow(
+    clippy::panic_in_result_fn,
+    reason = "Assertions verify observable CLI behavior."
+)]
+fn writes_to_fifo() -> Result<()> {
+    use std::io::Read;
+    let dir = assert_fs::TempDir::new()?;
+    let path = dir.path().join("output.fifo");
+    let status = std::process::Command::new("mkfifo").arg(&path).status()?;
+    assert!(status.success());
+    // Hold both ends open so the small write never waits for a separate reader.
+    let mut fifo = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&path)?;
+    cli_testing::cargo_bin_cmd!()
+        .arg("-")
+        .arg(&path)
+        .write_stdin("a\na\nb\n")
+        .assert()
+        .code(0)
+        .stdout("")
+        .stderr("");
+    let mut output = [0; 4];
+    fifo.read_exact(&mut output)?;
+    assert_eq!(&output, b"a\nb\n");
+    Ok(())
+}

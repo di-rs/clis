@@ -1,4 +1,4 @@
-use std::{fs::File, path::Path};
+use std::path::Path;
 
 use crate::editor::{
     editorcommand::{
@@ -16,23 +16,21 @@ impl Interpreter {
         current_file: Option<&Path>,
     ) -> Result<EditorCommand, String> {
         let str = value.to_string();
-        let mut split = str.split(' ');
-        match split.next() {
-            Some("w") => {
-                let name = split
-                    .next()
-                    .or_else(|| current_file.and_then(|x| x.to_str()));
+        let (verb, operand) = str.split_once(' ').unwrap_or((&str, ""));
+        match verb {
+            "w" => {
+                let name = if operand.is_empty() {
+                    current_file.and_then(|p| p.to_str())
+                } else {
+                    Some(operand)
+                };
                 name.map_or_else(
-                    || Err("ERR: filename was not provided".to_string()),
-                    // TODO: File creation should not be here
-                    |name| match File::create(name) {
-                        Err(e) => Err(format!("ERR: cannot open file {e}")),
-                        Ok(_) => Ok(EditorCommand::System(SaveAs(name.to_owned()))),
-                    },
+                    || Err("ERR: filename was not provided".to_owned()),
+                    |name| Ok(EditorCommand::System(SaveAs(name.to_owned()))),
                 )
             }
-            Some("q") => Ok(EditorCommand::System(Quit)),
-            Some("q!") => Ok(EditorCommand::System(QuitForce)),
+            "q" => Ok(EditorCommand::System(Quit)),
+            "q!" => Ok(EditorCommand::System(QuitForce)),
             _ => Err(format!("ERR: unknown command {str}")),
         }
     }

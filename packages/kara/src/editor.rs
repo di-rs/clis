@@ -36,6 +36,7 @@ const MAX_QUIT_ATTEMPTS: u8 = 2;
 #[derive(Default)]
 pub struct Editor {
     title: String,
+    terminal_active: bool,
     terminal_size: Size,
     mode: EditorMode,
     should_quit: bool,
@@ -61,6 +62,7 @@ impl Editor {
 
         Terminal::initialize()?;
         let mut editor = Self::default();
+        editor.terminal_active = true;
 
         let size = Terminal::size().unwrap_or_default();
         editor.resize(size);
@@ -86,7 +88,7 @@ impl Editor {
         }
     }
 
-    pub fn run(&mut self) {
+    pub fn run(&mut self) -> std::io::Result<()> {
         loop {
             self.refresh_screen();
             // TODO: Do it only if buffer was changed
@@ -98,10 +100,11 @@ impl Editor {
             match read() {
                 Ok(event) => self.evaluate_event(&event),
                 Err(err) => {
-                    debug_assert!(false, "Could not read event: {err:?}");
+                    return Err(err);
                 }
             }
         }
+        Ok(())
     }
 
     fn refresh_title(&mut self) {
@@ -182,11 +185,14 @@ impl Editor {
         match command {
             System(Quit | QuitForce | Resize(_)) => {}
             System(Save) => self.save(),
-            System(SaveAs(filename)) => {
-                if let Err(error) = self.buffer.save_as(&filename) {
-                    cli_log::record_error(error);
+            System(SaveAs(filename)) => match self.buffer.save_as(&filename) {
+                Ok(outcome) => self.report_save(outcome),
+                Err(error) => {
+                    cli_log::record_error(&error);
+                    self.messagebar
+                        .set(format!("ERR: Could not save file: {error}"));
                 }
-            }
+            },
             EditorCommand::Move(direction) => self.handle_move_command(&direction),
             EditorCommand::Edit(edit) => self.handle_edit_command(&edit),
             EditorCommand::ChangeMode(mode) => {
@@ -279,7 +285,7 @@ impl Editor {
     fn save(&mut self) {
         if self.buffer.has_file() {
             match self.buffer.save() {
-                Ok(()) => self.messagebar.set("File saved successfully.".to_owned()),
+                Ok(outcome) => self.report_save(outcome),
                 Err(e) => {
                     let message = format!("Error writing file! {e}");
                     cli_log::record_error(&message);
@@ -290,6 +296,18 @@ impl Editor {
             self.commandbar = Some(CommandBar::new("w "));
             self.mode = EditorMode::Command;
         }
+    }
+
+    fn report_save(&mut self, outcome: editorbuffer::SaveOutcome) {
+        let message = match outcome {
+            editorbuffer::SaveOutcome::Saved => "File saved successfully.".to_owned(),
+            editorbuffer::SaveOutcome::DurabilityWarning(error) => {
+                let message = format!("WARNING: File saved, but directory sync failed: {error}");
+                cli_log::record_error(&message);
+                message
+            }
+        };
+        self.messagebar.set(message);
     }
 
     fn quit(&mut self, force: bool) {
@@ -321,6 +339,9 @@ impl Editor {
 
 impl Drop for Editor {
     fn drop(&mut self) {
+        if !self.terminal_active {
+            return;
+        }
         let _ = Terminal::terminate();
         if self.should_quit {
             let _ = Terminal::move_to(Position { col: 0, row: 0 });
@@ -403,7 +424,7 @@ mod tests {
             .iter()
             .filter(|record| record["kv"]["event"] == "error")
             .collect();
-        assert_eq!(errors.len(), 3);
+        assert_eq!(errors.len(), 2);
         let open = errors
             .first()
             .ok_or_else(|| io::Error::other("missing open error"))?;

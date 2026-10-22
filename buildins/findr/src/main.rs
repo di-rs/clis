@@ -7,7 +7,7 @@ use findr::{is_name_matches, is_type_matches};
 
 fn main() -> std::process::ExitCode {
     cli_log::run("findr", |cli| match run(cli) {
-        Ok(()) => exitcode::OK,
+        Ok(failed) => i32::from(failed),
         Err(e) => {
             cli_log::diagnostic!("Error: {e}");
             exitcode::DATAERR
@@ -15,7 +15,8 @@ fn main() -> std::process::ExitCode {
     })
 }
 
-fn run(cli: Cli) -> Result<(), CliError> {
+fn run(cli: Cli) -> Result<bool, CliError> {
+    let mut failed = false;
     let mut writer = get_writer();
 
     for path in cli.paths {
@@ -30,6 +31,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
                     }
                 }
                 Err(e) => {
+                    failed = true;
                     cli_log::diagnostic!("{e}");
                 }
             }
@@ -37,7 +39,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
     }
 
     writer.flush()?;
-    Ok(())
+    Ok(failed)
 }
 
 fn get_writer() -> impl Write {

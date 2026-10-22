@@ -10,7 +10,7 @@ use wcr::{FileInfo, get_file_info};
 
 fn main() -> std::process::ExitCode {
     cli_log::run("wcr", |cli| match run(cli) {
-        Ok(()) => exitcode::OK,
+        Ok(failed) => i32::from(failed),
         Err(CliError::Config) => {
             cli_log::record_error(CliError::Config);
             exitcode::CONFIG
@@ -22,7 +22,8 @@ fn main() -> std::process::ExitCode {
     })
 }
 
-fn run(mut cli: Cli) -> Result<(), CliError> {
+fn run(mut cli: Cli) -> Result<bool, CliError> {
+    let mut failed = false;
     cli.normalize();
     let mut writer = get_writer();
     let mut total_info = FileInfo::default();
@@ -34,7 +35,10 @@ fn run(mut cli: Cli) -> Result<(), CliError> {
                 cli.write_info_line(&mut writer, &info, filename)?;
                 total_info.add(&info);
             }
-            Err(e) => cli_log::diagnostic!("{filename}: {e}"),
+            Err(e) => {
+                failed = true;
+                cli_log::diagnostic!("{filename}: {e}");
+            }
         }
     }
 
@@ -43,7 +47,7 @@ fn run(mut cli: Cli) -> Result<(), CliError> {
     }
 
     writer.flush()?;
-    Ok(())
+    Ok(failed)
 }
 
 fn get_reader(path: &str) -> Result<Box<dyn BufRead>, CliError> {

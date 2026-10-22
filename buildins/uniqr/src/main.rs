@@ -29,7 +29,7 @@ fn main() -> std::process::ExitCode {
 
 fn run(cli: Cli) -> Result<(), CliError> {
     let reader = get_reader(&cli.input_file)?;
-    let mut writer = get_writer(cli.output_file)?;
+    let mut writer = get_writer(cli.output_file, &cli.input_file)?;
 
     let list = UniqueList::from_reader(reader)?;
     report_unique_lines(&mut writer, list, cli.count)?;
@@ -54,9 +54,30 @@ fn get_reader(path: &str) -> Result<Box<dyn BufRead>, CliError> {
     }
 }
 
-fn get_writer(path: Option<String>) -> Result<Box<dyn Write>, CliError> {
+fn get_writer(path: Option<String>, input: &str) -> Result<Box<dyn Write>, CliError> {
     if let Some(path) = path {
-        let file = File::create(&path).map_err(|err| CliError::FileOpen { err, path })?;
+        use std::os::unix::fs::MetadataExt;
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path)
+            .map_err(|err| CliError::FileOpen {
+                err,
+                path: path.clone(),
+            })?;
+        if input != "-" {
+            let source = std::fs::metadata(input)?;
+            let target = file.metadata()?;
+            if source.dev() == target.dev() && source.ino() == target.ino() {
+                return Err(
+                    std::io::Error::other("input and output refer to the same file").into(),
+                );
+            }
+        }
+        if file.metadata()?.is_file() {
+            file.set_len(0)?;
+        }
         Ok(Box::new(BufWriter::new(file)))
     } else {
         let stdout = std::io::stdout();

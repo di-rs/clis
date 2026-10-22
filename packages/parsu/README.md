@@ -18,6 +18,7 @@ The output is a debug representation of the parent element and its child.
 | Argument or option | Meaning |
 | --- | --- |
 | `FILE` | Required UTF-8 file, or `-` for non-terminal stdin. |
+| `--json` | Emit a JSON tree or error envelope. |
 | `-h, --help` | Print help. |
 | `-V, --version` | Print version. |
 
@@ -38,3 +39,28 @@ Based on Bodil Stokke's [Learning Parser Combinators With Rust](https://bodil.lo
 [Architecture](docs/architecture.md) explains the implementation and boundaries.
 
 [All projects](../../README.md)
+
+## Installation and machine-readable output
+
+From the repository root, `make install-rust` installs Biggie, Parsu, and Kara in
+`~/.local/bin`; add it to `PATH`. Parsu runs from any directory without network
+access or authentication. Keep the existing debug output for human inspection;
+use `--json` for scripts:
+
+```sh
+printf '<root a="b"/>' | parsu --json -
+```
+
+```json
+{"ok":true,"data":{"name":"root","attributes":[["a","b"]],"children":[]}}
+```
+
+Attributes are ordered name/value pairs; children retain source order. This is a
+CLI envelope, not an external API response. Errors use
+`{"ok":false,"error":{"kind":"operation","message":"..."}}`; invalid arguments
+use kind `arguments`. Statuses are 0 for success, 1 for operation failure, and 2
+for invalid arguments. JSON goes to stdout, diagnostics to stderr; help/version
+remain text. Input contents are not included in parse errors. The reported byte
+offset identifies the unparsed remainder, not necessarily the deepest grammar
+failure because combinators can backtrack. The complete input/tree still reside
+in memory; this change does not expand the grammar or impose input/depth limits.

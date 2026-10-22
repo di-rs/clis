@@ -37,7 +37,7 @@ fn skip_bad_file() -> Result<()> {
     cargo_bin_cmd!()
         .arg(bad.path())
         .assert()
-        .success()
+        .code(1)
         .stderr(predicate::str::is_match(expected)?);
     Ok(())
 }
@@ -232,4 +232,14 @@ fn squeeze_and_number_preserve_whitespace_lines() {
         .success()
         .stdout("     1\t\n     2\t \n     3\t\n     4\té")
         .stderr("");
+}
+
+#[test]
+fn missing_operand_returns_failure() {
+    cli_testing::cargo_bin_cmd!()
+        .args(["/sanctuary-audit-missing/path"])
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr(predicates::str::contains("/sanctuary-audit-missing/path"));
 }

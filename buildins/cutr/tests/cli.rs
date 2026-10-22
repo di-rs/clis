@@ -46,7 +46,7 @@ fn skips_bad_file() -> Result<()> {
     cargo_bin_cmd!()
         .args(["-f", "1", CSV, &bad, TSV])
         .assert()
-        .success()
+        .code(1)
         .stderr(predicate::str::is_match(expected)?);
     Ok(())
 }
@@ -354,4 +354,14 @@ fn tsv_c1_8() -> Result<()> {
 #[test]
 fn repeated_value() -> Result<()> {
     run(&[BOOKS, "-c", "1,1"], "books.c1,1.out")
+}
+
+#[test]
+fn missing_operand_returns_failure() {
+    cli_testing::cargo_bin_cmd!()
+        .args(["-b", "1", "/sanctuary-audit-missing/path"])
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr(predicates::str::contains("/sanctuary-audit-missing/path"));
 }

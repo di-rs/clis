@@ -35,6 +35,7 @@ fn skip_bad_file() -> Result<()> {
     cargo_bin_cmd!()
         .arg(bad.path())
         .assert()
+        .code(1)
         .stderr(predicate::str::is_match(expected)?);
     Ok(())
 }
@@ -249,4 +250,14 @@ fn atlamal_stdin() -> Result<()> {
         .stdout(expected)
         .stderr("");
     Ok(())
+}
+
+#[test]
+fn missing_operand_returns_failure() {
+    cli_testing::cargo_bin_cmd!()
+        .args(["/sanctuary-audit-missing/path"])
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr(predicates::str::contains("/sanctuary-audit-missing/path"));
 }

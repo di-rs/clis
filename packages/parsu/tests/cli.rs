@@ -178,3 +178,34 @@ fn dies_trailing_non_xml_input() {
 fn dies_multiple_root_elements() {
     assert_malformed_stdin("<first/>\n<second/>");
 }
+
+#[test]
+#[allow(
+    clippy::panic_in_result_fn,
+    reason = "Assertions verify observable CLI behavior; Result propagates fixture errors."
+)]
+fn json_tree_and_errors_are_machine_readable() -> Result<()> {
+    let result = cargo_bin_cmd!()
+        .args(["--json", "-"])
+        .write_stdin("<root a=\"b\"><child/></root>")
+        .assert()
+        .code(0)
+        .stderr("");
+    let value: serde_json::Value = serde_json::from_slice(&result.get_output().stdout)?;
+    assert_eq!(
+        value,
+        serde_json::json!({"ok": true, "data": {"name": "root", "attributes": [["a","b"]], "children": [{"name":"child", "attributes":[],"children":[]}]}})
+    );
+    for (args, status) in [(vec!["--json", "-"], 1), (vec!["--json", "--unknown"], 2)] {
+        let result = cargo_bin_cmd!()
+            .args(args)
+            .write_stdin("not-xml-secret")
+            .assert()
+            .code(status)
+            .stderr("");
+        let value: serde_json::Value = serde_json::from_slice(&result.get_output().stdout)?;
+        assert_eq!(value["ok"], false);
+        assert!(!String::from_utf8_lossy(&result.get_output().stdout).contains("not-xml-secret"));
+    }
+    Ok(())
+}

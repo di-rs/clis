@@ -17,12 +17,8 @@ fn main() -> std::process::ExitCode {
     logging.set_stderr_level(cli.verbosity.log_level_filter());
     info!("starting up");
 
-    let _ = ctrlc::set_handler(move || {
-        println!("received Ctrl+C!");
-    });
-
     let status = match run(&cli) {
-        Ok(()) => exitcode::OK,
+        Ok(failed) => i32::from(failed),
         Err(CliError::Config) => {
             cli_log::record_error(CliError::Config);
             let _ = Cli::command().print_help();
@@ -36,7 +32,8 @@ fn main() -> std::process::ExitCode {
     logging.finish(status)
 }
 
-fn run(cli: &Cli) -> Result<(), CliError> {
+fn run(cli: &Cli) -> Result<bool, CliError> {
+    let mut failed = false;
     let pattern = cli.try_parse_pattern()?;
 
     let entries = find_files(&cli.files, cli.recursive);
@@ -55,10 +52,16 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                     }
                     writer.flush()?;
                 }
-                Err(e) => cli_log::diagnostic!("Failed to open {}: {e}", entry.display()),
+                Err(e) => {
+                    failed = true;
+                    cli_log::diagnostic!("Failed to open {}: {e}", entry.display());
+                }
             },
-            Err(e) => cli_log::diagnostic!("{e}"),
+            Err(e) => {
+                failed = true;
+                cli_log::diagnostic!("{e}");
+            }
         }
     }
-    Ok(())
+    Ok(failed)
 }

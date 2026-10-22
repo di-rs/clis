@@ -53,7 +53,7 @@ fn bad_file() {
     cargo_bin_cmd!()
         .arg(&bad)
         .assert()
-        .success()
+        .code(1)
         .stderr(predicate::str::contains(expected));
 }
 
@@ -345,7 +345,7 @@ fn missing_path_does_not_hide_valid_files() -> Result<()> {
         .current_dir(dir.path())
         .args(["missing", "present"])
         .assert()
-        .success()
+        .code(1)
         .stdout("present\n")
         .stderr(predicate::str::contains(
             "missing: No such file or directory",
@@ -355,7 +355,7 @@ fn missing_path_does_not_hide_valid_files() -> Result<()> {
 
 // These regressions catch missing persistence without changing terminal contracts.
 #[test]
-fn handled_file_error_is_persisted_with_successful_completion() -> Result<()> {
+fn handled_file_error_is_persisted_with_failure_completion() -> Result<()> {
     let logs = TempDir::new()?;
     cargo_bin_cmd!()
         .env("SANCTUARY_LOG_DIR", logs.path())
@@ -363,7 +363,7 @@ fn handled_file_error_is_persisted_with_successful_completion() -> Result<()> {
         .env("SANCTUARY_LOG_STDERR", "off")
         .arg("missing-log-test-input")
         .assert()
-        .success()
+        .code(1)
         .stdout("")
         .stderr(predicate::str::contains("missing-log-test-input:"));
     let records = read_log_records(&logs)?;
@@ -376,9 +376,9 @@ fn handled_file_error_is_persisted_with_successful_completion() -> Result<()> {
         return Err("missing logged input error".into());
     }
     if !(records.iter().any(|record| {
-        record["kv"]["event"] == "command_finished" && record["kv"]["exit_code"] == 0
+        record["kv"]["event"] == "command_finished" && record["kv"]["exit_code"] == 1
     })) {
-        return Err("missing successful completion".into());
+        return Err("missing failure completion".into());
     }
     Ok(())
 }
@@ -429,4 +429,14 @@ fn read_log_records(logs: &TempDir) -> Result<Vec<serde_json::Value>> {
         }
     }
     Ok(records)
+}
+
+#[test]
+fn missing_operand_returns_failure() {
+    cli_testing::cargo_bin_cmd!()
+        .args(["/sanctuary-audit-missing/path"])
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr(predicates::str::contains("/sanctuary-audit-missing/path"));
 }

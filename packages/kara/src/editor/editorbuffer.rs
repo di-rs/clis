@@ -15,6 +15,8 @@ mod bufferkind;
 mod file_buffer;
 mod fileinfo;
 
+pub use file_buffer::SaveOutcome;
+
 #[derive(Debug, Clone, Copy)]
 pub enum Direction {
     Up(usize),
@@ -45,21 +47,26 @@ impl EditorBuffer {
         })
     }
 
-    pub fn save(&mut self) -> Result<(), std::io::Error> {
-        self.buffer.save().inspect(|()| {
+    pub fn save(&mut self) -> Result<SaveOutcome, std::io::Error> {
+        self.buffer.save().inspect(|_| {
             self.modified_at = None;
         })
     }
 
-    pub fn save_as(&mut self, filename: &str) -> Result<(), std::io::Error> {
-        if let BufferKind::Buffer(buffer) = &self.buffer {
-            let file_buffer = FileBuffer::new(buffer.clone(), filename);
-            self.buffer = BufferKind::File(file_buffer);
-        }
+    pub fn save_as(&mut self, filename: &str) -> Result<SaveOutcome, std::io::Error> {
+        self.save_as_with(filename, FileBuffer::save)
+    }
 
-        self.buffer.save().inspect(|()| {
-            self.modified_at = None;
-        })
+    fn save_as_with(
+        &mut self,
+        filename: &str,
+        save: impl FnOnce(&FileBuffer) -> Result<SaveOutcome, std::io::Error>,
+    ) -> Result<SaveOutcome, std::io::Error> {
+        let file_buffer = FileBuffer::new((*self.buffer).clone(), filename);
+        let outcome = save(&file_buffer)?;
+        self.buffer = BufferKind::File(file_buffer);
+        self.modified_at = None;
+        Ok(outcome)
     }
 
     pub fn filename(&self) -> Option<&Path> {
@@ -221,5 +228,38 @@ impl Default for EditorBuffer {
             max_prev_x: 0,
             modified_at: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod save_tests {
+    use super::{EditorBuffer, SaveOutcome};
+    use std::{fs, io};
+
+    #[test]
+    #[allow(
+        clippy::panic_in_result_fn,
+        reason = "Assertions verify the save commit boundary."
+    )]
+    fn directory_sync_failure_keeps_committed_identity() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = assert_fs::TempDir::new()?;
+        let original = dir.path().join("original");
+        let destination = dir.path().join("saved");
+        fs::write(&original, b"original\n")?;
+        let mut buffer = EditorBuffer::open(original.to_str().ok_or("non-UTF-8 fixture")?)?;
+        buffer.insert_char('X');
+        let result =
+            buffer.save_as_with(destination.to_str().ok_or("non-UTF-8 fixture")?, |file| {
+                file.save_with_sync(|_| Err(io::Error::other("injected directory sync failure")))
+            })?;
+        assert!(matches!(result, SaveOutcome::DurabilityWarning(_)));
+        assert_eq!(buffer.filename(), Some(destination.as_path()));
+        assert!(!buffer.is_modified());
+        assert_eq!(fs::read(&destination)?, b"Xoriginal\n");
+        buffer.insert_char('Y');
+        assert!(matches!(buffer.save()?, SaveOutcome::Saved));
+        assert_eq!(fs::read(&destination)?, b"XYoriginal\n");
+        assert_eq!(fs::read(&original)?, b"original\n");
+        Ok(())
     }
 }

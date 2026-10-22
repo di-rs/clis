@@ -90,14 +90,18 @@ async function currentSandbox(page: Page, request: APIRequestContext) {
   return (await state(request)).sandboxes.find((s) => s.page_session_ids.includes(sessionId))!;
 }
 async function output(request: APIRequestContext, id: string, chunks: Buffer[]) {
-  expect(
-    (
-      await request.post("/__test__/output", {
-        data: { id, chunks: chunks.map((chunk) => chunk.toString("base64")) },
-      })
-    ).ok(),
-  ).toBe(true);
+  // Keep base64 plus JSON below the application's 16 KiB request-body limit.
+  // Splitting large chunks preserves the byte stream and the retention pressure.
+  for (const chunk of chunks) {
+    for (let offset = 0; offset < chunk.length; offset += 8192) {
+      const response = await request.post("/__test__/output", {
+        data: { id, chunks: [chunk.subarray(offset, offset + 8192).toString("base64")] },
+      });
+      expect(response.ok(), await response.text()).toBe(true);
+    }
+  }
 }
+
 async function inputs(page: Page) {
   return page.evaluate(() => (window as unknown as { terminalTrace: Trace }).terminalTrace.inputs);
 }

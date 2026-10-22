@@ -44,6 +44,19 @@ const LINE_WIDTH: usize = 22;
 /// Panics if the calendar's year or month cannot form a valid Chrono date.
 #[must_use]
 pub fn format_month(date: &CalendarDate, print_year: bool) -> Vec<String> {
+    format_month_with_highlight(date, print_year, true)
+}
+
+/// Format a month, optionally highlighting the current day.
+///
+/// # Panics
+/// Panics if the year or month cannot form a valid Chrono date.
+#[must_use]
+pub fn format_month_with_highlight(
+    date: &CalendarDate,
+    print_year: bool,
+    highlight: bool,
+) -> Vec<String> {
     let first = date.first_day();
     let mut days: Vec<String> = (1..first.weekday().number_from_sunday())
         .map(|_| "  ".to_string())
@@ -52,7 +65,7 @@ pub fn format_month(date: &CalendarDate, print_year: bool) -> Vec<String> {
     days.extend(
         (first.day()..=u32::from(first.num_days_in_month())).map(|num| {
             let fmt = format!("{num:>2}");
-            if date.is_today(num) {
+            if highlight && date.is_today(num) {
                 Style::new().reverse().paint(fmt).to_string()
             } else {
                 fmt

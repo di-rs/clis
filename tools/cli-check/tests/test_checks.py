@@ -1,5 +1,6 @@
 """Exercise the policy command against small, real Cargo workspace trees."""
 
+import json
 import os
 import subprocess
 import sys
@@ -62,6 +63,7 @@ def run_policy(root: Path) -> subprocess.CompletedProcess[str]:
         check=False,
         capture_output=True,
         text=True,
+        timeout=60,
     )
 
 
@@ -73,9 +75,13 @@ def test_package_selection_ignores_unselected_violations_and_rejects_unknown(
     write(tmp_path, "buildins/broken/Cargo.toml", '[package]\nname = "broken"\n')
     write(tmp_path, "buildins/broken/src/main.rs", "fn main() {}")
     command = [sys.executable, "-m", "cli_check", "tests", "--root", str(tmp_path), "-p"]
-    result = subprocess.run(command + ["echo"], capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        command + ["echo"], capture_output=True, text=True, check=False, timeout=60
+    )
     assert result.returncode == 0, result.stderr
-    result = subprocess.run(command + ["missing"], capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        command + ["missing"], capture_output=True, text=True, check=False, timeout=60
+    )
     assert result.returncode == 1
     assert "Unknown packages: missing" in result.stderr
 
@@ -244,6 +250,7 @@ def run_check(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
         check=False,
         capture_output=True,
         text=True,
+        timeout=60,
     )
 
 
@@ -327,6 +334,7 @@ def test_root_can_be_found_from_package_cwd(workspace: Path) -> None:
         cwd=workspace / "buildins/echo",
         capture_output=True,
         text=True,
+        timeout=60,
     )
     assert result.returncode == 0, result.stderr
 
@@ -497,6 +505,7 @@ def test_missing_cargo_is_actionable(tmp_path: Path) -> None:
         [sys.executable, "-m", "cli_check", "--root", str(tmp_path)],
         env=os.environ | {"PATH": str(tmp_path)},
         text=True,
+        timeout=60,
         capture_output=True,
         check=False,
     )
@@ -510,3 +519,21 @@ def test_root_index_resolves_reference_links_and_encoded_paths(workspace: Path) 
     result = run_check(workspace, "docs")
     assert result.returncode == 0, result.stderr
     assert not (workspace / "Cargo.lock").exists()
+
+
+def test_json_diagnostics_discovery_and_errors(tmp_path: Path) -> None:
+    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["buildins/*", "utils/*"]\n')
+    add_cli(tmp_path)
+    result = run_check(tmp_path, "--json", "tests")
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["data"]["diagnostics"] == []
+    result = run_check(tmp_path, "--json", "--list-packages")
+    assert result.returncode == 0
+    assert any(p["name"] == "echo" for p in json.loads(result.stdout)["data"]["packages"])
+    result = run_check(tmp_path, "--json", "docs")
+    assert result.returncode == 1
+    assert json.loads(result.stdout)["data"]["diagnostics"]
+    result = run_check(tmp_path, "--json", "--unknown")
+    assert result.returncode == 2
+    assert json.loads(result.stdout)["error"]["kind"] == "arguments"
+    assert result.stderr == ""

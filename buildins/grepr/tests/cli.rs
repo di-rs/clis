@@ -51,7 +51,7 @@ fn warns_bad_file() {
     cargo_bin_cmd!()
         .args(["foo", &bad])
         .assert()
-        .success()
+        .code(1)
         .stderr(predicate::str::contains(expected));
 }
 
@@ -184,7 +184,7 @@ fn warns_dir_not_recursive() {
     cargo_bin_cmd!()
         .args(["fox", INPUTS_DIR, FOX])
         .assert()
-        .success()
+        .code(1)
         .stderr(predicate::str::contains("tests/inputs is a directory"))
         .stdout(predicate::str::contains(stdout));
 }
@@ -370,7 +370,7 @@ fn recursive_search_preserves_explicit_files_and_missing_path_errors() -> Result
         .current_dir(dir.path())
         .args(["-r", "match", "missing.txt", "sample.txt"])
         .assert()
-        .success()
+        .code(1)
         .stdout("sample.txt:match file\n")
         .stderr("missing.txt doesn't exists\n");
     Ok(())
@@ -440,5 +440,62 @@ fn debug_logging_preserves_match_output_without_storing_input() -> Result<()> {
     if persisted.contains(secret) {
         return Err("input content leaked into diagnostic file".into());
     }
+    Ok(())
+}
+
+#[test]
+fn missing_operand_returns_failure() {
+    cli_testing::cargo_bin_cmd!()
+        .args(["x", "/sanctuary-audit-missing/path"])
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr(predicates::str::contains("/sanctuary-audit-missing/path"));
+}
+
+#[test]
+#[cfg(unix)]
+#[allow(
+    clippy::panic_in_result_fn,
+    reason = "Assertions verify subprocess interruption; Result propagates setup errors."
+)]
+fn sigint_terminates_without_stdout_chatter() -> Result<()> {
+    use std::{
+        os::unix::process::ExitStatusExt,
+        process::{Command, Stdio},
+        time::{Duration, Instant},
+    };
+    let mut child = Command::new(cargo_bin_cmd!().get_program())
+        .args(["x", "-"])
+        .env("SANCTUARY_LOG_LEVEL", "off")
+        .env("SANCTUARY_LOG_STDERR", "off")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    // Give startup time to install any signal handler while stdin stays open.
+    std::thread::sleep(Duration::from_millis(200));
+    let sent = Command::new("kill")
+        .args(["-INT", &child.id().to_string()])
+        .status();
+    let start = Instant::now();
+    let mut interrupted = false;
+    if sent.is_ok_and(|status| status.success()) {
+        while start.elapsed() < Duration::from_secs(2) {
+            if child.try_wait()?.is_some() {
+                interrupted = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+    if !interrupted {
+        child.kill()?;
+    }
+    let output = child.wait_with_output()?;
+    assert!(interrupted, "SIGINT did not terminate the blocked search");
+    assert_eq!(output.status.signal(), Some(2));
+    assert_eq!(output.stdout, b"");
+    assert_eq!(output.stderr, b"");
     Ok(())
 }

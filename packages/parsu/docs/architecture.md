@@ -8,7 +8,9 @@ XML processor.
 
 [The CLI](../src/main.rs) reads a complete UTF-8 input string from a file or
 non-terminal stdin, calls `parse_xml`, and writes the resulting tree using debug
-formatting. It owns buffering, diagnostics, and flushing.
+formatting by default or a serde JSON envelope with `--json`. It owns buffering,
+anyhow diagnostic context, and flushing. Errors report the byte offset of the
+unparsed remainder without copying input contents into diagnostics.
 
 [The parser abstraction](../src/parser.rs) returns a parsed value and the remaining
 input, or an input slice identifying failure. [Combinators](../src/combinators.rs)

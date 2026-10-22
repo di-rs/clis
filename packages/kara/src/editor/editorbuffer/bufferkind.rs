@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::{Buffer, FileBuffer};
+use super::{Buffer, FileBuffer, SaveOutcome};
 
 pub enum BufferKind {
     Buffer(Buffer),
@@ -8,10 +8,10 @@ pub enum BufferKind {
 }
 
 impl BufferKind {
-    pub fn save(&self) -> Result<(), std::io::Error> {
+    pub fn save(&self) -> Result<SaveOutcome, std::io::Error> {
         match &self {
             Self::File(file_buffer) => file_buffer.save(),
-            Self::Buffer(_buffer) => Ok(()),
+            Self::Buffer(_buffer) => Ok(SaveOutcome::Saved),
         }
     }
 

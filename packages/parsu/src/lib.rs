@@ -2,12 +2,11 @@ use crate::{
     combinators::{either, left, one_or_more, pair, pred, right, zero_or_more},
     parser::{ParseResult, Parser},
 };
-use color_eyre::Result;
 
 mod combinators;
 mod parser;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Element {
     name: String,
     attributes: Vec<(String, String)>,

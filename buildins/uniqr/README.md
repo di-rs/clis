@@ -18,7 +18,8 @@ Reference: [GNU uniq](https://www.gnu.org/software/coreutils/manual/html_node/un
 Comparisons ignore the terminating newline but preserve spaces, tabs, and carriage
 returns. Output keeps the first line of each run unchanged. Input must be UTF-8; all runs are stored in
 memory before output. Only adjacent matches are collapsed. Output files are
-truncated, so do not use the input path as the output path.
+truncated. Input/output aliases, including hard links and symlinks, are rejected
+before truncation with status 65; the original input remains intact.
 
 ## Test notes
 

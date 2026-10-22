@@ -23,8 +23,8 @@ all input unconditionally. Very long lines or large counts can still require
 substantial memory. `+N` skips the prefix and streams the remainder; `+0` starts
 at the beginning, while unsigned or negative zero produces no output. Repeated
 `-` operands share stdin, so later occurrences encounter EOF after the first.
-There is no follow (`-f`) mode or size suffix syntax. File-open errors do not by
-themselves make the command fail.
+There is no follow (`-f`) mode or size suffix syntax. File-open errors go to stderr; remaining operands are processed and the final
+exit status is 1.
 
 Benchmark suite: [benches/cli-bench.toml](benches/cli-bench.toml).
 Use [cli-bench](../../tools/cli-bench/README.md) with `--reference` for a system

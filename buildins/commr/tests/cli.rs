@@ -305,3 +305,19 @@ fn file1_file2_123_delim() -> Result<()> {
 fn blank_file1() -> Result<()> {
     run(&[BLANK, FILE1], "blank_file1.out")
 }
+
+#[test]
+fn malformed_input_is_not_eof() -> Result<()> {
+    let dir = assert_fs::TempDir::new()?;
+    let empty = dir.path().join("empty");
+    std::fs::write(&empty, b"")?;
+    cli_testing::cargo_bin_cmd!()
+        .arg("-")
+        .arg(empty)
+        .write_stdin(b"a\n\xff\nz\n")
+        .assert()
+        .code(65)
+        .stdout("a\n")
+        .stderr(predicates::str::contains("Error:"));
+    Ok(())
+}

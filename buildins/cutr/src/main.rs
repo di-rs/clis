@@ -11,7 +11,7 @@ use cutr::Extract;
 
 fn main() -> std::process::ExitCode {
     cli_log::run("cutr", |cli| match run(&cli) {
-        Ok(()) => exitcode::OK,
+        Ok(failed) => i32::from(failed),
         Err(CliError::Config) => {
             cli_log::record_error(CliError::Config);
             exitcode::CONFIG
@@ -23,7 +23,8 @@ fn main() -> std::process::ExitCode {
     })
 }
 
-fn run(cli: &Cli) -> Result<(), CliError> {
+fn run(cli: &Cli) -> Result<bool, CliError> {
+    let mut failed = false;
     let mut writer = get_writer();
 
     for filename in &cli.files {
@@ -32,11 +33,14 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                 let extractor = Extract::try_from(&cli.extract)?;
                 extractor.extract(reader, &mut writer, cli.delimiter)?;
             }
-            Err(e) => cli_log::diagnostic!("Failed to open {}: {e}", filename.display()),
+            Err(e) => {
+                failed = true;
+                cli_log::diagnostic!("Failed to open {}: {e}", filename.display());
+            }
         }
     }
     writer.flush()?;
-    Ok(())
+    Ok(failed)
 }
 
 fn get_reader(path: &Path) -> Result<Box<dyn BufRead>, CliError> {

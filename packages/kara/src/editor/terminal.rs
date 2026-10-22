@@ -30,21 +30,29 @@ type Result<T> = std::result::Result<T, std::io::Error>;
 impl Terminal {
     pub fn initialize() -> Result<()> {
         enable_raw_mode()?;
-        Self::enter_alternate_screen()?;
-        Self::enable_line_wrap()?;
-        Self::clear_screen()?;
-        Self::move_to(Position { col: 0, row: 0 })?;
-        Self::execute()?;
-        Ok(())
+        let result = (|| {
+            Self::enter_alternate_screen()?;
+            Self::disable_line_wrap()?;
+            Self::clear_screen()?;
+            Self::move_to(Position { col: 0, row: 0 })?;
+            Self::execute()
+        })();
+        if result.is_err() {
+            let _ = Self::terminate();
+        }
+        result
     }
 
     pub fn terminate() -> Result<()> {
-        Self::leave_alternate_screen()?;
-        Self::disable_line_wrap()?;
-        Self::show_caret(BlinkingBlock)?;
-        Self::execute()?;
-        disable_raw_mode()?;
-        Ok(())
+        // Attempt every restoration even if stdout or another step fails.
+        let results = [
+            Self::leave_alternate_screen(),
+            Self::enable_line_wrap(),
+            Self::show_caret(BlinkingBlock),
+            Self::execute(),
+            disable_raw_mode(),
+        ];
+        results.into_iter().collect()
     }
 
     fn enter_alternate_screen() -> Result<()> {

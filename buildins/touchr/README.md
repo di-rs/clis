@@ -16,8 +16,7 @@
 
 Reference: [GNU touch](https://www.gnu.org/software/coreutils/manual/html_node/touch-invocation.html).
 Only modification time is explicitly set, not access time. The supported timestamp
-forms are `YYYYMMDDhhmm` and `YYYYMMDDhhmmss`, interpreted as UTC, despite the help
-text advertising `[[CC]YY]MMDDhhmm[.ss]`. No local-time parsing, reference-file option,
+forms are `YYYYMMDDhhmm` and `YYYYMMDDhhmmss`, interpreted as UTC. No local-time parsing, reference-file option,
 or separate access-time mode is implemented.
 
 [All commands](../../README.md)

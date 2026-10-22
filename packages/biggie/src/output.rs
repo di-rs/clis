@@ -31,6 +31,7 @@ pub fn single(
     path: &Path,
     count: u64,
     unit: &str,
+    report: bool,
     generate: impl FnOnce(&mut BufWriter<Destination>) -> Result<()>,
 ) -> Result<()> {
     if path.as_os_str() == "-" {
@@ -44,6 +45,9 @@ pub fn single(
     let file =
         File::create(path).with_context(|| format!("Cannot create file {}", path.display()))?;
     buffered(Destination::File(file), generate, count, unit)?;
+    if !report {
+        return Ok(());
+    }
     let mut stdout = io::stdout().lock();
     writeln!(
         stdout,
@@ -88,7 +92,12 @@ pub fn reject_alias(left: &Path, right: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn pair(left_path: &Path, right_path: &Path, options: &biggie::PairOptions) -> Result<()> {
+pub fn pair(
+    left_path: &Path,
+    right_path: &Path,
+    options: &biggie::PairOptions,
+    report: bool,
+) -> Result<()> {
     use std::os::unix::fs::MetadataExt;
     options.validate()?;
     reject_alias(left_path, right_path)?;
@@ -123,6 +132,9 @@ pub fn pair(left_path: &Path, right_path: &Path, options: &biggie::PairOptions) 
     right_flush?;
     let (left_count, right_count) = options.record_counts()?;
     log::info!(left_count, right_count; "generated pair");
+    if !report {
+        return Ok(());
+    }
     let mut stdout = io::stdout().lock();
     writeln!(
         stdout,

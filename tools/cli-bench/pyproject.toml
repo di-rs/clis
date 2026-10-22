@@ -2,7 +2,14 @@
 name = "cli-bench"
 version = "0.1.0"
 requires-python = ">=3.15"
-dependencies = ["pydantic>=2,<3"]
+dependencies = ["pydantic>=2,<3", "cli-check"]
 
-[tool.uv]
-package = false
+[project.scripts]
+cli-bench = "cli_bench.command:main"
+
+[build-system]
+requires = ["uv_build==0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+cli-check = { workspace = true }

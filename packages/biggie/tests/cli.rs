@@ -1456,3 +1456,122 @@ fn invalid_environment_is_ignored_for_help_and_version() {
             .stderr("");
     }
 }
+
+#[test]
+#[allow(
+    clippy::panic_in_result_fn,
+    reason = "Assertions verify observable CLI behavior; Result propagates fixture errors."
+)]
+fn json_preview_preserves_outputs_and_reports_counts() -> Result<()> {
+    let dir = TempDir::new()?;
+    dir.child("output").write_str("keep")?;
+    let result = command()
+        .current_dir(dir.path())
+        .args([
+            "--json",
+            "--dry-run",
+            "records",
+            "--record",
+            "x",
+            "--repeat",
+            "2",
+            "output",
+        ])
+        .assert()
+        .code(0)
+        .stderr("");
+    let value: serde_json::Value = serde_json::from_slice(&result.get_output().stdout)?;
+    assert_eq!(
+        value,
+        serde_json::json!({"ok":true,"data":{"operation":"records","dry_run":true,"outputs":[{"path":"output","count":2,"unit":"records"}]}})
+    );
+    dir.child("output").assert("keep");
+    let result = command()
+        .current_dir(dir.path())
+        .args(["--json", "records", "--record", "x", "output"])
+        .assert()
+        .code(0)
+        .stderr("");
+    let value: serde_json::Value = serde_json::from_slice(&result.get_output().stdout)?;
+    assert_eq!(value["ok"], true);
+    dir.child("output").assert("x\n");
+    let result = command()
+        .args(["--json", "records", "--record", "x", "-"])
+        .assert()
+        .code(1)
+        .stderr("");
+    let value: serde_json::Value = serde_json::from_slice(&result.get_output().stdout)?;
+    assert_eq!(
+        value,
+        serde_json::json!({"ok":false,"error":{
+            "kind":"operation",
+            "message":"--json requires named outputs or --dry-run; stdout is reserved for generated data"
+        }})
+    );
+    let result = command()
+        .args([
+            "--json", "records", "--repeat", "0", "--record", "x", "output",
+        ])
+        .assert()
+        .code(2)
+        .stderr("");
+    let value: serde_json::Value = serde_json::from_slice(&result.get_output().stdout)?;
+    assert_eq!(
+        value,
+        serde_json::json!({"ok":false,"error":{
+            "kind":"arguments",
+            "message":"error: invalid value '0' for '--repeat <REPEAT>': 0 is not in 1..18446744073709551615\n\nFor more information, try '--help'.\n"
+        }})
+    );
+    Ok(())
+}
+
+#[test]
+#[allow(
+    clippy::panic_in_result_fn,
+    reason = "Assertions verify observable CLI behavior."
+)]
+fn json_pair_reports_both_outputs() -> Result<()> {
+    let dir = TempDir::new()?;
+    dir.child("left").write_str("keep left")?;
+    dir.child("right").write_str("keep right")?;
+    for dry_run in [true, false] {
+        let mut cmd = command();
+        cmd.current_dir(dir.path()).arg("--json");
+        if dry_run {
+            cmd.arg("--dry-run");
+        }
+        let result = cmd
+            .args([
+                "pair", "-l", "left", "-r", "right", "-a", "1", "-j", "2", "-b", "3",
+            ])
+            .assert()
+            .code(0)
+            .stderr("");
+        let value: serde_json::Value = serde_json::from_slice(&result.get_output().stdout)?;
+        assert_eq!(
+            value,
+            serde_json::json!({"ok":true,"data":{
+                "operation":"pair", "dry_run":dry_run, "outputs":[
+                    {"path":"left","count":3,"unit":"records"},
+                    {"path":"right","count":5,"unit":"records"}
+                ]
+            }})
+        );
+        if dry_run {
+            dir.child("left").assert("keep left");
+            dir.child("right").assert("keep right");
+        } else {
+            // Unseeded pair keys are 16-digit hex ordinals: left 0..3, right 1..6.
+            assert_eq!(
+                std::fs::read(dir.path().join("left"))?,
+                b"0000000000000000\n0000000000000001\n0000000000000002\n"
+            );
+            assert_eq!(
+                std::fs::read(dir.path().join("right"))?,
+                b"0000000000000001\n0000000000000002\n0000000000000003\n0000000000000004\n0000000000000005\n"
+            );
+        }
+    }
+    Ok(())
+}
