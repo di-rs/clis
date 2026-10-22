@@ -541,3 +541,14 @@ fn task_15_unquoted_backslashes() {
         .stdout("<a b>\n<$HOME>\n<*>\n<ab>\n")
         .stderr("");
 }
+
+#[test]
+fn task_16_single_quote_backslashes() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args(["-c", "printf '<%s>\\n' 'a\\b' '\\$HOME' '\\\\' '\\n'"])
+        .assert()
+        .code(0)
+        .stdout("<a\\b>\n<\\$HOME>\n<\\\\>\n<\\n>\n")
+        .stderr("");
+}
