@@ -414,8 +414,8 @@ The task numbers are stable even when implementation order changes.
 | 65 | History persistence: write file | bash; Bash §9 | Verified in Bash mode: history -w replaces explicit/default files after cd; [task_65](../tests/audit.rs) | [65 PR](https://github.com/di-rs/sanctuary/pull/177) |
 | 66 | History persistence: append file | bash; Bash §9 | Verified in Bash mode: history -a preserves existing contents and appends each new entry once; [task_66](../tests/audit.rs) | [66 PR](https://github.com/di-rs/sanctuary/pull/178) |
 | 67 | History persistence: startup read | bash; Bash §9 | Verified in Bash mode: HISTFILE loads before the first command without executing entries; [task_67](../tests/audit.rs) | [67 PR](https://github.com/di-rs/sanctuary/pull/179) |
-| 68 | History persistence: exit write | bash; Bash §9 | Partial: fresh-file exit persistence verified; H68 reproduces ignored overwrite mode; [task_68](../tests/audit.rs) | Current task PR |
-| 69 | History persistence: exit append | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 69 |
+| 68 | History persistence: exit write | bash; Bash §9 | Partial: fresh-file exit persistence verified; H68 reproduces ignored overwrite mode; [task_68](../tests/audit.rs) | [68 PR](https://github.com/di-rs/sanctuary/pull/180) |
+| 69 | History persistence: exit append | bash; Bash §9 | Verified in Bash mode: exit appends unsaved entries without duplicating an earlier history -a; [task_69](../tests/audit.rs) | Current task PR |
 | 70 | Parameters: declare | bash declare; sh §2.5–2.6 | Verified: declare creates a shell variable (bash mode); [task_70](../tests/audit.rs) | [70 PR](https://github.com/di-rs/sanctuary/pull/131) |
 | 71 | Parameters: missing-variable diagnostics | bash declare; sh §2.5–2.6 | Verified: missing variable diagnostics (bash mode); [task_71](../tests/audit.rs) | [71 PR](https://github.com/di-rs/sanctuary/pull/132) |
 | 72 | Parameters: storage | bash declare; sh §2.5–2.6 | Verified: shell variable storage and export (sh mode); [task_72](../tests/audit.rs) | [72 PR](https://github.com/di-rs/sanctuary/pull/133) |

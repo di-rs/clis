@@ -1620,3 +1620,15 @@ fn task_68_exit_history_overwrite() -> anyhow::Result<()> {
     home.child("history").assert("replacement\n");
     Ok(())
 }
+
+#[test]
+fn task_69_exit_history_append() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    home.child("history").write_str("existing\n")?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["--bash", "-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("shopt -s histappend; history -c; history -s first; history -a; history -s second; exit 0\n")?;
+    terminal.finish(0)?;
+    home.child("history").assert("existing\nfirst\nsecond\n");
+    Ok(())
+}
