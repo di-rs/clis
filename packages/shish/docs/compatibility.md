@@ -354,8 +354,8 @@ The task numbers are stable even when implementation order changes.
 | 48 | Background jobs: output | interactive sh; §2.11/jobs/wait | Verified: background stdout and stderr reach the terminal; [task_48](../tests/audit.rs) | [48 PR](https://github.com/di-rs/sanctuary/pull/163) |
 | 49 | Background jobs: list one | interactive sh; §2.11/jobs/wait | Verified: one active job lists its number, state, and command; [task_49](../tests/audit.rs) | [49 PR](https://github.com/di-rs/sanctuary/pull/164) |
 | 50 | Background jobs: list multiple | interactive sh; §2.11/jobs/wait | Verified: two active jobs have distinct IDs and current/previous annotations; [task_50](../tests/audit.rs) | [50 PR](https://github.com/di-rs/sanctuary/pull/165) |
-| 51 | Background jobs: reap one | interactive sh; §2.11/jobs/wait | Verified: wait %1 completes the worker and removes it before the next command; [task_51](../tests/audit.rs) | Current task PR |
-| 52 | Background jobs: reap multiple | interactive sh; §2.11/jobs/wait | Unverified; dedicated audit pending | Planned task 52 |
+| 51 | Background jobs: reap one | interactive sh; §2.11/jobs/wait | Verified: wait %1 completes the worker and removes it before the next command; [task_51](../tests/audit.rs) | [51 PR](https://github.com/di-rs/sanctuary/pull/166) |
+| 52 | Background jobs: reap multiple | interactive sh; §2.11/jobs/wait | Verified: bare wait completes both workers and clears the job table; [task_52](../tests/audit.rs) | Current task PR |
 | 53 | Background jobs: reap before prompt | interactive sh; §2.11/jobs/wait | Unverified; dedicated audit pending | Planned task 53 |
 | 54 | Background jobs: recycle job numbers | interactive sh; §2.11/jobs/wait | Unverified; dedicated audit pending | Planned task 54 |
 | 55 | Pipelines: two commands | sh; §2.9.2 | Verified: pipeline output, final status, and bounded fixture execution; [task_55](../tests/audit.rs) | [55 PR](https://github.com/di-rs/sanctuary/pull/128) |
