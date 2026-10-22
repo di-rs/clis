@@ -767,3 +767,21 @@ fn task_24_completion_arguments() -> anyhow::Result<()> {
     terminal.send("7\n")?;
     terminal.finish(7)
 }
+
+#[test]
+fn task_26_executable_completion() -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    let home = assert_fs::TempDir::new()?;
+    let tool = home.child("shish_fixture_command");
+    tool.write_str("#!/bin/sh\nexit 23\n")?;
+    std::fs::set_permissions(tool.path(), std::fs::Permissions::from_mode(0o755))?;
+    let path = home.path().to_str().unwrap();
+    let mut terminal = support::pty::Pty::new(home.path(), &["-i"], &[("PATH", path)])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("shish_fixture_c\t")?;
+    terminal.expect("shish-test> shish_fixture_command ")?;
+    terminal.send("\n")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("exit $?\n")?;
+    terminal.finish(23)
+}
