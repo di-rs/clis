@@ -273,8 +273,8 @@ The task numbers are stable even when implementation order changes.
 | 70 | Parameters: declare | bash declare; sh §2.5–2.6 | Verified: declare creates a shell variable (bash mode); [task_70](../tests/audit.rs) | [70 PR](https://github.com/di-rs/sanctuary/pull/131) |
 | 71 | Parameters: missing-variable diagnostics | bash declare; sh §2.5–2.6 | Verified: missing variable diagnostics (bash mode); [task_71](../tests/audit.rs) | [71 PR](https://github.com/di-rs/sanctuary/pull/132) |
 | 72 | Parameters: storage | bash declare; sh §2.5–2.6 | Verified: shell variable storage and export (sh mode); [task_72](../tests/audit.rs) | [72 PR](https://github.com/di-rs/sanctuary/pull/133) |
-| 73 | Parameters: name validation | bash declare; sh §2.5–2.6 | Verified: invalid declaration names are rejected (bash mode); [task_73](../tests/audit.rs) | Current task PR |
-| 74 | Parameters: expansion | bash declare; sh §2.5–2.6 | Unverified; dedicated audit pending | Planned task 74 |
+| 73 | Parameters: name validation | bash declare; sh §2.5–2.6 | Verified: invalid declaration names are rejected (bash mode); [task_73](../tests/audit.rs) | [73 PR](https://github.com/di-rs/sanctuary/pull/134) |
+| 74 | Parameters: expansion | bash declare; sh §2.5–2.6 | Verified: quoted and unquoted variable expansion (sh mode); [task_74](../tests/audit.rs) | Current task PR |
 | 75 | Parameters: braced expansion | bash declare; sh §2.5–2.6 | Unverified; dedicated audit pending | Planned task 75 |
 | 76 | Parameters: empty expansion | bash declare; sh §2.5–2.6 | Unverified; dedicated audit pending | Planned task 76 |
 

@@ -705,3 +705,14 @@ fn task_73_variable_names() {
         .stdout("")
         .stderr(predicates::str::contains("bad-name"));
 }
+
+#[test]
+fn task_74_variable_expansion() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args(["-c", "v='a b'; printf '<%s>\\n' $v \"$v\""])
+        .assert()
+        .code(0)
+        .stdout("<a>\n<b>\n<a b>\n")
+        .stderr("");
+}
