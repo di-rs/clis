@@ -1377,3 +1377,16 @@ fn task_58_history_builtin() -> anyhow::Result<()> {
     home.child("errors").assert("");
     Ok(())
 }
+
+#[test]
+fn task_59_history_listing() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["--bash", "-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("history -c; history -s 'echo first'; history -s 'echo second'; history > listing 2> errors; exit $?\n")?;
+    terminal.finish(0)?;
+    home.child("listing")
+        .assert("    1  echo first\n    2  echo second\n");
+    home.child("errors").assert("");
+    Ok(())
+}
