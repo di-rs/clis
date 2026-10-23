@@ -1,0 +1,45 @@
+name: 🛡️ Codex Security repository scan
+
+on:
+  schedule:
+    - cron: '23 4 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  security:
+    name: 🛡️ Scan repository with Codex Security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: 🛠️ Set up the Ubuntu sandbox
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes bubblewrap apparmor-profiles
+          sudo apparmor_parser -r /usr/share/apparmor/extra-profiles/bwrap-userns-restrict
+      - name: 📥 Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 🔎 Scan repository and save reports
+        uses: openai/codex-security@3f61e5150981a5087c32e4395bbaa8ce5ce0c3e3 # action-v0.3.0
+        with:
+          scope: repository
+          model: gpt-6-sol
+          effort: high
+          # Estimated USD stop threshold; in-flight requests can exceed it.
+          max-cost: '5'
+          fail-on-severity: none
+          upload-artifacts: 'true'
+        env:
+          OPENAI_API_KEY: ${{ secrets.CODEX_SECURITY_API_KEY }}
