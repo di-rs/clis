@@ -92,7 +92,12 @@ def value(node: Node, data: bytes) -> str:
 
 
 def nesting(node: Node, depth: int = 0) -> int:
-    depth += int(node.type in CONTROL)
+    alternative = (
+        node.type in {"if_expression", "if_statement"}
+        and node.parent is not None
+        and node.parent.type == "else_clause"
+    )
+    depth += int(node.type in CONTROL and not alternative)
     return max(
         [
             depth,
@@ -112,6 +117,15 @@ def identity(node: Node, data: bytes) -> str:
         name = current.child_by_field_name("name")
         if name:
             names.append(value(name, data))
+        elif current.type == "impl_item":
+            implementing_type = current.child_by_field_name("type")
+            trait = current.child_by_field_name("trait")
+            if implementing_type:
+                type_name = re.sub(r"\s+", "", value(implementing_type, data))
+                if trait:
+                    trait_name = re.sub(r"\s+", "", value(trait, data))
+                    type_name = f"<{type_name} as {trait_name}>"
+                names.append(type_name)
         current = current.parent
     return "::".join(reversed(names)) or f"anonymous:{node.type}"
 
