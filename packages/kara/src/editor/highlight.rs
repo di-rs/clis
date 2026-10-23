@@ -118,6 +118,7 @@ pub fn style(syntax: Option<Kind>, search: Option<MatchKind>) -> Style {
             Some(Kind::Keyword) => Style::new().fg(Color::Blue),
             Some(Kind::Type) => Style::new().fg(Color::Green),
             Some(Kind::Literal) => Style::new().fg(Color::Magenta),
+            Some(Kind::Character) => Style::new().fg(Color::Rgb(255, 191, 0)),
             None => Style::default(),
         },
     }

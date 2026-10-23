@@ -6,6 +6,7 @@ pub enum Kind {
     Keyword,
     Type,
     Literal,
+    Character,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -24,6 +25,15 @@ pub fn line(text: &str, _incoming: LexState) -> (Vec<Annotation>, LexState) {
         let Some(word) = next_word(remaining) else {
             break;
         };
+        if let Some(length) = character_length(remaining) {
+            let end = byte.saturating_add(length);
+            annotations.push(Annotation {
+                bytes: byte..end,
+                kind: Kind::Character,
+            });
+            byte = end;
+            continue;
+        }
         let length = number_length(remaining, word)
             .filter(|length| token_is_delimited(text, byte, byte.saturating_add(*length)));
         let end = byte.saturating_add(length.unwrap_or(word.len()));
@@ -86,6 +96,21 @@ fn token_is_delimited(text: &str, start: usize, end: usize) -> bool {
         character.is_whitespace() || (character.is_ascii_punctuation() && character != '_')
     };
     before.is_none_or(is_separator) && after.is_none_or(is_separator)
+}
+
+fn character_length(remaining: &str) -> Option<usize> {
+    let content = remaining.strip_prefix('\'')?;
+    let mut escaped = false;
+    for (byte, character) in content.char_indices() {
+        if escaped {
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else if character == '\'' {
+            return Some(byte.saturating_add(2));
+        }
+    }
+    None
 }
 
 fn word_kind(word: &str) -> Option<Kind> {
@@ -279,5 +304,30 @@ mod tests {
                 .collect();
             assert_eq!(actual, expected, "{text}");
         }
+    }
+
+    #[test]
+    fn quoted_characters_respect_escapes_and_hide_inner_tokens() {
+        let text = r"'a' '\n' '\'' '\\' '界' 'definitelynotachar' '12' 12";
+        let actual: Vec<_> = line(text, LexState)
+            .0
+            .into_iter()
+            .filter(|annotation| annotation.kind == Kind::Character)
+            .filter_map(|annotation| text.get(annotation.bytes))
+            .collect();
+        assert_eq!(
+            actual,
+            [
+                "'a'",
+                r"'\n'",
+                r"'\''",
+                r"'\\'",
+                "'界'",
+                "'definitelynotachar'",
+                "'12'"
+            ]
+        );
+        assert_eq!(tokens(text), ["12"]);
+        assert_eq!(character_length("'unterminated"), None);
     }
 }
