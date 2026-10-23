@@ -34,8 +34,8 @@
           [
             row.argument.help,
             row.argument.id,
-            row.argument.long ?? "",
-            row.argument.short ?? "",
+            row.argument.long ? `--${row.argument.long}` : "",
+            row.argument.short ? `-${row.argument.short}` : "",
             ...row.argument.aliases,
             node.command.name,
             ...node.path,

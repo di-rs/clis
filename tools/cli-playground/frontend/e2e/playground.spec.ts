@@ -596,6 +596,18 @@ test("explorer exposes change details and inserts flags without values or execut
   await expect.poll(() => inputs(session).join("")).toBe(" --format json");
 });
 
+test("search finds flags by their displayed long and short spellings", async ({ page }) => {
+  const [session] = await openPlayground(page);
+  await openExplorer(page);
+  const search = page.getByRole("textbox", { name: "Search commands and flags" });
+  for (const query of ["--number", "-n", "number"]) {
+    await search.fill(query);
+    await expect(page.getByRole("button", { name: "Insert --number", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Insert --format", exact: true })).toHaveCount(0);
+  }
+  expect(inputs(session)).toEqual([]);
+});
+
 test("long references keep search pinned and sample files reachable without disturbing the terminal", async ({
   page,
 }) => {
