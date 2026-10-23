@@ -18,59 +18,74 @@ pub struct Annotation {
 }
 
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LexState;
+pub struct LexState {
+    block_depth: usize,
+}
 
-pub fn line(text: &str, _incoming: LexState) -> (Vec<Annotation>, LexState) {
+pub fn line(text: &str, mut state: LexState) -> (Vec<Annotation>, LexState) {
     let mut annotations = Vec::new();
     let mut byte = 0;
-    while let Some(remaining) = text.get(byte..) {
-        let Some(word) = next_word(remaining) else {
-            break;
+    while byte < text.len() {
+        let remaining = text.get(byte..).unwrap_or_default();
+        let (length, kind) = if state.block_depth > 0 || remaining.starts_with("/*") {
+            (block_length(remaining, &mut state), Some(Kind::Comment))
+        } else if remaining.starts_with("//") {
+            (remaining.len(), Some(Kind::Comment))
+        } else if let Some(length) = character_length(remaining) {
+            (length, Some(Kind::Character))
+        } else if let Some(length) = lifetime_length(remaining) {
+            (length, Some(Kind::Lifetime))
+        } else {
+            let Some(word) = next_word(remaining) else {
+                break;
+            };
+            number_length(remaining, word)
+                .filter(|length| token_is_delimited(text, byte, byte.saturating_add(*length)))
+                .map_or_else(
+                    || {
+                        (
+                            word.len(),
+                            word_kind(word).filter(|_| {
+                                token_is_delimited(text, byte, byte.saturating_add(word.len()))
+                            }),
+                        )
+                    },
+                    |length| (length, Some(Kind::Number)),
+                )
         };
-        if remaining.starts_with("//") {
-            annotations.push(Annotation {
-                bytes: byte..text.len(),
-                kind: Kind::Comment,
-            });
+        let end = byte.saturating_add(length);
+        if end == byte {
             break;
         }
-        if let Some(length) = character_length(remaining) {
-            let end = byte.saturating_add(length);
+        if let Some(kind) = kind {
             annotations.push(Annotation {
                 bytes: byte..end,
-                kind: Kind::Character,
-            });
-            byte = end;
-            continue;
-        }
-        if let Some(length) = lifetime_length(remaining) {
-            let end = byte.saturating_add(length);
-            annotations.push(Annotation {
-                bytes: byte..end,
-                kind: Kind::Lifetime,
-            });
-            byte = end;
-            continue;
-        }
-        let length = number_length(remaining, word)
-            .filter(|length| token_is_delimited(text, byte, byte.saturating_add(*length)));
-        let end = byte.saturating_add(length.unwrap_or(word.len()));
-        if length.is_some() {
-            annotations.push(Annotation {
-                bytes: byte..end,
-                kind: Kind::Number,
-            });
-        } else if let Some(kind) = word_kind(word)
-            && token_is_delimited(text, byte, byte.saturating_add(word.len()))
-        {
-            annotations.push(Annotation {
-                bytes: byte..byte.saturating_add(word.len()),
                 kind,
             });
         }
         byte = end;
     }
-    (annotations, LexState)
+    (annotations, state)
+}
+
+fn block_length(text: &str, state: &mut LexState) -> usize {
+    let mut byte = 0;
+    while byte < text.len() {
+        let remaining = text.as_bytes().get(byte..).unwrap_or_default();
+        if remaining.starts_with(b"/*") {
+            state.block_depth = state.block_depth.saturating_add(1);
+            byte = byte.saturating_add(2);
+        } else if remaining.starts_with(b"*/") {
+            state.block_depth = state.block_depth.saturating_sub(1);
+            byte = byte.saturating_add(2);
+            if state.block_depth == 0 {
+                return byte;
+            }
+        } else {
+            byte = byte.saturating_add(1);
+        }
+    }
+    byte
 }
 
 // Rust punctuation separates tokens even where Unicode word boundaries do
@@ -294,7 +309,7 @@ mod tests {
     use super::*;
 
     fn tokens(text: &str) -> Vec<&str> {
-        line(text, LexState)
+        line(text, LexState::default())
             .0
             .into_iter()
             .filter(|annotation| annotation.kind == Kind::Number)
@@ -325,7 +340,7 @@ mod tests {
             ("[1.2e-3;4]", vec![1..7, 8..9]),
             ("界 (12,34)", vec![5..7, 8..10]),
         ] {
-            let ranges: Vec<_> = line(text, LexState)
+            let ranges: Vec<_> = line(text, LexState::default())
                 .0
                 .into_iter()
                 .map(|annotation| annotation.bytes)
@@ -367,7 +382,7 @@ mod tests {
     #[test]
     fn recognizes_complete_keywords_types_and_literals() {
         let text = "let Option Some true i32 mylet enum_value False";
-        let actual: Vec<_> = line(text, LexState)
+        let actual: Vec<_> = line(text, LexState::default())
             .0
             .into_iter()
             .filter_map(|annotation| {
@@ -397,7 +412,7 @@ mod tests {
             ),
             ("界fn fn界 ℘Option e\u{301}true", vec![]),
         ] {
-            let actual: Vec<_> = line(text, LexState)
+            let actual: Vec<_> = line(text, LexState::default())
                 .0
                 .into_iter()
                 .filter_map(|annotation| text.get(annotation.bytes))
@@ -409,7 +424,7 @@ mod tests {
     #[test]
     fn quoted_characters_respect_escapes_and_hide_inner_tokens() {
         let text = r"'a' '\n' '\'' '\\' '界' 'definitelynotachar' '12' 12";
-        let actual: Vec<_> = line(text, LexState)
+        let actual: Vec<_> = line(text, LexState::default())
             .0
             .into_iter()
             .filter(|annotation| annotation.kind == Kind::Character)
@@ -433,7 +448,7 @@ mod tests {
     #[test]
     fn lifetimes_do_not_consume_neighboring_quotes() {
         let text = "fn f<'a, 'b>(x: &'a str) -> &'static str { 'a' }";
-        let annotations = line(text, LexState).0;
+        let annotations = line(text, LexState::default()).0;
         let lifetimes: Vec<_> = annotations
             .iter()
             .filter(|annotation| annotation.kind == Kind::Lifetime)
@@ -455,7 +470,7 @@ mod tests {
         // a space character. Exercise each form independently.
         for text in ["'a-'", "'a\u{301}'", "'a'", r"'\n'", r"'\''"] {
             assert_eq!(
-                line(text, LexState).0,
+                line(text, LexState::default()).0,
                 [Annotation {
                     bytes: 0..text.len(),
                     kind: Kind::Character,
@@ -463,7 +478,7 @@ mod tests {
             );
         }
         let text = "'a-', 'a\u{301}'";
-        let actual: Vec<_> = line(text, LexState)
+        let actual: Vec<_> = line(text, LexState::default())
             .0
             .into_iter()
             .filter_map(|annotation| {
@@ -485,7 +500,7 @@ mod tests {
             "'a: loop { break 'a; }",
             "fn f<'a>() { '\\\''; }",
         ] {
-            let annotations = line(text, LexState).0;
+            let annotations = line(text, LexState::default()).0;
             let first = annotations
                 .iter()
                 .find(|annotation| text.get(annotation.bytes.clone()) == Some("'a"));
@@ -498,7 +513,7 @@ mod tests {
         // Without a separator, a later quote followed by a name is ambiguous;
         // retain the lifetime interpretation rather than joining the tokens.
         let text = "'a-'b";
-        let actual: Vec<_> = line(text, LexState)
+        let actual: Vec<_> = line(text, LexState::default())
             .0
             .into_iter()
             .filter_map(|annotation| {
@@ -522,7 +537,7 @@ mod tests {
             r"'\\'",
         ] {
             let text = format!("accept!('a-{character});");
-            let actual: Vec<_> = line(&text, LexState)
+            let actual: Vec<_> = line(&text, LexState::default())
                 .0
                 .into_iter()
                 .filter_map(|annotation| {
@@ -542,7 +557,7 @@ mod tests {
     fn line_comments_take_precedence_over_inner_tokens() {
         for text in ["// let 42", "/// Some(12)", "//! 'a' true"] {
             assert_eq!(
-                line(text, LexState).0,
+                line(text, LexState::default()).0,
                 vec![Annotation {
                     bytes: 0..text.len(),
                     kind: Kind::Comment
@@ -550,11 +565,50 @@ mod tests {
             );
         }
         assert_eq!(tokens("let x = 12; // Some(34) 'a'"), ["12"]);
-        let kinds: Vec<_> = line("'//' // comment", LexState)
+        let kinds: Vec<_> = line("'//' // comment", LexState::default())
             .0
             .into_iter()
             .map(|annotation| annotation.kind)
             .collect();
         assert_eq!(kinds, [Kind::Character, Kind::Comment]);
+    }
+    #[test]
+    fn nested_block_comments_carry_state_across_lines() {
+        let (_, state) = line("let x = /* outer /* inner", LexState::default());
+        assert_eq!(state.block_depth, 2);
+        let (middle, state) = line("still */ outer", state);
+        assert_eq!(state.block_depth, 1);
+        assert_eq!(
+            middle,
+            vec![Annotation {
+                bytes: 0..14,
+                kind: Kind::Comment
+            }]
+        );
+        let (end, state) = line("*/ 12", state);
+        assert_eq!(state, LexState::default());
+        assert_eq!(
+            end,
+            vec![
+                Annotation {
+                    bytes: 0..2,
+                    kind: Kind::Comment
+                },
+                Annotation {
+                    bytes: 3..5,
+                    kind: Kind::Number
+                }
+            ]
+        );
+        assert_eq!(tokens("'/*' 12 /* 34 */ 56"), ["12", "56"]);
+        assert_eq!(line("// /*", LexState::default()).1, LexState::default());
+        assert_eq!(tokens("'a'as u8"), Vec::<&str>::new());
+        assert_eq!(
+            line("'a'as", LexState::default())
+                .0
+                .last()
+                .map(|annotation| annotation.kind),
+            Some(Kind::Keyword)
+        );
     }
 }
