@@ -1,0 +1,15 @@
+schema = 1
+binary = "cli-fixtures"
+
+[[cases]]
+name = "version"
+args = ["--version"]
+origin = { manual = "Clap version output follows the package's declared name and version." }
+expect = { exit = 0, stdout = "cli-fixtures 0.1.0\n", stderr = "" }
+
+[[cases]]
+name = "custom_version"
+execution = "rust"
+args = ["--version"]
+origin = { manual = "Exercises attribute lifecycle against the built CLI's version contract." }
+expect = { exit = 0, stdout = "cli-fixtures 0.1.0\n", stderr = "" }

@@ -1,0 +1,167 @@
+schema = 1
+binary = "catr"
+
+[references.bsd-cat]
+program = "/bin/cat"
+platform = "macos"
+
+[[cases]]
+name = "bustle_stdin"
+args = ["-"]
+stdin = { mode = "pipe", files = ["inputs/the-bustle.txt"] }
+origin = { reference = "bsd-cat" }
+expect = { exit = 0, stdout_file = "expected/the-bustle.txt.stdin.out", stderr = "" }
+
+[[cases]]
+name = "bustle_stdin_n"
+args = ["-n", "-"]
+stdin = { mode = "pipe", files = ["inputs/the-bustle.txt"] }
+origin = { reference = "bsd-cat" }
+expect = { exit = 0, stdout_file = "expected/the-bustle.txt.n.stdin.out", stderr = "" }
+
+[[cases]]
+name = "bustle_stdin_b"
+args = ["-b", "-"]
+stdin = { mode = "pipe", files = ["inputs/the-bustle.txt"] }
+origin = { reference = "bsd-cat" }
+expect = { exit = 0, stdout_file = "expected/the-bustle.txt.b.stdin.out", stderr = "" }
+
+[[cases]]
+name = "empty"
+args = ["tests/inputs/empty.txt"]
+inputs = ["inputs/empty.txt"]
+origin = { reference = "bsd-cat" }
+expect = { exit = 0, stdout_file = "expected/empty.txt.out", stderr = "" }
+
+[[cases]]
+name = "empty_n"
+args = ["-n", "tests/inputs/empty.txt"]
+inputs = ["inputs/empty.txt"]
+origin = { reference = "bsd-cat" }
+expect = { exit = 0, stdout_file = "expected/empty.txt.n.out", stderr = "" }
+
+[[cases]]
+name = "empty_b"
+args = ["-b", "tests/inputs/empty.txt"]
+inputs = ["inputs/empty.txt"]
+origin = { reference = "bsd-cat" }
+expect = { exit = 0, stdout_file = "expected/empty.txt.b.out", stderr = "" }
+
+[[cases]]
+name = "fox"
+args = ["tests/inputs/fox.txt"]
+inputs = ["inputs/fox.txt"]
+origin = { reference = "bsd-cat" }
+expect = { exit = 0, stdout_file = "expected/fox.txt.out", stderr = "" }
+
+[[cases]]
+name = "fox_n"
+args = ["-n", "tests/inputs/fox.txt"]
+inputs = ["inputs/fox.txt"]
+origin = { reference = "bsd-cat" }
+expect = { exit = 0, stdout_file = "expected/fox.txt.n.out", stderr = "" }
+
+[[cases]]
+name = "fox_b"
+args = ["-b", "tests/inputs/fox.txt"]
+inputs = ["inputs/fox.txt"]
+origin = { reference = "bsd-cat" }
+expect = { exit = 0, stdout_file = "expected/fox.txt.b.out", stderr = "" }
+
+[[cases]]
+name = "spiders"
+args = ["tests/inputs/spiders.txt"]
+inputs = ["inputs/spiders.txt"]
+origin = { reference = "bsd-cat" }
+expect = { exit = 0, stdout_file = "expected/spiders.txt.out", stderr = "" }
+
+[[cases]]
+name = "spiders_n"
+args = ["-n", "tests/inputs/spiders.txt"]
+inputs = ["inputs/spiders.txt"]
+origin = { reference = "bsd-cat" }
+expect = { exit = 0, stdout_file = "expected/spiders.txt.n.out", stderr = "" }
+
+[[cases]]
+name = "spiders_b"
+args = ["-b", "tests/inputs/spiders.txt"]
+inputs = ["inputs/spiders.txt"]
+origin = { reference = "bsd-cat" }
+expect = { exit = 0, stdout_file = "expected/spiders.txt.b.out", stderr = "" }
+
+[[cases]]
+name = "bustle"
+args = ["tests/inputs/the-bustle.txt"]
+inputs = ["inputs/the-bustle.txt"]
+origin = { reference = "bsd-cat" }
+expect = { exit = 0, stdout_file = "expected/the-bustle.txt.out", stderr = "" }
+
+[[cases]]
+name = "bustle_n"
+args = ["-n", "tests/inputs/the-bustle.txt"]
+inputs = ["inputs/the-bustle.txt"]
+origin = { reference = "bsd-cat" }
+expect = { exit = 0, stdout_file = "expected/the-bustle.txt.n.out", stderr = "" }
+
+[[cases]]
+name = "bustle_b"
+args = ["-b", "tests/inputs/the-bustle.txt"]
+inputs = ["inputs/the-bustle.txt"]
+origin = { reference = "bsd-cat" }
+expect = { exit = 0, stdout_file = "expected/the-bustle.txt.b.out", stderr = "" }
+
+[[cases]]
+name = "all"
+args = ["tests/inputs/fox.txt", "tests/inputs/spiders.txt", "tests/inputs/the-bustle.txt"]
+inputs = ["inputs/fox.txt", "inputs/spiders.txt", "inputs/the-bustle.txt"]
+origin = { reference = "bsd-cat" }
+expect = { exit = 0, stdout_file = "expected/all.out", stderr = "" }
+
+[[cases]]
+name = "all_n"
+args = ["tests/inputs/fox.txt", "tests/inputs/spiders.txt", "tests/inputs/the-bustle.txt", "-n"]
+inputs = ["inputs/fox.txt", "inputs/spiders.txt", "inputs/the-bustle.txt"]
+origin = { reference = "bsd-cat", args = ["-n", "tests/inputs/fox.txt", "tests/inputs/spiders.txt", "tests/inputs/the-bustle.txt"], reason = "Use the BSD reference option spelling and place options before file operands." }
+expect = { exit = 0, stdout_file = "expected/all.n.out", stderr = "" }
+
+[[cases]]
+name = "all_b"
+args = ["tests/inputs/fox.txt", "tests/inputs/spiders.txt", "tests/inputs/the-bustle.txt", "-b"]
+inputs = ["inputs/fox.txt", "inputs/spiders.txt", "inputs/the-bustle.txt"]
+origin = { reference = "bsd-cat", args = ["-b", "tests/inputs/fox.txt", "tests/inputs/spiders.txt", "tests/inputs/the-bustle.txt"], reason = "Use the BSD reference option spelling and place options before file operands." }
+expect = { exit = 0, stdout_file = "expected/all.b.out", stderr = "" }
+
+[[cases]]
+name = "mutipspaces"
+args = ["tests/inputs/spiders-multispaces.txt"]
+inputs = ["inputs/spiders-multispaces.txt"]
+origin = { reference = "bsd-cat" }
+expect = { exit = 0, stdout_file = "expected/spiders-multispaces.txt.out", stderr = "" }
+
+[[cases]]
+name = "mutipspaces_s"
+args = ["tests/inputs/spiders-multispaces.txt", "-s"]
+inputs = ["inputs/spiders-multispaces.txt"]
+origin = { reference = "bsd-cat", args = ["-s", "tests/inputs/spiders-multispaces.txt"], reason = "Use the BSD reference option spelling and place options before file operands." }
+expect = { exit = 0, stdout_file = "expected/spiders-multispaces.txt.s.out", stderr = "" }
+
+[[cases]]
+name = "mutipspaces_s_n"
+args = ["tests/inputs/spiders-multispaces.txt", "-s", "-n"]
+inputs = ["inputs/spiders-multispaces.txt"]
+origin = { reference = "bsd-cat", args = ["-s", "-n", "tests/inputs/spiders-multispaces.txt"], reason = "Use the BSD reference option spelling and place options before file operands." }
+expect = { exit = 0, stdout_file = "expected/spiders-multispaces.txt.s.n.out", stderr = "" }
+
+[[cases]]
+name = "mutipspaces_s_b"
+args = ["tests/inputs/spiders-multispaces.txt", "-s", "-b"]
+inputs = ["inputs/spiders-multispaces.txt"]
+origin = { reference = "bsd-cat", args = ["-s", "-b", "tests/inputs/spiders-multispaces.txt"], reason = "Use the BSD reference option spelling and place options before file operands." }
+expect = { exit = 0, stdout_file = "expected/spiders-multispaces.txt.s.b.out", stderr = "" }
+
+[[cases]]
+name = "bustle_u"
+args = ["tests/inputs/the-bustle.txt", "-u"]
+inputs = ["inputs/the-bustle.txt"]
+origin = { reference = "bsd-cat", args = ["-u", "tests/inputs/the-bustle.txt"], reason = "Use the BSD reference option spelling and place options before file operands." }
+expect = { exit = 0, stdout_file = "expected/the-bustle.txt.out", stderr = "" }

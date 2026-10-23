@@ -10,6 +10,14 @@ readme = "README.md"
 
 [dependencies]
 assert_cmd.workspace = true
+assert_fs.workspace = true
+cli-testing-macros = { version = "0.1.0", path = "../cli-testing-macros" }
+libtest-mimic = "0.8.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json.workspace = true
+sha2 = "0.11.1"
+toml = "1.1.8"
+wait-timeout = "0.2.1"
 
 [dev-dependencies]
 assert_fs.workspace = true

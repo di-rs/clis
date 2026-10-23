@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["packages/biggie", "packages/kara", "packages/parsu", "packages/shish", "utils/*", "buildins/*"]
+members = ["packages/biggie", "packages/kara", "packages/parsu", "packages/shish", "utils/*", "buildins/*", "tools/cli-fixtures"]
 
 [workspace.package]
 authors = ["Dima P <dimapm@pm.me>"]

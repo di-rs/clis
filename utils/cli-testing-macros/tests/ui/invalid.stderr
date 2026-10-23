@@ -1,0 +1,89 @@
+error: #[test_case] requires a synchronous, safe, nongeneric Rust function
+ --> tests/ui/invalid.rs:6:1
+  |
+6 | async fn asynchronous(_: &mut Context) {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: #[test_case] requires a synchronous, safe, nongeneric Rust function
+ --> tests/ui/invalid.rs:9:1
+  |
+9 | unsafe fn unsafe_function(_: &mut Context) {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: #[test_case] requires a synchronous, safe, nongeneric Rust function
+  --> tests/ui/invalid.rs:12:1
+   |
+12 | fn generic<T>(cx: &mut Context) {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: #[test_case] requires exactly one parameter: cx: &mut Context
+  --> tests/ui/invalid.rs:15:1
+   |
+15 | fn missing_context() {}
+   | ^^^^^^^^^^^^^^^^^^^^
+
+error: #[test_case] requires exactly one parameter: cx: &mut Context
+  --> tests/ui/invalid.rs:18:18
+   |
+18 | fn extra_context(cx: &mut Context, other: &mut Context) {}
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: context must be borrowed as &mut Context
+  --> tests/ui/invalid.rs:21:26
+   |
+21 | fn immutable_context(cx: &Context) {}
+   |                          ^^^^^^^^
+
+error: context must be borrowed as &mut Context
+  --> tests/ui/invalid.rs:24:22
+   |
+24 | fn owned_context(cx: Context) {}
+   |                      ^^^^^^^
+
+error: context parameter must be an identifier
+  --> tests/ui/invalid.rs:27:22
+   |
+27 | fn discarded_context(_: &mut Context) {}
+   |                      ^
+
+error: #[test_case] supports () or cli_testing::Result<()>
+  --> tests/ui/invalid.rs:30:35
+   |
+30 | fn wrong_return(cx: &mut Context) -> bool { true }
+   |                                   ^^^^^^^
+
+error: #[test_case] supplies #[test] and cannot be combined with #[test] or #[should_panic]
+  --> tests/ui/invalid.rs:33:1
+   |
+33 | #[test]
+   | ^^^^^^^
+
+error: #[test_case] supplies #[test] and cannot be combined with #[test] or #[should_panic]
+  --> tests/ui/invalid.rs:37:1
+   |
+37 | #[should_panic]
+   | ^^^^^^^^^^^^^^^
+
+error: #[test_case] supplies #[test] and cannot be combined with #[test] or #[should_panic]
+  --> tests/ui/invalid.rs:41:1
+   |
+41 | #[cfg_attr(all(), should_panic)]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: expected string literal
+  --> tests/ui/invalid.rs:44:13
+   |
+44 | #[test_case(1)]
+   |             ^
+
+error: #[test_case] supports () or cli_testing::Result<()>
+  --> tests/ui/invalid.rs:48:35
+   |
+48 | fn wrong_result(cx: &mut Context) -> Result<u8, ()> { Ok(1) }
+   |                                   ^^^^^^^^^^^^^^^^^
+
+error: #[test_case] requires a synchronous, safe, nongeneric Rust function
+  --> tests/ui/invalid.rs:51:1
+   |
+51 | const fn constant(cx: &mut Context) {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

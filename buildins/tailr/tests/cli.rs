@@ -996,14 +996,8 @@ fn broken_stdout_does_not_wait_for_later_stdin() -> Result<()> {
         drop(reader);
         let (stdin, pending_input) = io::pipe()?;
         // A standard Command preserves the deliberately closed stdout pipe.
-        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_tailr"));
-        command
-            .args(["-q", mode, "+1"])
-            .arg(&input)
-            .arg("-")
-            .env("SANCTUARY_LOG_LEVEL", "off")
-            .env("SANCTUARY_LOG_STDERR", "off")
-            .env("LC_ALL", "C");
+        let mut command = cli_testing::context!().std_command();
+        command.args(["-q", mode, "+1"]).arg(&input).arg("-");
         let mut child = command
             .stdin(stdin)
             .stdout(writer)

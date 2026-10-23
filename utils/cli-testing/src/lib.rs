@@ -3,6 +3,17 @@
 use std::{ffi::OsStr, path::Path, time::Duration};
 
 pub use assert_cmd::Command;
+pub use cli_testing_macros::test_case;
+
+pub mod catalog;
+mod context;
+mod error;
+mod harness;
+pub mod recording;
+pub mod reference;
+pub use context::{Context, TestContext, Workspace, customize};
+pub use error::{Error, Result};
+pub use harness::run_catalog;
 
 mod fixtures;
 pub use fixtures::Fixtures;
@@ -20,24 +31,52 @@ pub use assert_cmd::cargo::cargo_bin;
 /// blocked stdin writer. Run tests under nextest's outer CI timeout as well.
 #[must_use]
 pub fn command(binary: impl AsRef<OsStr>, package_dir: impl AsRef<Path>) -> Command {
-    let mut command = Command::new(binary);
+    let mut command = Command::from_std(std_command(binary, package_dir));
+    command.timeout(Duration::from_secs(30));
     command
-        .current_dir(package_dir)
-        .timeout(Duration::from_secs(30));
+}
+
+/// Configure a standard process command for custom pipes and signal handling.
+/// Callers own process deadlines and child cleanup.
+#[must_use]
+pub fn std_command(
+    binary: impl AsRef<OsStr>,
+    package_dir: impl AsRef<Path>,
+) -> std::process::Command {
+    let mut command = std::process::Command::new(binary);
+    command.current_dir(package_dir);
     for (key, _) in std::env::vars_os() {
         if key.to_string_lossy().starts_with("SANCTUARY_LOG_") {
             command.env_remove(key);
         }
     }
-    command.envs([
+    command.envs(default_environment());
+    command
+}
+
+pub(crate) fn default_environment() -> std::collections::BTreeMap<String, String> {
+    [
         ("LC_ALL", "C"),
         ("TZ", "UTC"),
         ("NO_COLOR", "1"),
         ("TERM", "dumb"),
         ("SANCTUARY_LOG_LEVEL", "off"),
         ("SANCTUARY_LOG_STDERR", "off"),
-    ]);
-    command
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_owned(), value.to_owned()))
+    .collect()
+}
+
+/// Build a test context using the consuming package's executable and directory.
+#[macro_export]
+macro_rules! context {
+    () => {
+        $crate::TestContext::new(
+            $crate::cargo_bin!(env!("CARGO_PKG_NAME")),
+            env!("CARGO_MANIFEST_DIR"),
+        )
+    };
 }
 
 /// Discover the consuming package's built CLI and apply [`command`] defaults.

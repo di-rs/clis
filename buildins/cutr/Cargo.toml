@@ -20,3 +20,8 @@ rand = "0.10.3"
 
 [lints]
 workspace = true
+
+[[test]]
+name = "catalog"
+path = "tests/catalog.rs"
+harness = false

@@ -7,102 +7,157 @@ description: Use when adding, changing, or reviewing CLI tests, fixture expectat
 
 ## Choose the test boundary
 
-- Test observable CLI behavior through the built executable in the owning
-  package's `tests/cli.rs`. E2E coverage is required.
+- Test observable CLI behavior through the built executable in the owning package.
+  Keep native E2E tests in `tests/cli.rs`; catalog packages also register
+  `tests/catalog.rs` as `[[test]] name = "catalog", harness = false`.
+- Use `tests/cases.toml` for straightforward invocations. Use `#[test_case]` for
+  Rust customization of one catalog case. Keep multiple commands, signals,
+  deadlines, and custom pipe orchestration in ordinary Rust tests. Do not grow
+  TOML into a programming language or add a separate Rust scenario registry.
 - For a CLI behavior bug, add a failing CLI regression before the fix. Cover
   relevant boundaries: empty input, missing final newline, invalid UTF-8, stdin
   and file operands, `--`, invalid arguments, multiple files and filesystem effects.
 - Unit tests are optional. Add one only for distinct logic difficult to reach
   through the CLI. Retain direct library tests for public I/O and error contracts
-  that subprocess tests cannot expose. Do not duplicate the E2E case matrix or
-  add tests merely to raise counts.
+  that subprocess tests cannot expose. Do not duplicate the E2E case matrix.
 
-## Build commands and read fixtures
+## Connect cases and fixtures
 
-Add `cli-testing.workspace = true` under `[dev-dependencies]`. Use
-`cli_testing::cargo_bin_cmd!()` in the consuming package's integration tests;
-its result is an ordinary `assert_cmd::Command`.
+Add `cli-testing.workspace = true` under `[dev-dependencies]`. Keep reusable inputs
+in `tests/inputs/` and raw expectations in `tests/expected/`. Read the
+[helper guide and schema](../../../utils/cli-testing/README.md) when authoring a
+catalog or using the context API. The representative catalogs are catr, cutr, and
+grepr; existing packages can retain their native tests and generators.
 
-Keep reusable inputs in `tests/inputs/` and expected bytes in `tests/expected/`.
-`fixtures!().read_input(name)` and `read_expected(name)` return bytes and fail
-for missing files. Read expected files before running the command. Short argument
-and status cases can stay inline; packages without fixtures need no empty folders.
+A catalog case names its arguments, input dependencies, stdin transport, origin,
+and exact exit code/stdout/stderr. For example, inside a catr catalog with the
+`bsd-cat` reference declared:
+
+```toml
+[[cases]]
+name = "fox_stdin"
+args = ["-"]
+stdin = { mode = "pipe", files = ["inputs/fox.txt"] }
+origin = { reference = "bsd-cat" }
+expect = { exit = 0, stdout_file = "expected/fox.txt.out", stderr = "" }
+```
+
+Fixture fields are relative to `tests/`; arguments run from the package root.
+Declare file operands in `inputs`, including directory dependencies, so recording
+can hash them. Pipe `files` concatenate in order without separators. Regular-file
+stdin is a separate explicit mode. Every retained expected file needs a catalog
+owner, including Rust-owned recipes; remove unused fixtures only after checking
+native tests and reference generators too.
+
+Compare exact bytes without trimming, sorting, newline conversion, or wildcard
+matching. If the contract needs an adaptation, explain it beside the case.
+`expected_stdout = "utf8-lossy"` is the only named TOML adaptation and changes
+only expected bytes. Document command-specific differences in the package README.
+Manual origins must name an independent specification or worked example.
+
+## Customize a Rust-owned case
+
+Set `execution = "rust"` in the catalog, then connect it directly in `tests/cli.rs`:
 
 ```rust,ignore
-use cli_testing::{cargo_bin_cmd, fixtures};
+use cli_testing::{Context, Result, test_case};
 
-#[test]
-fn copies_file_bytes() -> std::io::Result<()> {
-    let expected = fixtures!().read_expected("message.out")?;
-    cargo_bin_cmd!()
-        .arg("tests/inputs/message.txt")
-        .assert()
-        .code(0)
-        .stdout(expected)
-        .stderr("");
+#[test_case("tsv_b1_8")]
+fn tsv_b1_8(cx: &mut Context) -> Result<()> {
+    // BSD cut emits raw bytes; cutr replaces incomplete UTF-8 sequences.
+    cx.map_expected_stdout(|bytes| {
+        String::from_utf8_lossy(bytes).into_owned().into_bytes()
+    })?;
     Ok(())
 }
 ```
 
-For a pipe case, read input bytes first and pass them to `.write_stdin(input)`.
-Assert both streams and the exact status. `.failure()` alone can accept a crash
-as an intended error. Use explicit predicates for variable diagnostics while
-retaining checks on the other stream and status.
+The wrapper loads fixtures, calls the body, runs the candidate, and checks both
+streams and the exact exit code. `cx.run()?` permits early custom assertions;
+subsequent calls and final checks reuse the output. Configuration freezes after
+an execution attempt. A body error or panic prevents subsequent automatic launch.
+Do not add `#[test]` or `#[should_panic]`; `cfg` and `ignore` remain supported.
+Use `cx.workspace()` for temporary resources needed after the body returns.
 
-Compare raw bytes without trimming, lossy decoding, sorting, newline conversion
-or wildcard matching. If the specified behavior needs a narrow transformation,
-document it at that assertion. Keep command-specific differences in the owning
-package's tests and README. See the [helper API](../../../utils/cli-testing/README.md).
+## Write manual process scenarios
 
-## Isolate process state
+`context!()` provides reusable `TestContext` helpers. `command()` returns
+assert_cmd; `std_command()` supplies the same environment/cwd defaults while
+leaving pipe wiring, deadlines, signals, and child cleanup to the test.
+`workspace()` owns an assert_fs temporary directory and supplies `child()`,
+`copy_input()`, and commands rooted there. Assert filesystem effects explicitly.
 
-Shared commands use the package cwd, C locale and UTC, request plain output,
-and disable logging. Other environment variables are inherited. Configure relevant
-settings on the child; never change the test process's environment or cwd.
+```rust,ignore
+use assert_fs::prelude::*;
 
-Use a fresh `assert_fs::TempDir` for file mutations and logs, then assert the
-filesystem effects explicitly. Committed inputs are read-only. Logging tests
-must opt into the desired level with a temporary destination.
+#[test]
+fn creates_file() -> Result<(), Box<dyn std::error::Error>> {
+    let workspace = cli_testing::context!().workspace()?;
+    workspace.command().arg("new").assert().code(0).stdout("").stderr("");
+    workspace.child("new").assert("");
+    Ok(())
+}
+```
 
-Keep ordinary piped fixtures small and run nextest with `--profile ci`.
-assert_cmd's timeout does not bound descendants or a blocked stdin writer.
-Redirecting a regular file to stdin exercises a different mode from a pipe.
-Use PTY/manual checks for interactive behavior; help and startup smoke tests do
-not cover interaction. Permission tests need an unprivileged user. State platform
-requirements and report skips or untested terminal behavior.
+This example belongs to touchr. Existing `cargo_bin_cmd!()`, `fixtures!()`, and
+`assert_fs::TempDir` remain available. Read input and expected files before running
+a manual command. Assert exact status and both streams: `.failure()` alone can
+accept a crash. Use explicit predicates only for genuinely variable diagnostics.
 
-## Regenerate independent expectations
+Shared commands use package cwd, C locale, UTC, plain output, and disabled logging.
+Other environment variables are inherited. Override relevant settings on the
+child, never the test process. Committed inputs are read-only. Logging tests must
+opt into a level and temporary destination.
 
-1. Read the package's `mk-outputs.nu` and README before running it. These are
-   direct package scripts: follow their executable choices, arguments, cwd and
-   locale requirements. Do not assume a shared generator interface.
-2. Verify the selected upstream implementation and version, or the OS release
-   for a BSD tool without a version flag. Record that identity and the generation
-   command in the change description. GNU and BSD tools are not interchangeable.
-3. Generate only the compatible cases with the independent reference. Capture
-   binary output faithfully and check expected status and stderr, including
-   intentional nonzero statuses. Never generate expectations from the candidate.
-4. Review every changed or newly created fixture, including byte differences,
-   before accepting it. Plain scripts may overwrite files before a later failure;
-   inspect partial changes after errors. Do not assume staging or rollback.
-5. Rerun the owning CLI tests. If the reference and candidate intentionally
-   differ, document a narrowly justified assertion adaptation or a manually
-   derived expectation. When no reference exists, use a behavior specification
-   or independently worked example. Never auto-accept snapshots in tests or CI.
+Keep ordinary piped fixtures small and run nextest with `--profile ci`. Child
+capture deadlines do not bound descendants retaining pipes; assert_cmd also has a
+blocked-stdin-writer limitation. Standard commands need explicit deadlines and
+cleanup. Workspaces do not sandbox host access. Use PTY/manual checks for
+interactive behavior; help and startup smoke tests do not cover interaction.
+Permission tests need an unprivileged user. Report platform requirements and skips.
 
-Ordinary tests use committed fixtures and need no Nushell or reference program.
-Keep implementation-specific caveats beside the affected CLI. For the evidence
-behind library choices and byte/status handling, read [research](references/research.md).
+## Record independent expectations
+
+For catalog packages, use [cli-fixtures](../../../tools/cli-fixtures/README.md):
+
+1. Inspect `list` / `explain`, the package README, and the selected reference.
+   Verify its implementation and version or OS release. Pilot BSD references are
+   explicit macOS system paths; cutr requires `LC_ALL=en_US.UTF-8`. Never silently
+   substitute GNU tools or generate expectations from the candidate.
+2. Use `validate` for catalog and fixture ownership, then `compare --candidate`
+   for automatic cases. Run Rust-owned cases through native tests; comparison
+   reports them without executing their customization bodies.
+3. `record --output DIR` stages raw reference streams and provenance in a new
+   directory. It checks the reference's declared status and stderr, including
+   intentional nonzero statuses, and records Rust-owned reference recipes too.
+   Declare and explain candidate/reference differences in the catalog.
+4. Review the completed manifest and every fixture change, including binary
+   differences. Use `apply DIR` only for a reviewed capture within the authorized
+   task. Stale, incomplete, or conflicting captures require a fresh recording.
+   Do not auto-accept expectations in tests or CI.
+5. Rerun owning tests. Keep manual expectations independently justified, and
+   record executable/OS identity and generation commands in the change description.
+
+For packages still using `mk-outputs.nu`, read that script and README first.
+Follow its executable choices, arguments, cwd, and locale; there is no shared
+legacy generator interface. Check reference status/stderr yourself, review all
+bytes, and inspect partial changes after failures: legacy scripts may overwrite
+fixtures before failing. Ordinary tests require no Nushell or reference tools.
+
+For the evidence behind helper choices and byte/status handling, read
+[research](references/research.md).
 
 ## Select verification
 
-Start with `cargo nextest run -p PACKAGE --profile ci`; run
-`cargo test -p PACKAGE --doc` only when that package has a library.
-Include affected consumers for shared changes. The [PR workflow](../../../.github/workflows/pull-request-check.yml)
-defines CI checks; run relevant formatting, lint, and test tools directly locally.
+Run `cargo nextest run -p PACKAGE --profile ci` and affected consumers for shared
+changes. Run `cargo test -p PACKAGE --doc` when the package has a library. For new
+catalogs and attributes, verify individual Cargo/nextest discovery and filtering.
+Run relevant formatting, lint, and test tools directly; leave full validation to
+CI. Do not run prek manually.
 
-Run `uv run cli-check -p PACKAGE` after structural test changes. Its
-[documented checks](../../../tools/cli-check/README.md) verify package boundaries,
-test registration, documentation and benchmark layout, not assertion quality or
-reference correctness. Select `cli-check tests -p PACKAGE` to inspect only test conventions.
-Report checks and limitations; preserve passing results until relevant inputs change.
+Run `uv run cli-check -p PACKAGE` after structural changes. It checks registration,
+including the catalog target, but semantic validation stays in Rust. Use
+`cli-fixtures validate` for catalogs and unreferenced expected files. See the
+[check reference](../../../tools/cli-check/docs/checks.md) and
+[PR workflow](../../../.github/workflows/pull-request-check.yml). Report checks and
+limitations; preserve passing results until relevant inputs change.

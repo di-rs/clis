@@ -1,5 +1,5 @@
-use assert_fs::{TempDir, prelude::*};
-use cli_testing::{Command, cargo_bin_cmd};
+use assert_fs::prelude::*;
+use cli_testing::{cargo_bin_cmd, context};
 use predicates::prelude::*;
 use std::{
     fs,
@@ -8,12 +8,6 @@ use std::{
 };
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-
-fn command(dir: &TempDir) -> Command {
-    let mut cmd = cargo_bin_cmd!();
-    cmd.current_dir(dir.path()).env("TZ", "UTC");
-    cmd
-}
 
 #[allow(
     clippy::panic_in_result_fn,
@@ -41,8 +35,8 @@ fn usage() {
 
 #[test]
 fn creates_single_file() -> Result<()> {
-    let dir = TempDir::new()?;
-    command(&dir)
+    let dir = context!().workspace()?;
+    dir.command()
         .arg("new")
         .assert()
         .success()
@@ -60,11 +54,11 @@ fn creates_single_file() -> Result<()> {
     reason = "Assertions fail the test; Result propagates fixture I/O errors."
 )]
 fn preserves_contents_and_updates_existing_file() -> Result<()> {
-    let dir = TempDir::new()?;
+    let dir = context!().workspace()?;
     let file = dir.child("existing");
     file.write_str("keep these contents\n")?;
     fs::File::open(file.path())?.set_modified(UNIX_EPOCH)?;
-    command(&dir)
+    dir.command()
         .arg("existing")
         .assert()
         .success()
@@ -77,14 +71,14 @@ fn preserves_contents_and_updates_existing_file() -> Result<()> {
 
 #[test]
 fn sets_supported_numeric_timestamps_on_multiple_files() -> Result<()> {
-    let dir = TempDir::new()?;
+    let dir = context!().workspace()?;
     for (timestamp, seconds) in [
         ("200001010000", 946_684_800),
         ("20000101000007", 946_684_807),
     ] {
         dir.child("existing").write_str("preserve me")?;
         let new = dir.child(format!("new-{timestamp}"));
-        command(&dir)
+        dir.command()
             .args(["-t", timestamp, "existing"])
             .arg(new.path())
             .assert()
@@ -101,8 +95,8 @@ fn sets_supported_numeric_timestamps_on_multiple_files() -> Result<()> {
 
 #[test]
 fn c_does_not_create_missing_files() -> Result<()> {
-    let dir = TempDir::new()?;
-    command(&dir)
+    let dir = context!().workspace()?;
+    dir.command()
         .args(["-c", "missing", "also-missing"])
         .assert()
         .success()
@@ -116,9 +110,9 @@ fn c_does_not_create_missing_files() -> Result<()> {
 
 #[test]
 fn c_still_updates_existing_files() -> Result<()> {
-    let dir = TempDir::new()?;
+    let dir = context!().workspace()?;
     dir.child("existing").write_str("keep me")?;
-    command(&dir)
+    dir.command()
         .args(["-c", "-t", "20000101000007", "missing", "existing"])
         .assert()
         .success()
@@ -131,9 +125,9 @@ fn c_still_updates_existing_files() -> Result<()> {
 
 #[test]
 fn rejects_invalid_timestamps_without_creating_files() -> Result<()> {
-    let dir = TempDir::new()?;
+    let dir = context!().workspace()?;
     for timestamp in ["bad", "202413010000", "202402300000"] {
-        command(&dir)
+        dir.command()
             .args(["-t", timestamp, "new"])
             .assert()
             .code(2)
@@ -146,10 +140,10 @@ fn rejects_invalid_timestamps_without_creating_files() -> Result<()> {
 
 #[test]
 fn reports_creation_path_errors() -> Result<()> {
-    let dir = TempDir::new()?;
+    let dir = context!().workspace()?;
     dir.child("file").write_str("keep me")?;
     for path in ["missing/child", "file/child"] {
-        command(&dir)
+        dir.command()
             .arg(path)
             .assert()
             .failure()
@@ -165,8 +159,8 @@ fn reports_creation_path_errors() -> Result<()> {
 
 #[test]
 fn requires_file_operand() -> Result<()> {
-    let dir = TempDir::new()?;
-    command(&dir)
+    let dir = context!().workspace()?;
+    dir.command()
         .assert()
         .failure()
         .stdout("")
@@ -177,10 +171,10 @@ fn requires_file_operand() -> Result<()> {
 #[cfg(unix)]
 #[test]
 fn follows_symlinks_without_erasing_contents() -> Result<()> {
-    let dir = TempDir::new()?;
+    let dir = context!().workspace()?;
     dir.child("target").write_str("preserve target")?;
     std::os::unix::fs::symlink("target", dir.child("link").path())?;
-    command(&dir)
+    dir.command()
         .args(["-t", "20000101000007", "link"])
         .assert()
         .code(0)

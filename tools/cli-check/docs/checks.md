@@ -28,10 +28,14 @@ outside this inventory's scope.
 The tests group checks target registration, including `autotests = false`,
 explicit target paths and `test = false`. It rejects `mk-outs.nu` and requires
 `tests/expected/` when `mk-outputs.nu` exists. Fixture-free packages need no empty
-fixture directories. Registration does not establish feature eligibility, test
+fixture directories. When `tests/cases.toml` or `tests/catalog.rs` exists, both
+must be nonempty and the `catalog` test target must be enabled with
+`harness = false`. This check does not parse the catalog: schema and fixture
+ownership validation belong to [cli-fixtures](../../cli-fixtures/README.md).
+Registration does not establish feature eligibility, test
 completeness, assertion quality or reference correctness. The
 [Rust test helper](../../../utils/cli-testing/README.md) supplies command setup and
-byte fixture loading; the [testing skill](../../../.agents/skills/cli-testing/SKILL.md)
+catalog execution and byte fixture loading; the [testing skill](../../../.agents/skills/cli-testing/SKILL.md)
 describes how to write behavioral tests.
 
 The docs group parses Markdown links, images and reference links while ignoring

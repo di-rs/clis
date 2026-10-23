@@ -537,3 +537,26 @@ def test_json_diagnostics_discovery_and_errors(tmp_path: Path) -> None:
     assert result.returncode == 2
     assert json.loads(result.stdout)["error"]["kind"] == "arguments"
     assert result.stderr == ""
+
+
+@pytest.mark.parametrize(
+    ("target", "catalog", "valid"),
+    [
+        ('[[test]]\nname = "catalog"\nharness = false\n', True, True),
+        ('[[test]]\nname = "catalog"\nharness = true\n', True, False),
+        ('[[test]]\nname = "catalog"\nharness = false\ntest = false\n', True, False),
+        ("", True, False),
+        ('[[test]]\nname = "catalog"\nharness = false\n', False, False),
+    ],
+)
+def test_catalog_registration_only(tmp_path: Path, target: str, catalog: bool, valid: bool) -> None:
+    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["buildins/*"]\n')
+    add_cli(tmp_path, test_targets=target)
+    write(tmp_path, "buildins/echo/tests/catalog.rs", "fn main() {}\n")
+    if catalog:
+        # Semantic validation belongs to the Rust parser, not this layout check.
+        write(tmp_path, "buildins/echo/tests/cases.toml", "not valid TOML\n")
+    result = run_policy(tmp_path)
+    assert (result.returncode == 0) is valid, result.stderr
+    if not valid:
+        assert "catalog" in result.stderr

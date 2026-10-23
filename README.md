@@ -68,6 +68,7 @@ explains sessions, sample files, and switching builds.
 | --- | --- |
 | [cli-bench](tools/cli-bench/README.md) | Run per-CLI benchmark suites with Biggie and hyperfine |
 | [cli-check](tools/cli-check/README.md) | Check CLI package boundaries, tests, documentation, and benchmark coverage |
+| [cli-fixtures](tools/cli-fixtures/README.md) | Inspect CLI cases and stage independent reference fixtures |
 | [cli-playground](tools/cli-playground/README.md) | Try Rust CLIs in a browser terminal with disposable files and a preview URL per PR |
 
 ## Shared libraries
@@ -75,7 +76,7 @@ explains sessions, sample files, and switching builds.
 | Project | Purpose |
 | --- | --- |
 | [cli-log](utils/cli-log/README.md) | Shared structured file logging and error reporting |
-| [cli-testing](utils/cli-testing/README.md) | Shared CLI test setup and byte fixture loading |
+| [cli-testing](utils/cli-testing/README.md) | TOML cases, Rust test contexts, and exact CLI assertions |
 
 ## Find your way around
 

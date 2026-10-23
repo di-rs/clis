@@ -1,0 +1,174 @@
+schema = 1
+binary = "grepr"
+
+[references.bsd-grep]
+program = "/usr/bin/grep"
+platform = "macos"
+
+[[cases]]
+name = "empty_file"
+args = ["foo", "tests/inputs/empty.txt"]
+inputs = ["inputs/empty.txt"]
+origin = { reference = "bsd-grep", exit = 1, reason = "BSD grep returns 1 for no matches; grepr returns 0 after a successful search." }
+expect = { exit = 0, stdout_file = "expected/foo.empty.txt", stderr = "" }
+
+[[cases]]
+name = "empty_regex"
+args = ["", "tests/inputs/fox.txt"]
+inputs = ["inputs/fox.txt"]
+origin = { reference = "bsd-grep" }
+expect = { exit = 0, stdout_file = "expected/empty_regex.fox.txt", stderr = "" }
+
+[[cases]]
+name = "bustle_capitalized"
+args = ["The", "tests/inputs/bustle.txt"]
+inputs = ["inputs/bustle.txt"]
+origin = { reference = "bsd-grep" }
+expect = { exit = 0, stdout_file = "expected/bustle.txt.the.capitalized", stderr = "" }
+
+[[cases]]
+name = "bustle_lowercase"
+args = ["the", "tests/inputs/bustle.txt"]
+inputs = ["inputs/bustle.txt"]
+origin = { reference = "bsd-grep" }
+expect = { exit = 0, stdout_file = "expected/bustle.txt.the.lowercase", stderr = "" }
+
+[[cases]]
+name = "bustle_insensitive"
+args = ["--insensitive", "the", "tests/inputs/bustle.txt"]
+inputs = ["inputs/bustle.txt"]
+origin = { reference = "bsd-grep", args = ["-i", "the", "tests/inputs/bustle.txt"], reason = "Use the BSD reference option spelling and place options before file operands." }
+expect = { exit = 0, stdout_file = "expected/bustle.txt.the.lowercase.insensitive", stderr = "" }
+
+[[cases]]
+name = "nobody"
+args = ["nobody", "tests/inputs/nobody.txt"]
+inputs = ["inputs/nobody.txt"]
+origin = { reference = "bsd-grep", exit = 1, reason = "BSD grep returns 1 for no matches; grepr returns 0 after a successful search." }
+expect = { exit = 0, stdout_file = "expected/nobody.txt", stderr = "" }
+
+[[cases]]
+name = "nobody_insensitive"
+args = ["-i", "nobody", "tests/inputs/nobody.txt"]
+inputs = ["inputs/nobody.txt"]
+origin = { reference = "bsd-grep" }
+expect = { exit = 0, stdout_file = "expected/nobody.txt.insensitive", stderr = "" }
+
+[[cases]]
+name = "multiple_files"
+args = ["The", "tests/inputs/bustle.txt", "tests/inputs/empty.txt", "tests/inputs/fox.txt", "tests/inputs/nobody.txt"]
+inputs = ["inputs/bustle.txt", "inputs/empty.txt", "inputs/fox.txt", "inputs/nobody.txt"]
+origin = { reference = "bsd-grep" }
+expect = { exit = 0, stdout_file = "expected/all.the.capitalized", stderr = "" }
+
+[[cases]]
+name = "multiple_files_insensitive"
+args = ["-i", "the", "tests/inputs/bustle.txt", "tests/inputs/empty.txt", "tests/inputs/fox.txt", "tests/inputs/nobody.txt"]
+inputs = ["inputs/bustle.txt", "inputs/empty.txt", "inputs/fox.txt", "inputs/nobody.txt"]
+origin = { reference = "bsd-grep" }
+expect = { exit = 0, stdout_file = "expected/all.the.lowercase.insensitive", stderr = "" }
+
+[[cases]]
+name = "recursive"
+args = ["--recursive", "dog", "tests/inputs"]
+inputs = ["inputs"]
+origin = { reference = "bsd-grep" }
+expect = { exit = 0, stdout_file = "expected/dog.recursive", stderr = "" }
+
+[[cases]]
+name = "recursive_insensitive"
+args = ["-ri", "then", "tests/inputs"]
+inputs = ["inputs"]
+origin = { reference = "bsd-grep" }
+expect = { exit = 0, stdout_file = "expected/the.recursive.insensitive", stderr = "" }
+
+[[cases]]
+name = "sensitive_count_capital"
+args = ["--count", "The", "tests/inputs/bustle.txt"]
+inputs = ["inputs/bustle.txt"]
+origin = { reference = "bsd-grep" }
+expect = { exit = 0, stdout_file = "expected/bustle.txt.the.capitalized.count", stderr = "" }
+
+[[cases]]
+name = "sensitive_count_lower"
+args = ["--count", "the", "tests/inputs/bustle.txt"]
+inputs = ["inputs/bustle.txt"]
+origin = { reference = "bsd-grep" }
+expect = { exit = 0, stdout_file = "expected/bustle.txt.the.lowercase.count", stderr = "" }
+
+[[cases]]
+name = "insensitive_count"
+args = ["-ci", "the", "tests/inputs/bustle.txt"]
+inputs = ["inputs/bustle.txt"]
+origin = { reference = "bsd-grep" }
+expect = { exit = 0, stdout_file = "expected/bustle.txt.the.lowercase.insensitive.count", stderr = "" }
+
+[[cases]]
+name = "nobody_count"
+args = ["-c", "nobody", "tests/inputs/nobody.txt"]
+inputs = ["inputs/nobody.txt"]
+origin = { reference = "bsd-grep", exit = 1, reason = "BSD grep returns 1 for no matches; grepr returns 0 after a successful search." }
+expect = { exit = 0, stdout_file = "expected/nobody.txt.count", stderr = "" }
+
+[[cases]]
+name = "nobody_count_insensitive"
+args = ["-ci", "nobody", "tests/inputs/nobody.txt"]
+inputs = ["inputs/nobody.txt"]
+origin = { reference = "bsd-grep" }
+expect = { exit = 0, stdout_file = "expected/nobody.txt.insensitive.count", stderr = "" }
+
+[[cases]]
+name = "sensitive_count_multiple"
+args = ["-c", "The", "tests/inputs/bustle.txt", "tests/inputs/empty.txt", "tests/inputs/fox.txt", "tests/inputs/nobody.txt"]
+inputs = ["inputs/bustle.txt", "inputs/empty.txt", "inputs/fox.txt", "inputs/nobody.txt"]
+origin = { reference = "bsd-grep" }
+expect = { exit = 0, stdout_file = "expected/all.the.capitalized.count", stderr = "" }
+
+[[cases]]
+name = "insensitive_count_multiple"
+args = ["-ic", "the", "tests/inputs/bustle.txt", "tests/inputs/empty.txt", "tests/inputs/fox.txt", "tests/inputs/nobody.txt"]
+inputs = ["inputs/bustle.txt", "inputs/empty.txt", "inputs/fox.txt", "inputs/nobody.txt"]
+origin = { reference = "bsd-grep" }
+expect = { exit = 0, stdout_file = "expected/all.the.lowercase.insensitive.count", stderr = "" }
+
+[[cases]]
+name = "stdin"
+args = ["The"]
+stdin = { mode = "pipe", files = ["inputs/bustle.txt"] }
+origin = { reference = "bsd-grep" }
+expect = { exit = 0, stdout_file = "expected/bustle.txt.the.capitalized", stderr = "" }
+
+[[cases]]
+name = "stdin_insensitive_count"
+args = ["-ci", "the", "-"]
+stdin = { mode = "pipe", files = ["inputs/bustle.txt", "inputs/empty.txt", "inputs/fox.txt", "inputs/nobody.txt"] }
+origin = { reference = "bsd-grep" }
+expect = { exit = 0, stdout_file = "expected/the.recursive.insensitive.count.stdin", stderr = "" }
+
+[[cases]]
+name = "recursive_insensitive_count"
+args = ["-ric", "the", "tests/inputs/empty.txt", "tests/inputs/nobody.txt", "tests/inputs/bustle.txt", "tests/inputs/fox.txt"]
+inputs = ["inputs/empty.txt", "inputs/nobody.txt", "inputs/bustle.txt", "inputs/fox.txt"]
+origin = { reference = "bsd-grep", reason = "Explicit operand order preserves the historical fixture from recursive enumeration. Directory traversal has separate Rust coverage." }
+expect = { exit = 0, stdout_file = "expected/the.recursive.insensitive.count", stderr = "" }
+
+[[cases]]
+name = "stdin_no_match"
+args = ["absent"]
+stdin = { mode = "pipe", text = "alpha\nbeta\n" }
+origin = { reference = "bsd-grep", exit = 1, reason = "BSD grep returns 1 for no matches; grepr returns 0 after a successful search." }
+expect = { exit = 0, stdout = "", stderr = "" }
+
+[[cases]]
+name = "stdin_no_match_count"
+args = ["-c", "absent", "-"]
+stdin = { mode = "pipe", text = "alpha\nbeta\n" }
+origin = { reference = "bsd-grep", exit = 1, reason = "BSD grep returns 1 for no matches; grepr returns 0 after a successful search." }
+expect = { exit = 0, stdout = "0\n", stderr = "" }
+
+[[cases]]
+name = "empty_stdin_empty_regex_count"
+args = ["--count", ""]
+stdin = { mode = "pipe", text = "" }
+origin = { reference = "bsd-grep", exit = 1, reason = "BSD grep returns 1 for no matches; grepr returns 0 after a successful search." }
+expect = { exit = 0, stdout = "0\n", stderr = "" }
