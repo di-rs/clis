@@ -97,14 +97,20 @@ impl Document {
         }
     }
     pub fn refresh_highlights(&mut self) {
-        self.highlights.refresh(&self.text);
+        if self.file_type() == super::file_type::FileType::Rust {
+            self.highlights.refresh(&self.text);
+        }
     }
     pub fn syntax_at(
         &self,
         line: usize,
         bytes: std::ops::Range<usize>,
     ) -> Option<super::highlight::Kind> {
-        self.highlights.kind_overlapping(line, bytes)
+        if self.file_type() == super::file_type::FileType::Rust {
+            self.highlights.kind_overlapping(line, bytes)
+        } else {
+            None
+        }
     }
     pub fn cursor(&self) -> super::cursor::Cursor {
         self.cursor.clone()

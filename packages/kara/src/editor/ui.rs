@@ -359,6 +359,15 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(12, 6))?;
         terminal.draw(|frame| render(frame, &mut state))?;
         assert_eq!(terminal.backend().buffer()[(0, 0)].fg, Color::Reset);
+        assert_eq!(terminal.backend().buffer()[(1, 0)].fg, Color::Reset);
+        let dir = assert_fs::TempDir::new()?;
+        state.buffer.save_as(
+            dir.path()
+                .join("colors.rs")
+                .to_str()
+                .ok_or("invalid path")?,
+        )?;
+        terminal.draw(|frame| render(frame, &mut state))?;
         assert_eq!(terminal.backend().buffer()[(1, 0)].fg, Color::Red);
         assert_eq!(terminal.backend().buffer()[(4, 0)].fg, Color::Red);
         state.search.update(
@@ -369,6 +378,18 @@ mod tests {
         terminal.draw(|frame| render(frame, &mut state))?;
         assert_eq!(terminal.backend().buffer()[(1, 0)].fg, Color::Black);
         assert_eq!(terminal.backend().buffer()[(1, 0)].bg, Color::Yellow);
+        state.buffer.save_as(
+            dir.path()
+                .join("colors.txt")
+                .to_str()
+                .ok_or("invalid path")?,
+        )?;
+        terminal.draw(|frame| render(frame, &mut state))?;
+        assert_eq!(terminal.backend().buffer()[(1, 0)].bg, Color::Yellow);
+        assert_eq!(terminal.backend().buffer()[(4, 0)].fg, Color::Reset);
+        state.search.visible = false;
+        terminal.draw(|frame| render(frame, &mut state))?;
+        assert_eq!(terminal.backend().buffer()[(1, 0)].fg, Color::Reset);
         Ok(())
     }
 
