@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::editor::{
-    editorcommand::{
+    command::{
         EditorCommand,
         System::{Quit, QuitForce, SaveAs},
     },

@@ -1,3 +1,4 @@
+use super::command::{Edit, EditorCommand, Move, System};
 use crossterm::event::{
     Event,
     KeyCode::{self, Char},
@@ -6,31 +7,8 @@ use crossterm::event::{
 
 use crate::editor::{
     Size,
-    editormode::{EditorMode, Placement},
+    mode::{EditorMode, Placement},
 };
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum Move {
-    Up,
-    Left,
-    Right,
-    Down,
-    PageUp,
-    PageDown,
-    LineStart,
-    LineEnd,
-    Home,
-    End,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum System {
-    Save,
-    SaveAs(String),
-    Quit,
-    QuitForce,
-    Resize(Size),
-}
 
 impl TryFrom<KeyEvent> for System {
     type Error = String;
@@ -46,14 +24,6 @@ impl TryFrom<KeyEvent> for System {
             )),
         }
     }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum Edit {
-    Insert(char),
-    InsertNewline,
-    Delete,
-    DeleteBackward,
 }
 
 impl TryFrom<KeyEvent> for Edit {
@@ -74,15 +44,6 @@ impl TryFrom<KeyEvent> for Edit {
             )),
         }
     }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum EditorCommand {
-    Move(Move),
-    ChangeMode(EditorMode),
-    Edit(Edit),
-    System(System),
-    Unknown,
 }
 
 impl EditorCommand {

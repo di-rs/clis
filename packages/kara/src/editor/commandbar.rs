@@ -2,8 +2,8 @@ use std::{cmp::min, path::Path, range::Range};
 
 use crate::editor::{
     Size,
+    command::{Edit, EditorCommand},
     commandbar::interpreter::Interpreter,
-    editorcommand::{Edit, EditorCommand},
     line::Line,
     terminal::Terminal,
 };
@@ -18,11 +18,11 @@ pub struct CommandBar {
 }
 
 impl CommandBar {
-    pub fn new(value: &str) -> Self {
+    pub fn new(value: &str, size: Size) -> Self {
         Self {
             prompt: ":".to_owned(),
             value: value.parse().unwrap(),
-            size: Terminal::size().unwrap_or_default(),
+            size,
         }
     }
 

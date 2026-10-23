@@ -6,8 +6,10 @@ loop and terminal lifecycle; there is no service or database behind it.
 
 ## Input, state, and rendering
 
-[The editor](../src/editor.rs) translates terminal events into commands according
-to the current mode. Its view and buffer hold document and cursor state, while
+[The editor](../src/editor.rs) owns the terminal session and event loop.
+The keymap translates events into commands according to the current mode;
+application state dispatches those commands without initializing a terminal.
+Its view and buffer hold document and cursor state, while
 command, status, and message bars provide separate parts of the screen.
 The terminal adapter contains terminal I/O. Editor teardown restores the terminal.
 

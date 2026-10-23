@@ -1,51 +1,27 @@
-use crossterm::event::{Event, KeyEvent, KeyEventKind, read};
-use editorbuffer::{Direction, EditorBuffer};
+use crossterm::event::read;
+use state::EditorState;
 use terminal::Terminal;
-use view::View;
-
+mod command;
 mod commandbar;
 mod documentstatus;
 mod editorbuffer;
-mod editorcommand;
-mod editormode;
+mod keymap;
 mod line;
 mod messagebar;
+mod mode;
+mod prelude;
+mod state;
 mod statusbar;
 mod terminal;
 mod view;
-
-mod prelude;
+use editorbuffer::EditorBuffer;
 pub use prelude::*;
-
-use crate::editor::{
-    commandbar::CommandBar,
-    editorcommand::{
-        Edit,
-        EditorCommand::{self, System},
-        Move,
-        System::{Quit, QuitForce, Resize, Save, SaveAs},
-    },
-    editormode::EditorMode,
-    messagebar::MessageBar,
-    statusbar::StatusBar,
-};
-
 pub const APP_NAME: &str = env!("CARGO_PKG_NAME");
-const MAX_QUIT_ATTEMPTS: u8 = 2;
-
 #[derive(Default)]
 pub struct Editor {
     title: String,
     terminal_active: bool,
-    terminal_size: Size,
-    mode: EditorMode,
-    should_quit: bool,
-    quit_attempts: Option<u8>,
-    buffer: EditorBuffer,
-    view: View,
-    statusbar: StatusBar,
-    messagebar: MessageBar,
-    commandbar: Option<CommandBar>,
+    state: EditorState,
 }
 
 impl Editor {
@@ -65,27 +41,17 @@ impl Editor {
         editor.terminal_active = true;
 
         let size = Terminal::size().unwrap_or_default();
-        editor.resize(size);
+        editor.state.resize(size);
         editor
+            .state
             .messagebar
             .set("Ctrl-s = save | Ctrl-q = quit".to_string());
 
         if let Some(filename) = file_name {
-            editor.open_file(&filename);
+            editor.state.open_file(&filename);
         }
 
         Ok(editor)
-    }
-
-    fn open_file(&mut self, file_name: &str) {
-        match EditorBuffer::open(file_name) {
-            Ok(buffer) => self.buffer = buffer,
-            Err(e) => {
-                let message = format!("ERR: Could not open file `{file_name}` {e}");
-                cli_log::record_error(&message);
-                self.messagebar.set(message);
-            }
-        }
     }
 
     pub fn run(&mut self) -> std::io::Result<()> {
@@ -93,12 +59,12 @@ impl Editor {
             self.refresh_screen();
             // TODO: Do it only if buffer was changed
             self.refresh_title();
-            if self.should_quit {
+            if self.state.should_quit {
                 break;
             }
 
             match read() {
-                Ok(event) => self.evaluate_event(&event),
+                Ok(event) => self.state.evaluate_event(&event),
                 Err(err) => {
                     return Err(err);
                 }
@@ -108,7 +74,7 @@ impl Editor {
     }
 
     fn refresh_title(&mut self) {
-        let title = self.buffer.filename().map_or_else(
+        let title = self.state.buffer.filename().map_or_else(
             || APP_NAME.to_string(),
             |p| format!("{} - {APP_NAME}", p.display()),
         );
@@ -119,225 +85,43 @@ impl Editor {
     }
 
     fn refresh_screen(&mut self) {
-        let Size { width, height } = self.terminal_size;
+        let Size { width, height } = self.state.terminal_size;
         if height == 0 || width == 0 {
             return;
         }
         let _ = Terminal::hide_caret();
 
-        let caret_location = self.buffer.caret_location();
-        self.view.scroll_into_view(caret_location);
+        let caret_location = self.state.buffer.caret_location();
+        self.state.view.scroll_into_view(caret_location);
 
         let bottom_bar_row = height.saturating_sub(1);
-        if let Some(commandbar) = &mut self.commandbar {
+        if let Some(commandbar) = &mut self.state.commandbar {
             commandbar.render(bottom_bar_row);
         } else {
-            self.messagebar.render(bottom_bar_row);
+            self.state.messagebar.render(bottom_bar_row);
         }
         if height > 1 {
-            self.view.render(&self.buffer);
+            self.state.view.render(&self.state.buffer);
         }
         if height > 2 {
             let statusbar_pos = height.saturating_sub(2);
-            self.statusbar
-                .render(statusbar_pos, &self.buffer, self.mode);
+            self.state
+                .statusbar
+                .render(statusbar_pos, &self.state.buffer, self.state.mode);
         }
 
-        let location = if let Some(commandbar) = &mut self.commandbar {
+        let location = if let Some(commandbar) = &mut self.state.commandbar {
             Location {
                 x: commandbar.caret_position_col(),
                 y: bottom_bar_row,
             }
         } else {
-            caret_location.saturation_sub(self.view.scroll_offset)
+            caret_location.saturation_sub(self.state.view.scroll_offset)
         };
 
         let _ = Terminal::move_to(location.into());
-        let _ = Terminal::show_caret(self.mode.get_cursor_style());
+        let _ = Terminal::show_caret(self.state.mode.get_cursor_style());
         let _ = Terminal::execute();
-    }
-
-    fn evaluate_event(&mut self, event: &Event) {
-        let should_process = match &event {
-            Event::Key(KeyEvent { kind, .. }) => kind == &KeyEventKind::Press,
-            Event::Resize(_, _) => true,
-            _ => false,
-        };
-
-        if should_process {
-            match EditorCommand::from_event(event, self.mode) {
-                Ok(command) => self.handle_command(command),
-                Err(err) => {
-                    debug_assert!(false, "Could not handle command: {err}");
-                }
-            }
-        }
-    }
-
-    fn handle_command(&mut self, command: EditorCommand) {
-        match command {
-            System(Quit) => self.quit(false),
-            System(QuitForce) => self.quit(true),
-            System(Resize(size)) => self.resize(size),
-            _ => self.reset_quit_attempts(),
-        }
-
-        match command {
-            System(Quit | QuitForce | Resize(_)) => {}
-            System(Save) => self.save(),
-            System(SaveAs(filename)) => match self.buffer.save_as(&filename) {
-                Ok(outcome) => self.report_save(outcome),
-                Err(error) => {
-                    cli_log::record_error(&error);
-                    self.messagebar
-                        .set(format!("ERR: Could not save file: {error}"));
-                }
-            },
-            EditorCommand::Move(direction) => self.handle_move_command(&direction),
-            EditorCommand::Edit(edit) => self.handle_edit_command(&edit),
-            EditorCommand::ChangeMode(mode) => {
-                self.change_mode(mode);
-            }
-            EditorCommand::Unknown => (),
-        }
-    }
-
-    fn handle_move_command(&mut self, direction: &Move) {
-        use editorcommand::Move::{
-            Down, End, Home, Left, LineEnd, LineStart, PageDown, PageUp, Right, Up,
-        };
-
-        match direction {
-            Up => self.buffer.move_caret(Direction::Up(1)),
-            Down => self.buffer.move_caret(Direction::Down(1)),
-            Left => self.buffer.move_caret(Direction::Left(1)),
-            Right => self.buffer.move_caret(Direction::Right(1)),
-            LineStart => self.buffer.move_caret(Direction::StartOfLine),
-            LineEnd => self.buffer.move_caret(Direction::EndOfLine),
-            Home => self.buffer.move_caret(Direction::StartOfBuffer),
-            End => self.buffer.move_caret(Direction::EndOfBuffer),
-            PageUp => {
-                let step = self.terminal_size.height / 2;
-                self.buffer.move_caret(Direction::Up(step));
-            }
-            PageDown => {
-                let step = self.terminal_size.height / 2;
-                self.buffer.move_caret(Direction::Down(step));
-            }
-        }
-    }
-
-    fn handle_edit_command(&mut self, edit_command: &Edit) {
-        match self.mode {
-            EditorMode::Edit(_) => match edit_command {
-                Edit::Insert(char) => self.buffer.insert_char(*char),
-                Edit::InsertNewline => self.buffer.insert_newline(),
-                Edit::Delete => self.buffer.delete(),
-                Edit::DeleteBackward => self.buffer.delete_backward(),
-            },
-            EditorMode::Command => {
-                if let Some(commandbar) = &mut self.commandbar {
-                    match edit_command {
-                        Edit::InsertNewline => {
-                            match commandbar.produce_command(self.buffer.filename()) {
-                                Err(e) => {
-                                    cli_log::record_error(&e);
-                                    self.messagebar.set(e);
-                                }
-                                Ok(command) => self.handle_command(command),
-                            }
-                            self.change_mode(EditorMode::View);
-                        }
-                        edit => commandbar.handle_edit(edit),
-                    }
-                }
-            }
-            EditorMode::View => {
-                if matches!(edit_command, Edit::Delete) {
-                    self.buffer.delete();
-                }
-            }
-        }
-    }
-
-    const fn resize(&mut self, size: Size) {
-        self.terminal_size = size;
-        let Size { height, width } = size;
-        self.view.resize(Size {
-            height: height.saturating_sub(2),
-            width,
-        });
-        self.statusbar.resize(Size { height: 1, width });
-        if let Some(commandbar) = &mut self.commandbar {
-            commandbar.resize(Size { height: 1, width });
-        }
-    }
-
-    fn change_mode(&mut self, mode: EditorMode) {
-        match mode {
-            EditorMode::Command => self.commandbar = Some(CommandBar::new("")),
-            mode => {
-                self.commandbar = None;
-                if let Some(direction) = self.mode.change_mode_movement(mode) {
-                    self.buffer.move_caret(direction);
-                }
-            }
-        }
-        self.mode = mode;
-    }
-
-    fn save(&mut self) {
-        if self.buffer.has_file() {
-            match self.buffer.save() {
-                Ok(outcome) => self.report_save(outcome),
-                Err(e) => {
-                    let message = format!("Error writing file! {e}");
-                    cli_log::record_error(&message);
-                    self.messagebar.set(message);
-                }
-            }
-        } else {
-            self.commandbar = Some(CommandBar::new("w "));
-            self.mode = EditorMode::Command;
-        }
-    }
-
-    fn report_save(&mut self, outcome: editorbuffer::SaveOutcome) {
-        let message = match outcome {
-            editorbuffer::SaveOutcome::Saved => "File saved successfully.".to_owned(),
-            editorbuffer::SaveOutcome::DurabilityWarning(error) => {
-                let message = format!("WARNING: File saved, but directory sync failed: {error}");
-                cli_log::record_error(&message);
-                message
-            }
-        };
-        self.messagebar.set(message);
-    }
-
-    fn quit(&mut self, force: bool) {
-        if !self.buffer.is_modified() || force {
-            self.should_quit = true;
-            return;
-        }
-
-        let attempt = self.quit_attempts.map_or(1, |x| x.saturating_add(1));
-        let left_attempts = MAX_QUIT_ATTEMPTS.saturating_sub(attempt);
-
-        if left_attempts == 0 {
-            self.should_quit = true;
-        } else {
-            self.messagebar.set(format!(
-                "WARNING! File has unsaved changes. Press Ctrl-Q {left_attempts} more times to quit."
-            ));
-            self.quit_attempts = Some(attempt);
-        }
-    }
-
-    fn reset_quit_attempts(&mut self) {
-        if self.quit_attempts.is_some() {
-            self.quit_attempts = None;
-            self.messagebar.clear();
-        }
     }
 }
 
@@ -347,7 +131,7 @@ impl Drop for Editor {
             return;
         }
         let _ = Terminal::terminate();
-        if self.should_quit {
+        if self.state.should_quit {
             let _ = Terminal::move_to(Position { col: 0, row: 0 });
             let _ = Terminal::print("Goodbye.\r\n");
         }
@@ -372,7 +156,10 @@ impl EditorBuilder {
 
 #[cfg(test)]
 mod tests {
-    use super::{Editor, EditorCommand, editorcommand::System};
+    use super::{
+        Editor,
+        command::{EditorCommand, System},
+    };
     use std::{io, process::Command};
 
     #[test]
@@ -381,11 +168,13 @@ mod tests {
         let session = cli_log::init("kara");
         session.set_stderr_level(log::LevelFilter::Off);
         let mut editor = Editor::default();
-        editor.open_file("missing-parent/document.txt");
-        editor.handle_command(EditorCommand::System(System::SaveAs(
-            "missing-parent/saved.txt".to_owned(),
-        )));
-        editor.save();
+        editor.state.open_file("missing-parent/document.txt");
+        editor
+            .state
+            .handle_command(EditorCommand::System(System::SaveAs(
+                "missing-parent/saved.txt".to_owned(),
+            )));
+        editor.state.save();
         let _ = session.finish(0);
     }
 
