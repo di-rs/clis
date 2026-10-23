@@ -30,8 +30,10 @@ failures exit with status 1. Normal quit exits with status 0.
 
 | Action | Keys |
 | --- | --- |
-| Move | Arrow keys or vim-like motions in navigation mode |
-| Start editing | `i` |
+| Move | Arrow keys; `u` up, `j` down, `h` left, `k` right in navigation mode |
+| Move within a line | `s` to the first non-whitespace grapheme; `e` to the end |
+| Move within the file | `g` to the first line; `G` to the last; `p`/`P` half-screen up/down |
+| Start editing | `i` at the caret; `a` after it; `I` at the first non-whitespace grapheme; `A` at line end |
 | Return to navigation | Esc or Ctrl-C |
 | Save | Ctrl-S; unnamed buffers prompt for a filename |
 | Enter a command | `:` from navigation, then Enter to run it |
