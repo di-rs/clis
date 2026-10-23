@@ -1,123 +1,32 @@
-use std::{fmt::Display, range::Range};
-
-mod welcome_message;
-use crate::editor::{
-    ScreenPosition, Size, document::Document, terminal::Terminal,
-    view::welcome_message::WelcomeMessage,
-};
+use super::{ScreenPosition, Size};
+pub(super) mod welcome_message;
 
 #[derive(Default)]
 pub struct View {
-    needs_redraw: bool,
-    size: Size,
+    pub size: Size,
     pub scroll_offset: ScreenPosition,
 }
-
-const Y_OVERSCAN: usize = 5;
-const X_OVERSCAN: usize = 5;
 
 impl View {
     pub const fn resize(&mut self, to: Size) {
         self.size = to;
-        self.needs_redraw = true;
     }
 
-    pub fn render(&mut self, buffer: &Document) {
-        if !self.needs_redraw && !buffer.is_modified() {
-            return;
-        }
-
-        let Size { height, width } = self.size;
-        let top = self.scroll_offset.y;
-
-        for i in 0..height {
-            match buffer.get_line(i.saturating_add(top)) {
-                Some(line) => {
-                    let left = self.scroll_offset.x;
-                    let right = self.scroll_offset.x.saturating_add(width);
-                    Self::render_line(i, line.get(Range::from(left..right)));
-                }
-                None => Self::render_line(i, "~"),
-            }
-        }
-
-        if buffer.is_empty() {
-            self.draw_welcome_message();
-        }
-
-        self.needs_redraw = false;
+    pub fn scroll_into_view(&mut self, current: ScreenPosition) {
+        self.scroll_offset.x = scroll_axis(self.scroll_offset.x, current.x, self.size.width);
+        self.scroll_offset.y = scroll_axis(self.scroll_offset.y, current.y, self.size.height);
     }
+}
 
-    pub const fn scroll_into_view(&mut self, current_location: ScreenPosition) {
-        let ScreenPosition { x, y } = current_location;
-
-        self.scroll_vertically(y);
-        self.scroll_horizontally(x);
-    }
-
-    const fn scroll_horizontally(&mut self, to: usize) {
-        let Size { width, .. } = self.size;
-
-        let mut offset_changed = false;
-
-        let start = self.scroll_offset.x.saturating_add(X_OVERSCAN);
-        let end = self
-            .scroll_offset
-            .x
-            .saturating_add(width)
-            .saturating_sub(X_OVERSCAN);
-
-        if self.scroll_offset.x > 0 && to < start {
-            self.scroll_offset.x = to.saturating_sub(X_OVERSCAN);
-            offset_changed = true;
-        } else if to >= end {
-            self.scroll_offset.x = to
-                .saturating_sub(width.saturating_sub(X_OVERSCAN))
-                .saturating_add(1);
-            offset_changed = true;
-        }
-
-        if offset_changed {
-            self.needs_redraw = true;
-        }
-    }
-
-    const fn scroll_vertically(&mut self, to: usize) {
-        let Size { height, .. } = self.size;
-
-        let mut offset_changed = false;
-
-        let top = self.scroll_offset.y.saturating_add(Y_OVERSCAN);
-        let bottom = self
-            .scroll_offset
-            .y
-            .saturating_add(height)
-            .saturating_sub(Y_OVERSCAN);
-
-        if self.scroll_offset.y > 0 && to < top {
-            self.scroll_offset.y = to.saturating_sub(Y_OVERSCAN);
-            offset_changed = true;
-        } else if to >= bottom {
-            self.scroll_offset.y = to
-                .saturating_sub(height.saturating_sub(Y_OVERSCAN))
-                .saturating_add(1);
-            offset_changed = true;
-        }
-
-        if offset_changed {
-            self.needs_redraw = true;
-        }
-    }
-
-    fn draw_welcome_message(&self) {
-        if let Some(message) = WelcomeMessage::draw(&self.size) {
-            let y = self.size.height / 3;
-            Self::render_line(y, message);
-        }
-    }
-
-    fn render_line(at: usize, line_text: impl Display) {
-        let result = Terminal::print_row(at, line_text);
-        debug_assert!(result.is_ok(), "Failed to render line");
+fn scroll_axis(offset: usize, caret: usize, size: usize) -> usize {
+    let margin = 5.min(size.saturating_sub(1) / 2);
+    if caret < offset.saturating_add(margin) {
+        caret.saturating_sub(margin)
+    } else if caret >= offset.saturating_add(size).saturating_sub(margin) {
+        caret
+            .saturating_add(1)
+            .saturating_sub(size.saturating_sub(margin))
+    } else {
+        offset
     }
 }

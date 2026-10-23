@@ -1,6 +1,6 @@
 use crossterm::cursor::SetCursorStyle::BlinkingBlock;
-use crossterm::cursor::{self, Hide, MoveTo, Show};
-use crossterm::style::{Attribute, Print, SetAttribute};
+use crossterm::cursor::{self, MoveTo, Show};
+use crossterm::style::Print;
 use crossterm::terminal::{
     self, DisableLineWrap, EnableLineWrap, EnterAlternateScreen, LeaveAlternateScreen, SetTitle,
 };
@@ -75,10 +75,6 @@ impl Terminal {
         queue!(Clear(ClearType::All))
     }
 
-    pub fn clear_line() -> Result<()> {
-        queue!(Clear(ClearType::CurrentLine))
-    }
-
     pub fn move_to(position: Position) -> Result<()> {
         let x = u16::try_from(position.col).unwrap_or(u16::MAX);
         let y = u16::try_from(position.row).unwrap_or(u16::MAX);
@@ -90,34 +86,12 @@ impl Terminal {
         queue!(Show, style)
     }
 
-    pub fn hide_caret() -> Result<()> {
-        queue!(Hide)
-    }
-
     pub fn set_title(title: &str) -> Result<()> {
         queue!(SetTitle(display_text(title)))
     }
 
     pub fn print(data: impl Display) -> Result<()> {
         queue!(Print(data))
-    }
-
-    pub fn print_row(row: usize, line_text: impl Display) -> Result<()> {
-        Self::move_to(Position { col: 0, row })?;
-        Self::clear_line()?;
-        Self::print(display_text(&line_text.to_string()))
-    }
-
-    pub fn print_inverted_row(row: usize, line_text: impl Display) -> Result<()> {
-        let width = Self::size()?.width;
-        Self::move_to(Position { col: 0, row })?;
-        Self::clear_line()?;
-        let text = display_text(&line_text.to_string());
-        queue!(
-            SetAttribute(Attribute::Reverse),
-            Print(format!("{text:width$.width$}")),
-            SetAttribute(Attribute::Reset)
-        )
     }
 
     pub fn size() -> Result<Size> {
@@ -134,7 +108,7 @@ impl Terminal {
     }
 }
 
-fn display_text(text: &str) -> String {
+pub(super) fn display_text(text: &str) -> String {
     text.chars()
         .map(|character| {
             if character.is_control() {

@@ -10,7 +10,6 @@ use super::{
     document::{self, Direction, Document},
     message_bar::MessageBar,
     mode::EditorMode,
-    status_bar::StatusBar,
     view::View,
 };
 use crossterm::event::{Event, KeyEvent, KeyEventKind};
@@ -23,7 +22,6 @@ pub(super) struct EditorState {
     pub(super) quit_attempts: Option<u8>,
     pub(super) buffer: Document,
     pub(super) view: View,
-    pub(super) status_bar: StatusBar,
     pub(super) message_bar: MessageBar,
     pub(super) command_bar: Option<CommandBar>,
 }
@@ -150,7 +148,6 @@ impl EditorState {
             height: height.saturating_sub(2),
             width,
         });
-        self.status_bar.resize(Size { height: 1, width });
         if let Some(command_bar) = &mut self.command_bar {
             command_bar.resize(Size { height: 1, width });
         }
