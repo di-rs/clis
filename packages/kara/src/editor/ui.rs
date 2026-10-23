@@ -426,7 +426,7 @@ mod tests {
     fn colors_rust_token_categories() -> Result<(), Box<dyn std::error::Error>> {
         let dir = assert_fs::TempDir::new()?;
         let path = dir.path().join("colors.rs");
-        std::fs::write(&path, b"let n: i32 = Some(12);\n'a' 'life")?;
+        std::fs::write(&path, b"let n: i32 = Some(12);\n'a' 'life\n// let 42")?;
         let mut state = EditorState::default();
         state.open_file(path.to_str().ok_or("invalid path")?);
         let mut terminal = Terminal::new(TestBackend::new(40, 6))?;
@@ -446,6 +446,10 @@ mod tests {
         assert_eq!(
             terminal.backend().buffer()[(4, 1)].fg,
             Color::Rgb(0, 128, 128)
+        );
+        assert_eq!(
+            terminal.backend().buffer()[(3, 2)].fg,
+            Color::Rgb(0, 128, 0)
         );
         Ok(())
     }

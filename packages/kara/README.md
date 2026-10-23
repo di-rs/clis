@@ -138,3 +138,6 @@ Lifetime names use teal. Their ASCII letters, digits, and underscores are recogn
 after a quote. When a later quote can start another lifetime or a complete
 single-character literal, that boundary takes precedence over permissive coloring
 of invalid quoted forms.
+
+Line comments (`//`, `///`, and `//!`) use dark green through the end of the line.
+Keywords and numbers inside comments keep the comment color.

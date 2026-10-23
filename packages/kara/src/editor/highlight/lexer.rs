@@ -8,6 +8,7 @@ pub enum Kind {
     Literal,
     Character,
     Lifetime,
+    Comment,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,6 +27,13 @@ pub fn line(text: &str, _incoming: LexState) -> (Vec<Annotation>, LexState) {
         let Some(word) = next_word(remaining) else {
             break;
         };
+        if remaining.starts_with("//") {
+            annotations.push(Annotation {
+                bytes: byte..text.len(),
+                kind: Kind::Comment,
+            });
+            break;
+        }
         if let Some(length) = character_length(remaining) {
             let end = byte.saturating_add(length);
             annotations.push(Annotation {
@@ -528,5 +536,25 @@ mod tests {
                 "{text}"
             );
         }
+    }
+
+    #[test]
+    fn line_comments_take_precedence_over_inner_tokens() {
+        for text in ["// let 42", "/// Some(12)", "//! 'a' true"] {
+            assert_eq!(
+                line(text, LexState).0,
+                vec![Annotation {
+                    bytes: 0..text.len(),
+                    kind: Kind::Comment
+                }]
+            );
+        }
+        assert_eq!(tokens("let x = 12; // Some(34) 'a'"), ["12"]);
+        let kinds: Vec<_> = line("'//' // comment", LexState)
+            .0
+            .into_iter()
+            .map(|annotation| annotation.kind)
+            .collect();
+        assert_eq!(kinds, [Kind::Character, Kind::Comment]);
     }
 }
