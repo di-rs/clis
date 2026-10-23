@@ -153,6 +153,23 @@ Proposed separate PR P05, if strict startup compatibility is selected: implement
 and test ENV expansion, privilege checks, interaction modes, and file errors.
 Do not silently enable host startup files as an unrelated feature fix.
 
+### P06: command descriptions omit functions
+
+Reference: POSIX `command`, `-v` description behavior. Reproduced during task 06
+with the same shish/Brush versions, platform, and default mode as the initial audit:
+
+```sh
+shish -c 'f() { :; }; command -v f'
+```
+
+Expected `f\n`, status 0; observed empty output, status 1, empty stderr. Scripts
+that use `command -v` to detect a function incorrectly conclude it is absent.
+Owner: Brush's `command` builtin lookup only considers builtins and executables.
+Workaround: use `type` for inspection where its descriptive format is acceptable.
+Acceptance test: `posix_command_v_reports_functions` in [audit.rs](../tests/audit.rs),
+currently ignored. Proposed separate PR P06: upstream function/alias description
+lookup, published dependency update, and acceptance tests. No upstream issue linked yet.
+
 ## Foundation stack
 
 Each row is independently reviewable and targets its predecessor. No PR is merged
@@ -188,8 +205,8 @@ The task numbers are stable even when implementation order changes.
 | 02 | Basics: invalid commands | sh; invocation/§2.9.1 | Verified: status 127, diagnostic, and continued stdin execution; [task_02](../tests/audit.rs) | [02 PR](https://github.com/di-rs/sanctuary/pull/107) |
 | 03 | Basics: REPL | sh; invocation/§2.9.1 | Verified: multiline interactive loop and persistent variables; [task_03](../tests/audit.rs) | [03 PR](https://github.com/di-rs/sanctuary/pull/108) |
 | 04 | Basics: exit | sh; invocation/§2.9.1 | Verified: exit stops later commands and inherits the last status; [task_04](../tests/audit.rs) | [04 PR](https://github.com/di-rs/sanctuary/pull/109) |
-| 05 | Basics: echo | sh; invocation/§2.9.1 | Verified: ordinary echo in sh/PATH and Bash builtin modes; option extensions excluded; [task_05](../tests/audit.rs) | Current task PR |
-| 06 | Basics: type | sh; invocation/§2.9.1 | Unverified; dedicated audit pending | Planned task 06 |
+| 05 | Basics: echo | sh; invocation/§2.9.1 | Verified: ordinary echo in sh/PATH and Bash builtin modes; option extensions excluded; [task_05](../tests/audit.rs) | [05 PR](https://github.com/di-rs/sanctuary/pull/110) |
+| 06 | Basics: type | sh; invocation/§2.9.1 | Verified: builtin/external type and function type via -t extension; missing type diagnostic. P06 tracks command -v separately; [task_06](../tests/audit.rs) | Current task PR |
 | 07 | Basics: executable lookup | sh; invocation/§2.9.1 | Unverified; dedicated audit pending | Planned task 07 |
 | 08 | Basics: program execution | sh; invocation/§2.9.1 | Verified external echo; broader task pending | Planned task 08 |
 | 09 | Navigation: pwd | sh; pwd/cd | Unverified; dedicated audit pending | Planned task 09 |

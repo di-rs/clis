@@ -379,3 +379,32 @@ fn task_05_echo_preserves_argument_boundaries() {
         .stdout("one  three\n\n")
         .stderr("");
 }
+
+#[test]
+fn task_06_type_classifies_commands() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args(["-c", "type true; type /bin/echo; f() { :; }; type -t f"])
+        .assert()
+        .code(0)
+        .stdout("true is a shell builtin\n/bin/echo is /bin/echo\nfunction\n")
+        .stderr("");
+    command(home.path())
+        .args(["-c", "type shish_missing_type"])
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr(predicates::str::contains("shish_missing_type"));
+}
+
+#[test]
+#[ignore = "P06: command -v does not report shell functions"]
+fn posix_command_v_reports_functions() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args(["-c", "f() { :; }; command -v f"])
+        .assert()
+        .code(0)
+        .stdout("f\n")
+        .stderr("");
+}
