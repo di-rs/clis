@@ -84,3 +84,18 @@ fn modal_editing_preserves_keybindings_and_saved_bytes() {
         String::from_utf8_lossy(&result.stderr)
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn editing_respects_grapheme_and_document_boundaries() {
+    let result = std::process::Command::new("python3")
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/editing.py"))
+        .arg(env!("CARGO_BIN_EXE_kara"))
+        .output()
+        .expect("run PTY editing regression driver");
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}

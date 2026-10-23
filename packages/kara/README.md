@@ -35,6 +35,7 @@ failures exit with status 1. Normal quit exits with status 0.
 | Move within the file | `g` to the first line; `G` to the last; `p`/`P` half-screen up/down |
 | Start editing | `i` at the caret; `a` after it; `I` at the first non-whitespace grapheme; `A` at line end |
 | Return to navigation | Esc or Ctrl-C |
+| Delete | `d` in navigation; Delete or Backspace while editing |
 | Save | Ctrl-S; unnamed buffers prompt for a filename |
 | Enter a command | `:` from navigation, then Enter to run it |
 | Quit | Ctrl-Q; press again consecutively to discard unsaved changes |

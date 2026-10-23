@@ -252,7 +252,11 @@ impl Editor {
                     }
                 }
             }
-            EditorMode::View => {}
+            EditorMode::View => {
+                if matches!(edit_command, Edit::Delete) {
+                    self.buffer.delete();
+                }
+            }
         }
     }
 
