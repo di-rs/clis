@@ -7,6 +7,7 @@ pub enum Kind {
     Type,
     Literal,
     Character,
+    Lifetime,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -30,6 +31,15 @@ pub fn line(text: &str, _incoming: LexState) -> (Vec<Annotation>, LexState) {
             annotations.push(Annotation {
                 bytes: byte..end,
                 kind: Kind::Character,
+            });
+            byte = end;
+            continue;
+        }
+        if let Some(length) = lifetime_length(remaining) {
+            let end = byte.saturating_add(length);
+            annotations.push(Annotation {
+                bytes: byte..end,
+                kind: Kind::Lifetime,
             });
             byte = end;
             continue;
@@ -99,6 +109,7 @@ fn token_is_delimited(text: &str, start: usize, end: usize) -> bool {
 }
 
 fn character_length(remaining: &str) -> Option<usize> {
+    let lifetime_end = lifetime_length(remaining);
     let content = remaining.strip_prefix('\'')?;
     let mut escaped = false;
     for (byte, character) in content.char_indices() {
@@ -107,10 +118,91 @@ fn character_length(remaining: &str) -> Option<usize> {
         } else if character == '\\' {
             escaped = true;
         } else if character == '\'' {
+            let quote = byte.saturating_add(1);
+            // A later quote may open another lifetime or one-scalar character.
+            // Prefer those tokens over a permissive, invalid character form.
+            let candidate = remaining.get(quote..)?;
+            if lifetime_end.is_some_and(|end| end < quote)
+                && (lifetime_length(candidate).is_some()
+                    || scalar_character_length(candidate).is_some())
+            {
+                return None;
+            }
             return Some(byte.saturating_add(2));
+        } else if lifetime_end.is_some()
+            && (character.is_whitespace()
+                || (character.is_ascii_punctuation() && !matches!(character, '_' | '-')))
+        {
+            // Permissive forms may contain hyphens, Unicode text, and escapes,
+            // but stop at whitespace or other ASCII punctuation. Do not cross
+            // lifetime bounds, labels, types, or comments to find a later quote.
+            return None;
         }
     }
     None
+}
+
+// Inspect only one character payload and its closing quote. This does not parse
+// surrounding Rust: it resolves an ambiguous quote in favor of a complete scalar
+// literal, including simple, ASCII, and Unicode escapes.
+fn scalar_character_length(remaining: &str) -> Option<usize> {
+    let content = remaining.strip_prefix('\'')?;
+    let payload = if let Some(escape) = content.strip_prefix('\\') {
+        let escaped_length = match escape.chars().next()? {
+            '\\' | '\'' | '"' | 'n' | 'r' | 't' | '0' => 1,
+            'x' => {
+                let digits = escape.get(1..3)?;
+                let value = u8::from_str_radix(digits, 16).ok()?;
+                if value > 0x7f || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                    return None;
+                }
+                3
+            }
+            'u' => {
+                let body = escape.strip_prefix("u{")?;
+                let close = body.find('}')?;
+                let mut value = 0_u32;
+                let mut digits = 0_usize;
+                for character in body.get(..close)?.chars() {
+                    if character == '_' {
+                        continue;
+                    }
+                    digits = digits.saturating_add(1);
+                    if digits > 6 {
+                        return None;
+                    }
+                    value = value
+                        .checked_mul(16)?
+                        .checked_add(character.to_digit(16)?)?;
+                }
+                if digits == 0 || char::from_u32(value).is_none() {
+                    return None;
+                }
+                close.saturating_add(3)
+            }
+            _ => return None,
+        };
+        escaped_length.saturating_add(1)
+    } else {
+        let character = content.chars().next()?;
+        if matches!(character, '\'' | '\n' | '\r') {
+            return None;
+        }
+        character.len_utf8()
+    };
+    content
+        .get(payload..)?
+        .starts_with('\'')
+        .then_some(payload.saturating_add(2))
+}
+
+fn lifetime_length(remaining: &str) -> Option<usize> {
+    let content = remaining.strip_prefix('\'')?;
+    let length = content
+        .bytes()
+        .take_while(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+        .count();
+    (length > 0).then_some(length.saturating_add(1))
 }
 
 fn word_kind(word: &str) -> Option<Kind> {
@@ -329,5 +421,112 @@ mod tests {
         );
         assert_eq!(tokens(text), ["12"]);
         assert_eq!(character_length("'unterminated"), None);
+    }
+    #[test]
+    fn lifetimes_do_not_consume_neighboring_quotes() {
+        let text = "fn f<'a, 'b>(x: &'a str) -> &'static str { 'a' }";
+        let annotations = line(text, LexState).0;
+        let lifetimes: Vec<_> = annotations
+            .iter()
+            .filter(|annotation| annotation.kind == Kind::Lifetime)
+            .filter_map(|annotation| text.get(annotation.bytes.clone()))
+            .collect();
+        let characters: Vec<_> = annotations
+            .iter()
+            .filter(|annotation| annotation.kind == Kind::Character)
+            .filter_map(|annotation| text.get(annotation.bytes.clone()))
+            .collect();
+        assert_eq!(lifetimes, ["'a", "'b", "'a", "'static"]);
+        assert_eq!(characters, ["'a'"]);
+        assert_eq!(lifetime_length("'a_1"), Some(4));
+        assert_eq!(lifetime_length("'_"), Some(2));
+    }
+    #[test]
+    fn permissive_characters_stop_at_lifetime_boundaries() {
+        // Adjacent permissive forms can instead spell a lifetime followed by
+        // a space character. Exercise each form independently.
+        for text in ["'a-'", "'a\u{301}'", "'a'", r"'\n'", r"'\''"] {
+            assert_eq!(
+                line(text, LexState).0,
+                [Annotation {
+                    bytes: 0..text.len(),
+                    kind: Kind::Character,
+                }]
+            );
+        }
+        let text = "'a-', 'a\u{301}'";
+        let actual: Vec<_> = line(text, LexState)
+            .0
+            .into_iter()
+            .filter_map(|annotation| {
+                text.get(annotation.bytes)
+                    .map(|text| (text, annotation.kind))
+            })
+            .collect();
+        assert_eq!(
+            actual,
+            [("'a-'", Kind::Character), ("'a\u{301}'", Kind::Character)]
+        );
+
+        for text in [
+            "<'a, 'b>",
+            "<'a,'b>",
+            "&'a/* comment */ str; '\\\''",
+            "<'a: 'b + 'c>",
+            "&'a&'b str",
+            "'a: loop { break 'a; }",
+            "fn f<'a>() { '\\\''; }",
+        ] {
+            let annotations = line(text, LexState).0;
+            let first = annotations
+                .iter()
+                .find(|annotation| text.get(annotation.bytes.clone()) == Some("'a"));
+            assert_eq!(
+                first.map(|annotation| annotation.kind),
+                Some(Kind::Lifetime)
+            );
+        }
+
+        // Without a separator, a later quote followed by a name is ambiguous;
+        // retain the lifetime interpretation rather than joining the tokens.
+        let text = "'a-'b";
+        let actual: Vec<_> = line(text, LexState)
+            .0
+            .into_iter()
+            .filter_map(|annotation| {
+                text.get(annotation.bytes)
+                    .map(|text| (text, annotation.kind))
+            })
+            .collect();
+        assert_eq!(actual, [("'a", Kind::Lifetime), ("'b", Kind::Lifetime)]);
+    }
+    #[test]
+    fn lifetime_before_scalar_character_keeps_both_tokens() {
+        for character in [
+            "'b'",
+            "' '",
+            "'界'",
+            r"'\n'",
+            r"'\x41'",
+            r"'\u{1F642}'",
+            r"'\u{10_FF_FF}'",
+            r"'\''",
+            r"'\\'",
+        ] {
+            let text = format!("accept!('a-{character});");
+            let actual: Vec<_> = line(&text, LexState)
+                .0
+                .into_iter()
+                .filter_map(|annotation| {
+                    text.get(annotation.bytes)
+                        .map(|text| (text, annotation.kind))
+                })
+                .collect();
+            assert_eq!(
+                actual,
+                [("'a", Kind::Lifetime), (character, Kind::Character)],
+                "{text}"
+            );
+        }
     }
 }

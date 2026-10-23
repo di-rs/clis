@@ -9,8 +9,8 @@ from pathlib import Path
 from pty_smoke import session
 
 
-def colored_text(output: bytes, color: int) -> bytes:
-    """Observe text in an indexed color, allowing combined SGR codes and cursor-only updates."""
+def colored_text(output: bytes, color: int | tuple[int, int, int]) -> bytes:
+    """Observe text in a foreground color, allowing combined SGR codes and cursor-only updates."""
     active = False
     cursor = 0
     rendered = bytearray()
@@ -25,7 +25,7 @@ def colored_text(output: bytes, color: int) -> bytes:
             while index < len(codes):
                 code = codes[index]
                 if code in (0, 39) or 30 <= code <= 37 or 90 <= code <= 97:
-                    active = code == 30 + color
+                    active = isinstance(color, int) and code == 30 + color
                 elif code in (38, 48, 58) and index + 2 < len(codes):
                     if codes[index + 1] == 5:
                         if code == 38:
@@ -33,7 +33,7 @@ def colored_text(output: bytes, color: int) -> bytes:
                         index += 2
                     elif codes[index + 1] == 2 and index + 4 < len(codes):
                         if code == 38:
-                            active = False
+                            active = tuple(codes[index + 2 : index + 5]) == color
                         index += 4
                 index += 1
         cursor = control.end()
@@ -67,6 +67,30 @@ def main() -> None:
         output = session(binary, directory, [b":w keywords.rs\r", b"\x11"])
         assert colored_text(output, 4) == b"macro_rulesrawsafe"
         assert (directory / "keywords.rs").read_bytes() == source
+
+        source = "'a-', 'a\u0301'".encode()
+        (directory / "original").write_bytes(source)
+        output = session(binary, directory, [b":w characters.rs\r", b"\x11"])
+        assert colored_text(output, (255, 191, 0)) == "'a-''a\u0301'".encode()
+        assert (directory / "characters.rs").read_bytes() == source
+
+        source = (
+            rb"accept!('a-'b');"
+            b"\n"
+            rb"accept!('a-' ');"
+            b"\n"
+            rb"accept!('a-'\n');"
+            b"\n"
+            rb"accept!('a-'\x41');"
+            b"\n"
+            rb"accept!('a-'\u{1F642}');"
+            b"\n"
+        )
+        (directory / "original").write_bytes(source)
+        output = session(binary, directory, [b":w lifetimes.rs\r", b"\x11"])
+        assert colored_text(output, (255, 191, 0)) == rb"'b'' ''\n''\x41''\u{1F642}'"
+        assert colored_text(output, (0, 128, 128)) == b"'a" * 5
+        assert (directory / "lifetimes.rs").read_bytes() == source
 
 
 if __name__ == "__main__":
