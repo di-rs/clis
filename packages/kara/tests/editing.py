@@ -17,13 +17,13 @@ def main() -> None:
         ("e\u0301b\n".encode(), b"d", b"b\n"),
         (b"ab\ncd\n", b"ji\x7f\x1b", b"abcd\n"),
         (b"abcdef\nx\n123456\n", b"ejdiZ\x1b", b"abcdef\nxZ123456\n"),
-        (b"abcd\nx\n", b"eGiX\x1b", b"abcd\nxX\n"),
+        (b"abcd\nx", b"eGiX\x1b", b"abcd\nxX"),
     ):
         check(binary, initial, [keys, b"\x13", b"\x11"], expected)
     initial = ("x" * 4096 + "👩‍💻e\u0301\n").encode()
     expected = ("x" * 4096 + "👩‍💻\n").encode()
     check(binary, initial, [b"ei\x7f\x1b", b"\x13", b"\x11"], expected)
-    check(binary, b"ab\n", [b"ed", b"\x11"], b"ab\n")
+    check(binary, b"ab\n", [b"Gd", b"\x11"], b"ab\n")
 
 
 if __name__ == "__main__":
