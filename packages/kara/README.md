@@ -100,5 +100,6 @@ python3 packages/kara/tests/pty_smoke.py "$PWD/target/debug/kara"
 ```
 
 `/` in navigation mode opens a search prompt. Type a query, use Backspace to
-remove a grapheme, and press Enter or Esc to return to navigation. Search traversal
-is added in the following assignment. In editing mode, `/` is ordinary text.
+remove a grapheme, and press Enter or Esc to return to navigation. Enter reports the number of literal, case-sensitive matches. Matching is
+single-line and non-overlapping; an empty query has no matches. Interactive
+movement follows in the next assignment. In editing mode, `/` is ordinary text.
