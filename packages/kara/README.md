@@ -120,3 +120,8 @@ a joined emoji sequence. Search does not normalize Unicode text.
 
 Visible matches use cyan backgrounds; the active match uses bold text on yellow.
 Accepted highlights persist, and edits refresh matches against current text.
+
+## Syntax highlighting
+
+ASCII digits are colored red. Search backgrounds take priority over syntax colors.
+Token recognition and file-type selection follow in the next assignments.
