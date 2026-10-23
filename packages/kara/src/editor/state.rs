@@ -90,9 +90,16 @@ impl EditorState {
             Down, End, Home, Left, LineEnd, LineStart, PageDown, PageUp, Right, Up,
         };
         if self.prompt.is_some() {
-            if self.mode == EditorMode::Search && matches!(direction, Down | Right) {
-                self.search.next();
-                self.reveal_search_match();
+            if self.mode == EditorMode::Search {
+                let step = match direction {
+                    Down | Right => Some(super::search::SearchDirection::Forward),
+                    Up | Left => Some(super::search::SearchDirection::Backward),
+                    _ => None,
+                };
+                if let Some(step) = step {
+                    self.search.step(step);
+                    self.reveal_search_match();
+                }
             }
             return;
         }

@@ -37,6 +37,14 @@ def main() -> None:
         binary, b"hit--hit", [b"/hit", b"\x1b[B", b"\r", b"iX", b"\x1b", b"\x13\x11"], b"hit--Xhit"
     )
 
+    check(binary, b"aaaaa", [b"/aa", b"\x1b[D", b"\r", b"iX", b"\x1b", b"\x13\x11"], b"aaXaaa")
+    check(
+        binary,
+        b"hit--hit",
+        [b"/hit", b"\x1b[B\x1b[A", b"\r", b"iX", b"\x1b", b"\x13\x11"],
+        b"Xhit--hit",
+    )
+
 
 if __name__ == "__main__":
     main()
