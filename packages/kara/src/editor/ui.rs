@@ -52,7 +52,12 @@ pub(super) fn render(frame: &mut Frame<'_>, state: &mut EditorState) {
             display_text(&status.filename),
             status.modified_indicator_to_string()
         );
-        let right = format!("{} | {}", state.mode, status.position_indicator_to_string());
+        let right = format!(
+            "{} | {} | {}",
+            state.mode,
+            status.file_type,
+            status.position_indicator_to_string()
+        );
         let right_width = u16::try_from(Line::from(right.as_str()).width())
             .unwrap_or(u16::MAX)
             .min(area.width);

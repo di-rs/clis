@@ -49,6 +49,9 @@ impl Document {
         self.modified_at = None;
         Ok(outcome)
     }
+    pub fn file_type(&self) -> super::file_type::FileType {
+        super::file_type::FileType::detect(self.filename())
+    }
     pub fn filename(&self) -> Option<&Path> {
         self.filename.as_deref()
     }
@@ -168,9 +171,13 @@ mod save_tests {
     fn directory_sync_failure_keeps_committed_identity() -> Result<(), Box<dyn std::error::Error>> {
         let dir = assert_fs::TempDir::new()?;
         let original = dir.path().join("original");
-        let destination = dir.path().join("saved");
+        let destination = dir.path().join("saved.rs");
         fs::write(&original, b"original\n")?;
         let mut buffer = Document::open(original.to_str().ok_or("non-UTF-8 fixture")?)?;
+        assert_eq!(
+            buffer.file_type(),
+            super::super::file_type::FileType::PlainText
+        );
         buffer.insert_char('X');
         let result = buffer.save_as_with(
             destination.to_str().ok_or("non-UTF-8 fixture")?,
@@ -183,11 +190,39 @@ mod save_tests {
         assert!(matches!(result, SaveOutcome::DurabilityWarning(_)));
         assert_eq!(buffer.filename(), Some(destination.as_path()));
         assert!(!buffer.is_modified());
+        assert_eq!(buffer.file_type(), super::super::file_type::FileType::Rust);
         assert_eq!(fs::read(&destination)?, b"Xoriginal\n");
         buffer.insert_char('Y');
         assert!(matches!(buffer.save()?, SaveOutcome::Saved));
         assert_eq!(fs::read(&destination)?, b"XYoriginal\n");
         assert_eq!(fs::read(&original)?, b"original\n");
+        Ok(())
+    }
+    #[test]
+    #[allow(
+        clippy::panic_in_result_fn,
+        reason = "Assertions verify failed saves retain file type and identity."
+    )]
+    fn failed_save_keeps_original_file_type() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = assert_fs::TempDir::new()?;
+        let original = dir.path().join("original.txt");
+        fs::write(&original, b"12")?;
+        let mut document = Document::open(original.to_str().ok_or("invalid path")?)?;
+        document.insert_char('3');
+        let failed = document.save_as_with("failed.rs", |_, _| {
+            Err(io::Error::new(io::ErrorKind::PermissionDenied, "denied"))
+        });
+        assert!(failed.is_err());
+        assert_eq!(document.filename(), Some(original.as_path()));
+        assert_eq!(
+            document.file_type(),
+            super::super::file_type::FileType::PlainText
+        );
+        assert!(document.is_modified());
+        assert_eq!(
+            super::super::file_type::FileType::detect(Some(std::path::Path::new("upper.RS"))),
+            super::super::file_type::FileType::Rust
+        );
         Ok(())
     }
 }

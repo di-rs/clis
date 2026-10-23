@@ -3,6 +3,7 @@ use super::Document;
 #[derive(Default, Eq, PartialEq, Debug)]
 pub struct DocumentStatus {
     total_lines: usize,
+    pub file_type: super::file_type::FileType,
     current_line_index: usize,
     is_modified: bool,
     pub(crate) filename: String,
@@ -37,6 +38,7 @@ impl From<&Document> for DocumentStatus {
 
         Self {
             total_lines,
+            file_type: buffer.file_type(),
             current_line_index,
             is_modified,
             filename,
