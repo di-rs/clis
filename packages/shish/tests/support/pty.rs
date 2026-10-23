@@ -4,16 +4,18 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{Read as _, Write as _};
 use std::path::Path;
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, bail};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
+type WriteRequest = (Vec<u8>, SyncSender<std::io::Result<()>>);
+
 pub struct Pty {
     child: Box<dyn Child + Send + Sync>,
     _master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn std::io::Write + Send>,
+    writer: SyncSender<WriteRequest>,
     receiver: Receiver<Vec<u8>>,
     terminal: vt100::Parser,
     output: Vec<u8>,
@@ -53,7 +55,20 @@ impl Pty {
         let child = pair.slave.spawn_command(command)?;
         drop(pair.slave);
         let mut reader = pair.master.try_clone_reader()?;
-        let writer = pair.master.take_writer()?;
+        let mut writer = pair.master.take_writer()?;
+        let (requests, pending) = mpsc::sync_channel::<WriteRequest>(1);
+        // Keep blocking OS writes off the driver thread so backpressure cannot
+        // prevent its deadline or cleanup guard from running. Killing the PTY
+        // child on cleanup releases a writer blocked on terminal input.
+        std::thread::spawn(move || {
+            while let Ok((bytes, completed)) = pending.recv() {
+                let result = writer.write_all(&bytes).and_then(|()| writer.flush());
+                let failed = result.is_err();
+                if completed.send(result).is_err() || failed {
+                    break;
+                }
+            }
+        });
         let (sender, receiver) = mpsc::sync_channel(64);
         std::thread::spawn(move || {
             let mut buffer = [0; 4096];
@@ -74,7 +89,7 @@ impl Pty {
         Ok(Self {
             child,
             _master: pair.master,
-            writer,
+            writer: requests,
             receiver,
             terminal: vt100::Parser::new(30, 120, 1000),
             output: Vec::new(),
@@ -82,9 +97,14 @@ impl Pty {
         })
     }
 
-    pub fn send(&mut self, input: &str) -> anyhow::Result<()> {
-        self.writer.write_all(input.as_bytes())?;
-        self.writer.flush()?;
+    pub fn send(&self, input: &str) -> anyhow::Result<()> {
+        let (completed, result) = mpsc::sync_channel(1);
+        self.writer
+            .try_send((input.as_bytes().to_vec(), completed))
+            .context("PTY write queue unavailable")?;
+        result
+            .recv_timeout(Duration::from_secs(1))
+            .context("PTY write did not complete within one second")??;
         Ok(())
     }
 
@@ -138,13 +158,13 @@ impl Pty {
                     .windows(4)
                     .filter(|window| *window == b"\x1b[6n")
                     .count();
-                for _ in 0..requests {
+                if requests > 0 {
                     let (row, col) = self.terminal.screen().cursor_position();
-                    self.send(&format!(
-                        "\x1b[{};{}R",
-                        row.saturating_add(1),
-                        col.saturating_add(1)
-                    ))?;
+                    let reply =
+                        format!("\x1b[{};{}R", row.saturating_add(1), col.saturating_add(1));
+                    // One deadline covers the whole batch, even for a program
+                    // flooding cursor queries without consuming their replies.
+                    self.send(&reply.repeat(requests))?;
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout | mpsc::RecvTimeoutError::Disconnected) => {}

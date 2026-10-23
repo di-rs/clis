@@ -199,3 +199,42 @@ fn startup_policy_skips_interactive_env() -> anyhow::Result<()> {
     terminal.send("exit\n")?;
     terminal.finish(0)
 }
+
+#[test]
+fn pty_input_backpressure_is_bounded() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut pty = support::pty::Pty::new(
+        home.path(),
+        &["-c", "stty raw -echo; printf ready; sleep 30"],
+        &[],
+    )?;
+    pty.expect("ready")?;
+    let started = std::time::Instant::now();
+    let error = pty.send(&"x".repeat(1_048_576)).unwrap_err();
+    anyhow::ensure!(error.to_string().contains("PTY write did not complete"));
+    drop(pty);
+    anyhow::ensure!(started.elapsed() < std::time::Duration::from_secs(5));
+    Ok(())
+}
+
+#[test]
+fn pty_cursor_reply_backpressure_is_bounded() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut pty = support::pty::Pty::new(
+        home.path(),
+        &[
+            "-c",
+            "stty raw -echo; while true; do printf '\x1b[6n'; done",
+        ],
+        &[],
+    )?;
+    let started = std::time::Instant::now();
+    let error = pty.expect("never printed").unwrap_err();
+    anyhow::ensure!(
+        error.to_string().contains("PTY write did not complete"),
+        "{error:#}"
+    );
+    drop(pty);
+    anyhow::ensure!(started.elapsed() < std::time::Duration::from_secs(8));
+    Ok(())
+}
