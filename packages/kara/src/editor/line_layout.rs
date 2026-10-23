@@ -118,6 +118,7 @@ impl LineLayout {
         match for_str {
             " " => None,
             "\t" => Some(' '),
+            _ if for_str.chars().any(char::is_control) => Some('▯'),
             _ if width > 0 && for_str.trim().is_empty() => Some('␣'),
             _ if width == 0 => {
                 let mut chars = for_str.chars();

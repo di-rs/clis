@@ -5,7 +5,6 @@ use crate::editor::{
     command::{Edit, EditorCommand},
     command_bar::interpreter::Interpreter,
     line_layout::LineLayout,
-    terminal::Terminal,
 };
 
 mod interpreter;
@@ -30,22 +29,19 @@ impl CommandBar {
         self.size = size;
     }
 
-    pub fn render(&self, position_y: usize) {
-        let area_for_value = self.size.width.saturating_sub(self.prompt.len());
+    pub fn text(&self) -> String {
+        let area_for_value = self
+            .size
+            .width
+            .saturating_sub(self.prompt.len())
+            .saturating_sub(1);
         let value_end = self.value.width();
         let value_start = value_end.saturating_sub(area_for_value);
-        let message = format!(
+        format!(
             "{}{}",
             self.prompt,
             self.value.get(Range::from(value_start..value_end))
-        );
-        let to_print = if message.len() <= self.size.width {
-            message
-        } else {
-            String::new()
-        };
-
-        _ = Terminal::print_row(position_y, to_print);
+        )
     }
 
     pub fn handle_edit(&mut self, edit_command: &Edit) {
@@ -67,8 +63,8 @@ impl CommandBar {
 
     pub fn caret_position_col(&self) -> usize {
         min(
-            self.prompt.len().saturating_add(self.value.len()),
-            self.size.width,
+            self.prompt.len().saturating_add(self.value.width()),
+            self.size.width.saturating_sub(1),
         )
     }
 }

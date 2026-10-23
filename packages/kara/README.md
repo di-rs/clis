@@ -74,6 +74,9 @@ Files containing invalid UTF-8 are rejected without changing their contents.
 
 ## Develop Kara
 
+The screen uses Ratatui with the Crossterm backend. Kara keeps its own modal
+editing and Unicode layout logic; resizing also supports very small terminals.
+
 For editor changes, test navigation, typing, saving, quitting, and terminal
 restoration in a PTY or real terminal. The startup E2E checks help, arguments, and failure when
 there is no usable terminal; it does not cover editing.

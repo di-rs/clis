@@ -16,8 +16,11 @@ from being exchanged accidentally. Line layout converts graphemes to display
 cells. Layout is derived from an individual rope line when needed; it is not a
 second document text store. Rope edits translate grapheme positions to character
 offsets, so editing does not rebuild the entire document.
-Command, status, and message bars provide separate parts of the screen.
-The terminal adapter contains terminal I/O. Editor teardown restores the terminal.
+Ratatui owns frame diffing and draws status, command, and message bars with standard
+widgets. A small document widget applies Unicode cell clipping before rendering.
+The viewport owns scrolling; the document retains all editing behavior. The
+Crossterm adapter manages terminal setup and cursor shape. Drawing errors propagate
+to the process boundary, and editor teardown restores the terminal.
 
 Persistence streams UTF-8 into and out of the rope without normalizing line
 endings or constructing a second whole-document string. Ropey's LF/CRLF line
@@ -42,3 +45,6 @@ logs. Startup errors propagate to the process boundary.
 
 Interactive behavior needs a PTY or real terminal: navigation, editing, saving,
 quitting, and restoration cannot be established by the non-terminal startup test.
+
+Ratatui TestBackend checks rendered Unicode cells, clipping, status styles, cursor
+placement, and tiny/resized terminals without initializing a real terminal.

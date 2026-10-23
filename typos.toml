@@ -8,3 +8,6 @@ Buildins = "Buildins"
 PERMITED = "PERMITED"
 # Existing commit identifier, not the English misspelling "abd".
 c646abd = "c646abd"
+
+# Terminal UI crate used by Kara.
+Ratatui = "Ratatui"

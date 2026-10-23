@@ -14,8 +14,8 @@ mod mode;
 mod persistence;
 mod prelude;
 mod state;
-mod status_bar;
 mod terminal;
+mod ui;
 mod view;
 use document::Document;
 pub use prelude::*;
@@ -25,6 +25,7 @@ pub struct Editor {
     title: String,
     terminal_active: bool,
     state: EditorState,
+    renderer: Option<ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>>,
 }
 
 impl Editor {
@@ -42,6 +43,9 @@ impl Editor {
         Terminal::initialize()?;
         let mut editor = Self::default();
         editor.terminal_active = true;
+        editor.renderer = Some(ratatui::Terminal::new(
+            ratatui::backend::CrosstermBackend::new(std::io::stdout()),
+        )?);
 
         let size = Terminal::size().unwrap_or_default();
         editor.state.resize(size);
@@ -59,7 +63,7 @@ impl Editor {
 
     pub fn run(&mut self) -> std::io::Result<()> {
         loop {
-            self.refresh_screen();
+            self.refresh_screen()?;
             // TODO: Do it only if buffer was changed
             self.refresh_title();
             if self.state.should_quit {
@@ -87,44 +91,13 @@ impl Editor {
         }
     }
 
-    fn refresh_screen(&mut self) {
-        let Size { width, height } = self.state.terminal_size;
-        if height == 0 || width == 0 {
-            return;
+    fn refresh_screen(&mut self) -> std::io::Result<()> {
+        if let Some(renderer) = &mut self.renderer {
+            renderer.draw(|frame| ui::render(frame, &mut self.state))?;
+            Terminal::show_caret(self.state.mode.get_cursor_style())?;
+            Terminal::execute()?;
         }
-        let _ = Terminal::hide_caret();
-
-        let caret_location = self.state.buffer.caret_location();
-        self.state.view.scroll_into_view(caret_location);
-
-        let bottom_bar_row = height.saturating_sub(1);
-        if let Some(command_bar) = &mut self.state.command_bar {
-            command_bar.render(bottom_bar_row);
-        } else {
-            self.state.message_bar.render(bottom_bar_row);
-        }
-        if height > 1 {
-            self.state.view.render(&self.state.buffer);
-        }
-        if height > 2 {
-            let status_bar_pos = height.saturating_sub(2);
-            self.state
-                .status_bar
-                .render(status_bar_pos, &self.state.buffer, self.state.mode);
-        }
-
-        let location = if let Some(command_bar) = &mut self.state.command_bar {
-            ScreenPosition {
-                x: command_bar.caret_position_col(),
-                y: bottom_bar_row,
-            }
-        } else {
-            caret_location.saturation_sub(self.state.view.scroll_offset)
-        };
-
-        let _ = Terminal::move_to(location.into());
-        let _ = Terminal::show_caret(self.state.mode.get_cursor_style());
-        let _ = Terminal::execute();
+        Ok(())
     }
 }
 
