@@ -38,7 +38,7 @@ id = "cargo-clippy"
 name = "cargo clippy"
 language = "system"
 entry = "uv run python -m cli_check.hooks cargo-clippy"
-files = '(\.rs$|(^|/)Cargo\.(toml|lock)$|(^|/)\.?(rust-toolchain|clippy|rustfmt)\.toml$|^(buildins/[^/]+|utils/[^/]+|packages/(biggie|kara|parsu))/(tests|benches)/|^\.(config/nextest|cargo/config)\.toml$)'
+files = '(\.rs$|(^|/)Cargo\.(toml|lock)$|(^|/)\.?(rust-toolchain|clippy|rustfmt)\.toml$|^(buildins/[^/]+|utils/[^/]+|packages/(biggie|kara|parsu|shish))/(tests|benches)/|^\.(config/nextest|cargo/config)\.toml$)'
 require_serial = true
 include_deleted = true
 
@@ -47,7 +47,7 @@ id = "cli-check"
 name = "CLI repository standards"
 language = "system"
 entry = "uv run python -m cli_check.hooks cli-check"
-files = '\.rs$|(^|/)(Cargo\.toml|README\.md|mk-outs\.nu|mk-outputs\.nu)$|^(buildins/[^/]+|utils/[^/]+|packages/(biggie|kara|parsu))/(tests|benches)/|^tools/cli-check/|^(pyproject\.toml|uv\.lock|prek\.toml)$'
+files = '\.rs$|(^|/)(Cargo\.toml|README\.md|mk-outs\.nu|mk-outputs\.nu)$|^(buildins/[^/]+|utils/[^/]+|packages/(biggie|kara|parsu|shish))/(tests|benches)/|^tools/cli-check/|^(pyproject\.toml|uv\.lock|prek\.toml)$'
 require_serial = true
 include_deleted = true
 

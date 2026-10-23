@@ -15,6 +15,8 @@ printf 'echo hello\n' | cargo run -p shish -- -s
 ```
 
 Use `--help` for arguments and `--version` for the package version.
+The root `make install-rust` target also installs shish into `~/.local/bin` (or
+`PREFIX/bin` when overridden).
 
 | Invocation | Behavior |
 | --- | --- |
@@ -25,11 +27,15 @@ Use `--help` for arguments and `--version` for the package version.
 | `-s [ARG...]` | Read commands from stdin with operands as positional parameters. |
 | `-n` | Check the selected command, script, or stdin without execution or redirection effects. |
 | `--posix` | Explicitly select the default sh/POSIX settings. |
+| `--bash` | Opt into Brush's Bash settings and builtins such as `declare`, `complete`, and `history`; conflicts with `--posix`. |
 
 Noninteractive execution prints no prompt. Interactive sessions use `PS1` when
-provided, otherwise the current directory's basename followed by ` > `. Builtin
-commands include `cd`, `exit`, and `jobs`; external programs use
+provided, otherwise the current directory's basename (`~` at HOME) followed by ` > `.
+Builtin commands include `cd`, `exit`, and `jobs`; external programs use
 ordinary `PATH` lookup. There is no discovery of repository build directories.
+`true` and `false` use Sanctuary's implementations in process, ignore arguments,
+and return status without terminating shish or creating standalone utility logs.
+They are the only Sanctuary utilities integrated as shell builtins initially.
 
 EOF returns the last command's status. `false` returns 1 and does not itself stop
 the shell; `exit` ends execution. Missing commands return 127. Syntax errors return
@@ -45,9 +51,13 @@ Shish runs with the invoking user's privileges. It supplies neither sandbox
 isolation nor recovery of interrupted processes. Boxie owns isolation and lifecycle
 recovery; its integration with shish remains a separate design stage.
 
-See [known compatibility gaps](docs/compatibility-gaps.md) for limitations and
-workarounds, [architecture](docs/architecture.md) for implementation boundaries,
-and [platform direction](../../docs/platform-direction.md) for the platform goals.
+The [compatibility inventory](docs/compatibility.md) records verified behavior and
+planned features. See [known gaps](docs/compatibility-gaps.md) for limitations and
+workarounds, and the [testing guide](docs/testing.md) for CLI and terminal evidence.
+[Architecture](docs/architecture.md) describes implementation boundaries; the
+[durability design](docs/durability.md) covers recovery limits and planned Boxie
+integration. [Platform direction](../../docs/platform-direction.md) sets the goals.
 Untested features are not yet a support promise.
+
 
 [All projects](../../README.md)

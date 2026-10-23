@@ -13,10 +13,17 @@ Stdin is read without consuming data intended for `read` or external programs.
 Interactive input uses a terminal editor. All execution paths preserve command
 statuses and delegate shell exit handling to the runtime.
 
+The `true` and `false` builtins call Sanctuary's utility libraries and return
+status without terminating the shell. Their standalone CLIs own logging and
+process termination.
+
 Dependencies use published releases recorded in the workspace lockfile. Known
 limitations, evidence, and follow-up acceptance criteria live in the
 [compatibility gaps](compatibility-gaps.md). See the [README](../README.md) for
 invocation, startup behavior, and the current compatibility promise.
+
+Explicit `--bash` selects Bash behavior for both syntax inspection and execution.
+Sanctuary status builtins are available in either mode.
 
 ## Origin
 
