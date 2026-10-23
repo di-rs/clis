@@ -943,7 +943,7 @@ fn task_28_command_common_prefix() -> anyhow::Result<()> {
     )?;
     terminal.expect("shish-test> ")?;
     terminal.send("shish_p\t")?;
-    terminal.expect("shish-test> shish_pick_")?;
+    terminal.expect_screen_line("shish-test> shish_pick_")?;
     terminal.send("\x03")?;
     terminal.expect_line("shish-test> ")?;
     terminal.send("exit 0\n")?;
