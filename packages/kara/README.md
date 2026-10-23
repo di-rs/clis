@@ -144,3 +144,7 @@ Keywords and numbers inside comments keep the comment color.
 
 Block comments use the same color, can span lines, and may nest. Editing an opener
 or closer updates later lines until the carried comment state stabilizes.
+
+Strings use orange, support escaped quotes, and can span lines. Comment delimiters
+inside strings stay string text; quotes inside block comments stay comment text.
+Search styling remains visible over either category.

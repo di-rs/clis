@@ -121,6 +121,7 @@ pub fn style(syntax: Option<Kind>, search: Option<MatchKind>) -> Style {
             Some(Kind::Character) => Style::new().fg(Color::Rgb(255, 191, 0)),
             Some(Kind::Lifetime) => Style::new().fg(Color::Rgb(0, 128, 128)),
             Some(Kind::Comment) => Style::new().fg(Color::Rgb(0, 128, 0)),
+            Some(Kind::String) => Style::new().fg(Color::Rgb(255, 165, 0)),
             None => Style::default(),
         },
     }
@@ -283,6 +284,37 @@ mod tests {
         cache.refresh(&text);
         assert_eq!(cache.recomputed, 14);
         assert_eq!(cache.kind_at(1, 0), Some(Kind::Number));
+        Ok(())
+    }
+    #[test]
+    #[allow(
+        clippy::panic_in_result_fn,
+        reason = "Assertions verify string-state edit propagation."
+    )]
+    fn editing_string_delimiters_refreshes_later_lines() -> Result<(), Box<dyn std::error::Error>> {
+        let mut text = Buffer::read(b"\"open\n12\n34".as_slice())?;
+        let mut cache = HighlightCache::default();
+        cache.refresh(&text);
+        assert_eq!(cache.kind_at(2, 0), Some(Kind::String));
+        text.insert_char(
+            '"',
+            TextPosition {
+                line: 1,
+                grapheme: 2,
+            },
+        );
+        cache.invalidate(1, 3, 3);
+        cache.refresh(&text);
+        assert_eq!(cache.recomputed, 5);
+        assert_eq!(cache.kind_at(2, 0), Some(Kind::Number));
+        assert!(text.delete(TextPosition {
+            line: 1,
+            grapheme: 2
+        }));
+        cache.invalidate(1, 3, 3);
+        cache.refresh(&text);
+        assert_eq!(cache.recomputed, 7);
+        assert_eq!(cache.kind_at(2, 0), Some(Kind::String));
         Ok(())
     }
 }

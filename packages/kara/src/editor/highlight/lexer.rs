@@ -9,6 +9,7 @@ pub enum Kind {
     Character,
     Lifetime,
     Comment,
+    String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -20,6 +21,7 @@ pub struct Annotation {
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LexState {
     block_depth: usize,
+    in_string: bool,
 }
 
 pub fn line(text: &str, mut state: LexState) -> (Vec<Annotation>, LexState) {
@@ -27,32 +29,35 @@ pub fn line(text: &str, mut state: LexState) -> (Vec<Annotation>, LexState) {
     let mut byte = 0;
     while byte < text.len() {
         let remaining = text.get(byte..).unwrap_or_default();
-        let (length, kind) = if state.block_depth > 0 || remaining.starts_with("/*") {
-            (block_length(remaining, &mut state), Some(Kind::Comment))
-        } else if remaining.starts_with("//") {
-            (remaining.len(), Some(Kind::Comment))
-        } else if let Some(length) = character_length(remaining) {
-            (length, Some(Kind::Character))
-        } else if let Some(length) = lifetime_length(remaining) {
-            (length, Some(Kind::Lifetime))
-        } else {
-            let Some(word) = next_word(remaining) else {
-                break;
+        let (length, kind) =
+            if state.block_depth > 0 || (!state.in_string && remaining.starts_with("/*")) {
+                (block_length(remaining, &mut state), Some(Kind::Comment))
+            } else if state.in_string || remaining.starts_with('"') {
+                (string_length(remaining, &mut state), Some(Kind::String))
+            } else if remaining.starts_with("//") {
+                (remaining.len(), Some(Kind::Comment))
+            } else if let Some(length) = character_length(remaining) {
+                (length, Some(Kind::Character))
+            } else if let Some(length) = lifetime_length(remaining) {
+                (length, Some(Kind::Lifetime))
+            } else {
+                let Some(word) = next_word(remaining) else {
+                    break;
+                };
+                number_length(remaining, word)
+                    .filter(|length| token_is_delimited(text, byte, byte.saturating_add(*length)))
+                    .map_or_else(
+                        || {
+                            (
+                                word.len(),
+                                word_kind(word).filter(|_| {
+                                    token_is_delimited(text, byte, byte.saturating_add(word.len()))
+                                }),
+                            )
+                        },
+                        |length| (length, Some(Kind::Number)),
+                    )
             };
-            number_length(remaining, word)
-                .filter(|length| token_is_delimited(text, byte, byte.saturating_add(*length)))
-                .map_or_else(
-                    || {
-                        (
-                            word.len(),
-                            word_kind(word).filter(|_| {
-                                token_is_delimited(text, byte, byte.saturating_add(word.len()))
-                            }),
-                        )
-                    },
-                    |length| (length, Some(Kind::Number)),
-                )
-        };
         let end = byte.saturating_add(length);
         if end == byte {
             break;
@@ -66,6 +71,23 @@ pub fn line(text: &str, mut state: LexState) -> (Vec<Annotation>, LexState) {
         byte = end;
     }
     (annotations, state)
+}
+
+fn string_length(text: &str, state: &mut LexState) -> usize {
+    let opening = usize::from(!state.in_string);
+    state.in_string = true;
+    let mut escaped = false;
+    for (byte, character) in text.get(opening..).unwrap_or_default().char_indices() {
+        if escaped {
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else if character == '"' {
+            state.in_string = false;
+            return opening.saturating_add(byte).saturating_add(1);
+        }
+    }
+    text.len()
 }
 
 fn block_length(text: &str, state: &mut LexState) -> usize {
@@ -609,6 +631,35 @@ mod tests {
                 .last()
                 .map(|annotation| annotation.kind),
             Some(Kind::Keyword)
+        );
+    }
+    #[test]
+    fn strings_carry_state_and_keep_comment_delimiters_literal() {
+        assert_eq!(tokens(r#""a\"b /* //" 12"#), ["12"]);
+        assert_eq!(tokens(r#""a\\" 12"#), ["12"]);
+        let (_, state) = line("\"/* comment-like", LexState::default());
+        assert!(state.in_string);
+        assert_eq!(state.block_depth, 0);
+        let (middle, state) = line(r#"still \"quoted\" */"#, state);
+        assert_eq!(middle.len(), 1);
+        assert_eq!(
+            middle.first().map(|annotation| annotation.kind),
+            Some(Kind::String)
+        );
+        let (end, state) = line("end\" /* \"ignored\" */ 42", state);
+        assert_eq!(state, LexState::default());
+        assert_eq!(
+            end.into_iter()
+                .map(|annotation| annotation.kind)
+                .collect::<Vec<_>>(),
+            [Kind::String, Kind::Comment, Kind::Number]
+        );
+        let (_, state) = line("\"continued\\", LexState::default());
+        let (end, state) = line("\" 12", state);
+        assert_eq!(state, LexState::default());
+        assert_eq!(
+            end.last().map(|annotation| annotation.kind),
+            Some(Kind::Number)
         );
     }
 }
