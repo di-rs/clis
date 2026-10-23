@@ -1,4 +1,4 @@
-use super::EditorBuffer;
+use super::Document;
 
 #[derive(Default, Eq, PartialEq, Debug)]
 pub struct DocumentStatus {
@@ -26,8 +26,8 @@ impl DocumentStatus {
     }
 }
 
-impl From<&EditorBuffer> for DocumentStatus {
-    fn from(buffer: &EditorBuffer) -> Self {
+impl From<&Document> for DocumentStatus {
+    fn from(buffer: &Document) -> Self {
         let total_lines = buffer.height();
         let current_line_index = buffer.caret_location().y;
         let is_modified = buffer.is_modified();

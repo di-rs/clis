@@ -25,11 +25,11 @@ struct TextFragment {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct Line {
+pub struct LineLayout {
     fragments: Vec<TextFragment>,
 }
 
-impl Line {
+impl LineLayout {
     pub const fn len(&self) -> usize {
         self.fragments.len()
     }
@@ -176,7 +176,7 @@ impl Line {
     }
 }
 
-impl FromStr for Line {
+impl FromStr for LineLayout {
     type Err = !;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -185,7 +185,7 @@ impl FromStr for Line {
     }
 }
 
-impl Display for Line {
+impl Display for LineLayout {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let result: String = self.fragments.iter().map(|f| f.grapheme.as_str()).collect();
         f.write_str(&result)

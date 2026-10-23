@@ -5,14 +5,14 @@ use crate::editor::{
         EditorCommand,
         System::{Quit, QuitForce, SaveAs},
     },
-    line::Line,
+    line_layout::LineLayout,
 };
 
 pub struct Interpreter {}
 
 impl Interpreter {
     pub(crate) fn into_command(
-        value: &Line,
+        value: &LineLayout,
         current_file: Option<&Path>,
     ) -> Result<EditorCommand, String> {
         let str = value.to_string();

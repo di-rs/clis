@@ -1,6 +1,5 @@
 use crate::editor::{
-    Size, documentstatus::DocumentStatus, editorbuffer::EditorBuffer, mode::EditorMode,
-    terminal::Terminal,
+    Size, document::Document, document_status::DocumentStatus, mode::EditorMode, terminal::Terminal,
 };
 
 #[derive(Default)]
@@ -13,7 +12,7 @@ impl StatusBar {
         self.size = size;
     }
 
-    pub fn render(&self, position_y: usize, buffer: &EditorBuffer, mode: EditorMode) {
+    pub fn render(&self, position_y: usize, buffer: &Document, mode: EditorMode) {
         let Size { width, .. } = self.size;
 
         let status: DocumentStatus = buffer.into();
