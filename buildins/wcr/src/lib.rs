@@ -42,7 +42,7 @@ impl FileInfo {
 }
 
 /// # Errors
-/// Wher fails to write info into a writer
+/// When it fails to write info into a writer
 pub fn get_file_info(reader: impl BufRead) -> Result<FileInfo, std::io::Error> {
     FileInfo::read_from_buffer(reader)
 }

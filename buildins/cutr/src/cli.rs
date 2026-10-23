@@ -17,7 +17,7 @@ pub struct Cli {
         long,
         value_name = "DELIMETER",
         default_value = "\t",
-        value_parser(Cli::parse_delimeter)
+        value_parser(Cli::parse_delimiter)
     )]
     pub delimiter: u8,
 
@@ -26,7 +26,7 @@ pub struct Cli {
 }
 
 impl Cli {
-    fn parse_delimeter(value: &str) -> Result<u8, CliError> {
+    fn parse_delimiter(value: &str) -> Result<u8, CliError> {
         match value.as_bytes() {
             [delimiter] => Ok(*delimiter),
             _ => Err(CliError::BadDelimiter(value.to_owned())),

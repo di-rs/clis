@@ -1,6 +1,6 @@
 use clap_verbosity_flag::{ErrorLevel, LogLevel, VerbosityFilter};
 
-// We are making copy of verbosity module to remove `-v` frop verbose
+// We are making copy of verbosity module to remove `-v` from verbose
 // This flag is reserved for `grepr` cli implementation
 
 /// Logging flags to `#[command(flatten)]` into your CLI

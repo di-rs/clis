@@ -1,5 +1,5 @@
 [files]
-extend-exclude = ["**/tests/inputs/**", "**/tests/expected/**", "**/benches/data/**", "docs/superpowers/**"]
+extend-exclude = ["**/tests/inputs/**", "**/tests/expected/**", "**/benches/data/**", "docs/superpowers/**", ".agents/**", ".codex/**", "**/node_modules/**", "**/target/**", "**/generated/**", "**/vendor/**", "**/fixtures/**", "Cargo.lock", "uv.lock", "**/pnpm-lock.yaml", "**/package-lock.json", "tools/cli-playground/src/cli_playground/static/**"]
 
 [default.extend-identifiers]
 # README section named after the buildins directory.
@@ -8,3 +8,18 @@ Buildins = "Buildins"
 PERMITED = "PERMITED"
 # Existing commit identifier, not the English misspelling "abd".
 c646abd = "c646abd"
+
+# Existing cutr help placeholder; preserve the CLI output contract.
+DELIMETER = "DELIMETER"
+# Existing public error variant; keep its name compatible.
+DirectryWithNonRecursive = "DirectryWithNonRecursive"
+# POSIX test operator used by benchmark verification commands.
+ot = "ot"
+
+[default.extend-words]
+# Exact substring expected by a tail byte-offset regression test.
+ater = "ater"
+
+[type.rust]
+# Byte-string fixtures can contain arbitrary random data.
+extend-ignore-re = ['b"[^"\n]*"']

@@ -107,10 +107,9 @@ def test_documentation_config_scans_tracked_markdown(
     result = run(root, env, "--files", config_file)
     assert result.returncode == 0, result.stdout + result.stderr
     calls = [json.loads(line) for line in (root / "trace").read_text().splitlines()]
-    assert {call[0] for call in calls} == (
-        {"lychee"} if config_file == "lychee.toml" else {"lychee", "typos"}
-    )
-    assert all(call[-1] == "a b.md" and "untracked.md" not in call for call in calls)
+    assert {call[0] for call in calls} == {"lychee", "typos"}
+    assert all("a b.md" in call and "untracked.md" not in call for call in calls)
+    assert config_file in next(call for call in calls if call[0] == "typos")
 
 
 def test_deleted_link_target_is_rejected_without_editing_markdown(

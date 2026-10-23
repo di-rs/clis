@@ -21,15 +21,15 @@ pub struct Cli {
     #[arg(value_name = "FILE_2", required(true))]
     pub file2: PathBuf,
 
-    /// Supress printing of column 1
+    /// Suppress printing of column 1
     #[arg(short('1'), default_value = "true", action(ArgAction::SetFalse))]
     show_col1: bool,
 
-    /// Supress printing of column 2
+    /// Suppress printing of column 2
     #[arg(short('2'), default_value = "true", action(ArgAction::SetFalse))]
     show_col2: bool,
 
-    /// Supress printing of column 3
+    /// Suppress printing of column 3
     #[arg(short('3'), default_value = "true", action(ArgAction::SetFalse))]
     show_col3: bool,
 
