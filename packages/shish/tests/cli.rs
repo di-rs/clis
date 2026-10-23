@@ -140,3 +140,20 @@ fn syntax_error_reports_a_location_and_status_two() {
         .stdout("")
         .stderr("shish: syntax error at line 1 col 14\n");
 }
+
+#[test]
+fn checkout_debug_programs_do_not_override_trusted_commands() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let directory = assert_fs::TempDir::new().unwrap();
+    let program = directory.child("target/debug/echo");
+    program.write_str("#!/bin/sh\nprintf hijacked\n").unwrap();
+    std::fs::set_permissions(program.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    cargo_bin_cmd!()
+        .current_dir(&directory)
+        .env("PATH", "/usr/bin:/bin")
+        .args(["-c", "echo hello"])
+        .assert()
+        .code(0)
+        .stdout("hello\n")
+        .stderr("");
+}
