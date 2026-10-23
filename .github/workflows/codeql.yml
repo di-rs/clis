@@ -4,8 +4,13 @@ on:
   pull_request:
     branches: [master]
     types: [opened, synchronize, reopened, ready_for_review, labeled]
-    # Analyze Rust and Actions inputs on PRs; master and scheduled scans remain complete.
+    # Analyze affected languages on PRs; master and scheduled scans remain complete.
     paths:
+      - '**/*.py'
+      - '**/*.pyi'
+      - '**/pyproject.toml'
+      - 'uv.lock'
+      - 'tools/guardrails/**'
       - '**/*.rs'
       - '**/Cargo.toml'
       - '**/Cargo.lock'
@@ -28,16 +33,48 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  select:
+    name: Select affected checks
+    if: ${{ !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.paths.outputs.rust }}
+      python: ${{ steps.paths.outputs.python }}
+      frontend: ${{ steps.paths.outputs.frontend }}
+      markdown: ${{ steps.paths.outputs.markdown }}
+      actions: ${{ steps.paths.outputs.actions }}
+      languages: ${{ steps.paths.outputs.languages }}
+      base: ${{ steps.paths.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: python3 -m unittest discover -s tools/guardrails/tests -p test_selection.py
+        env:
+          PYTHONPATH: tools
+      - id: paths
+        env:
+          PYTHONPATH: tools
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASE" ] || [ "$BASE" = 0000000000000000000000000000000000000000 ]; then
+            BASE=$(git rev-parse HEAD^)
+          fi
+          python3 -m guardrails.job_selection --base "$BASE"
   analyze:
+    needs: select
     if: >-
       ${{
+        (github.event_name != 'pull_request' || needs.select.outputs.languages != '[]') &&
         (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci'))
       }}
     name: 🛡️ Analyze ${{ matrix.language }} security
     strategy:
       fail-fast: false
       matrix:
-        language: [rust, actions]
+        language: ${{ fromJSON(github.event_name == 'pull_request' && needs.select.outputs.languages || '["rust", "python", "actions"]') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
