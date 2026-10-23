@@ -133,3 +133,8 @@ color, including uppercase prefixes and interior separators. Keywords use blue, 
 
 Quoted character forms use amber, with escaped quotes and backslashes handled as
 part of the token. As in the guide, this coloring does not validate character literals.
+
+Lifetime names use teal. Their ASCII letters, digits, and underscores are recognized
+after a quote. When a later quote can start another lifetime or a complete
+single-character literal, that boundary takes precedence over permissive coloring
+of invalid quoted forms.
