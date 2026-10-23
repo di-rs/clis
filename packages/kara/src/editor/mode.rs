@@ -5,7 +5,7 @@ use crossterm::cursor::{
     SetCursorStyle::{BlinkingBar, BlinkingBlock},
 };
 
-use crate::editor::editorbuffer::Direction;
+use crate::editor::document::Direction;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Placement {

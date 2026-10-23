@@ -3,8 +3,8 @@ use std::{cmp::min, path::Path, range::Range};
 use crate::editor::{
     Size,
     command::{Edit, EditorCommand},
-    commandbar::interpreter::Interpreter,
-    line::Line,
+    command_bar::interpreter::Interpreter,
+    line_layout::LineLayout,
     terminal::Terminal,
 };
 
@@ -13,7 +13,7 @@ mod interpreter;
 #[derive(Default)]
 pub struct CommandBar {
     prompt: String,
-    value: Line,
+    value: LineLayout,
     size: Size,
 }
 
@@ -61,7 +61,7 @@ impl CommandBar {
         current_file: Option<&Path>,
     ) -> Result<EditorCommand, String> {
         let cmd = Interpreter::into_command(&self.value, current_file);
-        self.value = Line::default();
+        self.value = LineLayout::default();
         cmd
     }
 

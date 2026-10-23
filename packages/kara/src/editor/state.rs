@@ -6,11 +6,11 @@ use super::{
         Move,
         System::{Quit, QuitForce, Resize, Save, SaveAs},
     },
-    commandbar::CommandBar,
-    editorbuffer::{self, Direction, EditorBuffer},
-    messagebar::MessageBar,
+    command_bar::CommandBar,
+    document::{self, Direction, Document},
+    message_bar::MessageBar,
     mode::EditorMode,
-    statusbar::StatusBar,
+    status_bar::StatusBar,
     view::View,
 };
 use crossterm::event::{Event, KeyEvent, KeyEventKind};
@@ -21,21 +21,21 @@ pub(super) struct EditorState {
     pub(super) mode: EditorMode,
     pub(super) should_quit: bool,
     pub(super) quit_attempts: Option<u8>,
-    pub(super) buffer: EditorBuffer,
+    pub(super) buffer: Document,
     pub(super) view: View,
-    pub(super) statusbar: StatusBar,
-    pub(super) messagebar: MessageBar,
-    pub(super) commandbar: Option<CommandBar>,
+    pub(super) status_bar: StatusBar,
+    pub(super) message_bar: MessageBar,
+    pub(super) command_bar: Option<CommandBar>,
 }
 
 impl EditorState {
     pub(super) fn open_file(&mut self, file_name: &str) {
-        match EditorBuffer::open(file_name) {
+        match Document::open(file_name) {
             Ok(buffer) => self.buffer = buffer,
             Err(e) => {
                 let message = format!("ERR: Could not open file `{file_name}` {e}");
                 cli_log::record_error(&message);
-                self.messagebar.set(message);
+                self.message_bar.set(message);
             }
         }
     }
@@ -72,7 +72,7 @@ impl EditorState {
                 Ok(outcome) => self.report_save(outcome),
                 Err(error) => {
                     cli_log::record_error(&error);
-                    self.messagebar
+                    self.message_bar
                         .set(format!("ERR: Could not save file: {error}"));
                 }
             },
@@ -119,19 +119,19 @@ impl EditorState {
                 Edit::DeleteBackward => self.buffer.delete_backward(),
             },
             EditorMode::Command => {
-                if let Some(commandbar) = &mut self.commandbar {
+                if let Some(command_bar) = &mut self.command_bar {
                     match edit_command {
                         Edit::InsertNewline => {
-                            match commandbar.produce_command(self.buffer.filename()) {
+                            match command_bar.produce_command(self.buffer.filename()) {
                                 Err(e) => {
                                     cli_log::record_error(&e);
-                                    self.messagebar.set(e);
+                                    self.message_bar.set(e);
                                 }
                                 Ok(command) => self.handle_command(command),
                             }
                             self.change_mode(EditorMode::View);
                         }
-                        edit => commandbar.handle_edit(edit),
+                        edit => command_bar.handle_edit(edit),
                     }
                 }
             }
@@ -150,17 +150,17 @@ impl EditorState {
             height: height.saturating_sub(2),
             width,
         });
-        self.statusbar.resize(Size { height: 1, width });
-        if let Some(commandbar) = &mut self.commandbar {
-            commandbar.resize(Size { height: 1, width });
+        self.status_bar.resize(Size { height: 1, width });
+        if let Some(command_bar) = &mut self.command_bar {
+            command_bar.resize(Size { height: 1, width });
         }
     }
 
     pub(super) fn change_mode(&mut self, mode: EditorMode) {
         match mode {
-            EditorMode::Command => self.commandbar = Some(CommandBar::new("", self.terminal_size)),
+            EditorMode::Command => self.command_bar = Some(CommandBar::new("", self.terminal_size)),
             mode => {
-                self.commandbar = None;
+                self.command_bar = None;
                 if let Some(direction) = self.mode.change_mode_movement(mode) {
                     self.buffer.move_caret(direction);
                 }
@@ -176,25 +176,25 @@ impl EditorState {
                 Err(e) => {
                     let message = format!("Error writing file! {e}");
                     cli_log::record_error(&message);
-                    self.messagebar.set(message);
+                    self.message_bar.set(message);
                 }
             }
         } else {
-            self.commandbar = Some(CommandBar::new("w ", self.terminal_size));
+            self.command_bar = Some(CommandBar::new("w ", self.terminal_size));
             self.mode = EditorMode::Command;
         }
     }
 
-    pub(super) fn report_save(&mut self, outcome: editorbuffer::SaveOutcome) {
+    pub(super) fn report_save(&mut self, outcome: document::SaveOutcome) {
         let message = match outcome {
-            editorbuffer::SaveOutcome::Saved => "File saved successfully.".to_owned(),
-            editorbuffer::SaveOutcome::DurabilityWarning(error) => {
+            document::SaveOutcome::Saved => "File saved successfully.".to_owned(),
+            document::SaveOutcome::DurabilityWarning(error) => {
                 let message = format!("WARNING: File saved, but directory sync failed: {error}");
                 cli_log::record_error(&message);
                 message
             }
         };
-        self.messagebar.set(message);
+        self.message_bar.set(message);
     }
 
     pub(super) fn quit(&mut self, force: bool) {
@@ -209,7 +209,7 @@ impl EditorState {
         if left_attempts == 0 {
             self.should_quit = true;
         } else {
-            self.messagebar.set(format!(
+            self.message_bar.set(format!(
                 "WARNING! File has unsaved changes. Press Ctrl-Q {left_attempts} more times to quit."
             ));
             self.quit_attempts = Some(attempt);
@@ -219,7 +219,7 @@ impl EditorState {
     pub(super) fn reset_quit_attempts(&mut self) {
         if self.quit_attempts.is_some() {
             self.quit_attempts = None;
-            self.messagebar.clear();
+            self.message_bar.clear();
         }
     }
 }

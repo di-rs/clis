@@ -2,7 +2,7 @@ use std::{fmt::Display, range::Range};
 
 mod welcome_message;
 use crate::editor::{
-    Location, Size, editorbuffer::EditorBuffer, terminal::Terminal,
+    ScreenPosition, Size, document::Document, terminal::Terminal,
     view::welcome_message::WelcomeMessage,
 };
 
@@ -10,7 +10,7 @@ use crate::editor::{
 pub struct View {
     needs_redraw: bool,
     size: Size,
-    pub scroll_offset: Location,
+    pub scroll_offset: ScreenPosition,
 }
 
 const Y_OVERSCAN: usize = 5;
@@ -22,7 +22,7 @@ impl View {
         self.needs_redraw = true;
     }
 
-    pub fn render(&mut self, buffer: &EditorBuffer) {
+    pub fn render(&mut self, buffer: &Document) {
         if !self.needs_redraw && !buffer.is_modified() {
             return;
         }
@@ -48,8 +48,8 @@ impl View {
         self.needs_redraw = false;
     }
 
-    pub const fn scroll_into_view(&mut self, current_location: Location) {
-        let Location { x, y } = current_location;
+    pub const fn scroll_into_view(&mut self, current_location: ScreenPosition) {
+        let ScreenPosition { x, y } = current_location;
 
         self.scroll_vertically(y);
         self.scroll_horizontally(x);

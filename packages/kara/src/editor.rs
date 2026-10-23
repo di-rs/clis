@@ -1,20 +1,23 @@
 use crossterm::event::read;
 use state::EditorState;
 use terminal::Terminal;
+mod buffer;
 mod command;
-mod commandbar;
-mod documentstatus;
-mod editorbuffer;
+mod command_bar;
+mod cursor;
+mod document;
+mod document_status;
 mod keymap;
-mod line;
-mod messagebar;
+mod line_layout;
+mod message_bar;
 mod mode;
+mod persistence;
 mod prelude;
 mod state;
-mod statusbar;
+mod status_bar;
 mod terminal;
 mod view;
-use editorbuffer::EditorBuffer;
+use document::Document;
 pub use prelude::*;
 pub const APP_NAME: &str = env!("CARGO_PKG_NAME");
 #[derive(Default)]
@@ -44,7 +47,7 @@ impl Editor {
         editor.state.resize(size);
         editor
             .state
-            .messagebar
+            .message_bar
             .set("Ctrl-s = save | Ctrl-q = quit".to_string());
 
         if let Some(filename) = file_name {
@@ -95,24 +98,24 @@ impl Editor {
         self.state.view.scroll_into_view(caret_location);
 
         let bottom_bar_row = height.saturating_sub(1);
-        if let Some(commandbar) = &mut self.state.commandbar {
-            commandbar.render(bottom_bar_row);
+        if let Some(command_bar) = &mut self.state.command_bar {
+            command_bar.render(bottom_bar_row);
         } else {
-            self.state.messagebar.render(bottom_bar_row);
+            self.state.message_bar.render(bottom_bar_row);
         }
         if height > 1 {
             self.state.view.render(&self.state.buffer);
         }
         if height > 2 {
-            let statusbar_pos = height.saturating_sub(2);
+            let status_bar_pos = height.saturating_sub(2);
             self.state
-                .statusbar
-                .render(statusbar_pos, &self.state.buffer, self.state.mode);
+                .status_bar
+                .render(status_bar_pos, &self.state.buffer, self.state.mode);
         }
 
-        let location = if let Some(commandbar) = &mut self.state.commandbar {
-            Location {
-                x: commandbar.caret_position_col(),
+        let location = if let Some(command_bar) = &mut self.state.command_bar {
+            ScreenPosition {
+                x: command_bar.caret_position_col(),
                 y: bottom_bar_row,
             }
         } else {
