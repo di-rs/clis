@@ -1,15 +1,26 @@
 use super::{Document, TextPosition};
 use unicode_segmentation::UnicodeSegmentation;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SearchDirection {
+    #[default]
     Forward,
     Backward,
+}
+
+impl SearchDirection {
+    pub const fn reversed(self) -> Self {
+        match self {
+            Self::Forward => Self::Backward,
+            Self::Backward => Self::Forward,
+        }
+    }
 }
 
 #[derive(Default, Clone)]
 pub struct Search {
     pub query: String,
+    pub direction: SearchDirection,
     pub matches: Vec<TextPosition>,
     pub active: Option<usize>,
     pub visible: bool,
@@ -24,16 +35,33 @@ impl Search {
         self.visible = true;
         self.revision = document.revision();
         self.matches = find(document, &self.query);
-        self.active = if self.matches.is_empty() {
-            None
-        } else {
-            Some(
-                self.matches
-                    .iter()
-                    .position(|at| (at.line, at.grapheme) >= (origin.line, origin.grapheme))
-                    .unwrap_or(0),
-            )
-        };
+        self.select(origin, self.direction, true);
+    }
+
+    pub fn select(&mut self, origin: TextPosition, direction: SearchDirection, inclusive: bool) {
+        if self.matches.is_empty() {
+            self.active = None;
+            return;
+        }
+        let origin = (origin.line, origin.grapheme);
+        self.active = Some(match direction {
+            SearchDirection::Forward => self
+                .matches
+                .iter()
+                .position(|at| {
+                    let at = (at.line, at.grapheme);
+                    at > origin || (inclusive && at == origin)
+                })
+                .unwrap_or(0),
+            SearchDirection::Backward => self
+                .matches
+                .iter()
+                .rposition(|at| {
+                    let at = (at.line, at.grapheme);
+                    at < origin || (inclusive && at == origin)
+                })
+                .unwrap_or_else(|| self.matches.len().saturating_sub(1)),
+        });
     }
 
     pub fn refresh(&mut self, document: &Document) {

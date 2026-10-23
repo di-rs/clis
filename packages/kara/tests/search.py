@@ -61,6 +61,19 @@ def main() -> None:
         "🇧🇦X🇦🇦".encode(),
     )
 
+    for keys, expected in (
+        ([b"e?hit\r", b"n"], b"hit--Xhit--hit"),
+        ([b"e?hit\r", b"N"], b"Xhit--hit--hit"),
+        ([b"/hit\r", b"n"], b"hit--Xhit--hit"),
+        ([b"/hit\r", b"N"], b"hit--hit--Xhit"),
+        ([b"/hit\r", b"\x1b", b"n"], b"hit--Xhit--hit"),
+        ([b"/hit\r", b"/\r"], b"hit--Xhit--hit"),
+        ([b"/hit\r", b"?\r"], b"hit--hit--Xhit"),
+        ([b"/hit\r", b"?absent", b"\x1b", b"n"], b"hit--Xhit--hit"),
+    ):
+        check(binary, b"hit--hit--hit", [*keys, b"iX", b"\x1b", b"\x13\x11"], expected)
+    check(binary, b"hit--hit", [b"/hit\r", b"d", b"n", b"iX", b"\x1b", b"\x13\x11"], b"it--Xhit")
+
 
 if __name__ == "__main__":
     main()

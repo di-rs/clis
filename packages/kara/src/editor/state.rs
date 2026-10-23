@@ -81,6 +81,17 @@ impl EditorState {
             EditorCommand::ChangeMode(mode) => {
                 self.change_mode(mode);
             }
+            EditorCommand::StartSearch(direction) => {
+                self.change_mode(EditorMode::Search);
+                self.search.direction = direction;
+                let label = match direction {
+                    super::search::SearchDirection::Forward => "/",
+                    super::search::SearchDirection::Backward => "?",
+                };
+                self.prompt = Some(Prompt::new(label, "", self.terminal_size));
+            }
+            EditorCommand::RepeatSearch { reverse } => self.repeat_search(reverse),
+            EditorCommand::ClearSearch => self.search.visible = false,
             EditorCommand::Unknown => (),
         }
     }
@@ -134,6 +145,15 @@ impl EditorState {
             },
             EditorMode::Search => {
                 if matches!(edit_command, Edit::InsertNewline) {
+                    if self.search.query.is_empty()
+                        && let Some(snapshot) = &self.search_snapshot
+                    {
+                        let origin = snapshot.cursor.position;
+                        self.search
+                            .update(&self.buffer, snapshot.previous.query.clone(), origin);
+                        self.search.select(origin, self.search.direction, false);
+                        self.reveal_search_match();
+                    }
                     self.search_snapshot = None;
                     self.message_bar
                         .set(format!("{} matches", self.search.matches.len()));
@@ -170,6 +190,25 @@ impl EditorState {
                     self.buffer.delete();
                 }
             }
+        }
+    }
+
+    fn repeat_search(&mut self, reverse: bool) {
+        if self.search.query.is_empty() {
+            return;
+        }
+        self.search.refresh(&self.buffer);
+        let direction = if reverse {
+            self.search.direction.reversed()
+        } else {
+            self.search.direction
+        };
+        self.search
+            .select(self.buffer.cursor().position, direction, false);
+        self.search.visible = true;
+        self.reveal_search_match();
+        if self.search.matches.is_empty() {
+            self.message_bar.set("No matches".to_owned());
         }
     }
 

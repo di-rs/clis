@@ -99,17 +99,24 @@ repository root after building Kara:
 python3 packages/kara/tests/pty_smoke.py "$PWD/target/debug/kara"
 ```
 
-`/` in navigation mode opens a search prompt. Type a query, use Backspace to
-remove a grapheme, and press Enter or Esc to return to navigation. Typing searches incrementally and moves to the first literal, case-sensitive match at or after the starting caret,
-wrapping to the beginning when needed. Down/Right selects the next result; Up/Left selects the previous result,
-using the same non-overlapping match order in either direction. Results
-are centered in the viewport.
-Enter accepts the location; Esc restores the original cursor and exact scrolling. Matching is
-single-line and non-overlapping; an empty query has no matches. In editing mode, `/` is ordinary text.
+## Search
 
-Visible search matches use cyan backgrounds; the active match uses bold text on
-yellow. Enter retains these highlights. Edits refresh matches against current text.
+In navigation mode, `/` searches forward and `?` searches backward. Typing searches
+incrementally from the original caret, wraps, and centers the selected result.
+Both keys remain ordinary text in editing mode.
 
-Matches must start and end at complete grapheme boundaries: searching for `e`
-does not match the base of `é`, and an emoji component does not match part of
+- Down/Right selects the next result; Up/Left selects the previous result.
+- Enter accepts the query and location. Enter on an empty prompt repeats the
+  previously accepted query in the prompt's direction, when one exists.
+- Esc in a prompt restores the previous cursor, exact viewport, and accepted search.
+- `n` repeats the accepted search direction; `N` reverses it. Both start from the
+  current caret and wrap.
+- Esc in navigation clears highlights but retains the query; repetition restores them.
+
+Search is literal, case-sensitive, single-line, and non-overlapping. Empty live
+queries show no results. Matches must start and end at complete grapheme boundaries:
+`e` does not match the base of `é`, and an emoji component does not match part of
 a joined emoji sequence. Search does not normalize Unicode text.
+
+Visible matches use cyan backgrounds; the active match uses bold text on yellow.
+Accepted highlights persist, and edits refresh matches against current text.
