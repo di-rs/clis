@@ -25,7 +25,7 @@ description: Use when adding, changing, or reviewing CLI tests, fixture expectat
 
 Add `cli-testing.workspace = true` under `[dev-dependencies]`. Keep reusable inputs
 in `tests/inputs/` and raw expectations in `tests/expected/`. Read the
-[helper guide and schema](../../../utils/cli-testing/README.md) when authoring a
+[helper guide and schema](../../../tools/cli-testing/docs/testing.md) when authoring a
 catalog or using the context API. The representative catalogs are catr, cutr, and
 grepr; existing packages can retain their native tests and generators.
 
@@ -118,9 +118,11 @@ Permission tests need an unprivileged user. Report platform requirements and ski
 
 ## Record independent expectations
 
-For catalog packages, use [cli-fixtures](../../../tools/cli-fixtures/README.md):
+For catalog packages, use [cli-testing](../../../tools/cli-testing/README.md):
 
-1. Inspect `list` / `explain`, the package README, and the selected reference.
+1. Verify `command -v cli-testing` and run `cli-testing --json doctor`. Use
+   `discover --root DIR` to locate catalogs and pass the selected `--suite PATH`.
+   Inspect `list` / `explain`, the package README, and the selected reference.
    Verify its implementation and version or OS release. Pilot BSD references are
    explicit macOS system paths; cutr requires `LC_ALL=en_US.UTF-8`. Never silently
    substitute GNU tools or generate expectations from the candidate.
@@ -132,7 +134,7 @@ For catalog packages, use [cli-fixtures](../../../tools/cli-fixtures/README.md):
    intentional nonzero statuses, and records Rust-owned reference recipes too.
    Declare and explain candidate/reference differences in the catalog.
 4. Review the completed manifest and every fixture change, including binary
-   differences. Use `apply DIR` only for a reviewed capture within the authorized
+   differences. Preview with `apply DIR --dry-run`; use `apply DIR` only for a reviewed capture within the authorized
    task. Stale, incomplete, or conflicting captures require a fresh recording.
    Do not auto-accept expectations in tests or CI.
 5. Rerun owning tests. Keep manual expectations independently justified, and
@@ -157,7 +159,7 @@ CI. Do not run prek manually.
 
 Run `uv run cli-check -p PACKAGE` after structural changes. It checks registration,
 including the catalog target, but semantic validation stays in Rust. Use
-`cli-fixtures validate` for catalogs and unreferenced expected files. See the
+`cli-testing validate` for catalogs and unreferenced expected files. See the
 [check reference](../../../tools/cli-check/docs/checks.md) and
 [PR workflow](../../../.github/workflows/pull-request-check.yml). Report checks and
 limitations; preserve passing results until relevant inputs change.

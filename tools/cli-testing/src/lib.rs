@@ -1,4 +1,4 @@
-#![doc = include_str!("../README.md")]
+#![doc = include_str!("../docs/testing.md")]
 
 use std::{ffi::OsStr, path::Path, time::Duration};
 

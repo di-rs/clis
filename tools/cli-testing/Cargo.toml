@@ -9,9 +9,11 @@ repository.workspace = true
 readme = "README.md"
 
 [dependencies]
+anyhow.workspace = true
 assert_cmd.workspace = true
 assert_fs.workspace = true
-cli-testing-macros = { version = "0.1.0", path = "../cli-testing-macros" }
+clap = { workspace = true, features = ["derive"] }
+cli-testing-macros = { version = "0.1.0", path = "macros" }
 libtest-mimic = "0.8.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json.workspace = true
@@ -21,6 +23,15 @@ wait-timeout = "0.2.1"
 
 [dev-dependencies]
 assert_fs.workspace = true
+predicates.workspace = true
 
 [lints]
 workspace = true
+
+[package.metadata.cli-check]
+benchmark-exemption = "Development-only fixture inspection and recording; no performance contract"
+
+[[test]]
+name = "catalog"
+path = "tests/catalog.rs"
+harness = false

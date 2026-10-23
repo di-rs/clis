@@ -34,7 +34,7 @@ Tutorial credit: [Command Line Applications in Rust](https://rust-cli.github.io/
 Reference `grep` exits with status 1 when no lines match, while `grepr`
 returns status 0. The [case catalog](tests/cases.toml) declares both statuses
 and checks the reference's stderr, using macOS `/usr/bin/grep`. Use
-[cli-fixtures](../../tools/cli-fixtures/README.md) to inspect or stage reference
+[cli-testing](../../tools/cli-testing/README.md) to inspect or stage reference
 output. Stdin recipes list input files in their concatenation order.
 
 The retained recursive-count fixture uses explicit operands in its historical

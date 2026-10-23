@@ -140,6 +140,43 @@ fn new_recording_directory(suite: &Suite, output: &Path) -> Result<PathBuf> {
 /// Rejects incomplete, stale, tampered or conflicting recordings before writes.
 /// An I/O failure during promotion reports which writes already completed.
 pub fn apply(suite: &Suite, directory: &Path) -> Result<Vec<PathBuf>> {
+    let replacements = prepare_apply(suite, directory)?;
+    let mut written = Vec::new();
+    for (relative, bytes) in replacements {
+        let path = suite.fixture_path(&relative)?;
+        if fs::read(&path)? == bytes {
+            continue;
+        }
+        fs::write(&path, bytes).map_err(|error| {
+            Error::caused_by(
+                format!(
+                    "cannot promote {}; already wrote {written:?}",
+                    path.display()
+                ),
+                error,
+            )
+        })?;
+        written.push(relative);
+    }
+    Ok(written)
+}
+
+/// Preflight a recording and list fixtures whose bytes would change.
+/// No expected files are written; configured reference version probes may run.
+/// # Errors
+/// Rejects the same incomplete, stale or conflicting recordings as [`apply`].
+pub fn preview(suite: &Suite, directory: &Path) -> Result<Vec<PathBuf>> {
+    let replacements = prepare_apply(suite, directory)?;
+    let mut changed = Vec::new();
+    for (path, bytes) in replacements {
+        if suite.read(&path)? != bytes {
+            changed.push(path);
+        }
+    }
+    Ok(changed)
+}
+
+fn prepare_apply(suite: &Suite, directory: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>> {
     let manifest = checked_path(directory, Path::new("recording.json")).map_err(|error| {
         Error::caused_by(
             "recording is incomplete: no readable completion manifest",
@@ -178,25 +215,7 @@ pub fn apply(suite: &Suite, directory: &Path) -> Result<Vec<PathBuf>> {
     for recorded in &recording.cases {
         verify_identity(suite, recorded)?;
     }
-    let replacements = replacements(suite, directory, &recording)?;
-    let mut written = Vec::new();
-    for (relative, bytes) in replacements {
-        let path = suite.fixture_path(&relative)?;
-        if fs::read(&path)? == bytes {
-            continue;
-        }
-        fs::write(&path, bytes).map_err(|error| {
-            Error::caused_by(
-                format!(
-                    "cannot promote {}; already wrote {written:?}",
-                    path.display()
-                ),
-                error,
-            )
-        })?;
-        written.push(relative);
-    }
-    Ok(written)
+    replacements(suite, directory, &recording)
 }
 
 fn catalog_hash(suite: &Suite) -> Result<String> {

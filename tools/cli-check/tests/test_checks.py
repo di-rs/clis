@@ -67,6 +67,26 @@ def run_policy(root: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+@pytest.mark.parametrize("library", [True, False])
+def test_helper_cli_uses_its_own_library_without_a_self_dependency(
+    tmp_path: Path, library: bool
+) -> None:
+    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["tools/cli-testing"]\n')
+    write(
+        tmp_path,
+        "tools/cli-testing/Cargo.toml",
+        '[package]\nname = "cli-testing"\nversion = "0.1.0"\nedition = "2024"\n',
+    )
+    write(tmp_path, "tools/cli-testing/src/main.rs", "fn main() {}\n")
+    write(tmp_path, "tools/cli-testing/tests/cli.rs", "#[test]\nfn cli_contract() {}\n")
+    if library:
+        write(tmp_path, "tools/cli-testing/src/lib.rs", "pub fn helper() {}\n")
+    result = run_policy(tmp_path)
+    assert result.returncode == (0 if library else 1), result.stderr
+    if not library:
+        assert "requires cli-testing" in result.stderr
+
+
 def test_package_selection_ignores_unselected_violations_and_rejects_unknown(
     tmp_path: Path,
 ) -> None:

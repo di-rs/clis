@@ -1,12 +1,12 @@
-# cli-testing
+# CLI testing in Rust
 
 `cli-testing` connects a CLI invocation, its inputs, expected bytes, and independent
 reference recipe in one named test case. Use TOML for straightforward cases,
 `#[test_case]` for a case with Rust customization, and ordinary Rust tests for
 multiple commands, signals, or custom pipes. The pilot packages are
-[catr](../../buildins/catr/tests/cases.toml),
-[cutr](../../buildins/cutr/tests/cases.toml), and
-[grepr](../../buildins/grepr/tests/cases.toml).
+[catr](../../../buildins/catr/tests/cases.toml),
+[cutr](../../../buildins/cutr/tests/cases.toml), and
+[grepr](../../../buildins/grepr/tests/cases.toml).
 
 Add `cli-testing.workspace = true` under the consuming package's
 `[dev-dependencies]`. Ordinary tests use committed fixtures, never execute the
@@ -178,7 +178,7 @@ For grepr's no-match behavior, declare `expect.exit = 0`, `origin.exit = 1`, and
 explain the difference. For a manual expectation, record its independent
 specification or worked example; reference overrides and adaptations are invalid.
 
-The TOML UTF-8 adaptation in [cutr's catalog](../../buildins/cutr/tests/cases.toml)
+The TOML UTF-8 adaptation in [cutr's catalog](../../../buildins/cutr/tests/cases.toml)
 and the Rust adaptation above both retain raw reference fixture bytes. Neither
 transforms captured candidate output. Prefer an explicit Rust assertion for a
 more involved contract instead of expanding TOML into a programming language.
@@ -200,18 +200,18 @@ files but are not host sandboxes. Catalogs and their reference commands are trus
 repository code. The legacy `Fixtures` API checks relative names but permits
 symlinks; catalog fixture paths are stricter.
 
-Use [cli-fixtures](../../tools/cli-fixtures/README.md) to list, explain, validate,
+Use [cli-testing CLI](../README.md) to list, explain, validate,
 compare, and stage independent reference output. `apply` explicitly promotes a
 reviewed recording after checking its inputs, catalog, executable identity, and
 artifacts for staleness or conflicts. See the
-[CLI testing skill](../../.agents/skills/cli-testing/SKILL.md) for repository policy.
+[CLI testing skill](../../../.agents/skills/cli-testing/SKILL.md) for repository policy.
 
 ## Architecture
 
-The [catalog model](src/catalog.rs) is shared by tests and the reference tool.
-The [runtime](src/context.rs) owns preparation, resources, process capture, and
-assertions. The [attribute crate](../cli-testing-macros/README.md) only generates a
-wrapper around that runtime. [libtest-mimic registration](src/harness.rs) gives each
+The [catalog model](../src/catalog.rs) is shared by tests and the reference tool.
+The [runtime](../src/context.rs) owns preparation, resources, process capture, and
+assertions. The [attribute crate](../macros/README.md) only generates a
+wrapper around that runtime. [libtest-mimic registration](../src/harness.rs) gives each
 automatic recipe its own test identity, while native Rust retains the normal test
 harness. This keeps ownership and reference provenance visible without duplicating
 parsers or introducing a scenario registry.

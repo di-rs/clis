@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["packages/biggie", "packages/kara", "packages/parsu", "packages/shish", "utils/*", "buildins/*", "tools/cli-fixtures"]
+members = ["packages/biggie", "packages/kara", "packages/parsu", "packages/shish", "utils/*", "buildins/*", "tools/cli-testing", "tools/cli-testing/macros"]
 
 [workspace.package]
 authors = ["Dima P <dimapm@pm.me>"]
@@ -12,7 +12,7 @@ include = ["README.md", "LICENSE", "build.rs", "Cargo.toml", "src/**/*.rs"]
 
 [workspace.dependencies]
 cli-log = { path = "utils/cli-log" }
-cli-testing = { path = "utils/cli-testing" }
+cli-testing = { path = "tools/cli-testing" }
 csv = "1.4.0"
 log = { version = "0.4", features = ["std", "kv"] }
 anyhow = "1.0"

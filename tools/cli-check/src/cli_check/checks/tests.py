@@ -26,7 +26,10 @@ def check(root: Path, packages: list[Package]) -> list[Diagnostic]:
             error("tests/cli.rs", "entrypoint", "requires a nonempty CLI integration test")
         elif not cli_test_enabled(package):
             error("tests/cli.rs", "enabled-target", "must be enabled as a Cargo test target")
-        if "cli-testing" not in table(package.manifest.get("dev-dependencies", {})):
+        owns_helper = package.name == "cli-testing" and package.library
+        if not owns_helper and "cli-testing" not in table(
+            package.manifest.get("dev-dependencies", {})
+        ):
             error("Cargo.toml", "helper", "requires cli-testing in [dev-dependencies]")
         catalog = package.directory / "tests/cases.toml"
         runner = package.directory / "tests/catalog.rs"

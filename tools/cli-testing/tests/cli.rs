@@ -39,8 +39,8 @@ fn accepts_unit_return(cx: &mut Context) {
 
 #[test_case("custom_version")]
 fn allows_early_output_assertions(cx: &mut Context) -> Result<()> {
-    assert_eq!(cx.run()?.stdout, b"cli-fixtures 0.1.0\n");
-    assert_eq!(cx.run()?.stdout, b"cli-fixtures 0.1.0\n");
+    assert_eq!(cx.run()?.stdout, b"cli-testing 0.1.0\n");
+    assert_eq!(cx.run()?.stdout, b"cli-testing 0.1.0\n");
     Ok(())
 }
 
@@ -217,6 +217,20 @@ fn recording_stages_raw_bytes_then_explicit_apply_promotes_them() -> TestResult 
     ] {
         assert!(manifest.contains(field));
     }
+    let preview = fixture_command(&dir)
+        .args(["--json", "apply"])
+        .arg(&stage)
+        .arg("--dry-run")
+        .assert()
+        .code(0)
+        .stderr("");
+    let preview: serde_json::Value = serde_json::from_slice(&preview.get_output().stdout)?;
+    assert_eq!(preview["data"]["dry_run"], true);
+    assert_eq!(preview["data"]["changed_files"][0], "expected/raw");
+    assert_eq!(
+        fs::read(dir.path().join("tests/expected/raw"))?,
+        b"old expectation"
+    );
     fixture_command(&dir)
         .arg("apply")
         .arg(&stage)
@@ -268,6 +282,12 @@ fn stale_or_tampered_recordings_leave_expectations_untouched() -> TestResult {
         } else {
             fs::write(path, b"changed")?;
         }
+        fixture_command(&dir)
+            .arg("apply")
+            .arg(&stage)
+            .arg("--dry-run")
+            .assert()
+            .code(1);
         fixture_command(&dir)
             .arg("apply")
             .arg(&stage)

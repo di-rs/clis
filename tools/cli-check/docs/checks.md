@@ -25,16 +25,18 @@ complete target graph separately. Declare repository packages in the root
 members list: implicit members introduced only through path dependencies are
 outside this inventory's scope.
 
-The tests group checks target registration, including `autotests = false`,
+The tests group requires the shared `cli-testing` development dependency; the
+`cli-testing` CLI itself uses its own library without a self-dependency. It checks
+target registration, including `autotests = false`,
 explicit target paths and `test = false`. It rejects `mk-outs.nu` and requires
 `tests/expected/` when `mk-outputs.nu` exists. Fixture-free packages need no empty
 fixture directories. When `tests/cases.toml` or `tests/catalog.rs` exists, both
 must be nonempty and the `catalog` test target must be enabled with
 `harness = false`. This check does not parse the catalog: schema and fixture
-ownership validation belong to [cli-fixtures](../../cli-fixtures/README.md).
+ownership validation belong to [cli-testing](../../cli-testing/README.md).
 Registration does not establish feature eligibility, test
 completeness, assertion quality or reference correctness. The
-[Rust test helper](../../../utils/cli-testing/README.md) supplies command setup and
+[Rust test helper](../../cli-testing/docs/testing.md) supplies command setup and
 catalog execution and byte fixture loading; the [testing skill](../../../.agents/skills/cli-testing/SKILL.md)
 describes how to write behavioral tests.
 

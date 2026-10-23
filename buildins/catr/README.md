@@ -29,7 +29,7 @@ expectations for those cases.
 
 The [case catalog](tests/cases.toml) connects each invocation to its inputs,
 expected bytes, and explicit macOS `/bin/cat` reference. Use
-[cli-fixtures](../../tools/cli-fixtures/README.md) to inspect or stage reference
+[cli-testing](../../tools/cli-testing/README.md) to inspect or stage reference
 output. Native error and boundary tests remain in [tests/cli.rs](tests/cli.rs).
 
 [All commands](../../README.md)
