@@ -90,6 +90,10 @@ impl EditorState {
             Down, End, Home, Left, LineEnd, LineStart, PageDown, PageUp, Right, Up,
         };
         if self.prompt.is_some() {
+            if self.mode == EditorMode::Search && matches!(direction, Down | Right) {
+                self.search.next();
+                self.reveal_search_match();
+            }
             return;
         }
 
@@ -129,12 +133,12 @@ impl EditorState {
                     self.change_mode(EditorMode::View);
                 } else if let Some(prompt) = &mut self.prompt {
                     prompt.handle_edit(edit_command);
-                    self.search.update(&self.buffer, prompt.value());
-                    if let Some(position) = self.search.current() {
-                        self.buffer.set_position(position);
-                    } else if let Some(snapshot) = &self.search_snapshot {
-                        self.buffer.restore_cursor(snapshot.cursor.clone());
-                    }
+                    let origin = self.search_snapshot.as_ref().map_or_else(
+                        || self.buffer.cursor().position,
+                        |snapshot| snapshot.cursor.position,
+                    );
+                    self.search.update(&self.buffer, prompt.value(), origin);
+                    self.reveal_search_match();
                 }
             }
             EditorMode::Command => {
@@ -162,6 +166,16 @@ impl EditorState {
         }
     }
 
+    fn reveal_search_match(&mut self) {
+        if let Some(position) = self.search.current() {
+            self.buffer.set_position(position);
+            self.view.center(self.buffer.caret_location());
+        } else if let Some(snapshot) = &self.search_snapshot {
+            self.buffer.restore_cursor(snapshot.cursor.clone());
+            self.view.restore(snapshot.scroll_offset);
+        }
+    }
+
     pub(super) const fn resize(&mut self, size: Size) {
         self.terminal_size = size;
         let Size { height, width } = size;
@@ -179,6 +193,7 @@ impl EditorState {
             EditorMode::Search => {
                 self.search_snapshot = Some(super::search::SearchSnapshot {
                     cursor: self.buffer.cursor(),
+                    scroll_offset: self.view.scroll_offset,
                     previous: std::mem::take(&mut self.search),
                 });
                 self.prompt = Some(Prompt::new("/", "", self.terminal_size));
@@ -188,6 +203,7 @@ impl EditorState {
                 if let Some(snapshot) = self.search_snapshot.take() {
                     self.buffer.restore_cursor(snapshot.cursor);
                     self.search = snapshot.previous;
+                    self.view.restore(snapshot.scroll_offset);
                 }
                 self.prompt = None;
                 if let Some(direction) = self.mode.change_mode_movement(mode) {
@@ -250,5 +266,57 @@ impl EditorState {
             self.quit_attempts = None;
             self.message_bar.clear();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::editor::{ScreenPosition, TextPosition};
+
+    #[test]
+    #[allow(
+        clippy::panic_in_result_fn,
+        reason = "Assertions verify exact search viewport restoration."
+    )]
+    fn search_centers_wraps_and_restores_scroll() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = assert_fs::TempDir::new()?;
+        let path = dir.path().join("text");
+        let text = (0..70)
+            .map(|line| {
+                if line == 35 || line == 60 {
+                    "x\n"
+                } else {
+                    "long ordinary line\n"
+                }
+            })
+            .collect::<String>();
+        std::fs::write(&path, text)?;
+        let mut state = EditorState::default();
+        state.open_file(path.to_str().ok_or("invalid path")?);
+        state.resize(Size {
+            width: 12,
+            height: 8,
+        });
+        let origin = TextPosition {
+            line: 20,
+            grapheme: 10,
+        };
+        let scroll = ScreenPosition { x: 7, y: 18 };
+        state.buffer.set_position(origin);
+        state.view.scroll_offset = scroll;
+        state.change_mode(EditorMode::Search);
+        state.handle_edit_command(&Edit::Insert('x'));
+        assert_eq!(state.buffer.cursor().position.line, 35);
+        assert_eq!(state.view.scroll_offset.y, 32);
+        state.handle_move_command(&Move::Down);
+        assert_eq!(state.buffer.cursor().position.line, 60);
+        state.handle_move_command(&Move::Right);
+        assert_eq!(state.buffer.cursor().position.line, 35);
+        state.change_mode(EditorMode::View);
+        state.view.scroll_into_view(state.buffer.caret_location());
+        assert_eq!(state.buffer.cursor().position, origin);
+        assert_eq!(state.view.scroll_offset, scroll);
+        Ok(())
     }
 }

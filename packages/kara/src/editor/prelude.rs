@@ -10,7 +10,7 @@ pub struct Position {
     pub row: usize,
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScreenPosition {
     pub x: usize,
     pub y: usize,
