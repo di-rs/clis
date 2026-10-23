@@ -184,8 +184,8 @@ The task numbers are stable even when implementation order changes.
 
 | Task | Area and behavior | Mode/reference | Status and evidence | Focused PR |
 | --- | --- | --- | --- | --- |
-| 01 | Basics: prompt | sh; invocation/§2.9.1 | Verified: home/directory prompt, PS1, no noninteractive prompt; [task_01](../tests/audit.rs) | Current task PR |
-| 02 | Basics: invalid commands | sh; invocation/§2.9.1 | Verified missing command/status case; broader task pending | Planned task 02 |
+| 01 | Basics: prompt | sh; invocation/§2.9.1 | Verified: home/directory prompt, PS1, no noninteractive prompt; [task_01](../tests/audit.rs) | [01 PR](https://github.com/di-rs/sanctuary/pull/106) |
+| 02 | Basics: invalid commands | sh; invocation/§2.9.1 | Verified: status 127, diagnostic, and continued stdin execution; [task_02](../tests/audit.rs) | Current task PR |
 | 03 | Basics: REPL | sh; invocation/§2.9.1 | Verified PTY input/EOF smoke; broader task pending | Planned task 03 |
 | 04 | Basics: exit | sh; invocation/§2.9.1 | Verified explicit exit 7; broader task pending | Planned task 04 |
 | 05 | Basics: echo | sh; invocation/§2.9.1 | Unverified; dedicated audit pending | Planned task 05 |
