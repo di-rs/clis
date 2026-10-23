@@ -361,3 +361,21 @@ fn task_04_exit_stops_execution_and_preserves_status() {
         .stdout("")
         .stderr("");
 }
+
+#[test]
+fn task_05_echo_preserves_argument_boundaries() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args(["-c", "echo one '' three; echo"])
+        .assert()
+        .code(0)
+        .stdout("one  three\n\n")
+        .stderr("");
+    command(home.path())
+        .env("PATH", "")
+        .args(["--bash", "-c", "echo one '' three; echo"])
+        .assert()
+        .code(0)
+        .stdout("one  three\n\n")
+        .stderr("");
+}
