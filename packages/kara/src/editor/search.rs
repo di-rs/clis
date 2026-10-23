@@ -1,6 +1,12 @@
 use super::{Document, TextPosition};
 use unicode_segmentation::UnicodeSegmentation;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SearchDirection {
+    Forward,
+    Backward,
+}
+
 #[derive(Default, Clone)]
 pub struct Search {
     pub query: String,
@@ -24,10 +30,15 @@ impl Search {
         };
     }
 
-    pub fn next(&mut self) {
-        self.active = self.active.map(|index| {
-            let next = index.saturating_add(1);
-            if next < self.matches.len() { next } else { 0 }
+    pub fn step(&mut self, direction: SearchDirection) {
+        self.active = self.active.map(|index| match direction {
+            SearchDirection::Forward => {
+                let next = index.saturating_add(1);
+                if next < self.matches.len() { next } else { 0 }
+            }
+            SearchDirection::Backward => index
+                .checked_sub(1)
+                .unwrap_or_else(|| self.matches.len().saturating_sub(1)),
         });
     }
 
