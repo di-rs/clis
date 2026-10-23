@@ -9,11 +9,14 @@ loop and terminal lifecycle; there is no service or database behind it.
 [The editor](../src/editor.rs) owns the terminal session and event loop.
 The keymap translates events into commands according to the current mode;
 application state dispatches those commands without initializing a terminal.
-The document owns text, file identity, and modified state. A separate cursor
+The document owns a Ropey text buffer, file identity, and modified state. A separate cursor
 implements movement in logical lines and graphemes; the viewport scrolls in
 terminal cells. Distinct text and screen position types keep those coordinates
 from being exchanged accidentally. Line layout converts graphemes to display
-cells. Command, status, and message bars provide separate parts of the screen.
+cells. Layout is derived from an individual rope line when needed; it is not a
+second document text store. Rope edits translate grapheme positions to character
+offsets, so editing does not rebuild the entire document.
+Command, status, and message bars provide separate parts of the screen.
 The terminal adapter contains terminal I/O. Editor teardown restores the terminal.
 
 Persistence functions accept text and a path explicitly; there is no nested

@@ -20,6 +20,9 @@ def main() -> None:
         (b"abcd\nx\n", b"eGiX\x1b", b"abcd\nxX\n"),
     ):
         check(binary, initial, [keys, b"\x13", b"\x11"], expected)
+    initial = ("x" * 4096 + "👩‍💻e\u0301\n").encode()
+    expected = ("x" * 4096 + "👩‍💻\n").encode()
+    check(binary, initial, [b"ei\x7f\x1b", b"\x13", b"\x11"], expected)
     check(binary, b"ab\n", [b"ed", b"\x11"], b"ab\n")
 
 
