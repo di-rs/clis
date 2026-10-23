@@ -38,6 +38,7 @@ explains sessions, sample files, and switching builds.
 | [boxie](packages/boxie/README.md) | Run isolated sandboxes through a private service API |
 | [kara](packages/kara/README.md) | Edit text in a terminal |
 | [parsu](packages/parsu/README.md) | Parse a restricted XML-like language |
+| [shish](packages/shish/README.md) | Run shell commands |
 
 ## Commands
 

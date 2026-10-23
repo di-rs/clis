@@ -11,6 +11,7 @@ covers the system that exists today.
 | --- | --- |
 | [Builtins and applications](../README.md#commands) | Standalone commands and applications, with usage and limitations in each package. |
 | [Boxie](../packages/boxie/README.md) | Private consumer API, sandbox execution, isolation, and lifecycle recovery. |
+| [Shish](../packages/shish/README.md) | Local shell command execution; currently an imported migration baseline. |
 | [CLI playground](../tools/cli-playground/README.md) | PR previews, browser terminals, and preview/session metadata. |
 | [Shared libraries](../README.md#shared-libraries) | Logging and CLI test support. |
 | [Development tools](../README.md#development-tools) | Package checks, benchmark execution, and preview workflows. |

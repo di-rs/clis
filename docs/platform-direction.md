@@ -8,9 +8,8 @@ model.
 ## Platform responsibilities
 
 Boxie is the platform runtime. It owns sandbox execution and isolation. Shish
-will be a shell application in this repository, with selected repository builtins
-integrated into its environment. The shell migration is planned; it is not yet
-available in Sanctuary.
+is a shell application in this repository. Its initial source import runs external
+commands; library-backed execution and selected repository builtins are planned.
 
 Separate applications and services will manage consumer accounts, consumer API
 tokens, and environment setup. Their names, interfaces, and deployment boundaries
