@@ -171,7 +171,7 @@ features; it does not change the default mode.
 | F06 | [#101](https://github.com/di-rs/sanctuary/pull/101) | Sanctuary builtin integration and installation |
 | F07 | [#102](https://github.com/di-rs/sanctuary/pull/102) | Temporal/Boxie research and recovery design |
 | F08 | [#103](https://github.com/di-rs/sanctuary/pull/103) | Compatibility inventory and CLI/PTY infrastructure |
-| M01 | Current stage | Explicit opt-in Bash mode |
+| M01 | [#105](https://github.com/di-rs/sanctuary/pull/105) | Explicit opt-in Bash mode |
 
 ## Screenshot task inventory
 
@@ -184,7 +184,7 @@ The task numbers are stable even when implementation order changes.
 
 | Task | Area and behavior | Mode/reference | Status and evidence | Focused PR |
 | --- | --- | --- | --- | --- |
-| 01 | Basics: prompt | sh; invocation/§2.9.1 | Unverified; dedicated audit pending | Planned task 01 |
+| 01 | Basics: prompt | sh; invocation/§2.9.1 | Verified: home/directory prompt, PS1, no noninteractive prompt; [task_01](../tests/audit.rs) | Current task PR |
 | 02 | Basics: invalid commands | sh; invocation/§2.9.1 | Verified missing command/status case; broader task pending | Planned task 02 |
 | 03 | Basics: REPL | sh; invocation/§2.9.1 | Verified PTY input/EOF smoke; broader task pending | Planned task 03 |
 | 04 | Basics: exit | sh; invocation/§2.9.1 | Verified explicit exit 7; broader task pending | Planned task 04 |

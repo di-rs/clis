@@ -30,8 +30,8 @@ The root `make install-rust` target also installs shish into `~/.local/bin` (or
 | `--bash` | Opt into Brush's Bash settings and builtins such as `declare`, `complete`, and `history`; conflicts with `--posix`. |
 
 Noninteractive execution prints no prompt. Interactive sessions use `PS1` when
-provided, otherwise the current directory's basename followed by ` > `. Builtin
-commands include `cd`, `exit`, and `jobs`; external programs use
+provided, otherwise the current directory's basename (`~` at HOME) followed by ` > `.
+Builtin commands include `cd`, `exit`, and `jobs`; external programs use
 ordinary `PATH` lookup. There is no discovery of repository build directories.
 `true` and `false` use Sanctuary's implementations in process, ignore arguments,
 and return status without terminating shish or creating standalone utility logs.

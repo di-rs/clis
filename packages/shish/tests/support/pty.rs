@@ -24,6 +24,15 @@ pub struct Pty {
 
 impl Pty {
     pub fn new(home: &Path, args: &[&str], env: &[(&str, &str)]) -> anyhow::Result<Self> {
+        Self::with_prompt(home, args, env, Some("shish-test> "))
+    }
+
+    pub fn with_prompt(
+        home: &Path,
+        args: &[&str],
+        env: &[(&str, &str)],
+        prompt: Option<&str>,
+    ) -> anyhow::Result<Self> {
         let pair = native_pty_system().openpty(PtySize {
             rows: 30,
             cols: 120,
@@ -40,13 +49,15 @@ impl Pty {
             ("TZ", "UTC"),
             ("TERM", "xterm-256color"),
             ("NO_COLOR", "1"),
-            ("PS1", "shish-test> "),
             ("PS2", "more> "),
             ("SANCTUARY_LOG_LEVEL", "off"),
         ] {
             command.env(key, value);
         }
         command.env("HOME", home);
+        if let Some(prompt) = prompt {
+            command.env("PS1", prompt);
+        }
         command.env("HISTFILE", home.join("history"));
         command.cwd(home);
         for (key, value) in env {
