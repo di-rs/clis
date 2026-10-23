@@ -215,4 +215,74 @@ mod tests {
         assert_eq!(cache.kind_at(2, 1), Some(Kind::Number));
         Ok(())
     }
+    #[test]
+    #[allow(
+        clippy::panic_in_result_fn,
+        reason = "Assertions verify multiline state invalidation and stabilization."
+    )]
+    fn edits_recompute_until_block_state_stabilizes() -> Result<(), Box<dyn std::error::Error>> {
+        let mut text = Buffer::read(b"12\n34\n56\n78".as_slice())?;
+        let mut cache = HighlightCache::default();
+        cache.refresh(&text);
+        text.insert_char(
+            '/',
+            TextPosition {
+                line: 0,
+                grapheme: 0,
+            },
+        );
+        text.insert_char(
+            '*',
+            TextPosition {
+                line: 0,
+                grapheme: 1,
+            },
+        );
+        cache.invalidate(0, 4, 4);
+        cache.refresh(&text);
+        assert_eq!(cache.recomputed, 8);
+        assert_eq!(cache.kind_at(3, 0), Some(Kind::Comment));
+        text.insert_char(
+            '*',
+            TextPosition {
+                line: 2,
+                grapheme: 2,
+            },
+        );
+        text.insert_char(
+            '/',
+            TextPosition {
+                line: 2,
+                grapheme: 3,
+            },
+        );
+        cache.invalidate(2, 4, 4);
+        cache.refresh(&text);
+        assert_eq!(cache.recomputed, 10);
+        assert_eq!(cache.kind_at(2, 0), Some(Kind::Comment));
+        assert_eq!(cache.kind_at(3, 0), Some(Kind::Number));
+        text.insert_char(
+            '9',
+            TextPosition {
+                line: 1,
+                grapheme: 0,
+            },
+        );
+        cache.invalidate(1, 4, 4);
+        cache.refresh(&text);
+        assert_eq!(cache.recomputed, 11);
+        assert!(text.delete(TextPosition {
+            line: 0,
+            grapheme: 0
+        }));
+        assert!(text.delete(TextPosition {
+            line: 0,
+            grapheme: 0
+        }));
+        cache.invalidate(0, 4, 4);
+        cache.refresh(&text);
+        assert_eq!(cache.recomputed, 14);
+        assert_eq!(cache.kind_at(1, 0), Some(Kind::Number));
+        Ok(())
+    }
 }

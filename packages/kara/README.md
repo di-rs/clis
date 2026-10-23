@@ -141,3 +141,6 @@ of invalid quoted forms.
 
 Line comments (`//`, `///`, and `//!`) use dark green through the end of the line.
 Keywords and numbers inside comments keep the comment color.
+
+Block comments use the same color, can span lines, and may nest. Editing an opener
+or closer updates later lines until the carried comment state stabilizes.
