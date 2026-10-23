@@ -73,16 +73,6 @@ impl LineLayout {
         self.fragments = Self::str_to_fragments(&result);
     }
 
-    pub fn split(&mut self, at: usize) -> Self {
-        if at > self.fragments.len() {
-            return Self::default();
-        }
-        let reminder = self.fragments.split_off(at);
-        Self {
-            fragments: reminder,
-        }
-    }
-
     pub fn delete(&mut self, x: usize) {
         let mut result = String::new();
         for (index, fragment) in self.fragments.iter().enumerate() {
@@ -91,12 +81,6 @@ impl LineLayout {
             }
         }
         self.fragments = Self::str_to_fragments(&result);
-    }
-
-    pub fn append(&mut self, other: &Self) {
-        let mut concat = self.to_string();
-        concat.push_str(&other.to_string());
-        self.fragments = Self::str_to_fragments(&concat);
     }
 
     pub fn append_char(&mut self, character: char) {

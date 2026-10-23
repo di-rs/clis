@@ -1,4 +1,4 @@
-use super::{TextPosition, buffer::Buffer, line_layout::LineLayout};
+use super::{TextPosition, buffer::Buffer};
 use std::cmp::{max, min};
 
 #[derive(Debug, Clone, Copy)]
@@ -103,7 +103,8 @@ impl Cursor {
     }
 
     fn current_line_width(&self, text: &Buffer) -> usize {
-        text.get_line(self.position.line).map_or(0, LineLayout::len)
+        text.get_line(self.position.line)
+            .map_or(0, |line| line.len())
     }
 
     const fn reset_max_x(&mut self) {

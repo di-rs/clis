@@ -74,8 +74,10 @@ pub(super) fn save_with_sync(
     security::make_private_directory(staging.path())?;
     let mut file = tempfile::NamedTempFile::new_in(staging.path())?;
     security::make_private(file.path(), file.as_file())?;
-    for line in &buffer.lines {
-        writeln!(file, "{line}")?;
+    for index in 0..buffer.height() {
+        if let Some(line) = buffer.get_line(index) {
+            writeln!(file, "{line}")?;
+        }
     }
     if let Some(security) = security {
         security.apply(file.path(), file.as_file())?;

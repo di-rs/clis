@@ -94,13 +94,13 @@ impl Document {
     pub const fn is_empty(&self) -> bool {
         self.text.is_empty()
     }
-    pub fn get_line(&self, index: usize) -> Option<&LineLayout> {
+    pub fn get_line(&self, index: usize) -> Option<LineLayout> {
         self.text.get_line(index)
     }
     fn current_line_width(&self) -> usize {
         self.text
             .get_line(self.cursor.position.line)
-            .map_or(0, LineLayout::len)
+            .map_or(0, |line| line.len())
     }
     fn mark_modified(&mut self) {
         self.modified_at = Some(Instant::now());
