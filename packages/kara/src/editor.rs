@@ -13,6 +13,7 @@ mod mode;
 mod persistence;
 mod prelude;
 mod prompt;
+mod search;
 mod state;
 mod terminal;
 mod ui;

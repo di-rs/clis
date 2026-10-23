@@ -93,7 +93,7 @@ impl Buffer {
         self.text.len_lines()
     }
 
-    fn line_text(&self, index: usize) -> Option<String> {
+    pub fn line_text(&self, index: usize) -> Option<String> {
         let mut line = self.text.get_line(index)?.to_string();
         if line.ends_with('\n') {
             line.pop();

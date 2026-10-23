@@ -121,6 +121,21 @@ impl EditorState {
             },
             EditorMode::Search => {
                 if matches!(edit_command, Edit::InsertNewline) {
+                    if let Some(prompt) = &self.prompt {
+                        let matches = super::search::find(&self.buffer, &prompt.value());
+                        let message = matches.first().map_or_else(
+                            || "No matches".to_owned(),
+                            |position| {
+                                format!(
+                                    "{} matches; first at {}:{}",
+                                    matches.len(),
+                                    position.line.saturating_add(1),
+                                    position.grapheme.saturating_add(1)
+                                )
+                            },
+                        );
+                        self.message_bar.set(message);
+                    }
                     self.change_mode(EditorMode::View);
                 } else if let Some(prompt) = &mut self.prompt {
                     prompt.handle_edit(edit_command);

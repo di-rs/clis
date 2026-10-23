@@ -44,6 +44,10 @@ impl Prompt {
         )
     }
 
+    pub fn value(&self) -> String {
+        self.value.to_string()
+    }
+
     pub fn handle_edit(&mut self, edit_command: &Edit) {
         match edit_command {
             Edit::Insert(char) => self.value.append_char(*char),

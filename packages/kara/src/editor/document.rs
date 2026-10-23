@@ -100,6 +100,9 @@ impl Document {
     pub fn is_empty(&self) -> bool {
         self.text.is_empty()
     }
+    pub fn line_text(&self, index: usize) -> Option<String> {
+        self.text.line_text(index)
+    }
     pub fn get_line(&self, index: usize) -> Option<LineLayout> {
         self.text.get_line(index)
     }
