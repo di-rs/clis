@@ -130,3 +130,6 @@ warning. A failed save retains the previous type. Saving under a new extension i
 fragments inside identifiers are not highlighted. Binary (`0b`), octal (`0o`), and hexadecimal (`0x`) literals use the same number
 color, including uppercase prefixes and interior separators. Keywords use blue, common Rust types use green, and literal names such as
 `Some`, `None`, `Ok`, `Err`, `true`, and `false` use purple.
+
+Quoted character forms use amber, with escaped quotes and backslashes handled as
+part of the token. As in the guide, this coloring does not validate character literals.
