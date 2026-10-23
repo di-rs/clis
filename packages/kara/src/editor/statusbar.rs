@@ -1,5 +1,5 @@
 use crate::editor::{
-    Size, documentstatus::DocumentStatus, editorbuffer::EditorBuffer, editormode::EditorMode,
+    Size, documentstatus::DocumentStatus, editorbuffer::EditorBuffer, mode::EditorMode,
     terminal::Terminal,
 };
 
