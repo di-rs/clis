@@ -77,7 +77,14 @@ impl FileBuffer {
                 if metadata.permissions().readonly() {
                     return Err(std::io::ErrorKind::PermissionDenied.into());
                 }
-                // Check effective write access without truncating the original.
+                // Atomic replacement must require write access to the destination,
+                // even when the directory permits renaming over it.
+                rustix::fs::accessat(
+                    rustix::fs::CWD,
+                    path,
+                    rustix::fs::Access::WRITE_OK,
+                    rustix::fs::AtFlags::EACCESS,
+                )?;
                 let original = File::options().write(true).open(&destination)?;
                 Some(security::Security::read(&destination, &original)?)
             }
