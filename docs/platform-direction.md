@@ -69,20 +69,15 @@ test matrix and make the relevant recorded gaps acceptance criteria. Shell
 compatibility alone makes no operating-system-wide or complete utility-conformance
 claim.
 
-## Open design question: shell durability
+## Shell durability direction
 
-The shell needs a Temporal-backed execution design, but the division of work
-between shell and runtime remains open. Two approaches deserve evaluation:
-
-| Approach | Benefit | Design work it requires |
-| --- | --- | --- |
-| Shell-owned workflows and activities | Shell operations can express their own durable execution semantics. | Define replay-safe operations, side-effect handling, credentials, and how shell workers recover. |
-| Runtime-mediated durable execution | Boxie can keep workflow connectivity and credentials outside the shell environment. | Define how the shell expresses resumable work and how runtime recovery preserves shell semantics. |
-
-Temporal service placement is a separate choice. A shared service outside
-sandboxes centralizes operations but needs an explicit trust and isolation model.
-A service inside each sandbox would couple its storage and recovery to the sandbox
-and add per-environment operating cost. Neither placement is selected here.
+Start with shish inside Boxie's existing operator-controlled image/profile,
+admission, supervisor, terminal, and Temporal lifecycle. The
+[shish durability design](../packages/shish/docs/durability.md) recommends
+runtime-mediated durable jobs as a later, explicitly submitted workload type.
+Keep Temporal workers and credentials outside sandboxes. The design compares
+shell-owned workers and other alternatives and defines focused implementation
+follow-ups; it introduces no remote execution API or recovery implementation.
 
 Reconnecting to a surviving process, restarting an entire job, and resuming from a
 checkpoint are different guarantees. Ordinary background jobs do not implicitly
@@ -94,11 +89,7 @@ crashes without recording success. Retrying can duplicate the write. The durable
 execution contract must define retry eligibility and uncertain outcomes; arbitrary
 shell side effects cannot be assumed idempotent.
 
-Before choosing, define what survives failure: command progress, filesystem state,
-shell variables, external side effects, and terminal connections are different
-contracts. Also decide how cancellation, retries, environment versions, and consumer
-ownership interact. Existing lifecycle recovery is not evidence for any stronger
-shell guarantee.
-
-These questions guide future design work; this decision does not prescribe a
-runtime migration schedule or new public API.
+Files, shell variables, output, command progress, and external effects each need
+explicit persistence and recovery contracts. Existing lifecycle recovery is not
+evidence for any stronger shell guarantee. Durable jobs and process checkpointing
+remain future product decisions with their own acceptance criteria.
