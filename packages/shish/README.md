@@ -12,10 +12,9 @@ cargo run -p shish -- -c '/bin/echo hello'
 ```
 
 Use `--help` for arguments and `--version` for the package version. With no
-arguments, shish runs its original prompt loop. This migration baseline is not
-POSIX conformant: shell-state builtins, EOF handling, quoting, and redirection
-still need correction. Do not use the imported interactive loop for unattended
-input until the subsequent repair lands.
+arguments, shish reads commands from stdin and shows prompts only on a terminal.
+EOF exits with the last command's status. This migration baseline is not POSIX
+conformant: shell-state builtins, quoting, and redirection still need correction.
 
 No upstream utility crates are imported. External commands come from the host.
 Shish runs with the invoking user's privileges; it is not a sandbox and does not

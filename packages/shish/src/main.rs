@@ -3,7 +3,7 @@ mod command;
 mod parser;
 mod prompt;
 
-use std::io;
+use std::io::{self, IsTerminal as _};
 use std::process::ExitCode;
 
 use clap::Parser;
@@ -23,17 +23,29 @@ fn main() -> anyhow::Result<ExitCode> {
         let status = cli::handle_user_input(&command)?;
         return Ok(ExitCode::from(u8::try_from(status).unwrap_or(1)));
     }
+    let interactive = io::stdin().is_terminal();
+    let mut status = 0;
     loop {
-        prompt::prompt()?;
-        let command = get_user_input()?;
-        if let Err(error) = cli::handle_user_input(&command) {
-            eprintln!("{error}");
+        if interactive {
+            prompt::prompt()?;
+        }
+        let Some(command) = get_user_input()? else {
+            return Ok(ExitCode::from(u8::try_from(status).unwrap_or(1)));
+        };
+        match cli::handle_user_input(&command) {
+            Ok(code) => status = code,
+            Err(error) => {
+                eprintln!("{error}");
+                status = 1;
+            }
         }
     }
 }
 
-fn get_user_input() -> Result<String, io::Error> {
+fn get_user_input() -> Result<Option<String>, io::Error> {
     let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    Ok(input)
+    if io::stdin().read_line(&mut input)? == 0 {
+        return Ok(None);
+    }
+    Ok(Some(input))
 }
