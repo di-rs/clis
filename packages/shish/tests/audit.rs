@@ -329,3 +329,18 @@ fn task_02_invalid_command_preserves_repl_execution() {
         .stdout("127\n")
         .stderr("error: command not found: shish_missing_command\n");
 }
+
+#[test]
+fn task_03_repl_accepts_multiline_commands_and_keeps_state() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("for value in one two; do\n")?;
+    terminal.expect("more> ")?;
+    terminal.send(" /bin/echo \"$value\"\ndone\n")?;
+    terminal.expect("\none\ntwo\n")?;
+    terminal.send("printf '<%s>\\n' \"$value\"\n")?;
+    terminal.expect("\n<two>\n")?;
+    terminal.send("exit\n")?;
+    terminal.finish(0)
+}
