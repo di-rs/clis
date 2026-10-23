@@ -9,10 +9,26 @@ pub struct Search {
 }
 
 impl Search {
-    pub fn update(&mut self, document: &Document, query: String) {
+    pub fn update(&mut self, document: &Document, query: String, origin: TextPosition) {
         self.query = query;
         self.matches = find(document, &self.query);
-        self.active = (!self.matches.is_empty()).then_some(0);
+        self.active = if self.matches.is_empty() {
+            None
+        } else {
+            Some(
+                self.matches
+                    .iter()
+                    .position(|at| (at.line, at.grapheme) >= (origin.line, origin.grapheme))
+                    .unwrap_or(0),
+            )
+        };
+    }
+
+    pub fn next(&mut self) {
+        self.active = self.active.map(|index| {
+            let next = index.saturating_add(1);
+            if next < self.matches.len() { next } else { 0 }
+        });
     }
 
     pub fn current(&self) -> Option<TextPosition> {
@@ -25,6 +41,7 @@ impl Search {
 pub struct SearchSnapshot {
     pub cursor: super::cursor::Cursor,
     pub previous: Search,
+    pub scroll_offset: super::ScreenPosition,
 }
 
 /// Search one rope line at a time; byte offsets never escape as text coordinates.
