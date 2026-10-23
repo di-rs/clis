@@ -1,4 +1,4 @@
-# Brush dependency notices
+# Third-party notices
 
 These notices accompany the specific dependencies accepted in the repository
 license policy. They supplement the licenses distributed with the crates; they

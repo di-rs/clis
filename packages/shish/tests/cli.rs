@@ -157,3 +157,75 @@ fn checkout_debug_programs_do_not_override_trusted_commands() {
         .stdout("hello\n")
         .stderr("");
 }
+
+// Acceptance tests for documented published-Brush limitations. See
+// docs/compatibility-gaps.md.
+#[test]
+#[ignore = "Brush 0.5.0 cached PATH lookup selects directories; awaiting a published fix"]
+fn path_lookup_skips_directories_and_nonexecutable_files() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let directory = assert_fs::TempDir::new().unwrap();
+    directory.child("first/probe").create_dir_all().unwrap();
+    let blocked = directory.child("second/probe");
+    blocked.write_str("not executable").unwrap();
+    std::fs::set_permissions(blocked.path(), std::fs::Permissions::from_mode(0o644)).unwrap();
+    let executable = directory.child("third/probe");
+    executable.write_str("#!/bin/sh\nprintf found\n").unwrap();
+    std::fs::set_permissions(executable.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let paths = std::env::join_paths([
+        directory.child("first").path(),
+        directory.child("second").path(),
+        directory.child("third").path(),
+    ])
+    .unwrap();
+    cargo_bin_cmd!()
+        .current_dir(&directory)
+        .env("PATH", paths)
+        .args(["-c", "probe"])
+        .assert()
+        .code(0)
+        .stdout("found")
+        .stderr("");
+}
+
+#[test]
+#[ignore = "stdin completeness reparses growing prefixes; awaiting a published incremental parser"]
+fn large_multiline_stdin_completes_within_budget() {
+    let directory = assert_fs::TempDir::new().unwrap();
+    let script = directory.child("large.sh");
+    script
+        .write_str(&format!(
+            "value='\n{}'\nprintf done\n",
+            "payload\n".repeat(20_000)
+        ))
+        .unwrap();
+    // A regular file avoids assert_cmd's unbounded pipe writer on timeout.
+    // This operational budget is not a POSIX timing requirement.
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_shish"));
+    command
+        .arg("-s")
+        .current_dir(&directory)
+        .env("LC_ALL", "C")
+        .env("SANCTUARY_LOG_LEVEL", "off")
+        .stdin(std::fs::File::open(script.path()).unwrap());
+    command
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = command.spawn().unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        if child.try_wait().unwrap().is_some() {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("multiline stdin exceeded the five-second acceptance budget");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stdout, b"done");
+    assert_eq!(output.stderr, b"");
+}
