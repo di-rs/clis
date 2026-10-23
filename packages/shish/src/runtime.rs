@@ -26,9 +26,11 @@ pub async fn run(args: &Args) -> anyhow::Result<u8> {
     // must not consume bytes intended for the next shell command.
     let stdin = File::from(io::stdin().as_fd().try_clone_to_owned()?);
     let mut shell = Shell::builder()
-        .builtins(brush_builtins::default_builtins(
-            brush_builtins::BuiltinSet::ShMode,
-        ))
+        .builtins(brush_builtins::default_builtins(if args.bash {
+            brush_builtins::BuiltinSet::BashMode
+        } else {
+            brush_builtins::BuiltinSet::ShMode
+        }))
         .builtin(
             "true",
             brush_core::builtins::simple_builtin::<crate::builtins::Status<true>, _>(),
@@ -43,8 +45,8 @@ pub async fn run(args: &Args) -> anyhow::Result<u8> {
         .interactive(args.is_interactive())
         .read_commands_from_stdin(args.command.is_none() && args.script().is_none())
         .command_string_mode(args.command.is_some())
-        .sh_mode(true)
-        .posix(true)
+        .sh_mode(!args.bash)
+        .posix(!args.bash)
         .profile(brush_core::ProfileLoadBehavior::Skip)
         .rc(brush_core::RcLoadBehavior::Skip)
         .fds(HashMap::from([(0, stdin.into())]))
