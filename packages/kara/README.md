@@ -106,3 +106,6 @@ using the same non-overlapping match order in either direction. Results
 are centered in the viewport.
 Enter accepts the location; Esc restores the original cursor and exact scrolling. Matching is
 single-line and non-overlapping; an empty query has no matches. In editing mode, `/` is ordinary text.
+
+Visible search matches use cyan backgrounds; the active match uses bold text on
+yellow. Enter retains these highlights. Edits refresh matches against current text.

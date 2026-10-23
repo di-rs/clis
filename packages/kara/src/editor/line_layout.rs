@@ -35,26 +35,35 @@ impl LineLayout {
     }
 
     pub fn get(&self, range: Range<usize>) -> String {
+        self.visible(range)
+            .into_iter()
+            .map(|(_, text)| text)
+            .collect()
+    }
+
+    /// Visible fragments retain their source grapheme indexes after cell clipping.
+    pub fn visible(&self, range: Range<usize>) -> Vec<(usize, String)> {
+        let mut result = Vec::new();
         if range.start >= range.end {
-            return String::new();
+            return result;
         }
-        let mut result = String::new();
-        let mut current_pos = 0;
-        for fragment in &self.fragments {
-            let fragment_end = fragment.rendered_width.saturation_add(current_pos);
-            if current_pos >= range.end {
+        let mut cell = 0;
+        for (index, fragment) in self.fragments.iter().enumerate() {
+            let end = fragment.rendered_width.saturation_add(cell);
+            if cell >= range.end {
                 break;
             }
-            if fragment_end > range.start {
-                if fragment_end > range.end || current_pos < range.start {
-                    result.push('⋯');
-                } else if let Some(char) = fragment.replacement {
-                    result.push(char);
+            if end > range.start {
+                let text = if end > range.end || cell < range.start {
+                    "⋯".to_owned()
+                } else if let Some(replacement) = fragment.replacement {
+                    replacement.to_string()
                 } else {
-                    result.push_str(&fragment.grapheme);
-                }
+                    fragment.grapheme.clone()
+                };
+                result.push((index, text));
             }
-            current_pos = fragment_end;
+            cell = end;
         }
         result
     }

@@ -12,11 +12,17 @@ pub struct Search {
     pub query: String,
     pub matches: Vec<TextPosition>,
     pub active: Option<usize>,
+    pub visible: bool,
+    revision: u64,
+    match_length: usize,
 }
 
 impl Search {
     pub fn update(&mut self, document: &Document, query: String, origin: TextPosition) {
         self.query = query;
+        self.match_length = self.query.graphemes(true).count();
+        self.visible = true;
+        self.revision = document.revision();
         self.matches = find(document, &self.query);
         self.active = if self.matches.is_empty() {
             None
@@ -28,6 +34,40 @@ impl Search {
                     .unwrap_or(0),
             )
         };
+    }
+
+    pub fn refresh(&mut self, document: &Document) {
+        if self.revision != document.revision() {
+            self.matches = find(document, &self.query);
+            self.active = self
+                .matches
+                .iter()
+                .position(|position| *position == document.cursor().position);
+            self.revision = document.revision();
+        }
+    }
+
+    pub fn match_at(&self, position: TextPosition) -> Option<MatchKind> {
+        if !self.visible {
+            return None;
+        }
+        let index = self
+            .matches
+            .partition_point(|start| {
+                (start.line, start.grapheme) <= (position.line, position.grapheme)
+            })
+            .checked_sub(1)?;
+        let start = self.matches.get(index)?;
+        if start.line != position.line
+            || position.grapheme >= start.grapheme.saturating_add(self.match_length)
+        {
+            return None;
+        }
+        Some(if self.active == Some(index) {
+            MatchKind::Active
+        } else {
+            MatchKind::Other
+        })
     }
 
     pub fn step(&mut self, direction: SearchDirection) {
@@ -47,6 +87,11 @@ impl Search {
             .and_then(|index| self.matches.get(index))
             .copied()
     }
+}
+
+pub enum MatchKind {
+    Active,
+    Other,
 }
 
 pub struct SearchSnapshot {

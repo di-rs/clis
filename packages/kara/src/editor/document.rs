@@ -14,6 +14,7 @@ pub struct Document {
     cursor: Cursor,
     filename: Option<PathBuf>,
     modified_at: Option<Instant>,
+    revision: u64,
 }
 impl Document {
     pub fn open(filename: &str) -> std::io::Result<Self> {
@@ -120,7 +121,11 @@ impl Document {
             .get_line(self.cursor.position.line)
             .map_or(0, |line| line.len())
     }
+    pub const fn revision(&self) -> u64 {
+        self.revision
+    }
     fn mark_modified(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
         self.modified_at = Some(Instant::now());
     }
     pub const fn is_modified(&self) -> bool {

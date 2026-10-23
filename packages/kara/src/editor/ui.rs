@@ -4,8 +4,8 @@ use ratatui::{
     Frame,
     buffer::Buffer,
     layout::Rect,
-    style::{Modifier, Style},
-    text::Line,
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
     widgets::{Paragraph, Widget},
 };
 
@@ -23,12 +23,14 @@ pub(super) fn render(frame: &mut Frame<'_>, state: &mut EditorState) {
     if area.is_empty() {
         return;
     }
+    state.search.refresh(&state.buffer);
     let caret = state.buffer.caret_location();
     state.view.scroll_into_view(caret);
     let document_area = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(2));
     frame.render_widget(
         DocumentWidget {
             document: &state.buffer,
+            search: &state.search,
             offset: state.view.scroll_offset,
         },
         document_area,
@@ -94,21 +96,41 @@ pub(super) fn render(frame: &mut Frame<'_>, state: &mut EditorState) {
 
 struct DocumentWidget<'a> {
     document: &'a Document,
+    search: &'a super::search::Search,
     offset: ScreenPosition,
 }
 
 impl Widget for DocumentWidget<'_> {
     fn render(self, area: Rect, buffer: &mut Buffer) {
         for y in 0..area.height {
-            let line = self
-                .document
-                .get_line(self.offset.y.saturating_add(usize::from(y)));
+            let line_index = self.offset.y.saturating_add(usize::from(y));
+            let line = self.document.get_line(line_index);
             let text = line.map_or_else(
-                || "~".to_owned(),
+                || Line::from("~"),
                 |line| {
-                    line.get(Range::from(
-                        self.offset.x..self.offset.x.saturating_add(usize::from(area.width)),
-                    ))
+                    let spans = line
+                        .visible(Range::from(
+                            self.offset.x..self.offset.x.saturating_add(usize::from(area.width)),
+                        ))
+                        .into_iter()
+                        .map(|(grapheme, text)| {
+                            let style = match self.search.match_at(super::TextPosition {
+                                line: line_index,
+                                grapheme,
+                            }) {
+                                Some(super::search::MatchKind::Active) => Style::new()
+                                    .fg(Color::Black)
+                                    .bg(Color::Yellow)
+                                    .add_modifier(Modifier::BOLD),
+                                Some(super::search::MatchKind::Other) => {
+                                    Style::new().fg(Color::Black).bg(Color::Cyan)
+                                }
+                                None => Style::default(),
+                            };
+                            Span::styled(text, style)
+                        })
+                        .collect::<Vec<_>>();
+                    Line::from(spans)
                 },
             );
             Paragraph::new(text).render(
@@ -173,6 +195,7 @@ mod tests {
         let mut clipped = Buffer::empty(Rect::new(0, 0, 2, 1));
         DocumentWidget {
             document: &state.buffer,
+            search: &state.search,
             offset: ScreenPosition { x: 2, y: 0 },
         }
         .render(clipped.area, &mut clipped);
@@ -230,6 +253,55 @@ mod tests {
                 "status lost a mode cell: {status}"
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    #[allow(
+        clippy::panic_in_result_fn,
+        reason = "Assertions verify search style composition, clipping, and invalidation."
+    )]
+    fn accepted_search_styles_survive_clipping_and_follow_edits()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::editor::{TextPosition, command::Edit, mode::EditorMode};
+        let mut state = EditorState::default();
+        for character in "界a界".chars() {
+            state.buffer.insert_char(character);
+        }
+        state.buffer.set_position(TextPosition::default());
+        state.change_mode(EditorMode::Search);
+        state.handle_edit_command(&Edit::Insert('界'));
+        state.handle_edit_command(&Edit::InsertNewline);
+        let mut terminal = Terminal::new(TestBackend::new(12, 6))?;
+        terminal.draw(|frame| render(frame, &mut state))?;
+        assert_eq!(terminal.backend().buffer()[(0, 0)].bg, Color::Yellow);
+        assert!(
+            terminal.backend().buffer()[(0, 0)]
+                .modifier
+                .contains(Modifier::BOLD)
+        );
+        assert_eq!(terminal.backend().buffer()[(3, 0)].bg, Color::Cyan);
+        let mut clipped = Buffer::empty(Rect::new(0, 0, 2, 1));
+        DocumentWidget {
+            document: &state.buffer,
+            search: &state.search,
+            offset: ScreenPosition { x: 1, y: 0 },
+        }
+        .render(clipped.area, &mut clipped);
+        assert_eq!(clipped[(0, 0)].symbol(), "⋯");
+        assert_eq!(clipped[(0, 0)].bg, Color::Yellow);
+        assert_eq!(clipped[(1, 0)].bg, Color::Reset);
+        state.buffer.delete();
+        terminal.draw(|frame| render(frame, &mut state))?;
+        assert_eq!(terminal.backend().buffer()[(0, 0)].bg, Color::Reset);
+        assert_eq!(terminal.backend().buffer()[(1, 0)].bg, Color::Cyan);
+        state.change_mode(EditorMode::Search);
+        state.handle_edit_command(&Edit::Insert('a'));
+        state.change_mode(EditorMode::View);
+        terminal.draw(|frame| render(frame, &mut state))?;
+        assert_eq!(state.search.query, "界");
+        assert_eq!(terminal.backend().buffer()[(0, 0)].bg, Color::Reset);
+        assert_eq!(terminal.backend().buffer()[(1, 0)].bg, Color::Cyan);
         Ok(())
     }
 }

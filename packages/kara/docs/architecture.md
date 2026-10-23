@@ -48,3 +48,7 @@ quitting, and restoration cannot be established by the non-terminal startup test
 
 Ratatui TestBackend checks rendered Unicode cells, clipping, status styles, cursor
 placement, and tiny/resized terminals without initializing a real terminal.
+
+Search caches match positions by document revision and composes styling over
+visible grapheme fragments after clipping. Prompt cancellation restores the prior
+search, cursor, and viewport together.
