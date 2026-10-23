@@ -21,13 +21,14 @@ pub enum EditorMode {
     View,
     Edit(Placement),
     Command,
+    Search,
 }
 
 impl EditorMode {
     pub const fn get_cursor_style(self) -> cursor::SetCursorStyle {
         match self {
             Self::View => BlinkingBlock,
-            Self::Edit(_) | Self::Command => BlinkingBar,
+            Self::Edit(_) | Self::Command | Self::Search => BlinkingBar,
         }
     }
 
@@ -50,6 +51,7 @@ impl Display for EditorMode {
             Self::View => "NAVIGATE",
             Self::Edit(_) => "EDIT",
             Self::Command => "COMMAND",
+            Self::Search => "SEARCH",
         };
         f.write_str(name)
     }

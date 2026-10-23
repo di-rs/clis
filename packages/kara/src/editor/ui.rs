@@ -34,10 +34,10 @@ pub(super) fn render(frame: &mut Frame<'_>, state: &mut EditorState) {
         document_area,
     );
     let bottom = area.bottom().saturating_sub(1);
-    let message = state.command_bar.as_ref().map_or_else(
-        || state.message_bar.text(),
-        super::command_bar::CommandBar::text,
-    );
+    let message = state
+        .prompt
+        .as_ref()
+        .map_or_else(|| state.message_bar.text(), super::prompt::Prompt::text);
     frame.render_widget(
         Paragraph::new(display_text(&message)),
         Rect::new(area.x, bottom, area.width, 1),
@@ -68,7 +68,7 @@ pub(super) fn render(frame: &mut Frame<'_>, state: &mut EditorState) {
             ),
         );
     }
-    let cursor = state.command_bar.as_ref().map_or_else(
+    let cursor = state.prompt.as_ref().map_or_else(
         || ScreenPosition {
             x: caret.x.saturating_sub(state.view.scroll_offset.x),
             y: caret.y.saturating_sub(state.view.scroll_offset.y),

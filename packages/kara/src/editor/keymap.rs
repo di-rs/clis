@@ -52,7 +52,9 @@ impl EditorCommand {
         common_command.map_or_else(
             || match mode {
                 EditorMode::View => Ok(Self::match_event_view_mode(event)),
-                EditorMode::Edit(_) | EditorMode::Command => Ok(Self::match_event_edit_mode(event)),
+                EditorMode::Edit(_) | EditorMode::Command | EditorMode::Search => {
+                    Ok(Self::match_event_edit_mode(event))
+                }
             },
             Ok,
         )
@@ -102,6 +104,7 @@ impl EditorCommand {
                 (Char('A'), _) => Self::ChangeMode(EditorMode::Edit(Placement::End)),
 
                 (Char(':'), _) => Self::ChangeMode(EditorMode::Command),
+                (Char('/'), _) => Self::ChangeMode(EditorMode::Search),
 
                 (Char('d'), _) => Self::Edit(Edit::Delete),
                 _ => Self::Unknown,
