@@ -417,4 +417,28 @@ mod tests {
         }
         Ok(())
     }
+
+    #[test]
+    #[allow(
+        clippy::panic_in_result_fn,
+        reason = "Assertions verify visible Rust category colors."
+    )]
+    fn colors_rust_token_categories() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = assert_fs::TempDir::new()?;
+        let path = dir.path().join("colors.rs");
+        std::fs::write(&path, b"let n: i32 = Some(12);")?;
+        let mut state = EditorState::default();
+        state.open_file(path.to_str().ok_or("invalid path")?);
+        let mut terminal = Terminal::new(TestBackend::new(40, 6))?;
+        terminal.draw(|frame| render(frame, &mut state))?;
+        for (column, color) in [
+            (0, Color::Blue),
+            (7, Color::Green),
+            (13, Color::Magenta),
+            (18, Color::Red),
+        ] {
+            assert_eq!(terminal.backend().buffer()[(column, 0)].fg, color);
+        }
+        Ok(())
+    }
 }

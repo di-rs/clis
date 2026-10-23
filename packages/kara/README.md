@@ -128,5 +128,5 @@ The status bar reports `Rust` for `.rs` files (case-insensitive) and `Text` othe
 A successful Save As updates the type, including a committed save with a durability
 warning. A failed save retains the previous type. Saving under a new extension immediately updates colors. Numbers support interior underscore separators and signed exponents. Numeric
 fragments inside identifiers are not highlighted. Binary (`0b`), octal (`0o`), and hexadecimal (`0x`) literals use the same number
-color, including uppercase prefixes and interior separators. Other tokens follow
-in later assignments.
+color, including uppercase prefixes and interior separators. Keywords use blue, common Rust types use green, and literal names such as
+`Some`, `None`, `Ok`, `Err`, `true`, and `false` use purple.
