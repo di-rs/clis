@@ -98,3 +98,7 @@ repository root after building Kara:
 ```sh
 python3 packages/kara/tests/pty_smoke.py "$PWD/target/debug/kara"
 ```
+
+`/` in navigation mode opens a search prompt. Type a query, use Backspace to
+remove a grapheme, and press Enter or Esc to return to navigation. Search traversal
+is added in the following assignment. In editing mode, `/` is ordinary text.

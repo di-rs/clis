@@ -6,10 +6,10 @@ use super::{
         Move,
         System::{Quit, QuitForce, Resize, Save, SaveAs},
     },
-    command_bar::CommandBar,
     document::{self, Direction, Document},
     message_bar::MessageBar,
     mode::EditorMode,
+    prompt::Prompt,
     view::View,
 };
 use crossterm::event::{Event, KeyEvent, KeyEventKind};
@@ -23,7 +23,7 @@ pub(super) struct EditorState {
     pub(super) buffer: Document,
     pub(super) view: View,
     pub(super) message_bar: MessageBar,
-    pub(super) command_bar: Option<CommandBar>,
+    pub(super) prompt: Option<Prompt>,
 }
 
 impl EditorState {
@@ -87,6 +87,9 @@ impl EditorState {
         use super::command::Move::{
             Down, End, Home, Left, LineEnd, LineStart, PageDown, PageUp, Right, Up,
         };
+        if self.prompt.is_some() {
+            return;
+        }
 
         match direction {
             Up => self.buffer.move_caret(Direction::Up(1)),
@@ -116,11 +119,18 @@ impl EditorState {
                 Edit::Delete => self.buffer.delete(),
                 Edit::DeleteBackward => self.buffer.delete_backward(),
             },
+            EditorMode::Search => {
+                if matches!(edit_command, Edit::InsertNewline) {
+                    self.change_mode(EditorMode::View);
+                } else if let Some(prompt) = &mut self.prompt {
+                    prompt.handle_edit(edit_command);
+                }
+            }
             EditorMode::Command => {
-                if let Some(command_bar) = &mut self.command_bar {
+                if let Some(prompt) = &mut self.prompt {
                     match edit_command {
                         Edit::InsertNewline => {
-                            match command_bar.produce_command(self.buffer.filename()) {
+                            match prompt.produce_command(self.buffer.filename()) {
                                 Err(e) => {
                                     cli_log::record_error(&e);
                                     self.message_bar.set(e);
@@ -129,7 +139,7 @@ impl EditorState {
                             }
                             self.change_mode(EditorMode::View);
                         }
-                        edit => command_bar.handle_edit(edit),
+                        edit => prompt.handle_edit(edit),
                     }
                 }
             }
@@ -148,16 +158,17 @@ impl EditorState {
             height: height.saturating_sub(2),
             width,
         });
-        if let Some(command_bar) = &mut self.command_bar {
-            command_bar.resize(Size { height: 1, width });
+        if let Some(prompt) = &mut self.prompt {
+            prompt.resize(Size { height: 1, width });
         }
     }
 
     pub(super) fn change_mode(&mut self, mode: EditorMode) {
         match mode {
-            EditorMode::Command => self.command_bar = Some(CommandBar::new("", self.terminal_size)),
+            EditorMode::Search => self.prompt = Some(Prompt::new("/", "", self.terminal_size)),
+            EditorMode::Command => self.prompt = Some(Prompt::new(":", "", self.terminal_size)),
             mode => {
-                self.command_bar = None;
+                self.prompt = None;
                 if let Some(direction) = self.mode.change_mode_movement(mode) {
                     self.buffer.move_caret(direction);
                 }
@@ -177,7 +188,7 @@ impl EditorState {
                 }
             }
         } else {
-            self.command_bar = Some(CommandBar::new("w ", self.terminal_size));
+            self.prompt = Some(Prompt::new(":", "w ", self.terminal_size));
             self.mode = EditorMode::Command;
         }
     }

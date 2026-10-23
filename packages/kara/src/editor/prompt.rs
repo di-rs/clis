@@ -3,23 +3,23 @@ use std::{cmp::min, path::Path, range::Range};
 use crate::editor::{
     Size,
     command::{Edit, EditorCommand},
-    command_bar::interpreter::Interpreter,
     line_layout::LineLayout,
+    prompt::interpreter::Interpreter,
 };
 
 mod interpreter;
 
 #[derive(Default)]
-pub struct CommandBar {
-    prompt: String,
+pub struct Prompt {
+    label: String,
     value: LineLayout,
     size: Size,
 }
 
-impl CommandBar {
-    pub fn new(value: &str, size: Size) -> Self {
+impl Prompt {
+    pub fn new(label: &str, value: &str, size: Size) -> Self {
         Self {
-            prompt: ":".to_owned(),
+            label: label.to_owned(),
             value: value.parse().unwrap(),
             size,
         }
@@ -33,13 +33,13 @@ impl CommandBar {
         let area_for_value = self
             .size
             .width
-            .saturating_sub(self.prompt.len())
+            .saturating_sub(self.label.len())
             .saturating_sub(1);
         let value_end = self.value.width();
         let value_start = value_end.saturating_sub(area_for_value);
         format!(
             "{}{}",
-            self.prompt,
+            self.label,
             self.value.get(Range::from(value_start..value_end))
         )
     }
@@ -63,7 +63,7 @@ impl CommandBar {
 
     pub fn caret_position_col(&self) -> usize {
         min(
-            self.prompt.len().saturating_add(self.value.width()),
+            self.label.len().saturating_add(self.value.width()),
             self.size.width.saturating_sub(1),
         )
     }
