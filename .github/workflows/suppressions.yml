@@ -1,0 +1,56 @@
+name: Suppression reasons
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+permissions:
+  contents: read
+concurrency:
+  group: suppressions-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+env:
+  PYTHONPATH: tools
+jobs:
+  select:
+    if: ${{ !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      selected: ${{ steps.paths.outputs.selected }}
+      base: ${{ steps.paths.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: python3 -m unittest discover -s tools/guardrails/tests -p test_scope.py
+      - id: paths
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: >-
+          python3 -m guardrails.scope --base "$BASE"
+          --patterns '*.rs' '*.py' '*.pyi' '*.js' '*.jsx' '*.ts' '*.tsx' '*.svelte'
+          --present '*.rs' '*.py' '*.pyi' '*.js' '*.jsx' '*.ts' '*.tsx' '*.svelte'
+          --config 'tools/guardrails/syntax.py' 'tools/guardrails/scripts.py' 'tools/guardrails/tests/test_suppressions.py' 'pyproject.toml' 'uv.lock' '.github/workflows/suppressions.yml' 'tools/guardrails/suppressions.py' 'tools/guardrails/changes.py' 'tools/guardrails/scope.py'
+  check:
+    name: Suppression reasons
+    needs: select
+    if: needs.select.outputs.selected == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BASE: ${{ needs.select.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: '0.13.0'
+      - run: uv sync --frozen --all-packages
+      - run: uv run --frozen pytest tools/guardrails/tests/test_suppressions.py
+      - run: uv run --frozen python -m guardrails.suppressions --base "$BASE"
