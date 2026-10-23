@@ -24,6 +24,8 @@ pub(super) struct EditorState {
     pub(super) view: View,
     pub(super) message_bar: MessageBar,
     pub(super) prompt: Option<Prompt>,
+    pub(super) search: super::search::Search,
+    search_snapshot: Option<super::search::SearchSnapshot>,
 }
 
 impl EditorState {
@@ -121,24 +123,18 @@ impl EditorState {
             },
             EditorMode::Search => {
                 if matches!(edit_command, Edit::InsertNewline) {
-                    if let Some(prompt) = &self.prompt {
-                        let matches = super::search::find(&self.buffer, &prompt.value());
-                        let message = matches.first().map_or_else(
-                            || "No matches".to_owned(),
-                            |position| {
-                                format!(
-                                    "{} matches; first at {}:{}",
-                                    matches.len(),
-                                    position.line.saturating_add(1),
-                                    position.grapheme.saturating_add(1)
-                                )
-                            },
-                        );
-                        self.message_bar.set(message);
-                    }
+                    self.search_snapshot = None;
+                    self.message_bar
+                        .set(format!("{} matches", self.search.matches.len()));
                     self.change_mode(EditorMode::View);
                 } else if let Some(prompt) = &mut self.prompt {
                     prompt.handle_edit(edit_command);
+                    self.search.update(&self.buffer, prompt.value());
+                    if let Some(position) = self.search.current() {
+                        self.buffer.set_position(position);
+                    } else if let Some(snapshot) = &self.search_snapshot {
+                        self.buffer.restore_cursor(snapshot.cursor.clone());
+                    }
                 }
             }
             EditorMode::Command => {
@@ -180,9 +176,19 @@ impl EditorState {
 
     pub(super) fn change_mode(&mut self, mode: EditorMode) {
         match mode {
-            EditorMode::Search => self.prompt = Some(Prompt::new("/", "", self.terminal_size)),
+            EditorMode::Search => {
+                self.search_snapshot = Some(super::search::SearchSnapshot {
+                    cursor: self.buffer.cursor(),
+                    previous: std::mem::take(&mut self.search),
+                });
+                self.prompt = Some(Prompt::new("/", "", self.terminal_size));
+            }
             EditorMode::Command => self.prompt = Some(Prompt::new(":", "", self.terminal_size)),
             mode => {
+                if let Some(snapshot) = self.search_snapshot.take() {
+                    self.buffer.restore_cursor(snapshot.cursor);
+                    self.search = snapshot.previous;
+                }
                 self.prompt = None;
                 if let Some(direction) = self.mode.change_mode_movement(mode) {
                     self.buffer.move_caret(direction);

@@ -213,10 +213,9 @@ mod tests {
         let directory = assert_fs::TempDir::new()?;
         let path = directory.path().join("界".repeat(10));
         std::fs::write(&path, b"x")?;
-        let mut state = EditorState {
-            buffer: Document::open(path.to_str().ok_or("invalid fixture path")?)?,
-            ..EditorState::default()
-        };
+        let mut state = EditorState::default();
+        state.open_file(path.to_str().ok_or("invalid fixture path")?);
+        assert_eq!(state.buffer.filename(), Some(path.as_path()));
         let prefix_width = Line::from(format!("{}/", directory.path().display())).width();
         let width = u16::try_from(prefix_width.saturating_add(30))?;
         let mut terminal = Terminal::new(TestBackend::new(width, 4))?;

@@ -13,7 +13,23 @@ def main() -> None:
     check(binary, b"abc", [b"/query\r", b"iX", b"\x1b", b":w\r:q\r"], b"Xabc")
 
     output = check(binary, "é hit hit".encode(), [b"/hit\r", b"\x11"], "é hit hit".encode())
-    assert b"2 matches; first at 1:3" in output
+    assert b"2 matches" in output
+
+    check(
+        binary,
+        b"one target two",
+        [b"/target", b"\r", b"iX", b"\x1b", b"\x13\x11"],
+        b"one Xtarget two",
+    )
+    check(
+        binary,
+        b"one target two",
+        [b"kk/target", b"\x1b", b"iX", b"\x1b", b"\x13\x11"],
+        b"onXe target two",
+    )
+    check(
+        binary, b"one target two", [b"/absent\r", b"iX", b"\x1b", b"\x13\x11"], b"Xone target two"
+    )
 
 
 if __name__ == "__main__":
