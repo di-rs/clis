@@ -1,6 +1,32 @@
 use super::{Document, TextPosition};
 use unicode_segmentation::UnicodeSegmentation;
 
+#[derive(Default, Clone)]
+pub struct Search {
+    pub query: String,
+    pub matches: Vec<TextPosition>,
+    pub active: Option<usize>,
+}
+
+impl Search {
+    pub fn update(&mut self, document: &Document, query: String) {
+        self.query = query;
+        self.matches = find(document, &self.query);
+        self.active = (!self.matches.is_empty()).then_some(0);
+    }
+
+    pub fn current(&self) -> Option<TextPosition> {
+        self.active
+            .and_then(|index| self.matches.get(index))
+            .copied()
+    }
+}
+
+pub struct SearchSnapshot {
+    pub cursor: super::cursor::Cursor,
+    pub previous: Search,
+}
+
 /// Search one rope line at a time; byte offsets never escape as text coordinates.
 pub fn find(document: &Document, query: &str) -> Vec<TextPosition> {
     if query.is_empty() || query.contains(['\r', '\n']) {

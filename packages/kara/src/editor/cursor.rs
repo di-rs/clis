@@ -13,7 +13,7 @@ pub enum Direction {
     EndOfBuffer,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Cursor {
     pub position: TextPosition,
     desired_grapheme: usize,

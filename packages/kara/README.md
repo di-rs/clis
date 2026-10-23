@@ -100,6 +100,6 @@ python3 packages/kara/tests/pty_smoke.py "$PWD/target/debug/kara"
 ```
 
 `/` in navigation mode opens a search prompt. Type a query, use Backspace to
-remove a grapheme, and press Enter or Esc to return to navigation. Enter reports the number of literal, case-sensitive matches. Matching is
-single-line and non-overlapping; an empty query has no matches. Interactive
-movement follows in the next assignment. In editing mode, `/` is ordinary text.
+remove a grapheme, and press Enter or Esc to return to navigation. Typing searches incrementally and moves to the first literal, case-sensitive match.
+Enter accepts the location; Esc restores the original cursor. Matching is
+single-line and non-overlapping; an empty query has no matches. In editing mode, `/` is ordinary text.

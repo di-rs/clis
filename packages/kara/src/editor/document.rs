@@ -85,6 +85,15 @@ impl Document {
             self.cursor.clamp_after_edit(&self.text);
         }
     }
+    pub fn cursor(&self) -> super::cursor::Cursor {
+        self.cursor.clone()
+    }
+    pub const fn restore_cursor(&mut self, cursor: super::cursor::Cursor) {
+        self.cursor = cursor;
+    }
+    pub fn set_position(&mut self, position: TextPosition) {
+        self.cursor.set_position(&self.text, position);
+    }
     pub fn move_caret(&mut self, direction: Direction) {
         self.cursor.move_caret(&self.text, direction);
     }
