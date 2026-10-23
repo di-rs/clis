@@ -50,12 +50,13 @@ Shish runs with the invoking user's privileges. It supplies neither sandbox
 isolation nor recovery of interrupted processes. Boxie owns isolation and lifecycle
 recovery; its integration with shish remains a separate design stage.
 
-See [known compatibility gaps](docs/compatibility-gaps.md) for limitations and
-workarounds, [architecture](docs/architecture.md) for implementation boundaries,
-and [platform direction](../../docs/platform-direction.md) for the platform goals.
+The [compatibility inventory](docs/compatibility.md) records verified behavior and
+planned features. See [known gaps](docs/compatibility-gaps.md) for limitations and
+workarounds, and the [testing guide](docs/testing.md) for CLI and terminal evidence.
+[Architecture](docs/architecture.md) describes implementation boundaries; the
+[durability design](docs/durability.md) covers recovery limits and planned Boxie
+integration. [Platform direction](../../docs/platform-direction.md) sets the goals.
 Untested features are not yet a support promise.
-The [durability design](docs/durability.md) describes recovery limits and planned
-integration with Boxie.
 
 
 [All projects](../../README.md)

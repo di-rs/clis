@@ -25,5 +25,8 @@ tokio = { version = "1.54.1", features = ["rt-multi-thread", "sync"] }
 [dev-dependencies]
 assert_fs.workspace = true
 cli-testing.workspace = true
+portable-pty = "0.9"
 predicates.workspace = true
+sysinfo = { version = "0.37", default-features = false, features = ["system"] }
+vt100 = "0.16"
 
