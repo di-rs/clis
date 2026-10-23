@@ -26,6 +26,13 @@ impl Cursor {
         self.reset_max_x();
     }
 
+    pub fn set_position(&mut self, text: &Buffer, position: TextPosition) {
+        self.position = position;
+        self.desired_grapheme = position.grapheme;
+        self.snap_to_valid_line(text);
+        self.snap_to_valid_graheme(text);
+    }
+
     pub fn move_caret(&mut self, text: &Buffer, direction: Direction) {
         match direction {
             Direction::Up(step) => self.move_up(text, step),
@@ -71,7 +78,7 @@ impl Cursor {
         if self.position.grapheme < width {
             self.position.grapheme = self.position.grapheme.saturating_add(step);
             self.reset_max_x();
-        } else if self.position.line < text.height() {
+        } else if self.position.line.saturating_add(1) < text.height() {
             self.move_down(text, 1);
             self.move_line_start(text);
         }
@@ -99,7 +106,7 @@ impl Cursor {
     }
 
     fn snap_to_valid_line(&mut self, text: &Buffer) {
-        self.position.line = min(self.position.line, text.height());
+        self.position.line = min(self.position.line, text.height().saturating_sub(1));
     }
 
     fn current_line_width(&self, text: &Buffer) -> usize {

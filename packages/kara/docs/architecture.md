@@ -19,6 +19,9 @@ offsets, so editing does not rebuild the entire document.
 Command, status, and message bars provide separate parts of the screen.
 The terminal adapter contains terminal I/O. Editor teardown restores the terminal.
 
+Persistence streams UTF-8 into and out of the rope without normalizing line
+endings or constructing a second whole-document string. Ropey's LF/CRLF line
+model includes an editable empty document and an empty line after a final newline.
 Persistence functions accept text and a path explicitly; there is no nested
 file-buffer wrapper or implicit dereferencing between storage layers.
 File loading and saving operate on local files. Command parsing does not open files.

@@ -66,8 +66,11 @@ Read-only destinations and existing non-regular files (including FIFOs, sockets,
 and devices) are rejected. On Unix, the parent directory is synced
 after replacement.
 Replacement breaks hard-link identity and does not preserve all extended metadata.
-New files are private to their owner. Saving adds line terminators rather than
-preserving the original line endings.
+New files are private to their owner. Saving preserves UTF-8 bytes, existing LF
+and CRLF endings (including mixed endings), and whether the file ends in a newline.
+Enter inserts the first line-ending convention found in the file, or LF if none
+exists. A trailing newline exposes an empty final line; `G` moves to that line.
+Files containing invalid UTF-8 are rejected without changing their contents.
 
 ## Develop Kara
 

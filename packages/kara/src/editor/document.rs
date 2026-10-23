@@ -63,7 +63,13 @@ impl Document {
     }
     pub fn insert_newline(&mut self) {
         self.text.insert_newline(self.cursor.position);
-        self.move_caret(Direction::Right(1));
+        self.cursor.set_position(
+            &self.text,
+            TextPosition {
+                line: self.cursor.position.line.saturating_add(1),
+                grapheme: 0,
+            },
+        );
         self.mark_modified();
     }
     pub fn delete_backward(&mut self) {
@@ -91,7 +97,7 @@ impl Document {
                 .map_or(0, |line| line.width_until(self.cursor.position.grapheme)),
         }
     }
-    pub const fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.text.is_empty()
     }
     pub fn get_line(&self, index: usize) -> Option<LineLayout> {
@@ -108,7 +114,7 @@ impl Document {
     pub const fn is_modified(&self) -> bool {
         self.modified_at.is_some()
     }
-    pub const fn height(&self) -> usize {
+    pub fn height(&self) -> usize {
         self.text.height()
     }
 }

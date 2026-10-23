@@ -1,7 +1,7 @@
 use super::buffer::Buffer;
 use std::{
     fs::File,
-    io::{self, Write},
+    io::{self, BufReader},
     path::Path,
 };
 mod security;
@@ -11,7 +11,7 @@ pub enum SaveOutcome {
     DurabilityWarning(io::Error),
 }
 pub fn open(path: &Path) -> io::Result<Buffer> {
-    Ok(std::fs::read_to_string(path)?.into())
+    Buffer::read(BufReader::new(File::open(path)?))
 }
 pub fn save(buffer: &Buffer, path: &Path) -> io::Result<SaveOutcome> {
     save_with_sync(buffer, path, File::sync_all)
@@ -74,11 +74,7 @@ pub(super) fn save_with_sync(
     security::make_private_directory(staging.path())?;
     let mut file = tempfile::NamedTempFile::new_in(staging.path())?;
     security::make_private(file.path(), file.as_file())?;
-    for index in 0..buffer.height() {
-        if let Some(line) = buffer.get_line(index) {
-            writeln!(file, "{line}")?;
-        }
-    }
+    buffer.write_to(&mut file)?;
     if let Some(security) = security {
         security.apply(file.path(), file.as_file())?;
     }

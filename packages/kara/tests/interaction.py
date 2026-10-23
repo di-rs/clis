@@ -25,7 +25,7 @@ def main() -> None:
         (b"ju", b"Xab\ncd\n"),
         (b"kh", b"Xab\ncd\n"),
         (b"e", b"abX\ncd\n"),
-        (b"Ge", b"ab\ncdX\n"),
+        (b"Ge", b"ab\ncd\nX"),
         (b"jg", b"Xab\ncd\n"),
         (b"\x1b[B\x1b[C", b"ab\ncXd\n"),
     ):
