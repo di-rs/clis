@@ -4,7 +4,7 @@ use ratatui::{
     Frame,
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Paragraph, Widget},
 };
@@ -24,6 +24,7 @@ pub(super) fn render(frame: &mut Frame<'_>, state: &mut EditorState) {
         return;
     }
     state.search.refresh(&state.buffer);
+    state.buffer.refresh_highlights();
     let caret = state.buffer.caret_location();
     state.view.scroll_into_view(caret);
     let document_area = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(2));
@@ -114,25 +115,14 @@ impl Widget for DocumentWidget<'_> {
                         ))
                         .into_iter()
                         .map(|(grapheme, text)| {
-                            let style = match self.search.match_at(super::TextPosition {
+                            let syntax = line
+                                .byte_range(grapheme)
+                                .and_then(|bytes| self.document.syntax_at(line_index, bytes));
+                            let search = self.search.match_at(super::TextPosition {
                                 line: line_index,
                                 grapheme,
-                            }) {
-                                Some(super::search::MatchKind::Active) => Style::new()
-                                    .fg(Color::Black)
-                                    .bg(Color::Yellow)
-                                    .add_modifier(Modifier::BOLD),
-                                Some(super::search::MatchKind::Other) => {
-                                    Style::new().fg(Color::Black).bg(Color::Cyan)
-                                }
-                                None if line.grapheme_at(grapheme).is_some_and(|source| {
-                                    source.chars().any(|character| character.is_ascii_digit())
-                                }) =>
-                                {
-                                    Style::new().fg(Color::Red)
-                                }
-                                None => Style::default(),
-                            };
+                            });
+                            let style = super::highlight::style(syntax, search);
                             Span::styled(text, style)
                         })
                         .collect::<Vec<_>>();
@@ -170,7 +160,7 @@ mod tests {
     use ratatui::{
         Terminal,
         backend::{Backend, TestBackend},
-        style::Modifier,
+        style::{Color, Modifier},
     };
 
     #[test]
@@ -321,6 +311,36 @@ mod tests {
     #[test]
     #[allow(
         clippy::panic_in_result_fn,
+        reason = "Assertions verify full-grapheme syntax coloring and search precedence."
+    )]
+    fn colors_digits_after_prepend_characters() -> Result<(), Box<dyn std::error::Error>> {
+        let fixture = assert_fs::TempDir::new()?;
+        let path = fixture.path().join("grapheme.rs");
+        std::fs::write(&path, "\u{600}1")?;
+        let mut state = EditorState::default();
+        state.buffer = Document::open(path.to_str().ok_or("non-UTF-8 fixture path")?)?;
+        let mut terminal = Terminal::new(TestBackend::new(12, 6))?;
+        terminal.draw(|frame| render(frame, &mut state))?;
+        assert_eq!(terminal.backend().buffer()[(0, 0)].symbol(), "\u{600}1");
+        assert_eq!(terminal.backend().buffer()[(0, 0)].fg, Color::Red);
+        state.search.update(
+            &state.buffer,
+            "\u{600}1".to_owned(),
+            super::super::TextPosition::default(),
+        );
+        terminal.draw(|frame| render(frame, &mut state))?;
+        assert_eq!(terminal.backend().buffer()[(0, 0)].fg, Color::Black);
+        assert_eq!(terminal.backend().buffer()[(0, 0)].bg, Color::Yellow);
+        state.handle_command(crate::editor::command::EditorCommand::ClearSearch);
+        terminal.draw(|frame| render(frame, &mut state))?;
+        assert_eq!(terminal.backend().buffer()[(0, 0)].fg, Color::Red);
+        assert_eq!(terminal.backend().buffer()[(0, 0)].bg, Color::Reset);
+        Ok(())
+    }
+
+    #[test]
+    #[allow(
+        clippy::panic_in_result_fn,
         reason = "Assertions verify digit colors and search precedence."
     )]
     fn colors_digits_below_search_styles() -> Result<(), Box<dyn std::error::Error>> {
@@ -356,7 +376,8 @@ mod tests {
         let directory = assert_fs::TempDir::new()?;
         let path = directory.path().join("keycap.rs");
         std::fs::write(&path, "1\u{fe0f}\u{20e3}")?;
-        let document = Document::open(path.to_str().ok_or("invalid fixture path")?)?;
+        let mut document = Document::open(path.to_str().ok_or("invalid fixture path")?)?;
+        document.refresh_highlights();
         for x in [0, 1] {
             let mut cells = Buffer::empty(Rect::new(0, 0, 1, 1));
             DocumentWidget {

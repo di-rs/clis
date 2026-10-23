@@ -52,3 +52,9 @@ placement, and tiny/resized terminals without initializing a real terminal.
 Search caches match positions by document revision and composes styling over
 visible grapheme fragments after clipping. Prompt cancellation restores the prior
 search, cursor, and viewport together.
+
+The highlighting subsystem stores byte-range annotations and each line's outgoing
+lexer state. Edits align the cache when lines split or join, then recompute from
+the first affected line until downstream state stabilizes. Rendering translates
+source graphemes to byte offsets and composes search styling over syntax styling.
+The cache owns annotations, not a duplicate document string.

@@ -6,6 +6,7 @@ mod command;
 mod cursor;
 mod document;
 mod document_status;
+mod highlight;
 mod keymap;
 mod line_layout;
 mod message_bar;
