@@ -20,6 +20,7 @@ impl GraphemeWidth {
 #[derive(Debug, Clone)]
 struct TextFragment {
     grapheme: String,
+    byte: usize,
     rendered_width: GraphemeWidth,
     replacement: Option<char>,
 }
@@ -32,12 +33,6 @@ pub struct LineLayout {
 impl LineLayout {
     pub const fn len(&self) -> usize {
         self.fragments.len()
-    }
-
-    pub fn grapheme_at(&self, index: usize) -> Option<&str> {
-        self.fragments
-            .get(index)
-            .map(|fragment| fragment.grapheme.as_str())
     }
 
     pub fn get(&self, range: Range<usize>) -> String {
@@ -124,6 +119,11 @@ impl LineLayout {
             .sum()
     }
 
+    pub fn byte_range(&self, grapheme: usize) -> Option<std::ops::Range<usize>> {
+        let fragment = self.fragments.get(grapheme)?;
+        Some(fragment.byte..fragment.byte.saturating_add(fragment.grapheme.len()))
+    }
+
     pub fn width(&self) -> usize {
         self.width_until(self.len())
     }
@@ -151,8 +151,8 @@ impl LineLayout {
 
     fn str_to_fragments(line_str: &str) -> Vec<TextFragment> {
         line_str
-            .graphemes(true)
-            .map(|grapheme| {
+            .grapheme_indices(true)
+            .map(|(byte, grapheme)| {
                 let (replacement, rendered_width) = Self::replacement_character(grapheme)
                     .map_or_else(
                         || {
@@ -168,6 +168,7 @@ impl LineLayout {
 
                 TextFragment {
                     grapheme: grapheme.to_string(),
+                    byte,
                     rendered_width,
                     replacement,
                 }

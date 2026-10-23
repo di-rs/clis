@@ -15,6 +15,7 @@ pub struct Document {
     filename: Option<PathBuf>,
     modified_at: Option<Instant>,
     revision: u64,
+    highlights: super::highlight::HighlightCache,
 }
 impl Document {
     pub fn open(filename: &str) -> std::io::Result<Self> {
@@ -55,14 +56,18 @@ impl Document {
         self.filename.is_some()
     }
     pub fn insert_char(&mut self, character: char) {
+        let old_height = self.height();
+        let edited_line = self.cursor.position.line;
         let old_len = self.current_line_width();
         self.text.insert_char(character, self.cursor.position);
         if self.current_line_width() > old_len {
             self.move_caret(Direction::Right(1));
         }
-        self.mark_modified();
+        self.mark_modified(edited_line, old_height);
     }
     pub fn insert_newline(&mut self) {
+        let old_height = self.height();
+        let edited_line = self.cursor.position.line;
         self.text.insert_newline(self.cursor.position);
         self.cursor.set_position(
             &self.text,
@@ -71,7 +76,7 @@ impl Document {
                 grapheme: 0,
             },
         );
-        self.mark_modified();
+        self.mark_modified(edited_line, old_height);
     }
     pub fn delete_backward(&mut self) {
         if self.cursor.position == TextPosition::default() {
@@ -81,10 +86,22 @@ impl Document {
         self.delete();
     }
     pub fn delete(&mut self) {
+        let old_height = self.height();
+        let edited_line = self.cursor.position.line;
         if self.text.delete(self.cursor.position) {
-            self.mark_modified();
+            self.mark_modified(edited_line, old_height);
             self.cursor.clamp_after_edit(&self.text);
         }
+    }
+    pub fn refresh_highlights(&mut self) {
+        self.highlights.refresh(&self.text);
+    }
+    pub fn syntax_at(
+        &self,
+        line: usize,
+        bytes: std::ops::Range<usize>,
+    ) -> Option<super::highlight::Kind> {
+        self.highlights.kind_overlapping(line, bytes)
     }
     pub fn cursor(&self) -> super::cursor::Cursor {
         self.cursor.clone()
@@ -124,7 +141,9 @@ impl Document {
     pub const fn revision(&self) -> u64 {
         self.revision
     }
-    fn mark_modified(&mut self) {
+    fn mark_modified(&mut self, edited_line: usize, old_height: usize) {
+        self.highlights
+            .invalidate(edited_line, old_height, self.height());
         self.revision = self.revision.wrapping_add(1);
         self.modified_at = Some(Instant::now());
     }

@@ -117,6 +117,7 @@ impl Search {
     }
 }
 
+#[derive(Clone, Copy)]
 pub enum MatchKind {
     Active,
     Other,
