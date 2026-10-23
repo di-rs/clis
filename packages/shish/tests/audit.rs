@@ -344,3 +344,20 @@ fn task_03_repl_accepts_multiline_commands_and_keeps_state() -> anyhow::Result<(
     terminal.send("exit\n")?;
     terminal.finish(0)
 }
+
+#[test]
+fn task_04_exit_stops_execution_and_preserves_status() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args(["-c", "exit 23; printf wrong"])
+        .assert()
+        .code(23)
+        .stdout("")
+        .stderr("");
+    command(home.path())
+        .args(["-c", "false; exit"])
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr("");
+}
