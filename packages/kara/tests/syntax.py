@@ -45,6 +45,8 @@ def colored_text(output: bytes, color: int | tuple[int, int, int]) -> bytes:
 def main() -> None:
     os.environ.pop("NO_COLOR", None)
     binary = str(Path(sys.argv[1]).resolve())
+    # This test intentionally requests terminal colors, independent of the runner.
+    os.environ.pop("NO_COLOR", None)
     with tempfile.TemporaryDirectory(prefix="kara-syntax-") as temp:
         directory = Path(temp)
         (directory / "original").write_bytes(b"let n = 12;\n")
@@ -91,6 +93,13 @@ def main() -> None:
         assert colored_text(output, (255, 191, 0)) == rb"'b'' ''\n''\x41''\u{1F642}'"
         assert colored_text(output, (0, 128, 128)) == b"'a" * 5
         assert (directory / "lifetimes.rs").read_bytes() == source
+
+        source = b'let n = "/* quoted */";\n/* outer\n12\n*/\n'
+        (directory / "original").write_bytes(source)
+        output = session(binary, directory, [b":w comments.rs\r", b":q\r"])
+        assert b"38;2;255;165;0" in output, repr(output)
+        assert b"38;2;0;128;0" in output, repr(output)
+        assert (directory / "comments.rs").read_bytes() == source
 
 
 if __name__ == "__main__":

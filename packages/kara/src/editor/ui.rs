@@ -428,7 +428,7 @@ mod tests {
         let path = dir.path().join("colors.rs");
         std::fs::write(
             &path,
-            b"let n: i32 = Some(12);\n'a' 'life\n// let 42\n/* outer\n12\n*/ let",
+            b"let n: i32 = Some(12);\n'a' 'life\n// let 42\n/* outer\n12\n*/ let\n\"// string\"",
         )?;
         let mut state = EditorState::default();
         state.open_file(path.to_str().ok_or("invalid path")?);
@@ -459,6 +459,51 @@ mod tests {
             Color::Rgb(0, 128, 0)
         );
         assert_eq!(terminal.backend().buffer()[(3, 5)].fg, Color::Blue);
+        assert_eq!(
+            terminal.backend().buffer()[(2, 6)].fg,
+            Color::Rgb(255, 165, 0)
+        );
+        state.search.update(
+            &state.buffer,
+            "string".to_owned(),
+            super::super::TextPosition::default(),
+        );
+        terminal.draw(|frame| render(frame, &mut state))?;
+        assert_eq!(terminal.backend().buffer()[(4, 6)].bg, Color::Yellow);
+        assert_eq!(terminal.backend().buffer()[(4, 6)].fg, Color::Black);
+        Ok(())
+    }
+    #[test]
+    #[allow(
+        clippy::panic_in_result_fn,
+        reason = "Assertions verify syntax annotations inside a grapheme and search precedence."
+    )]
+    fn strings_color_annotations_inside_graphemes() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = assert_fs::TempDir::new()?;
+        let path = dir.path().join("prepend.rs");
+        std::fs::write(&path, "\u{600}\"x\"")?;
+        let mut state = EditorState::default();
+        state.open_file(path.to_str().ok_or("invalid path")?);
+        let mut terminal = Terminal::new(TestBackend::new(20, 4))?;
+        terminal.draw(|frame| render(frame, &mut state))?;
+        assert_eq!(
+            terminal.backend().buffer()[(0, 0)].fg,
+            Color::Rgb(255, 165, 0)
+        );
+        state.search.update(
+            &state.buffer,
+            "\u{600}\"".to_owned(),
+            super::super::TextPosition::default(),
+        );
+        terminal.draw(|frame| render(frame, &mut state))?;
+        assert_eq!(terminal.backend().buffer()[(0, 0)].fg, Color::Black);
+        assert_eq!(terminal.backend().buffer()[(0, 0)].bg, Color::Yellow);
+        state.search.visible = false;
+        terminal.draw(|frame| render(frame, &mut state))?;
+        assert_eq!(
+            terminal.backend().buffer()[(0, 0)].fg,
+            Color::Rgb(255, 165, 0)
+        );
         Ok(())
     }
 }
