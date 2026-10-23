@@ -1,0 +1,48 @@
+name: Changed-area labels
+on:
+  # reason: this job reads GitHub metadata only and never checks out PR content.
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+jobs:
+  labels:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # Metadata only: do not check out or execute any pull-request content.
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          script: |
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              ...context.repo, pull_number: context.issue.number, per_page: 100
+            });
+            const areas = {
+              'area:rust': p => /\.rs$|(^|\/)Cargo\.(toml|lock)$/.test(p),
+              'area:python': p => /\.pyi?$|(^|\/)pyproject\.toml$|^uv\.lock$/.test(p),
+              'area:frontend': p => p.startsWith('tools/cli-playground/frontend/'),
+              'area:ci': p => p.startsWith('.github/') || p.startsWith('tools/guardrails/'),
+              'area:docs': p => /\.(md|markdown)$/.test(p),
+              'area:infra': p => p.startsWith('infra/') || p.includes('/infra/')
+            };
+            const existing = await github.paginate(github.rest.issues.listLabelsOnIssue, {
+              ...context.repo, issue_number: context.issue.number, per_page: 100
+            });
+            for (const [name, matches] of Object.entries(areas)) {
+              if (files.some(file => matches(file.filename))) {
+                try {
+                  await github.rest.issues.createLabel({...context.repo, name, color: '64748b'});
+                } catch (error) {
+                  if (error.status !== 422) throw error;
+                }
+                await github.rest.issues.addLabels({
+                  ...context.repo, issue_number: context.issue.number, labels: [name]
+                });
+              } else if (existing.some(label => label.name === name)) {
+                await github.rest.issues.removeLabel({
+                  ...context.repo, issue_number: context.issue.number, name
+                });
+              }
+            }
