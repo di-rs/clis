@@ -104,7 +104,11 @@ impl EditorCommand {
                 (Char('A'), _) => Self::ChangeMode(EditorMode::Edit(Placement::End)),
 
                 (Char(':'), _) => Self::ChangeMode(EditorMode::Command),
-                (Char('/'), _) => Self::ChangeMode(EditorMode::Search),
+                (Char('/'), _) => Self::StartSearch(super::search::SearchDirection::Forward),
+                (Char('?'), _) => Self::StartSearch(super::search::SearchDirection::Backward),
+                (Char('n'), _) => Self::RepeatSearch { reverse: false },
+                (Char('N'), _) => Self::RepeatSearch { reverse: true },
+                (KeyCode::Esc, _) => Self::ClearSearch,
 
                 (Char('d'), _) => Self::Edit(Edit::Delete),
                 _ => Self::Unknown,
