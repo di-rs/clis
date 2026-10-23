@@ -95,14 +95,18 @@ impl EditorBuffer {
     }
 
     pub fn delete_backward(&mut self) {
+        if self.text_location == Location::default() {
+            return;
+        }
         self.move_left(1);
         self.delete();
     }
 
     pub fn delete(&mut self) {
-        if self.text_location.x != 0 || self.text_location.y != 0 {
-            self.buffer.delete(self.text_location);
+        if self.buffer.delete(self.text_location) {
             self.mark_modified();
+            self.reset_max_x();
+            self.snap_to_valid_graheme();
         }
     }
 
@@ -116,9 +120,11 @@ impl EditorBuffer {
             Direction::EndOfLine => self.move_line_end(),
             Direction::StartOfBuffer => {
                 self.text_location.y = 0;
+                self.snap_to_valid_graheme();
             }
             Direction::EndOfBuffer => {
                 self.text_location.y = self.buffer.height().saturating_sub(1);
+                self.snap_to_valid_graheme();
             }
         }
     }
@@ -130,8 +136,8 @@ impl EditorBuffer {
 
     fn move_down(&mut self, step: usize) {
         self.text_location.y = self.text_location.y.saturating_add(step);
-        self.snap_to_valid_graheme();
         self.snap_to_valid_line();
+        self.snap_to_valid_graheme();
     }
 
     fn move_left(&mut self, step: usize) {

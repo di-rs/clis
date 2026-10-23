@@ -27,13 +27,13 @@ impl Buffer {
         }
     }
 
-    pub fn delete(&mut self, at: Location) {
+    pub fn delete(&mut self, at: Location) -> bool {
         let Some(line) = self.lines.get_mut(at.y) else {
-            return;
+            return false;
         };
         if at.x < line.len() {
             line.delete(at.x);
-            return;
+            return true;
         }
 
         let next_line_index = at.y.saturating_add(1);
@@ -42,7 +42,9 @@ impl Buffer {
             if let Some(line) = self.lines.get_mut(at.y) {
                 line.append(&next_line);
             }
+            return true;
         }
+        false
     }
 
     pub const fn is_empty(&self) -> bool {
