@@ -1,32 +1,53 @@
 # Shish
 
-Shish is Sanctuary's shell application. This initial import runs external commands;
-the existing parser and executor are being replaced with Brush.
+Shish is Sanctuary's shell for running commands, scripts, and interactive
+sessions. It defaults to sh/POSIX settings; full POSIX conformance is not yet
+guaranteed.
 
-## Run a command
+## Run commands
 
 From the repository root:
 
 ```sh
-cargo run -p shish -- -c '/bin/echo hello'
+cargo run -p shish -- -c 'printf "%s\n" "hello world"'
+cargo run -p shish -- script.sh first-argument
+printf 'echo hello\n' | cargo run -p shish -- -s
 ```
 
-Use `--help` for arguments and `--version` for the package version. With no
-arguments, shish reads commands from stdin and shows prompts only on a terminal.
-EOF exits with the last command's status. This migration baseline is not POSIX
-conformant: shell-state builtins, quoting, and redirection still need correction.
+Use `--help` for arguments and `--version` for the package version.
 
-Use `-n -c 'COMMAND'` or pipe a script into `shish -n` to check syntax without
-execution. This path uses Brush's sh/POSIX parser settings, reports syntax errors
-on stderr, and exits with status 2 on invalid syntax. Successful checks are silent.
-Syntax acceptance does not establish that the migration runtime can execute it.
+| Invocation | Behavior |
+| --- | --- |
+| No command or script | Read stdin; enable terminal editing when stdin and stderr are terminals. |
+| `-i` | Force interactive shell settings; terminal editing requires terminal stdin. |
+| `-c COMMAND [NAME [ARG...]]` | Execute a string; `NAME` becomes `$0`, remaining operands become `$1` onward. |
+| `SCRIPT [ARG...]` | Read a script; its filename becomes `$0`. |
+| `-s [ARG...]` | Read commands from stdin with operands as positional parameters. |
+| `-n` | Check the selected command, script, or stdin without execution or redirection effects. |
+| `--posix` | Explicitly select the default sh/POSIX settings. |
 
-No upstream utility crates are imported. External commands come from the host.
-Shish runs with the invoking user's privileges; it is not a sandbox and does not
-make commands durable. Boxie owns sandbox isolation and lifecycle recovery.
+Noninteractive execution prints no prompt. Interactive sessions use `PS1` when
+provided, otherwise the current directory's basename followed by ` > `. Builtin
+commands include `cd`, `exit`, and `jobs`; external programs use
+ordinary `PATH` lookup. There is no discovery of repository build directories.
 
-See [architecture](docs/architecture.md) for the migration boundary and
-[platform direction](../../docs/platform-direction.md) for the compatibility policy.
+EOF returns the last command's status. `false` returns 1 and does not itself stop
+the shell; `exit` ends execution. Missing commands return 127. Syntax errors return
+2 and write a diagnostic to stderr; successful syntax checks are silent.
+
+Startup deliberately skips profile and rc files, including inherited `ENV` and
+`BASH_ENV`. Source configuration explicitly with the `.` command if needed. This
+is a known difference from strict shell compatibility.
+The initial integration targets Unix platforms; local verification is on macOS,
+with Linux verification delegated to CI.
+
+Shish runs with the invoking user's privileges. It supplies neither sandbox
+isolation nor recovery of interrupted processes. Boxie owns isolation and lifecycle
+recovery; its integration with shish remains a separate design stage.
+
+See [known compatibility gaps](docs/compatibility-gaps.md) for limitations and
+workarounds, [architecture](docs/architecture.md) for implementation boundaries,
+and [platform direction](../../docs/platform-direction.md) for the platform goals.
+Untested features are not yet a support promise.
 
 [All projects](../../README.md)
-

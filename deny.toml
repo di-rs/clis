@@ -3,9 +3,25 @@
 all-features = true
 
 [licenses]
-# Each accepted dependency offers one of these licenses; no private-crate bypass.
+# Default licenses; reviewed Brush dependencies have exact-version exceptions.
 allow = ["MIT", "Apache-2.0", "Unicode-3.0"]
 confidence-threshold = 0.93
+
+# Required by published Brush 0.5.0; retain notices in packages/shish/THIRD-PARTY-NOTICES.md.
+[[licenses.exceptions]]
+name = "check_elevation"
+version = "=0.2.7"
+allow = ["BSD-2-Clause"]
+
+[[licenses.exceptions]]
+name = "foldhash"
+version = "=0.2.0"
+allow = ["Zlib"]
+
+[[licenses.exceptions]]
+name = "terminfo"
+version = "=0.9.0"
+allow = ["WTFPL"]
 
 [bans]
 # Duplicates are reviewed; several are legitimate transitive requirements.
