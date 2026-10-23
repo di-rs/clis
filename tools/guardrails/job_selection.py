@@ -27,8 +27,18 @@ def selection(paths: list[str], present: list[str]) -> dict[str, bool]:
         ),
     )
 
-    def selected(patterns: tuple[str, ...], suffixes: set[str]) -> bool:
-        return (config or matches(paths, patterns)) and any(
+    python_consumers = matches(
+        [path for path in paths if Path(path).suffix not in {".md", ".markdown"}],
+        (
+            "infra/*",
+            "packages/boxie/infra/*",
+            "tools/cli-playground/infra/*",
+            ".github/workflows/*",
+        ),
+    )
+
+    def selected(patterns: tuple[str, ...], suffixes: set[str], *, consumers: bool = False) -> bool:
+        return (config or consumers or matches(paths, patterns)) and any(
             Path(path).suffix in suffixes for path in maintained
         )
 
@@ -62,6 +72,7 @@ def selection(paths: list[str], present: list[str]) -> dict[str, bool]:
                 "tools/cli-playground/tests/*",
             ),
             {".py", ".pyi"},
+            consumers=python_consumers,
         ),
         "frontend": selected(
             (

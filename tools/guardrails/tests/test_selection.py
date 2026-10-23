@@ -50,3 +50,21 @@ class SelectionTests(unittest.TestCase):
     def test_modified_non_markdown_target_does_not_select_link_checks(self) -> None:
         path = "tools/cli-playground/src/cli_playground/routes.py"
         self.assertFalse(selection([path], ["README.md", path])["markdown"])
+
+    def test_infrastructure_inputs_select_python_consumers(self) -> None:
+        for path in [
+            "packages/boxie/infra/compose.operations.yml",
+            "packages/boxie/infra/observability/versions.json",
+            "tools/cli-playground/infra/scripts/deploy.sh",
+            "tools/cli-playground/infra/proxy/routes.yml",
+            "infra/environments/single-host/release.sh",
+            "infra/host/bootstrap.sh",
+            "infra/host/storage-guard.sh",
+            ".github/workflows/boxie-release.yml",
+        ]:
+            with self.subTest(path=path):
+                self.assertTrue(selection([path], [path, "app.py"])["python"])
+
+    def test_infrastructure_docs_only_skip_python(self) -> None:
+        path = "packages/boxie/infra/README.md"
+        self.assertFalse(selection([path], [path, "app.py"])["python"])
