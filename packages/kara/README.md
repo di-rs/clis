@@ -123,8 +123,8 @@ Accepted highlights persist, and edits refresh matches against current text.
 
 ## Syntax highlighting
 
-ASCII digits are colored red. Search backgrounds take priority over syntax colors.
+Rust files color ASCII digits red; plain-text files have no syntax colors. Search backgrounds take priority over syntax colors.
 The status bar reports `Rust` for `.rs` files (case-insensitive) and `Text` otherwise.
 A successful Save As updates the type, including a committed save with a durability
-warning. A failed save retains the previous type. Conditional colors and token
-recognition follow in the next assignments.
+warning. A failed save retains the previous type. Saving under a new extension immediately updates colors. Token recognition follows
+in the next assignments.
