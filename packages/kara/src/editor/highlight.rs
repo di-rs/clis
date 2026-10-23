@@ -132,8 +132,23 @@ mod tests {
     )]
     fn finds_annotations_inside_complete_graphemes() -> Result<(), Box<dyn std::error::Error>> {
         let text = Buffer::read("\u{600}1x2".as_bytes())?;
-        let mut cache = HighlightCache::default();
-        cache.refresh(&text);
+        // Annotation composition is independent of which tokens the lexer accepts.
+        let cache = HighlightCache {
+            lines: vec![CachedLine {
+                annotations: vec![
+                    Annotation {
+                        bytes: 2..3,
+                        kind: Kind::Number,
+                    },
+                    Annotation {
+                        bytes: 4..5,
+                        kind: Kind::Number,
+                    },
+                ],
+                ..CachedLine::default()
+            }],
+            ..HighlightCache::default()
+        };
         assert_eq!(cache.kind_overlapping(0, 0..3), Some(Kind::Number));
         assert_eq!(cache.kind_overlapping(0, 0..2), None);
         assert_eq!(cache.kind_overlapping(0, 3..4), None);

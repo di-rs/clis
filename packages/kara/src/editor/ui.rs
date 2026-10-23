@@ -318,7 +318,7 @@ mod tests {
         clippy::panic_in_result_fn,
         reason = "Assertions verify full-grapheme syntax coloring and search precedence."
     )]
-    fn colors_digits_after_prepend_characters() -> Result<(), Box<dyn std::error::Error>> {
+    fn non_numeric_graphemes_keep_search_styles() -> Result<(), Box<dyn std::error::Error>> {
         let fixture = assert_fs::TempDir::new()?;
         let path = fixture.path().join("grapheme.rs");
         std::fs::write(&path, "\u{600}1")?;
@@ -327,7 +327,7 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(12, 6))?;
         terminal.draw(|frame| render(frame, &mut state))?;
         assert_eq!(terminal.backend().buffer()[(0, 0)].symbol(), "\u{600}1");
-        assert_eq!(terminal.backend().buffer()[(0, 0)].fg, Color::Red);
+        assert_eq!(terminal.backend().buffer()[(0, 0)].fg, Color::Reset);
         state.search.update(
             &state.buffer,
             "\u{600}1".to_owned(),
@@ -338,7 +338,7 @@ mod tests {
         assert_eq!(terminal.backend().buffer()[(0, 0)].bg, Color::Yellow);
         state.handle_command(crate::editor::command::EditorCommand::ClearSearch);
         terminal.draw(|frame| render(frame, &mut state))?;
-        assert_eq!(terminal.backend().buffer()[(0, 0)].fg, Color::Red);
+        assert_eq!(terminal.backend().buffer()[(0, 0)].fg, Color::Reset);
         assert_eq!(terminal.backend().buffer()[(0, 0)].bg, Color::Reset);
         Ok(())
     }
@@ -350,7 +350,7 @@ mod tests {
     )]
     fn colors_digits_below_search_styles() -> Result<(), Box<dyn std::error::Error>> {
         let mut state = EditorState::default();
-        for character in "a1界2".chars() {
+        for character in "a 1 界 2".chars() {
             state.buffer.insert_char(character);
         }
         state
@@ -359,7 +359,7 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(12, 6))?;
         terminal.draw(|frame| render(frame, &mut state))?;
         assert_eq!(terminal.backend().buffer()[(0, 0)].fg, Color::Reset);
-        assert_eq!(terminal.backend().buffer()[(1, 0)].fg, Color::Reset);
+        assert_eq!(terminal.backend().buffer()[(2, 0)].fg, Color::Reset);
         let dir = assert_fs::TempDir::new()?;
         state.buffer.save_as(
             dir.path()
@@ -368,16 +368,16 @@ mod tests {
                 .ok_or("invalid path")?,
         )?;
         terminal.draw(|frame| render(frame, &mut state))?;
-        assert_eq!(terminal.backend().buffer()[(1, 0)].fg, Color::Red);
-        assert_eq!(terminal.backend().buffer()[(4, 0)].fg, Color::Red);
+        assert_eq!(terminal.backend().buffer()[(2, 0)].fg, Color::Red);
+        assert_eq!(terminal.backend().buffer()[(7, 0)].fg, Color::Red);
         state.search.update(
             &state.buffer,
             "1".to_owned(),
             super::super::TextPosition::default(),
         );
         terminal.draw(|frame| render(frame, &mut state))?;
-        assert_eq!(terminal.backend().buffer()[(1, 0)].fg, Color::Black);
-        assert_eq!(terminal.backend().buffer()[(1, 0)].bg, Color::Yellow);
+        assert_eq!(terminal.backend().buffer()[(2, 0)].fg, Color::Black);
+        assert_eq!(terminal.backend().buffer()[(2, 0)].bg, Color::Yellow);
         state.buffer.save_as(
             dir.path()
                 .join("colors.txt")
@@ -385,11 +385,11 @@ mod tests {
                 .ok_or("invalid path")?,
         )?;
         terminal.draw(|frame| render(frame, &mut state))?;
-        assert_eq!(terminal.backend().buffer()[(1, 0)].bg, Color::Yellow);
-        assert_eq!(terminal.backend().buffer()[(4, 0)].fg, Color::Reset);
+        assert_eq!(terminal.backend().buffer()[(2, 0)].bg, Color::Yellow);
+        assert_eq!(terminal.backend().buffer()[(7, 0)].fg, Color::Reset);
         state.search.visible = false;
         terminal.draw(|frame| render(frame, &mut state))?;
-        assert_eq!(terminal.backend().buffer()[(1, 0)].fg, Color::Reset);
+        assert_eq!(terminal.backend().buffer()[(2, 0)].fg, Color::Reset);
         Ok(())
     }
 
@@ -398,7 +398,7 @@ mod tests {
         clippy::panic_in_result_fn,
         reason = "Assertions verify source styling survives horizontal clipping."
     )]
-    fn clipped_keycap_digits_keep_source_color() -> Result<(), Box<dyn std::error::Error>> {
+    fn clipped_non_numeric_graphemes_keep_source_color() -> Result<(), Box<dyn std::error::Error>> {
         let directory = assert_fs::TempDir::new()?;
         let path = directory.path().join("keycap.rs");
         std::fs::write(&path, "1\u{fe0f}\u{20e3}")?;
@@ -413,7 +413,7 @@ mod tests {
             }
             .render(cells.area, &mut cells);
             assert_eq!(cells[(0, 0)].symbol(), "⋯");
-            assert_eq!(cells[(0, 0)].fg, Color::Red);
+            assert_eq!(cells[(0, 0)].fg, Color::Reset);
         }
         Ok(())
     }
