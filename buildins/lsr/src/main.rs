@@ -5,6 +5,9 @@ use crate::cli::{Cli, CliError};
 use lsr::{find_files, get_formatted_output};
 
 fn main() -> std::process::ExitCode {
+    if let Some(status) = cli_schema::emit::<Cli>() {
+        return status;
+    }
     cli_log::run("lsr", |cli| match run(&cli) {
         Ok(failed) => i32::from(failed),
         Err(e) => {

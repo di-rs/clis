@@ -9,10 +9,13 @@ name = "sanctuary_true"
 
 [dependencies]
 cli-log.workspace = true
+cli-schema = { version = "0.1.0", path = "../../utils/cli-schema" }
 
 [dev-dependencies]
+assert_fs.workspace = true
 cli-testing.workspace = true
 predicates = { workspace = true }
+serde_json.workspace = true
 
 [lints]
 workspace = true

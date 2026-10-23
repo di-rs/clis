@@ -26,7 +26,18 @@ service availability. User files and terminal contents may contain sensitive dat
   admission. Preserve path/type validation and expanded-byte limits in
   [Boxie extraction](../packages/boxie/src/boxie/persistence/artifact_files.py)
   and [playground validation](../tools/cli-playground/src/cli_playground/artifacts.py).
-  Valid executable headers do not establish trust.
+  Valid executable headers do not establish trust. The optional command catalog
+  is untrusted data with bounded bytes, tree size, strings, names and collections.
+  Bind it to the expected head revision and exact executable digests. Persist its
+  canonical digest in both upload intents and immutable revisions, including
+  conflict checks on retries and recovery. Strip the sidecar before sending the
+  executable bundle to Boxie. [Publication contracts](../tools/cli-playground/docs/previews.md#build-and-comparison-contract)
+  define the limits and unavailable-baseline behavior.
+- **Catalog to browser and terminal:** Render metadata as text, never HTML.
+  Shell-quote inserted tokens and reject control characters; never append Enter
+  or placeholder operands. Changing the explorer must not replace a session or
+  silently change the revision described. Digests establish artifact identity,
+  not the truth of descriptions or the completeness of behavior-change badges.
 - **Sandbox to host:** Only the supervisor receives Docker access. Preserve
   [runsc isolation](../packages/boxie/src/boxie/sandbox/docker.py), the non-root
   user, disabled network, read-only root and artifacts, dropped capabilities,
@@ -35,7 +46,10 @@ service availability. User files and terminal contents may contain sensitive dat
   The [privileged controller](../.github/workflows/cli-playground-preview.yml)
   uses default-branch code. Never execute PR-controlled scripts or binaries with
   publication or deployment credentials. Apply the same boundary to benchmark
-  reporting and release automation.
+  reporting and release automation. CLI reflection runs only in the unprivileged
+  build, with elapsed-time/output limits and without ambient credentials; the
+  publisher and gateway validate metadata without executing uploaded code.
+  Those capture bounds do not isolate a malicious process from its build runner.
 
 ## Review priorities
 

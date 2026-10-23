@@ -9,6 +9,9 @@ use crate::cli::{Cli, CliError};
 use tailr::{get_total_lines, print_bytes, print_lines, print_stream_bytes, print_stream_lines};
 
 fn main() -> std::process::ExitCode {
+    if let Some(status) = cli_schema::emit::<Cli>() {
+        return status;
+    }
     cli_log::run("tailr", |cli| match run(&cli) {
         Ok(failed) => i32::from(failed),
         Err(CliError::FileOpen(_, e)) => {

@@ -7,6 +7,9 @@ use cli::Cli;
 use pwdr::{logical_path, physical_path};
 
 fn main() -> Result<std::process::ExitCode> {
+    if let Some(status) = cli_schema::emit::<Cli>() {
+        return Ok(status);
+    }
     color_eyre::install()?;
     cli_log::try_run("pwdr", |cli| run(&cli))
 }

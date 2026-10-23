@@ -11,6 +11,9 @@ struct Cli {
 }
 
 fn main() -> ExitCode {
+    if let Some(status) = cli_schema::emit::<Cli>() {
+        return status;
+    }
     let session = cli_log::init("kara");
     session.set_stderr_level(log::LevelFilter::Off);
     let cli = match session.parse::<Cli>() {

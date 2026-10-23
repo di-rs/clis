@@ -8,6 +8,8 @@ import struct
 import zipfile
 from pathlib import Path
 
+from cli_playground.catalog import CATALOG_NAME, MAX_CATALOG, Catalog, parse_catalog
+
 MAX_BINARY = 64 * 1024 * 1024
 MAX_ARCHIVE = 512 * 1024 * 1024
 MAX_CLIS = 1024
@@ -27,21 +29,27 @@ def validate_elf_header(header: bytes) -> None:
 
 def archive_members(archive: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
     members = archive.infolist()
-    if not 1 <= len(members) <= MAX_CLIS or sum(m.file_size for m in members) > MAX_ARCHIVE:
+    if not 1 <= len(members) <= MAX_CLIS + 1 or sum(m.file_size for m in members) > MAX_ARCHIVE:
         raise ValueError("binary bundle exceeds limits")
     names: set[str] = set()
     for member in members:
         if (
-            not re.fullmatch(CLI_PATTERN, member.filename)
+            (member.filename != CATALOG_NAME and not re.fullmatch(CLI_PATTERN, member.filename))
             or member.filename in names
             or member.is_dir()
             or member.flag_bits & 1
             or member.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
             or (member.external_attr >> 16) & 0o170000 not in (0, 0o100000)
-            or not 64 <= member.file_size <= MAX_BINARY
+            or not (
+                1 <= member.file_size <= MAX_CATALOG
+                if member.filename == CATALOG_NAME
+                else 64 <= member.file_size <= MAX_BINARY
+            )
         ):
             raise ValueError("unsafe binary artifact")
         names.add(member.filename)
+    if not 1 <= len(names - {CATALOG_NAME}) <= MAX_CLIS:
+        raise ValueError("invalid CLI count")
     return members
 
 
@@ -51,6 +59,8 @@ def binary_archive(data: bytes) -> dict[str, bytes]:
     binaries = {}
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         for member in archive_members(archive):
+            if member.filename == CATALOG_NAME:
+                continue
             binary = archive.read(member)
             validate_elf_header(binary[:64])
             binaries[member.filename] = binary
@@ -60,7 +70,7 @@ def binary_archive(data: bytes) -> dict[str, bytes]:
 def stage_archive(source: Path, destination: Path, max_binary_bytes: int) -> list[str]:
     """Validate and stage one member at a time so large batches stay off the heap."""
     with zipfile.ZipFile(source) as archive:
-        members = archive_members(archive)
+        members = [member for member in archive_members(archive) if member.filename != CATALOG_NAME]
         if any(member.file_size > max_binary_bytes for member in members):
             raise OverflowError("binary exceeds the upload limit")
         destination.mkdir()
@@ -88,3 +98,13 @@ def canonical_archive(staged: Path, clis: list[str], destination: Path) -> str:
         raise OverflowError("canonical artifact exceeds upload limit")
     with destination.open("rb") as source:
         return hashlib.file_digest(source, "sha256").hexdigest()
+
+
+def archive_catalog(source: Path | bytes, sha: str, binaries: dict[str, str]) -> Catalog | None:
+    with zipfile.ZipFile(io.BytesIO(source) if isinstance(source, bytes) else source) as archive:
+        if CATALOG_NAME not in archive.namelist():
+            return None
+        member = archive.getinfo(CATALOG_NAME)
+        if member.file_size > MAX_CATALOG:
+            raise ValueError("catalog exceeds size limit")
+        return parse_catalog(archive.read(member), sha, binaries)

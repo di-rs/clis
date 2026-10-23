@@ -50,6 +50,8 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # Enable only after the catalog migration and compatible publisher/backend land.
+          CLI_PLAYGROUND_CATALOG: ${{ vars.CLI_PLAYGROUND_CATALOG }}
         run: |
           uv run --no-dev python tools/cli-playground/preview_ci.py build \
             --base "$BASE_SHA" --head "$HEAD_SHA" --output "$RUNNER_TEMP/cli-playground-artifact"

@@ -2,6 +2,7 @@
 """Build PR binaries without secrets; publish bounded artifacts from trusted code."""
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -29,7 +30,13 @@ from githubkit.exception import GitHubException
 # Keep direct script invocation usable from any working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
-from cli_playground.artifacts import CLI_PATTERN, MAX_ARCHIVE, MAX_CLIS, binary_archive  # noqa: E402
+from cli_playground.artifacts import (  # noqa: E402
+    CLI_PATTERN,
+    MAX_ARCHIVE,
+    MAX_CLIS,
+    archive_catalog,
+    binary_archive,
+)
 
 MAX_JSON = 2 * 1024 * 1024
 MAX_PAGES = 20
@@ -202,6 +209,8 @@ def select(
         "tools/cli-playground/Build.Dockerfile",
         "tools/cli-playground/Build.Dockerfile.dockerignore",
         "tools/cli-playground/preview_ci.py",
+        "tools/cli-playground/src/cli_playground/catalog_build.py",
+        "tools/cli-playground/src/cli_playground/catalog.py",
         WORKFLOW,
     }
     if any(
@@ -608,7 +617,13 @@ def publish(
                 bundle = github_request(
                     api, f"{base}/actions/artifacts/{artifact_id}/zip", limit=MAX_ARCHIVE
                 )
-                count = len(binary_archive(bundle))
+                binaries = binary_archive(bundle)
+                archive_catalog(
+                    bundle,
+                    sha,
+                    {name: hashlib.sha256(binary).hexdigest() for name, binary in binaries.items()},
+                )
+                count = len(binaries)
                 response = upload(
                     api,
                     repo,
@@ -701,6 +716,9 @@ def main() -> None:
     build.add_argument("--base", required=True)
     build.add_argument("--head", required=True)
     build.add_argument("--output", required=True, type=Path)
+    build.add_argument(
+        "--catalog", action="store_true", default=os.environ.get("CLI_PLAYGROUND_CATALOG") == "1"
+    )
     publication = commands.add_parser("publish")
     publication.add_argument("--repo", required=True)
     publication.add_argument("--run-id", required=True, type=int)
@@ -733,6 +751,10 @@ def main() -> None:
                 args.output.mkdir(parents=True, exist_ok=False)
                 for name in names:
                     shutil.copy2(ROOT / "target/release" / name, args.output / name)
+                if args.catalog:
+                    from cli_playground.catalog_build import build_catalog
+
+                    build_catalog(ROOT, args.base, args.head, names, args.output)
         else:
             api = github_client()
             base_url = os.environ.get("CLI_PLAYGROUND_URL", "")

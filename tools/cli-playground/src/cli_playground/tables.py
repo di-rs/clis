@@ -56,6 +56,8 @@ class Revision(Table, table=True):
     artifact_id: UUID = Field(unique=True)
     sha: str
     sha256: str
+    catalog: dict[str, Any] | None = Field(default=None, sa_column=Column(JSONB, nullable=True))
+    catalog_sha256: str | None = None
     clis: list[str] = Field(sa_column=Column(JSONB, nullable=False))
     expires_at: float
 
@@ -102,6 +104,8 @@ class Upload(Table, table=True):
     revision: str
     sha: str
     sha256: str
+    catalog: dict[str, Any] | None = Field(default=None, sa_column=Column(JSONB, nullable=True))
+    catalog_sha256: str | None = None
     clis: list[str] = Field(sa_column=Column(JSONB, nullable=False))
     expires_at: float
     build_sha: str | None = None

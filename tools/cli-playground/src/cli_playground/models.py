@@ -14,6 +14,7 @@ from pydantic import (
 )
 
 from cli_playground.artifacts import CLI_PATTERN, MAX_CLIS
+from cli_playground.catalog import Catalog
 
 SHA_PATTERN = r"[0-9a-f]{40}"
 ID_PATTERN = r"[0-9a-f]{32}"
@@ -54,6 +55,9 @@ class ArtifactIdentity(BaseModel):
 
 
 class ArtifactMetadata(ArtifactIdentity):
+    catalog: Catalog | None = None
+    catalog_sha256: Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")] | None = None
+
     clis: Annotated[list[CliName], Field(min_length=1, max_length=MAX_CLIS)]
     expires_at: FiniteFloat
     revision: ArtifactRevision

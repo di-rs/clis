@@ -11,11 +11,14 @@ clap = { workspace = true }
 anyhow.workspace = true
 serde_json.workspace = true
 serde = { version = "1.0.229", features = ["derive"] }
+cli-schema = { version = "0.1.0", path = "../../utils/cli-schema" }
 
 [dev-dependencies]
+assert_fs.workspace = true
 cli-testing.workspace = true
 color-eyre.workspace = true
 predicates = "3.1.4"
+serde_json.workspace = true
 
 [lints]
 workspace = true

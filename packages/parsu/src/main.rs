@@ -10,6 +10,9 @@ use cli::Cli;
 use parsu::parse_xml;
 
 fn main() -> ExitCode {
+    if let Some(status) = cli_schema::emit::<Cli>() {
+        return status;
+    }
     let json = std::env::args_os()
         .skip(1)
         .take_while(|arg| arg != "--")

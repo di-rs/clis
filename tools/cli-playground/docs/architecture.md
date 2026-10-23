@@ -38,6 +38,24 @@ Browser reconnect behavior and terminal limits are documented in the
 trusted publication and credentials; [deployment](deployment.md) covers service
 composition, and [observability](observability.md) covers request tracing.
 
+## Command explorer and terminal ownership
+
+The explorer consumes the revision catalog described in [preview publication](previews.md#build-and-comparison-contract).
+Clap reflection supplies the command tree during the unprivileged build. Trusted
+publication validates data and digests without invoking the executable; the gateway
+persists that reference separately from Boxie's executable artifact.
+
+`App.svelte` owns one terminal controller and the active revision. CLI selection,
+search, filtering, and the mobile drawer update the explorer without replacing
+the terminal DOM. Build polling records the latest available revision but cannot
+switch the active workspace. Only an explicit fresh-session action remounts the
+terminal and loads another catalog. Reconnection uses the existing session.
+
+The explorer renders metadata as text. Insertion shell-quotes individual command
+and flag tokens, rejects terminal control characters, and passes the text through
+the terminal's existing paste path. It never sends Enter or operand placeholders.
+Command details and comparison badges have no effect on terminal ownership.
+
 ## Domain, application and adapters
 
 The synchronous [domain](../src/cli_playground/domain.py) decides whether a build

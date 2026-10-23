@@ -23,6 +23,7 @@ log.workspace = true
 thousands = "0.2.0"
 rand = "0.10.3"
 serde_json.workspace = true
+cli-schema = { version = "0.1.0", path = "../../utils/cli-schema" }
 
 [dev-dependencies]
 cli-testing.workspace = true

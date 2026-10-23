@@ -7,6 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 TESTS = (
     "test_postgres.py",
+    "test_catalog.py",
     "test_api.py",
     "test_sessions.py",
     "test_service.py",

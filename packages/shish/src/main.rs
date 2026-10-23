@@ -67,6 +67,9 @@ impl Args {
 }
 
 fn main() -> anyhow::Result<ExitCode> {
+    if let Some(status) = cli_schema::emit::<Args>() {
+        return Ok(status);
+    }
     let args = Args::parse();
     if args.no_execute {
         return match syntax::parse(&args.syntax_input()?, args.bash) {

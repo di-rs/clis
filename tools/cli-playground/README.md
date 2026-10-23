@@ -6,10 +6,26 @@ workspace. All included CLIs share `PATH`, so you can try pipelines.
 
 ## Use a preview
 
-Open the PR's playground link and choose a command to see a starter example.
-Changing the selection keeps your terminal and files. A new build offers
-**Switch to latest build** without replacing a running session automatically.
-**Reset** ends the session.
+Open the PR's playground link and choose a CLI in the left command explorer.
+Search commands and flags, or choose **Changes** to inspect additions, edits, and
+removals against the PR's recorded merge base. Expand **Details** for defaults,
+choices, full help, and before/after values. Removed entries cannot be inserted.
+
+Click a command to insert its executable and subcommand path at the terminal
+cursor. Click a flag to insert its spelling. Neither action adds values or presses
+Enter; finish the command yourself. Sample files and shell essentials are in
+collapsed sections below the explorer. On narrow screens, **Explore** opens a drawer.
+
+Selection, search, and drawer changes preserve your terminal, partially typed
+input, and files. The reference stays pinned to the terminal's build. A new build
+offers **Switch to latest build**; switching builds or choosing **Reset session**
+ends the old session and starts a fresh workspace.
+
+Older previews show **Command reference unavailable**. An existing CLI whose
+merge base cannot export metadata shows **Comparison unavailable**, with no change
+badges. Newly introduced CLIs are marked added. The explorer describes the
+published CLIs' declared interfaces; it cannot detect runtime behavior or custom
+validation changes that the parser metadata does not express.
 
 A connection drop can resume the same terminal on the current page. Reloading the
 page starts fresh. Sessions expire after 60 minutes, ten idle minutes, or two

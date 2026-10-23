@@ -8,6 +8,9 @@ mod cli;
 use crate::cli::{Cli, CliError, get_reader, get_writer};
 
 fn main() -> std::process::ExitCode {
+    if let Some(status) = cli_schema::emit::<Cli>() {
+        return status;
+    }
     setup_panic!();
     let logging = cli_log::init("grepr");
     let cli = match logging.parse::<Cli>() {

@@ -1,0 +1,16 @@
+[package]
+name = "cli-schema"
+version = "0.1.0"
+description = "Versioned command metadata for Sanctuary CLI previews"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+clap.workspace = true
+serde_json.workspace = true

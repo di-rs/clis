@@ -227,6 +227,7 @@ dependencies = [
  "assert_fs",
  "clap",
  "cli-log",
+ "cli-schema",
  "cli-testing",
  "csv",
  "log",
@@ -451,14 +452,17 @@ name = "calr"
 version = "0.1.0"
 dependencies = [
  "ansiterm",
+ "assert_fs",
  "chrono",
  "clap",
  "cli-log",
+ "cli-schema",
  "cli-testing",
  "exitcode",
  "itertools 0.15.0",
  "predicates",
  "pretty_assertions",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 
@@ -469,9 +473,11 @@ dependencies = [
  "assert_fs",
  "clap",
  "cli-log",
+ "cli-schema",
  "cli-testing",
  "exitcode",
  "predicates",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 
@@ -601,6 +607,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cli-schema"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "serde_json",
+]
+
+[[package]]
 name = "cli-testing"
 version = "0.1.0"
 dependencies = [
@@ -679,9 +693,11 @@ dependencies = [
  "assert_fs",
  "clap",
  "cli-log",
+ "cli-schema",
  "cli-testing",
  "exitcode",
  "predicates",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 
@@ -807,14 +823,17 @@ dependencies = [
 name = "cutr"
 version = "0.1.0"
 dependencies = [
+ "assert_fs",
  "clap",
  "cli-log",
+ "cli-schema",
  "cli-testing",
  "csv",
  "exitcode",
  "predicates",
  "pretty_assertions",
  "rand 0.10.3",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 
@@ -951,10 +970,13 @@ checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
 name = "echor"
 version = "0.1.0"
 dependencies = [
+ "assert_fs",
  "clap",
  "cli-log",
+ "cli-schema",
  "cli-testing",
  "predicates",
+ "serde_json",
 ]
 
 [[package]]
@@ -1037,6 +1059,7 @@ version = "0.1.0"
 dependencies = [
  "assert_fs",
  "cli-log",
+ "cli-schema",
  "cli-testing",
  "predicates",
  "serde_json",
@@ -1091,13 +1114,16 @@ checksum = "d45db016d36b838f563236e9193d0ee6ce38f3f68b6c94e914b4929c96bbb890"
 name = "findr"
 version = "0.1.0"
 dependencies = [
+ "assert_fs",
  "clap",
  "cli-log",
+ "cli-schema",
  "cli-testing",
  "exitcode",
  "predicates",
  "pretty_assertions",
  "regex",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "walkdir",
@@ -1340,6 +1366,7 @@ dependencies = [
  "clap",
  "clap-verbosity-flag",
  "cli-log",
+ "cli-schema",
  "cli-testing",
  "exitcode",
  "human-panic",
@@ -1348,6 +1375,7 @@ dependencies = [
  "predicates",
  "pretty_assertions",
  "regex",
+ "serde_json",
  "thiserror 2.0.21",
  "walkdir",
 ]
@@ -1376,9 +1404,11 @@ dependencies = [
  "assert_fs",
  "clap",
  "cli-log",
+ "cli-schema",
  "cli-testing",
  "exitcode",
  "predicates",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 
@@ -1672,6 +1702,7 @@ dependencies = [
  "assert_fs",
  "clap",
  "cli-log",
+ "cli-schema",
  "cli-testing",
  "crossterm",
  "exacl",
@@ -1762,6 +1793,7 @@ dependencies = [
  "chrono",
  "clap",
  "cli-log",
+ "cli-schema",
  "cli-testing",
  "exitcode",
  "predicates",
@@ -1822,6 +1854,7 @@ dependencies = [
  "assert_fs",
  "clap",
  "cli-log",
+ "cli-schema",
  "cli-testing",
  "color-eyre",
  "predicates",
@@ -2021,8 +2054,10 @@ name = "parsu"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_fs",
  "clap",
  "cli-log",
+ "cli-schema",
  "cli-testing",
  "color-eyre",
  "predicates",
@@ -2276,9 +2311,11 @@ dependencies = [
  "assert_fs",
  "clap",
  "cli-log",
+ "cli-schema",
  "cli-testing",
  "color-eyre",
  "predicates",
+ "serde_json",
 ]
 
 [[package]]
@@ -2596,10 +2633,12 @@ dependencies = [
  "brush-interactive",
  "brush-parser",
  "clap",
+ "cli-schema",
  "cli-testing",
  "false",
  "portable-pty",
  "predicates",
+ "serde_json",
  "sysinfo 0.37.2",
  "tokio",
  "true",
@@ -2912,9 +2951,11 @@ dependencies = [
  "assert_fs",
  "clap",
  "cli-log",
+ "cli-schema",
  "cli-testing",
  "exitcode",
  "predicates",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 
@@ -3087,9 +3128,11 @@ dependencies = [
  "chrono",
  "clap",
  "cli-log",
+ "cli-schema",
  "cli-testing",
  "color-eyre",
  "predicates",
+ "serde_json",
 ]
 
 [[package]]
@@ -3155,9 +3198,12 @@ checksum = "0d15f4f5898bcfc5d8a8e45ed30b2f108d710c1a2e5489dbf80e078f707181bc"
 name = "true"
 version = "0.1.0"
 dependencies = [
+ "assert_fs",
  "cli-log",
+ "cli-schema",
  "cli-testing",
  "predicates",
+ "serde_json",
 ]
 
 [[package]]
@@ -3236,10 +3282,12 @@ dependencies = [
  "assert_fs",
  "clap",
  "cli-log",
+ "cli-schema",
  "cli-testing",
  "exitcode",
  "predicates",
  "pretty_assertions",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
 ]
@@ -3509,9 +3557,11 @@ dependencies = [
  "assert_fs",
  "clap",
  "cli-log",
+ "cli-schema",
  "cli-testing",
  "exitcode",
  "predicates",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 
