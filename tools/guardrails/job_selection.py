@@ -14,6 +14,7 @@ def matches(paths: list[str], patterns: tuple[str, ...]) -> bool:
 
 def selection(paths: list[str], present: list[str]) -> dict[str, bool]:
     maintained = [p for p in present if not excluded(p)]
+    removed = bool(set(paths) - set(present))
     config = matches(
         paths,
         (
@@ -66,6 +67,9 @@ def selection(paths: list[str], present: list[str]) -> dict[str, bool]:
             (
                 "tools/cli-playground/frontend/*",
                 "tools/cli-playground/tests/*",
+                "tools/cli-playground/infra/*",
+                "packages/boxie/tests/*",
+                "packages/boxie/infra/*",
                 "tools/cli-playground/pyproject.toml",
                 "packages/boxie/pyproject.toml",
                 "pyproject.toml",
@@ -78,7 +82,8 @@ def selection(paths: list[str], present: list[str]) -> dict[str, bool]:
         "markdown": selected(
             ("*.md", "*.markdown", ".markdownlint*", "lychee.toml", "typos.toml", "prek.toml"),
             {".md", ".markdown"},
-        ),
+        )
+        or (removed and any(Path(path).suffix in {".md", ".markdown"} for path in maintained)),
         "actions": matches(
             paths, (".github/*", "*action.yml", "*action.yaml", "tools/guardrails/job_selection.py")
         ),

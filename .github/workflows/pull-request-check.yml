@@ -438,5 +438,4 @@ jobs:
           tool: prek@0.5.5
           fallback: none
       - run: prek run check-added-large-files --all-files --show-diff-on-failure
-      - if: needs.select.outputs.rust == 'true' || needs.select.outputs.markdown == 'true' || needs.select.outputs.python == 'true'
-        run: uv run --frozen cli-check
+      - run: uv run --frozen cli-check

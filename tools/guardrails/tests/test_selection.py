@@ -26,3 +26,27 @@ class SelectionTests(unittest.TestCase):
         ]:
             self.assertTrue(selection([path], present)["frontend"])
         self.assertTrue(selection(["deny.toml"], present)["rust"])
+
+    def test_packaging_inputs_select_integration_consumers(self) -> None:
+        for path in [
+            "packages/boxie/tests/test_packaging.py",
+            "packages/boxie/infra/compose.yml",
+            "packages/boxie/infra/compose.production.yml",
+            "packages/boxie/infra/postgres/compose.yml",
+            "packages/boxie/infra/Boxie.Dockerfile.dockerignore",
+            "tools/cli-playground/infra/compose.production.yml",
+            "tools/cli-playground/infra/docker/CliPlayground.Dockerfile.dockerignore",
+        ]:
+            with self.subTest(path=path):
+                self.assertTrue(selection([path], [path, "ui.ts"])["frontend"])
+
+    def test_removed_non_markdown_targets_select_link_checks(self) -> None:
+        old = "tools/cli-playground/src/cli_playground/routes.py"
+        new = "tools/cli-playground/src/cli_playground/http.py"
+        for paths, present in [([old], ["README.md"]), ([old, new], ["README.md", new])]:
+            with self.subTest(paths=paths):
+                self.assertTrue(selection(paths, present)["markdown"])
+
+    def test_modified_non_markdown_target_does_not_select_link_checks(self) -> None:
+        path = "tools/cli-playground/src/cli_playground/routes.py"
+        self.assertFalse(selection([path], ["README.md", path])["markdown"])
