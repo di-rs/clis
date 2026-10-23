@@ -34,6 +34,12 @@ impl LineLayout {
         self.fragments.len()
     }
 
+    pub fn grapheme_at(&self, index: usize) -> Option<&str> {
+        self.fragments
+            .get(index)
+            .map(|fragment| fragment.grapheme.as_str())
+    }
+
     pub fn get(&self, range: Range<usize>) -> String {
         self.visible(range)
             .into_iter()

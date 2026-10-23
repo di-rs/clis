@@ -125,6 +125,12 @@ impl Widget for DocumentWidget<'_> {
                                 Some(super::search::MatchKind::Other) => {
                                     Style::new().fg(Color::Black).bg(Color::Cyan)
                                 }
+                                None if line.grapheme_at(grapheme).is_some_and(|source| {
+                                    source.chars().any(|character| character.is_ascii_digit())
+                                }) =>
+                                {
+                                    Style::new().fg(Color::Red)
+                                }
                                 None => Style::default(),
                             };
                             Span::styled(text, style)
@@ -310,6 +316,58 @@ mod tests {
             .handle_command(crate::editor::command::EditorCommand::RepeatSearch { reverse: false });
         terminal.draw(|frame| render(frame, &mut state))?;
         assert_eq!(terminal.backend().buffer()[(1, 0)].bg, Color::Yellow);
+        Ok(())
+    }
+    #[test]
+    #[allow(
+        clippy::panic_in_result_fn,
+        reason = "Assertions verify digit colors and search precedence."
+    )]
+    fn colors_digits_below_search_styles() -> Result<(), Box<dyn std::error::Error>> {
+        let mut state = EditorState::default();
+        for character in "a1界2".chars() {
+            state.buffer.insert_char(character);
+        }
+        state
+            .buffer
+            .set_position(super::super::TextPosition::default());
+        let mut terminal = Terminal::new(TestBackend::new(12, 6))?;
+        terminal.draw(|frame| render(frame, &mut state))?;
+        assert_eq!(terminal.backend().buffer()[(0, 0)].fg, Color::Reset);
+        assert_eq!(terminal.backend().buffer()[(1, 0)].fg, Color::Red);
+        assert_eq!(terminal.backend().buffer()[(4, 0)].fg, Color::Red);
+        state.search.update(
+            &state.buffer,
+            "1".to_owned(),
+            super::super::TextPosition::default(),
+        );
+        terminal.draw(|frame| render(frame, &mut state))?;
+        assert_eq!(terminal.backend().buffer()[(1, 0)].fg, Color::Black);
+        assert_eq!(terminal.backend().buffer()[(1, 0)].bg, Color::Yellow);
+        Ok(())
+    }
+
+    #[test]
+    #[allow(
+        clippy::panic_in_result_fn,
+        reason = "Assertions verify source styling survives horizontal clipping."
+    )]
+    fn clipped_keycap_digits_keep_source_color() -> Result<(), Box<dyn std::error::Error>> {
+        let directory = assert_fs::TempDir::new()?;
+        let path = directory.path().join("keycap.rs");
+        std::fs::write(&path, "1\u{fe0f}\u{20e3}")?;
+        let document = Document::open(path.to_str().ok_or("invalid fixture path")?)?;
+        for x in [0, 1] {
+            let mut cells = Buffer::empty(Rect::new(0, 0, 1, 1));
+            DocumentWidget {
+                document: &document,
+                search: &super::super::search::Search::default(),
+                offset: ScreenPosition { x, y: 0 },
+            }
+            .render(cells.area, &mut cells);
+            assert_eq!(cells[(0, 0)].symbol(), "⋯");
+            assert_eq!(cells[(0, 0)].fg, Color::Red);
+        }
         Ok(())
     }
 }
