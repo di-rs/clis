@@ -15,6 +15,8 @@ printf 'echo hello\n' | cargo run -p shish -- -s
 ```
 
 Use `--help` for arguments and `--version` for the package version.
+The root `make install-rust` target also installs shish into `~/.local/bin` (or
+`PREFIX/bin` when overridden).
 
 | Invocation | Behavior |
 | --- | --- |
@@ -30,6 +32,9 @@ Noninteractive execution prints no prompt. Interactive sessions use `PS1` when
 provided, otherwise the current directory's basename followed by ` > `. Builtin
 commands include `cd`, `exit`, and `jobs`; external programs use
 ordinary `PATH` lookup. There is no discovery of repository build directories.
+`true` and `false` use Sanctuary's implementations in process, ignore arguments,
+and return status without terminating shish or creating standalone utility logs.
+They are the only Sanctuary utilities integrated as shell builtins initially.
 
 EOF returns the last command's status. `false` returns 1 and does not itself stop
 the shell; `exit` ends execution. Missing commands return 127. Syntax errors return
