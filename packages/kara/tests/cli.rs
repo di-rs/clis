@@ -129,3 +129,18 @@ fn search_preserves_modal_interaction() {
         String::from_utf8_lossy(&result.stderr)
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn syntax_and_file_type_follow_saved_identity() {
+    let result = std::process::Command::new("python3")
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/syntax.py"))
+        .arg(env!("CARGO_BIN_EXE_kara"))
+        .output()
+        .expect("run PTY syntax regression driver");
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
