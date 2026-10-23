@@ -45,6 +45,22 @@ def main() -> None:
         b"Xhit--hit",
     )
 
+    check(
+        binary, "e\u0301 e".encode(), [b"/e\r", b"iX", b"\x1b", b"\x13\x11"], "e\u0301 Xe".encode()
+    )
+    check(
+        binary,
+        "👩‍💻 👩".encode(),
+        ["/👩\r".encode(), b"iX", b"\x1b", b"\x13\x11"],
+        "👩‍💻 X👩".encode(),
+    )
+    check(
+        binary,
+        "🇧🇦🇦🇦".encode(),
+        ["/🇦🇦\r".encode(), b"iX", b"\x1b", b"\x13\x11"],
+        "🇧🇦X🇦🇦".encode(),
+    )
+
 
 if __name__ == "__main__":
     main()

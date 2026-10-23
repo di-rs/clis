@@ -109,3 +109,7 @@ single-line and non-overlapping; an empty query has no matches. In editing mode,
 
 Visible search matches use cyan backgrounds; the active match uses bold text on
 yellow. Enter retains these highlights. Edits refresh matches against current text.
+
+Matches must start and end at complete grapheme boundaries: searching for `e`
+does not match the base of `é`, and an emoji component does not match part of
+a joined emoji sequence. Search does not normalize Unicode text.

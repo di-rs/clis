@@ -110,13 +110,32 @@ pub fn find(document: &Document, query: &str) -> Vec<TextPosition> {
         let Some(line) = document.line_text(line_index) else {
             continue;
         };
-        let boundaries: Vec<_> = line.grapheme_indices(true).map(|(byte, _)| byte).collect();
-        for (byte, _) in line.match_indices(query) {
-            let grapheme = boundaries.partition_point(|boundary| *boundary < byte);
-            matches.push(TextPosition {
-                line: line_index,
-                grapheme,
-            });
+        let boundaries: Vec<_> = line
+            .grapheme_indices(true)
+            .map(|(byte, _)| byte)
+            .chain(std::iter::once(line.len()))
+            .collect();
+        let mut offset = 0;
+        while let Some(relative) = line.get(offset..).and_then(|suffix| suffix.find(query)) {
+            let byte = offset.saturating_add(relative);
+            let end = byte.saturating_add(query.len());
+            if let (Ok(grapheme), Ok(_)) = (
+                boundaries.binary_search(&byte),
+                boundaries.binary_search(&end),
+            ) {
+                matches.push(TextPosition {
+                    line: line_index,
+                    grapheme,
+                });
+                offset = end;
+            } else {
+                // Rejected candidates must not consume a later valid overlap.
+                let next = boundaries.partition_point(|boundary| *boundary <= byte);
+                let Some(next_byte) = boundaries.get(next) else {
+                    break;
+                };
+                offset = *next_byte;
+            }
         }
     }
     matches
@@ -167,6 +186,52 @@ mod tests {
         assert_eq!(find(&document, ""), []);
         assert_eq!(find(&document, "HIT"), []);
         assert_eq!(find(&document, "hit\r\nx"), []);
+        Ok(())
+    }
+    #[test]
+    #[allow(
+        clippy::panic_in_result_fn,
+        reason = "Assertions establish complete grapheme matching independently."
+    )]
+    fn rejects_partial_combining_and_emoji_sequences() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = assert_fs::TempDir::new()?;
+        let path = dir.path().join("unicode");
+        std::fs::write(
+            &path,
+            "e\u{301} e 👩‍💻 👩
+",
+        )?;
+        let document = Document::open(path.to_str().ok_or("invalid path")?)?;
+        assert_eq!(
+            find(&document, "e"),
+            vec![TextPosition {
+                line: 0,
+                grapheme: 2
+            }]
+        );
+        assert_eq!(find(&document, "\u{301}"), []);
+        assert_eq!(find(&document, "💻"), []);
+        assert_eq!(
+            find(&document, "👩"),
+            vec![TextPosition {
+                line: 0,
+                grapheme: 6
+            }]
+        );
+        assert_eq!(
+            find(&document, "e\u{301}"),
+            vec![TextPosition {
+                line: 0,
+                grapheme: 0
+            }]
+        );
+        assert_eq!(
+            find(&document, "👩‍💻"),
+            vec![TextPosition {
+                line: 0,
+                grapheme: 4
+            }]
+        );
         Ok(())
     }
 }
