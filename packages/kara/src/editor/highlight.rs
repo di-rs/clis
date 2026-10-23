@@ -120,6 +120,7 @@ pub fn style(syntax: Option<Kind>, search: Option<MatchKind>) -> Style {
             Some(Kind::Literal) => Style::new().fg(Color::Magenta),
             Some(Kind::Character) => Style::new().fg(Color::Rgb(255, 191, 0)),
             Some(Kind::Lifetime) => Style::new().fg(Color::Rgb(0, 128, 128)),
+            Some(Kind::Comment) => Style::new().fg(Color::Rgb(0, 128, 0)),
             None => Style::default(),
         },
     }
