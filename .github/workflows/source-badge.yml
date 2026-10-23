@@ -53,7 +53,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const branch = 'badges';
+            const branch = 'chore/badges';
             try {
               await github.rest.git.getRef({...context.repo, ref: `heads/${branch}`});
             } catch (error) {

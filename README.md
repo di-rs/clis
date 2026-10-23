@@ -1,6 +1,6 @@
 # Sanctuary
 
-![Source nonblank lines](https://raw.githubusercontent.com/di-rs/sanctuary/badges/loc.svg)
+![Source nonblank lines](https://raw.githubusercontent.com/di-rs/sanctuary/chore/badges/loc.svg)
 
 Sanctuary is a platform for shell sandboxes, with Rust command-line tools, shared
 libraries, and Python services. Each CLI is its own Cargo package.
