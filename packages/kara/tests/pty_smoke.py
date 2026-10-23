@@ -17,13 +17,13 @@ import termios
 import time
 from pathlib import Path
 
+from macos_acl import read_acl
 from vt import screen_text
 
 
 def acl(path: Path) -> bytes:
     if sys.platform == "darwin":
-        result = subprocess.check_output(["ls", "-lde", str(path)])
-        return b"\n".join(result.splitlines()[1:])
+        return read_acl(path)
     try:
         return os.getxattr(path, "system.posix_acl_access")
     except OSError as error:
@@ -134,14 +134,20 @@ def main() -> None:
             before.st_gid,
             stat.S_IMODE(before.st_mode),
         ), "save changed file ownership or mode"
-        assert acl(secured) == before_acl, "save changed the access ACL"
+        after_acl = acl(secured)
+        assert after_acl == before_acl, (
+            f"save changed the access ACL: {before_acl!r} -> {after_acl!r}"
+        )
         link = directory / "secured-link"
         link.symlink_to(secured)
         session(binary, directory, [b":w secured-link\r", b"\x11"])
         assert link.is_symlink(), "save replaced the symlink"
         assert secured.read_bytes() == b"original\n"
         assert secured.stat().st_gid == before.st_gid
-        assert acl(secured) == before_acl, "save through symlink changed the access ACL"
+        after_acl = acl(secured)
+        assert after_acl == before_acl, (
+            f"save through symlink changed the access ACL: {before_acl!r} -> {after_acl!r}"
+        )
         inherited = directory / "inherited"
         inherited.mkdir()
         if sys.platform == "darwin":

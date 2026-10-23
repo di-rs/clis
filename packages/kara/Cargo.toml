@@ -1,12 +1,12 @@
 [package]
 name = "kara"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
-description = "Text Editor Rust practice"
+description = "A small modal terminal text editor"
 license.workspace = true
 repository.workspace = true
 keywords = ["rust", "text-editor"]
-categories = ["pratice", "pet"]
+categories = ["command-line-utilities", "text-editors"]
 
 [dependencies]
 crossterm = "0.29.0"
