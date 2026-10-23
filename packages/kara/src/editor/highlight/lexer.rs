@@ -3,6 +3,9 @@ use std::ops::Range;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Number,
+    Keyword,
+    Type,
+    Literal,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,12 +25,19 @@ pub fn line(text: &str, _incoming: LexState) -> (Vec<Annotation>, LexState) {
             break;
         };
         let length = number_length(remaining, word)
-            .filter(|length| number_is_delimited(text, byte, byte.saturating_add(*length)));
+            .filter(|length| token_is_delimited(text, byte, byte.saturating_add(*length)));
         let end = byte.saturating_add(length.unwrap_or(word.len()));
         if length.is_some() {
             annotations.push(Annotation {
                 bytes: byte..end,
                 kind: Kind::Number,
+            });
+        } else if let Some(kind) = word_kind(word)
+            && token_is_delimited(text, byte, byte.saturating_add(word.len()))
+        {
+            annotations.push(Annotation {
+                bytes: byte..byte.saturating_add(word.len()),
+                kind,
             });
         }
         byte = end;
@@ -63,7 +73,7 @@ fn next_word(text: &str) -> Option<&str> {
     text.get(..end)
 }
 
-fn number_is_delimited(text: &str, start: usize, end: usize) -> bool {
+fn token_is_delimited(text: &str, start: usize, end: usize) -> bool {
     // A Unicode word boundary can occur within an identifier, e.g. 界12.
     // Rust operators/separators are ASCII. Conservatively keep adjacent
     // non-whitespace Unicode characters (including combining marks) attached
@@ -76,6 +86,23 @@ fn number_is_delimited(text: &str, start: usize, end: usize) -> bool {
         character.is_whitespace() || (character.is_ascii_punctuation() && character != '_')
     };
     before.is_none_or(is_separator) && after.is_none_or(is_separator)
+}
+
+fn word_kind(word: &str) -> Option<Kind> {
+    match word {
+        "as" | "async" | "await" | "break" | "const" | "continue" | "crate" | "dyn" | "else"
+        | "enum" | "extern" | "fn" | "for" | "if" | "impl" | "in" | "let" | "loop" | "match"
+        | "mod" | "move" | "mut" | "pub" | "ref" | "return" | "self" | "Self" | "static"
+        | "struct" | "super" | "trait" | "type" | "unsafe" | "use" | "where" | "while"
+        | "abstract" | "become" | "box" | "do" | "final" | "gen" | "macro" | "override"
+        | "priv" | "typeof" | "unsized" | "virtual" | "yield" | "try" | "union" | "macro_rules"
+        | "raw" | "safe" => Some(Kind::Keyword),
+        "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64" | "u128"
+        | "usize" | "f32" | "f64" | "bool" | "char" | "Option" | "Result" | "String" | "str"
+        | "Vec" | "HashMap" => Some(Kind::Type),
+        "Some" | "None" | "Ok" | "Err" | "true" | "false" => Some(Kind::Literal),
+        _ => None,
+    }
 }
 
 fn number_length(remaining: &str, word: &str) -> Option<usize> {
@@ -145,6 +172,7 @@ mod tests {
         line(text, LexState)
             .0
             .into_iter()
+            .filter(|annotation| annotation.kind == Kind::Number)
             .filter_map(|annotation| text.get(annotation.bytes))
             .collect()
     }
@@ -210,5 +238,46 @@ mod tests {
             ]
         );
         assert_eq!(tokens("0x 0b2 0o8 0xGG abc0xFF 0x_FF_"), Vec::<&str>::new());
+    }
+    #[test]
+    fn recognizes_complete_keywords_types_and_literals() {
+        let text = "let Option Some true i32 mylet enum_value False";
+        let actual: Vec<_> = line(text, LexState)
+            .0
+            .into_iter()
+            .filter_map(|annotation| {
+                text.get(annotation.bytes)
+                    .map(|word| (word, annotation.kind))
+            })
+            .collect();
+        assert_eq!(
+            actual,
+            [
+                ("let", Kind::Keyword),
+                ("Option", Kind::Type),
+                ("Some", Kind::Literal),
+                ("true", Kind::Literal),
+                ("i32", Kind::Type)
+            ]
+        );
+    }
+    #[test]
+    fn weak_keywords_and_unicode_identifiers_keep_complete_tokens() {
+        for (text, expected) in [
+            ("macro_rules! example { () => {} }", vec!["macro_rules"]),
+            ("&raw const value", vec!["raw", "const"]),
+            (
+                "unsafe extern C { safe fn test(); }",
+                vec!["unsafe", "extern", "safe", "fn"],
+            ),
+            ("界fn fn界 ℘Option e\u{301}true", vec![]),
+        ] {
+            let actual: Vec<_> = line(text, LexState)
+                .0
+                .into_iter()
+                .filter_map(|annotation| text.get(annotation.bytes))
+                .collect();
+            assert_eq!(actual, expected, "{text}");
+        }
     }
 }
