@@ -500,3 +500,17 @@ fn task_12_cd_without_operand_and_tilde_use_home() {
         .stdout(format!("{}\n{}\n", root.display(), root.display()))
         .stderr("");
 }
+
+#[test]
+fn task_13_single_quotes() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args([
+            "-c",
+            "printf '<%s>\\n' 'a b' '' '$HOME \\ * ; &' 'a'\"'\"'b'",
+        ])
+        .assert()
+        .code(0)
+        .stdout("<a b>\n<>\n<$HOME \\ * ; &>\n<a'b>\n")
+        .stderr("");
+}
