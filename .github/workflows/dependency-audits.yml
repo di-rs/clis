@@ -1,0 +1,101 @@
+name: Dependency vulnerability audits
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+permissions:
+  contents: read
+concurrency:
+  group: dependency-audits-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+env:
+  PYTHONPATH: tools
+jobs:
+  select-python:
+    if: ${{ !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      selected: ${{ steps.paths.outputs.selected }}
+      base: ${{ steps.paths.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: python3 -m unittest discover -s tools/guardrails/tests -p test_scope.py
+      - id: paths
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: >-
+          python3 -m guardrails.scope --base "$BASE"
+          --patterns '*pyproject.toml' 'uv.lock'
+          --present 'uv.lock'
+          --config '.github/workflows/dependency-audits.yml' 'tools/guardrails/dependency_audits.py' 'tools/guardrails/changes.py' 'tools/guardrails/scope.py'
+  python:
+    name: Python dependency audit
+    needs: select-python
+    if: needs.select-python.outputs.selected == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BASE: ${{ needs.select-python.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: '0.13.0'
+      - run: uv tool install pip-audit==2.10.1
+      - run: uv tool run --python 3.15 --from pytest==9.1.1 pytest -p no:cacheprovider -c /dev/null tools/guardrails/tests/test_audits.py
+      - run: uv run --no-project --python 3.15 python -m guardrails.dependency_audits python
+  select-frontend:
+    if: ${{ !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      selected: ${{ steps.paths.outputs.selected }}
+      base: ${{ steps.paths.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: python3 -m unittest discover -s tools/guardrails/tests -p test_scope.py
+      - id: paths
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: >-
+          python3 -m guardrails.scope --base "$BASE"
+          --patterns '*package.json' '*pnpm-lock.yaml' '*pnpm-workspace.yaml'
+          --present '*pnpm-lock.yaml'
+          --config '.github/workflows/dependency-audits.yml' 'tools/guardrails/dependency_audits.py' 'tools/guardrails/changes.py' 'tools/guardrails/scope.py'
+  frontend:
+    name: Frontend dependency audit
+    needs: select-frontend
+    if: needs.select-frontend.outputs.selected == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BASE: ${{ needs.select-frontend.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@68f39c78aaf39be468cabd2afb09c162574c84af
+        with:
+          working-directory: tools/cli-playground/frontend
+          node-version-file: .node-version
+          version-file: package.json
+          run-install: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: '0.13.0'
+      - run: uv tool run --python 3.15 --from pytest==9.1.1 pytest -p no:cacheprovider -c /dev/null tools/guardrails/tests/test_audits.py
+      - run: uv run --no-project --python 3.15 python -m guardrails.dependency_audits frontend
