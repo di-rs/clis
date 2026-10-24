@@ -381,8 +381,8 @@ The task numbers are stable even when implementation order changes.
 | 55 | Pipelines: two commands | sh; §2.9.2 | Verified: pipeline output, final status, and bounded fixture execution; [task_55](../tests/audit.rs) | [55 PR](https://github.com/di-rs/sanctuary/pull/128) |
 | 56 | Pipelines: builtins | sh; §2.9.2 | Verified: pipeline output, final status, and bounded fixture execution; [task_56](../tests/audit.rs) | [56 PR](https://github.com/di-rs/sanctuary/pull/129) |
 | 57 | Pipelines: multiple commands | sh; §2.9.2 | Verified: pipeline output, final status, and bounded fixture execution; [task_57](../tests/audit.rs) | [57 PR](https://github.com/di-rs/sanctuary/pull/130) |
-| 58 | History: builtin | bash; Bash §9 | Verified in Bash mode: history remains available without PATH commands; [task_58](../tests/audit.rs) | Current task PR |
-| 59 | History: listing | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 59 |
+| 58 | History: builtin | bash; Bash §9 | Verified in Bash mode: history remains available without PATH commands; [task_58](../tests/audit.rs) | [58 PR](https://github.com/di-rs/sanctuary/pull/170) |
+| 59 | History: listing | bash; Bash §9 | Verified in Bash mode: numbered history listing preserves command order; [task_59](../tests/audit.rs) | Current task PR |
 | 60 | History: entry limits | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 60 |
 | 61 | History: up-arrow | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 61 |
 | 62 | History: down-arrow | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 62 |
