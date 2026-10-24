@@ -377,11 +377,11 @@ The task numbers are stable even when implementation order changes.
 | 51 | Background jobs: reap one | interactive sh; §2.11/jobs/wait | Verified: wait %1 completes the worker and removes it before the next command; [task_51](../tests/audit.rs) | [51 PR](https://github.com/di-rs/sanctuary/pull/166) |
 | 52 | Background jobs: reap multiple | interactive sh; §2.11/jobs/wait | Verified: bare wait completes both workers and clears the job table; [task_52](../tests/audit.rs) | [52 PR](https://github.com/di-rs/sanctuary/pull/167) |
 | 53 | Background jobs: reap before prompt | interactive sh; §2.11/jobs/wait | Verified: completion notice and job removal before the next command; [task_53](../tests/audit.rs) | [53 PR](https://github.com/di-rs/sanctuary/pull/168) |
-| 54 | Background jobs: recycle job numbers | interactive sh; §2.11/jobs/wait | Partial: empty-table recycling works; live-ID collision acceptance pending; [task_54](../tests/audit.rs) | Current task PR |
+| 54 | Background jobs: recycle job numbers | interactive sh; §2.11/jobs/wait | Partial: empty-table recycling works; live-ID collision acceptance pending; [task_54](../tests/audit.rs) | [54 PR](https://github.com/di-rs/sanctuary/pull/169) |
 | 55 | Pipelines: two commands | sh; §2.9.2 | Verified: pipeline output, final status, and bounded fixture execution; [task_55](../tests/audit.rs) | [55 PR](https://github.com/di-rs/sanctuary/pull/128) |
 | 56 | Pipelines: builtins | sh; §2.9.2 | Verified: pipeline output, final status, and bounded fixture execution; [task_56](../tests/audit.rs) | [56 PR](https://github.com/di-rs/sanctuary/pull/129) |
 | 57 | Pipelines: multiple commands | sh; §2.9.2 | Verified: pipeline output, final status, and bounded fixture execution; [task_57](../tests/audit.rs) | [57 PR](https://github.com/di-rs/sanctuary/pull/130) |
-| 58 | History: builtin | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 58 |
+| 58 | History: builtin | bash; Bash §9 | Verified in Bash mode: history remains available without PATH commands; [task_58](../tests/audit.rs) | Current task PR |
 | 59 | History: listing | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 59 |
 | 60 | History: entry limits | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 60 |
 | 61 | History: up-arrow | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 61 |

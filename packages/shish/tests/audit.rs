@@ -1362,3 +1362,18 @@ fn task_54_recycle_after_empty_table() -> anyhow::Result<()> {
     terminal.send(": > release; wait; exit 0\n")?;
     terminal.finish(0)
 }
+
+#[test]
+fn task_58_history_builtin() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["--bash", "-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send(
+        "PATH=/missing; type -t history; history -c; history > listing 2> errors; exit $?\n",
+    )?;
+    terminal.expect("\nbuiltin\n")?;
+    terminal.finish(0)?;
+    home.child("listing").assert("");
+    home.child("errors").assert("");
+    Ok(())
+}
