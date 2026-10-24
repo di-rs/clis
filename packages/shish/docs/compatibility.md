@@ -350,8 +350,8 @@ The task numbers are stable even when implementation order changes.
 | 44 | Programmable completion: longest common prefix | bash; Bash §8.6–8.7 | Missing: programmed candidates are listed without inserting their longest common prefix (C44); [task_44](../tests/audit.rs) | [44 PR](https://github.com/di-rs/sanctuary/pull/160) |
 | 45 | Programmable completion: unregistration | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_45](../tests/audit.rs) | [45 PR](https://github.com/di-rs/sanctuary/pull/156) |
 | 46 | Background jobs: jobs | interactive sh; §2.11/jobs/wait | Verified: empty job table, builtin lookup, status and streams; [task_46](../tests/audit.rs) | [46 PR](https://github.com/di-rs/sanctuary/pull/161) |
-| 47 | Background jobs: launch | interactive sh; §2.11/jobs/wait | Verified: prompt returns while a background worker awaits release; [task_47](../tests/audit.rs) | Current task PR |
-| 48 | Background jobs: output | interactive sh; §2.11/jobs/wait | Unverified; dedicated audit pending | Planned task 48 |
+| 47 | Background jobs: launch | interactive sh; §2.11/jobs/wait | Verified: prompt returns while a background worker awaits release; [task_47](../tests/audit.rs) | [47 PR](https://github.com/di-rs/sanctuary/pull/162) |
+| 48 | Background jobs: output | interactive sh; §2.11/jobs/wait | Verified: background stdout and stderr reach the terminal; [task_48](../tests/audit.rs) | Current task PR |
 | 49 | Background jobs: list one | interactive sh; §2.11/jobs/wait | Unverified; dedicated audit pending | Planned task 49 |
 | 50 | Background jobs: list multiple | interactive sh; §2.11/jobs/wait | Unverified; dedicated audit pending | Planned task 50 |
 | 51 | Background jobs: reap one | interactive sh; §2.11/jobs/wait | Unverified; dedicated audit pending | Planned task 51 |
