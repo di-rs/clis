@@ -8,12 +8,12 @@ ingress:
       access:
         required: true
         teamName: ${OPERATOR_TEAM_NAME}
-        audTag: [${OPERATOR_GRAFANA_AUDIENCE}]
+        audTag: ["${OPERATOR_GRAFANA_AUDIENCE}"]
   - hostname: ${OPERATOR_TEMPORAL_HOSTNAME}
     service: http://temporal-ui:8080
     originRequest:
       access:
         required: true
         teamName: ${OPERATOR_TEAM_NAME}
-        audTag: [${OPERATOR_TEMPORAL_AUDIENCE}]
+        audTag: ["${OPERATOR_TEMPORAL_AUDIENCE}"]
   - service: http_status:404
