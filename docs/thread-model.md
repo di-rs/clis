@@ -37,6 +37,8 @@ service availability. User files and terminal contents may contain sensitive dat
   publication or deployment credentials. Apply the same boundary to benchmark
   reporting and release automation.
 
+Changed-area labels use GitHub metadata only and never check out PR code.
+
 ## Review priorities
 
 Trace attacker-controlled input to the affected asset; state required credentials,
