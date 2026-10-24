@@ -1007,3 +1007,22 @@ fn task_39_single_programmed_completion() -> anyhow::Result<()> {
     terminal.send("exit 0\n")?;
     terminal.finish(0)
 }
+
+#[test]
+fn task_41_completer_arguments() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["--bash", "-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("_pick() { printf '<%s>\\n' \"$@\" > completion-args; COMPREPLY=(argument_done); }; complete -F _pick pick; echo setup-ready\n")?;
+    terminal.expect("\nsetup-ready\n")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("pick arg\t")?;
+    terminal.expect("shish-test> pick argument_done ")?;
+    terminal.send("\x03")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("exit 0\n")?;
+    terminal.finish(0)?;
+    home.child("completion-args")
+        .assert("<pick>\n<arg>\n<pick>\n");
+    Ok(())
+}
