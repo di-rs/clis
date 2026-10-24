@@ -209,8 +209,8 @@ The task numbers are stable even when implementation order changes.
 | 06 | Basics: type | sh; invocation/§2.9.1 | Verified: builtin/external type and function type via -t extension; missing type diagnostic. P06 tracks command -v separately; [task_06](../tests/audit.rs) | [06 PR](https://github.com/di-rs/sanctuary/pull/111) |
 | 07 | Basics: executable lookup | sh; invocation/§2.9.1 | Verified: custom PATH, executable permission, and missing lookup; [task_07](../tests/audit.rs) | [07 PR](https://github.com/di-rs/sanctuary/pull/112) |
 | 08 | Basics: program execution | sh; invocation/§2.9.1 | Verified: argv boundaries, stdout/stderr, and external status; [task_08](../tests/audit.rs) | [08 PR](https://github.com/di-rs/sanctuary/pull/113) |
-| 09 | Navigation: pwd | sh; pwd/cd | Verified: initial and changed working directories; [task_09](../tests/audit.rs) | Current task PR |
-| 10 | Navigation: absolute cd | sh; pwd/cd | Unverified; dedicated audit pending | Planned task 10 |
+| 09 | Navigation: pwd | sh; pwd/cd | Verified: initial and changed working directories; [task_09](../tests/audit.rs) | [09 PR](https://github.com/di-rs/sanctuary/pull/114) |
+| 10 | Navigation: absolute cd | sh; pwd/cd | Verified: absolute cd updates shell cwd while host test cwd is unchanged; [task_10](../tests/audit.rs) | Current task PR |
 | 11 | Navigation: relative cd | sh; pwd/cd | Unverified; dedicated audit pending | Planned task 11 |
 | 12 | Navigation: home-directory cd | sh; pwd/cd | Unverified; dedicated audit pending | Planned task 12 |
 | 13 | Quoting: single quotes | sh; §2.2 | Unverified; dedicated audit pending | Planned task 13 |
