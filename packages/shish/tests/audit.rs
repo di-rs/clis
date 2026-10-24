@@ -755,3 +755,15 @@ fn task_23_builtin_completion() -> anyhow::Result<()> {
     terminal.send("exit $?\n")?;
     terminal.finish(1)
 }
+
+#[test]
+fn task_24_completion_arguments() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut terminal =
+        support::pty::Pty::new(home.path(), &["-i"], &[("PATH", "/shish-no-tools")])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("exi\t")?;
+    terminal.expect("shish-test> exit ")?;
+    terminal.send("7\n")?;
+    terminal.finish(7)
+}

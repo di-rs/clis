@@ -223,8 +223,8 @@ The task numbers are stable even when implementation order changes.
 | 20 | Redirection: stderr | sh; §2.7 | Verified: exact file contents, unaffected output stream, and success status; [task_20](../tests/audit.rs) | [20 PR](https://github.com/di-rs/sanctuary/pull/125) |
 | 21 | Redirection: append stdout | sh; §2.7 | Verified: exact file contents, unaffected output stream, and success status; [task_21](../tests/audit.rs) | [21 PR](https://github.com/di-rs/sanctuary/pull/126) |
 | 22 | Redirection: append stderr | sh; §2.7 | Verified: exact file contents, unaffected output stream, and success status; [task_22](../tests/audit.rs) | [22 PR](https://github.com/di-rs/sanctuary/pull/127) |
-| 23 | Command completion: builtins | interactive; product UI | Verified: bounded PTY Tab interaction with isolated PATH; [task_23](../tests/audit.rs) | Current task PR |
-| 24 | Command completion: arguments | interactive; product UI | Unverified; dedicated audit pending | Planned task 24 |
+| 23 | Command completion: builtins | interactive; product UI | Verified: bounded PTY Tab interaction with isolated PATH; [task_23](../tests/audit.rs) | [23 PR](https://github.com/di-rs/sanctuary/pull/138) |
+| 24 | Command completion: arguments | interactive; product UI | Verified: bounded PTY Tab interaction with isolated PATH; [task_24](../tests/audit.rs) | Current task PR |
 | 25 | Command completion: no matches | interactive; product UI | Unverified; dedicated audit pending | Planned task 25 |
 | 26 | Command completion: executables | interactive; product UI | Unverified; dedicated audit pending | Planned task 26 |
 | 27 | Command completion: multiple matches | interactive; product UI | Unverified; dedicated audit pending | Planned task 27 |
