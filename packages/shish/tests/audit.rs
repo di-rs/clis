@@ -474,3 +474,16 @@ fn task_10_cd_accepts_absolute_paths_with_spaces() {
         .stdout(format!("{}\n", target.display()))
         .stderr("");
 }
+
+#[test]
+fn task_11_cd_resolves_relative_paths_and_parent_components() {
+    let home = assert_fs::TempDir::new().unwrap();
+    home.child("one/two").create_dir_all().unwrap();
+    let root = home.path().canonicalize().unwrap();
+    command(&root)
+        .args(["-c", "cd one/two; cd ..; pwd"])
+        .assert()
+        .code(0)
+        .stdout(format!("{}\n", root.join("one").display()))
+        .stderr("");
+}
