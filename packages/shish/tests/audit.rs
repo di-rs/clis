@@ -895,3 +895,33 @@ fn task_35_multiple_argument_completion() -> anyhow::Result<()> {
     terminal.send("exit 0\n")?;
     terminal.finish(0)
 }
+
+#[test]
+fn task_25_unmatched_input_can_be_cancelled() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut terminal =
+        support::pty::Pty::new(home.path(), &["-i"], &[("PATH", "/shish-no-tools")])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("shish_missing_completion\t_suffix")?;
+    terminal.expect("shish-test> shish_missing_completion_suffix")?;
+    terminal.send("\x03")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("exit 0\n")?;
+    terminal.finish(0)
+}
+
+#[test]
+#[ignore = "C25: an empty Reedline completion menu consumes the first Enter"]
+fn task_25_enter_executes_after_no_completion() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut terminal =
+        support::pty::Pty::new(home.path(), &["-i"], &[("PATH", "/shish-no-tools")])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("shish_missing_completion\t")?;
+    terminal.expect("shish-test> shish_missing_completion")?;
+    terminal.send("\n")?;
+    terminal.expect("error: command not found: shish_missing_completion")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("exit $?\n")?;
+    terminal.finish(127)
+}
