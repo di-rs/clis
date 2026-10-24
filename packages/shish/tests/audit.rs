@@ -446,3 +446,17 @@ fn task_08_external_program_preserves_arguments_streams_and_status() {
         .stdout("<a b>\n")
         .stderr("diagnostic");
 }
+
+#[test]
+fn task_09_pwd_reflects_shell_directory() {
+    let home = assert_fs::TempDir::new().unwrap();
+    home.child("nested").create_dir_all().unwrap();
+    let root = home.path().canonicalize().unwrap();
+    let expected = format!("{}\n{}\n", root.display(), root.join("nested").display());
+    command(&root)
+        .args(["-c", "pwd; cd nested; pwd"])
+        .assert()
+        .code(0)
+        .stdout(expected)
+        .stderr("");
+}
