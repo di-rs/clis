@@ -584,3 +584,18 @@ fn task_18_quoted_executable_path() {
             .stderr("");
     }
 }
+
+#[test]
+fn task_19_stdout_redirection() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args([
+            "-c",
+            "printf first-longer-value > out; printf second > out; printf visible",
+        ])
+        .assert()
+        .code(0)
+        .stdout("visible")
+        .stderr("");
+    home.child("out").assert("second");
+}
