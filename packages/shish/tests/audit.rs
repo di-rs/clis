@@ -964,3 +964,14 @@ fn task_36_complete_registration() {
         .stdout("complete -W 'beta' pick\n")
         .stderr("");
 }
+
+#[test]
+fn task_37_missing_completion_spec() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args(["--bash", "-c", "complete -p shish_missing_spec"])
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr("no completion found for command\n");
+}
