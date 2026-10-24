@@ -1404,3 +1404,19 @@ fn task_60_history_entry_limits() -> anyhow::Result<()> {
     home.child("errors").assert("");
     Ok(())
 }
+
+#[test]
+fn task_61_history_up_arrow() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["--bash", "-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("echo history-up\n")?;
+    terminal.expect("\nhistory-up\n")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("\x1b[A")?;
+    terminal.expect_line("shish-test> echo history-up")?;
+    terminal.send("\x03")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("exit 0\n")?;
+    terminal.finish(0)
+}
