@@ -694,3 +694,14 @@ fn task_72_variable_storage() {
     command(home.path()).args(["-c", "v='a b'; printf '<%s>\\n' \"$v\"; export v; /bin/sh -c 'printf \"<%s>\\n\" \"$v\"; v=child'; printf '<%s>\\n' \"$v\""])
         .assert().code(0).stdout("<a b>\n<a b>\n<a b>\n").stderr("");
 }
+
+#[test]
+fn task_73_variable_names() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args(["--bash", "-c", "declare 'bad-name=value'"])
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr(predicates::str::contains("bad-name"));
+}
