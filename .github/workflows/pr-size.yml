@@ -1,0 +1,55 @@
+name: PR size advisory
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+permissions:
+  contents: read
+concurrency:
+  group: pr-size-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+env:
+  PYTHONPATH: tools
+jobs:
+  select:
+    if: ${{ !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      selected: ${{ steps.paths.outputs.selected }}
+      base: ${{ steps.paths.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: python3 -m unittest discover -s tools/guardrails/tests -p test_scope.py
+      - id: paths
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: >-
+          python3 -m guardrails.scope --base "$BASE"
+          --patterns '*'
+          --present '*'
+          --config '.github/workflows/pr-size.yml' 'tools/guardrails/pr_size.py' 'tools/guardrails/changes.py' 'tools/guardrails/scope.py'
+  check:
+    name: PR size advisory
+    needs: select
+    if: needs.select.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BASE: ${{ needs.select.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: '0.13.0'
+      - run: uv tool run --from pytest==9.1.1 pytest -p no:cacheprovider -c /dev/null tools/guardrails/tests/test_size.py
+      - run: python3 -m guardrails.pr_size --base "$BASE"
