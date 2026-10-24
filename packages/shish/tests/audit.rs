@@ -487,3 +487,16 @@ fn task_11_cd_resolves_relative_paths_and_parent_components() {
         .stdout(format!("{}\n", root.join("one").display()))
         .stderr("");
 }
+
+#[test]
+fn task_12_cd_without_operand_and_tilde_use_home() {
+    let home = assert_fs::TempDir::new().unwrap();
+    home.child("nested").create_dir_all().unwrap();
+    let root = home.path().canonicalize().unwrap();
+    command(&root)
+        .args(["-c", "cd nested; cd; pwd; cd nested; cd ~; pwd"])
+        .assert()
+        .code(0)
+        .stdout(format!("{}\n{}\n", root.display(), root.display()))
+        .stderr("");
+}
