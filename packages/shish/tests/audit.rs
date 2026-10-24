@@ -514,3 +514,18 @@ fn task_13_single_quotes() {
         .stdout("<a b>\n<>\n<$HOME \\ * ; &>\n<a'b>\n")
         .stderr("");
 }
+
+#[test]
+fn task_14_double_quotes() {
+    let home = assert_fs::TempDir::new().unwrap();
+    home.child("matching-file").touch().unwrap();
+    command(home.path())
+        .args([
+            "-c",
+            "v='a b'; empty=; printf '<%s>\\n' \"$v\" \"$empty\" \"*\" \"pre${v}post\"",
+        ])
+        .assert()
+        .code(0)
+        .stdout("<a b>\n<>\n<*>\n<prea bpost>\n")
+        .stderr("");
+}
