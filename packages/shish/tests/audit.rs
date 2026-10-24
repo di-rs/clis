@@ -643,3 +643,10 @@ fn task_55_two_command_pipeline() {
         .stdout("ABC")
         .stderr("");
 }
+
+#[test]
+fn task_56_builtin_pipeline() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path()).args(["-c", "false | true; printf '%s\\n' \"$?\"; true | false; printf '%s\\n' \"$?\"; v=parent; printf child | read v; printf '%s\\n' \"$v\""])
+        .assert().code(0).stdout("0\n1\nparent\n").stderr("");
+}
