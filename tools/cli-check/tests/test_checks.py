@@ -67,6 +67,26 @@ def run_policy(root: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+@pytest.mark.parametrize("library", [True, False])
+def test_helper_cli_uses_its_own_library_without_a_self_dependency(
+    tmp_path: Path, library: bool
+) -> None:
+    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["tools/cli-testing"]\n')
+    write(
+        tmp_path,
+        "tools/cli-testing/Cargo.toml",
+        '[package]\nname = "cli-testing"\nversion = "0.1.0"\nedition = "2024"\n',
+    )
+    write(tmp_path, "tools/cli-testing/src/main.rs", "fn main() {}\n")
+    write(tmp_path, "tools/cli-testing/tests/cli.rs", "#[test]\nfn cli_contract() {}\n")
+    if library:
+        write(tmp_path, "tools/cli-testing/src/lib.rs", "pub fn helper() {}\n")
+    result = run_policy(tmp_path)
+    assert result.returncode == (0 if library else 1), result.stderr
+    if not library:
+        assert "requires cli-testing" in result.stderr
+
+
 def test_package_selection_ignores_unselected_violations_and_rejects_unknown(
     tmp_path: Path,
 ) -> None:
@@ -537,3 +557,26 @@ def test_json_diagnostics_discovery_and_errors(tmp_path: Path) -> None:
     assert result.returncode == 2
     assert json.loads(result.stdout)["error"]["kind"] == "arguments"
     assert result.stderr == ""
+
+
+@pytest.mark.parametrize(
+    ("target", "catalog", "valid"),
+    [
+        ('[[test]]\nname = "catalog"\nharness = false\n', True, True),
+        ('[[test]]\nname = "catalog"\nharness = true\n', True, False),
+        ('[[test]]\nname = "catalog"\nharness = false\ntest = false\n', True, False),
+        ("", True, False),
+        ('[[test]]\nname = "catalog"\nharness = false\n', False, False),
+    ],
+)
+def test_catalog_registration_only(tmp_path: Path, target: str, catalog: bool, valid: bool) -> None:
+    write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["buildins/*"]\n')
+    add_cli(tmp_path, test_targets=target)
+    write(tmp_path, "buildins/echo/tests/catalog.rs", "fn main() {}\n")
+    if catalog:
+        # Semantic validation belongs to the Rust parser, not this layout check.
+        write(tmp_path, "buildins/echo/tests/cases.toml", "not valid TOML\n")
+    result = run_policy(tmp_path)
+    assert (result.returncode == 0) is valid, result.stderr
+    if not valid:
+        assert "catalog" in result.stderr

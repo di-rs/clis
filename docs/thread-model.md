@@ -36,6 +36,14 @@ service availability. User files and terminal contents may contain sensitive dat
   uses default-branch code. Never execute PR-controlled scripts or binaries with
   publication or deployment credentials. Apply the same boundary to benchmark
   reporting and release automation.
+- **Local fixture recipes and recordings:** CLI test catalogs and their reference
+  commands are trusted repository code, executed with the developer's permissions.
+  Temporary test workspaces do not sandbox host access. `cli-testing record`
+  stages output outside committed fixtures; `apply` is an explicit promotion of a
+  reviewed capture. Validate catalog ownership, allowed paths, input/expectation
+  hashes, reference identity, completion, and shared-file conflicts before writes.
+  A recording's provenance is consistency metadata, not authentication of an
+  arbitrary downloaded artifact.
 
 ## Review priorities
 

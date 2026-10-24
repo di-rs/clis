@@ -4,10 +4,7 @@ use predicates::prelude::*;
 use pretty_assertions::assert_eq;
 use std::{fs, path::PathBuf};
 
-const BUSTLE: &str = "tests/inputs/bustle.txt";
-const EMPTY: &str = "tests/inputs/empty.txt";
 const FOX: &str = "tests/inputs/fox.txt";
-const NOBODY: &str = "tests/inputs/nobody.txt";
 const INPUTS_DIR: &str = "tests/inputs";
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -55,128 +52,6 @@ fn warns_bad_file() {
         .stderr(predicate::str::contains(expected));
 }
 
-fn run(args: &[&str], expected_file: &str) -> Result<()> {
-    let expected = cli_testing::fixtures!().read_expected(expected_file)?;
-    cargo_bin_cmd!()
-        .args(args)
-        .assert()
-        .code(0)
-        .stdout(expected)
-        .stderr("");
-    Ok(())
-}
-
-#[test]
-fn empty_file() -> Result<()> {
-    run(&["foo", EMPTY], "foo.empty.txt")
-}
-
-#[test]
-fn empty_regex() -> Result<()> {
-    run(&["", FOX], "empty_regex.fox.txt")
-}
-
-#[test]
-fn bustle_capitalized() -> Result<()> {
-    run(&["The", BUSTLE], "bustle.txt.the.capitalized")
-}
-
-#[test]
-fn bustle_lowercase() -> Result<()> {
-    run(&["the", BUSTLE], "bustle.txt.the.lowercase")
-}
-
-#[test]
-fn bustle_insensitive() -> Result<()> {
-    run(
-        &["--insensitive", "the", BUSTLE],
-        "bustle.txt.the.lowercase.insensitive",
-    )
-}
-
-#[test]
-fn nobody() -> Result<()> {
-    run(&["nobody", NOBODY], "nobody.txt")
-}
-
-#[test]
-fn nobody_insensitive() -> Result<()> {
-    run(&["-i", "nobody", NOBODY], "nobody.txt.insensitive")
-}
-
-#[test]
-fn multiple_files() -> Result<()> {
-    run(&["The", BUSTLE, EMPTY, FOX, NOBODY], "all.the.capitalized")
-}
-
-#[test]
-fn multiple_files_insensitive() -> Result<()> {
-    run(
-        &["-i", "the", BUSTLE, EMPTY, FOX, NOBODY],
-        "all.the.lowercase.insensitive",
-    )
-}
-
-#[test]
-fn recursive() -> Result<()> {
-    run(&["--recursive", "dog", INPUTS_DIR], "dog.recursive")
-}
-
-#[test]
-fn recursive_insensitive() -> Result<()> {
-    run(&["-ri", "then", INPUTS_DIR], "the.recursive.insensitive")
-}
-
-#[test]
-fn sensitive_count_capital() -> Result<()> {
-    run(
-        &["--count", "The", BUSTLE],
-        "bustle.txt.the.capitalized.count",
-    )
-}
-
-#[test]
-fn sensitive_count_lower() -> Result<()> {
-    run(
-        &["--count", "the", BUSTLE],
-        "bustle.txt.the.lowercase.count",
-    )
-}
-
-#[test]
-fn insensitive_count() -> Result<()> {
-    run(
-        &["-ci", "the", BUSTLE],
-        "bustle.txt.the.lowercase.insensitive.count",
-    )
-}
-
-#[test]
-fn nobody_count() -> Result<()> {
-    run(&["-c", "nobody", NOBODY], "nobody.txt.count")
-}
-
-#[test]
-fn nobody_count_insensitive() -> Result<()> {
-    run(&["-ci", "nobody", NOBODY], "nobody.txt.insensitive.count")
-}
-
-#[test]
-fn sensitive_count_multiple() -> Result<()> {
-    run(
-        &["-c", "The", BUSTLE, EMPTY, FOX, NOBODY],
-        "all.the.capitalized.count",
-    )
-}
-
-#[test]
-fn insensitive_count_multiple() -> Result<()> {
-    run(
-        &["-ic", "the", BUSTLE, EMPTY, FOX, NOBODY],
-        "all.the.lowercase.insensitive.count",
-    )
-}
-
 #[test]
 fn warns_dir_not_recursive() {
     let stdout = "tests/inputs/fox.txt:\
@@ -187,39 +62,6 @@ fn warns_dir_not_recursive() {
         .code(1)
         .stderr(predicate::str::contains("tests/inputs is a directory"))
         .stdout(predicate::str::contains(stdout));
-}
-
-#[test]
-fn stdin() -> Result<()> {
-    let fixtures = cli_testing::fixtures!();
-    let input = fixtures.read_input("bustle.txt")?;
-    let expected = fixtures.read_expected("bustle.txt.the.capitalized")?;
-    cargo_bin_cmd!()
-        .arg("The")
-        .write_stdin(input)
-        .assert()
-        .code(0)
-        .stdout(expected)
-        .stderr("");
-    Ok(())
-}
-
-#[test]
-fn stdin_insensitive_count() -> Result<()> {
-    let fixtures = cli_testing::fixtures!();
-    let mut input = Vec::new();
-    for name in ["bustle.txt", "empty.txt", "fox.txt", "nobody.txt"] {
-        input.extend(fixtures.read_input(name)?);
-    }
-    let expected = fixtures.read_expected("the.recursive.insensitive.count.stdin")?;
-    cargo_bin_cmd!()
-        .args(["-ci", "the", "-"])
-        .write_stdin(input)
-        .assert()
-        .code(0)
-        .stdout(expected)
-        .stderr("");
-    Ok(())
 }
 
 #[test]
@@ -261,21 +103,6 @@ fn check_stdin(args: &[&str], input: &str, expected: &str) {
         .success()
         .stdout(expected.to_owned())
         .stderr("");
-}
-
-#[test]
-fn stdin_no_match() {
-    check_stdin(&["absent"], "alpha\nbeta\n", "");
-}
-
-#[test]
-fn stdin_no_match_count() {
-    check_stdin(&["-c", "absent", "-"], "alpha\nbeta\n", "0\n");
-}
-
-#[test]
-fn empty_stdin_empty_regex_count() {
-    check_stdin(&["--count", ""], "", "0\n");
 }
 
 #[test]

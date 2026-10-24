@@ -35,4 +35,11 @@ sequences; the relevant assertions explicitly apply replacement decoding to
 match `cutr`. The duplicate-position fixture is a manual expectation because
 upstream `cut` deduplicates positions.
 
+The [case catalog](tests/cases.toml) pins macOS `/usr/bin/cut` with
+`LC_ALL=en_US.UTF-8`. `tsv_b8` declares the `utf8-lossy` expectation adaptation in
+TOML; `tsv_b1_8` uses `#[test_case]` in [tests/cli.rs](tests/cli.rs) to make the
+same adaptation in Rust. Both keep the committed reference bytes unchanged.
+Use [cli-testing](../../tools/cli-testing/README.md) to inspect, compare, or
+stage the independent recipes. Other Rust scenarios remain native tests.
+
 [All commands](../../README.md)

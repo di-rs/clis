@@ -12,10 +12,10 @@ From the repository root with the pinned Rust toolchain installed:
 cargo run -p echor -- hello world
 ```
 
-For installed commands, `make install-local` installs Biggie, Parsu, Kara, Shish, cli-bench,
-and cli-check into `~/.local/bin`. Add it to `PATH`; use `PREFIX=/path` to override.
+For installed commands, `make install-local` installs Biggie, Parsu, Kara, Shish, cli-testing,
+cli-bench, and cli-check into `~/.local/bin`. Add it to `PATH`; use `PREFIX=/path` to override.
 The Rust tools are release binaries; the Python tools use isolated uv tool environments.
-The target replaces installations with these six names; built-ins are not installed.
+The target replaces installations with these seven names; built-ins are not installed.
 
 Choose another package from the tables below. These commands implement selected
 behaviors, not complete GNU/BSD replacements; each README explains the differences.
@@ -68,6 +68,7 @@ explains sessions, sample files, and switching builds.
 | --- | --- |
 | [cli-bench](tools/cli-bench/README.md) | Run per-CLI benchmark suites with Biggie and hyperfine |
 | [cli-check](tools/cli-check/README.md) | Check CLI package boundaries, tests, documentation, and benchmark coverage |
+| [cli-testing](tools/cli-testing/README.md) | Author CLI tests and inspect, compare, and record reference fixtures |
 | [cli-playground](tools/cli-playground/README.md) | Try Rust CLIs in a browser terminal with disposable files and a preview URL per PR |
 
 ## Shared libraries
@@ -75,7 +76,6 @@ explains sessions, sample files, and switching builds.
 | Project | Purpose |
 | --- | --- |
 | [cli-log](utils/cli-log/README.md) | Shared structured file logging and error reporting |
-| [cli-testing](utils/cli-testing/README.md) | Shared CLI test setup and byte fixture loading |
 
 ## Find your way around
 

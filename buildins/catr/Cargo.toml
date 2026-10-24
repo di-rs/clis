@@ -17,3 +17,8 @@ predicates = "3.1.4"
 
 [lints]
 workspace = true
+
+[[test]]
+name = "catalog"
+path = "tests/catalog.rs"
+harness = false
