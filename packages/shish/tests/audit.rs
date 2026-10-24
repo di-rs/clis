@@ -1632,3 +1632,23 @@ fn task_69_exit_history_append() -> anyhow::Result<()> {
     home.child("history").assert("existing\nfirst\nsecond\n");
     Ok(())
 }
+
+#[test]
+fn history_conflicting_operations_keep_brush_validation() -> anyhow::Result<()> {
+    for options in ["-r -w", "-w -a", "-a -w"] {
+        let home = assert_fs::TempDir::new()?;
+        let mut terminal = support::pty::Pty::new(home.path(), &["--bash", "-i"], &[])?;
+        terminal.expect("shish-test> ")?;
+        terminal.send(&format!(
+            "history {options} > output 2> errors; printf '%s' \"$?\" > status; exit 0\n"
+        ))?;
+        terminal.finish(0)?;
+        home.child("status").assert("2");
+        home.child("output").assert("");
+        home.child("errors")
+            .assert(predicates::str::contains("cannot be used with"));
+        home.child("-a").assert(predicates::path::missing());
+        home.child("-w").assert(predicates::path::missing());
+    }
+    Ok(())
+}

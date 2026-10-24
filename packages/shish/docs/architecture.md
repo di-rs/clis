@@ -18,6 +18,7 @@ History imports resolve paths from the shell directory and enforce a size limit;
 imported entries are never executed. History writes and appends also resolve paths from the
 shell directory. Unknown history options are rejected before file operations.
 Appending saves only unsaved entries, so repeated appends do not duplicate them.
+History flags are validated as options; use `./` for filenames starting with a dash.
 
 
 The `true` and `false` builtins call Sanctuary's utility libraries and return
