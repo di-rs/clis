@@ -13,11 +13,13 @@ cli-log.workspace = true
 chrono = "0.4.45"
 clap = { workspace = true }
 color-eyre = { workspace = true }
+cli-schema = { version = "0.1.0", path = "../../utils/cli-schema" }
 
 [dev-dependencies]
 cli-testing.workspace = true
 assert_fs = { workspace = true }
 predicates = { workspace = true }
+serde_json.workspace = true
 
 [lints]
 workspace = true

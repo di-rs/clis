@@ -17,7 +17,8 @@ from uuid import UUID, uuid4
 from anyio import CancelScope
 
 from cli_playground import domain
-from cli_playground.artifacts import canonical_archive, stage_archive
+from cli_playground.artifacts import archive_catalog, canonical_archive, stage_archive
+from cli_playground.catalog import Catalog
 from cli_playground.config import Settings
 from cli_playground.domain import ArtifactConflictError, CreateIntent, SessionBinding, UploadIntent
 from cli_playground.models import (
@@ -331,12 +332,18 @@ class CliPlaygroundService:
                 staged = temporary / "binaries"
                 canonical = temporary / "canonical.zip"
 
-                def prepare() -> tuple[list[str], str]:
+                def prepare() -> tuple[list[str], str, Catalog | None]:
                     clis = stage_archive(archive, staged, self.settings.max_binary_bytes)
-                    return clis, canonical_archive(staged, clis, canonical)
+                    hashes = {}
+                    for cli in clis:
+                        with (staged / cli).open("rb") as binary:
+                            hashes[cli] = hashlib.file_digest(binary, "sha256").hexdigest()
+                    catalog = archive_catalog(archive, sha, hashes)
+                    return clis, canonical_archive(staged, clis, canonical), catalog
 
                 try:
-                    clis, digest = await run_staging(prepare)
+                    clis, digest, catalog = await run_staging(prepare)
+                    catalog_digest = catalog.digest() if catalog else None
                 except OverflowError as error:
                     raise UploadTooLargeError from error
                 except (zipfile.BadZipFile, zlib.error, RuntimeError) as error:
@@ -346,7 +353,11 @@ class CliPlaygroundService:
                 await self.store.check_build(pr, build)
                 revision = sha if build is None else f"{sha}-{build.run_number}-{build.run_attempt}"
                 existing = await self.store.revision(pr, revision)
-                if existing is not None and (existing.sha256 != digest or existing.clis != clis):
+                if existing is not None and (
+                    existing.sha256 != digest
+                    or existing.clis != clis
+                    or existing.catalog_sha256 != catalog_digest
+                ):
                     raise ArtifactConflictError(
                         "this revision already has different binaries or CLI set"
                     )
@@ -362,7 +373,10 @@ class CliPlaygroundService:
                     None,
                 )
                 if pending is not None:
-                    if pending.artifact.sha256 != digest:
+                    if (
+                        pending.artifact.sha256 != digest
+                        or pending.artifact.catalog_sha256 != catalog_digest
+                    ):
                         raise ArtifactConflictError("this revision has a different pending upload")
                     return await self.finish_upload(pending)
                 metadata = ArtifactMetadata(
@@ -372,6 +386,8 @@ class CliPlaygroundService:
                     clis=clis,
                     artifact_id=uuid4(),
                     sha256=digest,
+                    catalog=catalog,
+                    catalog_sha256=catalog_digest,
                     expires_at=self.clock() + self.settings.preview_seconds,
                 )
                 intent = UploadIntent(
@@ -407,6 +423,15 @@ class CliPlaygroundService:
     async def reopen_pull_request(self, pr: int) -> None:
         async with self.uploads:
             await self.store.reopen_pull_request(pr)
+
+    async def catalog(self, identifier: str, revision: str) -> Catalog | None:
+        record = await self.store.record(identifier)
+        if record is None:
+            raise LookupError("preview not found")
+        artifact = await self.store.revision(record.pr, revision)
+        if artifact is None or artifact.expires_at <= self.clock():
+            raise LookupError("revision not found")
+        return artifact.catalog
 
     async def metadata(self, identifier: str) -> EnvironmentMetadata | None:
         return await self.store.metadata(identifier)

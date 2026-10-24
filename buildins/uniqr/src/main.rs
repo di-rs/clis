@@ -9,6 +9,9 @@ use crate::cli::{Cli, CliError};
 use uniqr::{UniqueList, report_unique_lines};
 
 fn main() -> std::process::ExitCode {
+    if let Some(status) = cli_schema::emit::<Cli>() {
+        return status;
+    }
     cli_log::run("uniqr", |cli| match run(cli) {
         Ok(()) => exitcode::OK,
         Err(CliError::Config) => {

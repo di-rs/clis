@@ -9,6 +9,9 @@ use crate::cli::{Cli, CliError};
 use wcr::{FileInfo, get_file_info};
 
 fn main() -> std::process::ExitCode {
+    if let Some(status) = cli_schema::emit::<Cli>() {
+        return status;
+    }
     cli_log::run("wcr", |cli| match run(cli) {
         Ok(failed) => i32::from(failed),
         Err(CliError::Config) => {

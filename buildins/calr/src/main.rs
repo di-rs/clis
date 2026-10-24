@@ -8,6 +8,9 @@ use crate::cli::{Cli, CliError};
 use calr::{CalendarDate, Month, format_month_with_highlight, get_today};
 
 fn main() -> std::process::ExitCode {
+    if let Some(status) = cli_schema::emit::<Cli>() {
+        return status;
+    }
     cli_log::run("calr", |mut cli: Cli| {
         cli.setup_default();
         match run(&cli) {

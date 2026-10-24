@@ -5,6 +5,9 @@ mod cli;
 mod output;
 use cli::{Cli, Command, ParsedCli};
 fn main() -> ExitCode {
+    if let Some(status) = cli_schema::emit::<Cli>() {
+        return status;
+    }
     let cli = match Cli::parse_validated() {
         Ok(cli) => cli,
         Err(error) => {

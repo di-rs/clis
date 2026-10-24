@@ -18,6 +18,7 @@ brush-core = "0.5"
 brush-interactive = { version = "0.4", features = ["reedline", "minimal"] }
 brush-parser = "0.4"
 clap = { workspace = true, features = ["derive"] }
+cli-schema = { version = "0.1.0", path = "../../utils/cli-schema" }
 sanctuary-false = { version = "0.1.0", path = "../../buildins/false", package = "false" }
 sanctuary-true = { version = "0.1.0", path = "../../buildins/true", package = "true" }
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "sync"] }
@@ -27,6 +28,7 @@ assert_fs.workspace = true
 cli-testing.workspace = true
 portable-pty = "0.9"
 predicates.workspace = true
+serde_json.workspace = true
 sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 vt100 = "0.16"
 

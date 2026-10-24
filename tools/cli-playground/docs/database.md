@@ -7,11 +7,19 @@ accessed only through its HTTP/WebSocket API.
 ## Transaction and recovery guarantees
 
 Publication locks the PR row while checking build order, closure and immutable
-binary identity. It commits the revision, current preview and upload-intent
+binary and catalog identity. It commits the revision, current preview and upload-intent
 removal together. PR closure cancels pending uploads in the same transaction;
 reopening cannot revive them. Attachment updates lock and reload the binding,
 so a late completion cannot overwrite a newer claim. Transactions end before
 calling Boxie.
+
+The nullable `catalog` JSONB and `catalog_sha256` fields on `artifact_revision`
+and `upload_intent` were added by `0003_cli_catalog`. A catalog's canonical digest
+participates in conflict checks before remote upload, during recovery, and after
+publication. A changed catalog cannot reuse a revision whose executable bytes
+are unchanged. Existing rows need no backfill and remain usable without a catalog.
+The staged ZIP contains executable bytes only; recovery reads the catalog from
+the persisted upload intent.
 
 ### Recover unfinished remote operations
 
@@ -48,6 +56,12 @@ uv run --package cli-playground alembic \
 The installed wheel includes Alembic scripts; the container includes `alembic.ini`
 and runs the standard `alembic upgrade head` command. Startup checks the schema version
 and fails if it is missing or incompatible. It does not create or upgrade tables.
+
+Catalog rollout requires the migration and compatible gateway before enabling
+the PR build variable; follow the [publication sequence](previews.md#enable-generated-command-catalogs).
+The startup schema check expects `0003_cli_catalog`. An older application may
+reject the newer schema on restart, so retain the compatible application when
+disabling catalog production.
 
 ### Author a migration
 

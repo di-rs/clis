@@ -23,6 +23,7 @@ from fastapi import Path as PathParameter
 from fastapi.responses import FileResponse
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
+from cli_playground.catalog import Catalog
 from cli_playground.domain import ArtifactConflictError
 from cli_playground.models import (
     ID_PATTERN,
@@ -128,6 +129,13 @@ def create_router(service: CliPlaygroundService, static_dir: Path) -> APIRouter:
         authenticate(request)
         await service.reopen_pull_request(pr)
         return {"reopened": pr}
+
+    @router.get("/api/environments/{identifier}/revisions/{revision}/catalog")
+    async def catalog(identifier: str, revision: ArtifactRevision) -> Catalog | None:
+        try:
+            return await service.catalog(identifier, revision)
+        except LookupError as error:
+            raise HTTPException(404, "catalog revision not found") from error
 
     @router.get("/api/environments/{identifier}")
     async def metadata(identifier: str) -> EnvironmentMetadata:

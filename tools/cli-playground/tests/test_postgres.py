@@ -283,3 +283,53 @@ def test_database_io_yields_to_event_loop_and_cancellation_rolls_back(
                 assert (await session.get(Preview, 1) is None) == cancel
 
     asyncio.run(exercise())
+
+
+def test_catalog_digest_conflicts_survive_pending_upload_and_committed_retry(
+    postgres_dsn: str,
+) -> None:
+    from cli_playground.domain import ArtifactConflictError, UploadIntent
+    from cli_playground.session_store import SessionStore
+    from cli_playground.storage import EnvironmentStore
+
+    from .catalog_fixtures import catalog
+    from .helpers import database, migrate
+
+    migrate(postgres_dsn)
+    reference = catalog()
+    changed = catalog(about="A different description")
+    original = ArtifactMetadata(
+        pr=123,
+        sha="a" * 40,
+        revision="a" * 40,
+        artifact_id=uuid4(),
+        sha256="b" * 64,
+        clis=["echor"],
+        expires_at=100,
+        catalog=reference,
+        catalog_sha256=reference.digest(),
+    )
+    conflicting = original.model_copy(
+        update={"catalog": changed, "catalog_sha256": changed.digest()}
+    )
+
+    async def exercise() -> None:
+        async with database(postgres_dsn) as sessions:
+            await SessionStore(sessions).upload_intent(
+                UploadIntent(artifact=original, build=None, previous_revision=None)
+            )
+        async with database(postgres_dsn) as sessions:
+            operations = SessionStore(sessions)
+            store = EnvironmentStore(sessions, preview_seconds=100, clock=lambda: 1)
+            assert (await operations.uploads())[0].artifact.catalog == reference
+            with pytest.raises(ArtifactConflictError):
+                await store.finish_upload(conflicting, None)
+            saved = await store.finish_upload(original, None)
+            assert saved.catalog_sha256 == reference.digest()
+        async with database(postgres_dsn) as sessions:
+            store = EnvironmentStore(sessions, preview_seconds=100, clock=lambda: 1)
+            assert (await store.finish_upload(original, None)).catalog == reference
+            with pytest.raises(ArtifactConflictError):
+                await store.finish_upload(conflicting, None)
+
+    asyncio.run(exercise())

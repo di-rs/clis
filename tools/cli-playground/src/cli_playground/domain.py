@@ -77,7 +77,9 @@ def check_revision(
     if build is not None and build.sha != artifact.sha:
         raise ArtifactConflictError("build identity conflict")
     if previous is not None and (
-        previous.sha256 != artifact.sha256 or previous.clis != artifact.clis
+        previous.sha256 != artifact.sha256
+        or previous.clis != artifact.clis
+        or previous.catalog_sha256 != artifact.catalog_sha256
     ):
         raise ArtifactConflictError("this revision already has different binaries or CLI set")
 

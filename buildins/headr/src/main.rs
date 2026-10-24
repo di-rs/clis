@@ -11,6 +11,9 @@ mod cli;
 use crate::cli::{Args, CliError};
 
 fn main() -> std::process::ExitCode {
+    if let Some(status) = cli_schema::emit::<Args>() {
+        return status;
+    }
     cli_log::run("headr", |cli| match run(&cli) {
         Ok(failed) => i32::from(failed),
         Err(CliError::Config) => {

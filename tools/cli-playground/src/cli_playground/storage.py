@@ -15,6 +15,7 @@ from cli_playground.domain import (
     ArtifactConflictError,
     UploadIntent,
     check_build,
+    check_revision,
     check_upload,
     identifier,
     next_build,
@@ -248,10 +249,10 @@ class EnvironmentStore:
             self.clock(),
         )
         assert result.artifact is not None
-        await session.merge(Revision(**result.artifact.model_dump()))
+        await session.merge(Revision(**result.artifact.model_dump(by_alias=True)))
         await session.flush()
         assign_record(row, result)
-        return Environment(id=row.id, **result.artifact.model_dump())
+        return Environment(id=row.id, **result.artifact.model_dump(by_alias=True))
 
     async def finish_upload(
         self, artifact: ArtifactMetadata, build: BuildIdentity | None
@@ -264,8 +265,10 @@ class EnvironmentStore:
             if intent is None:
                 previous = await session.get(Revision, (artifact.pr, artifact.revision))
                 if previous and previous.artifact_id == artifact.artifact_id:
+                    check_revision(artifact_value(previous), artifact, build)
                     return Environment(id=row.id, **artifact_value(previous).model_dump())
                 raise ArtifactConflictError("upload is no longer pending")
+            check_revision(artifact_value(intent), artifact, build)
             try:
                 current = await preview_value(session, row)
                 check_upload(

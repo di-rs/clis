@@ -18,6 +18,7 @@ cli-log.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 tempfile = "3.27.0"
+cli-schema = { version = "0.1.0", path = "../../utils/cli-schema" }
 
 [dev-dependencies]
 cli-testing.workspace = true

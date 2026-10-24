@@ -10,6 +10,9 @@ use crate::cli::{Cli, CliError};
 use commr::get_lines;
 
 fn main() -> std::process::ExitCode {
+    if let Some(status) = cli_schema::emit::<Cli>() {
+        return status;
+    }
     cli_log::run("commr", |cli| match run(&cli) {
         Ok(()) => exitcode::OK,
         Err(CliError::Config) => {

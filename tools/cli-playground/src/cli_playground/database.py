@@ -29,7 +29,7 @@ def session_factory(url: str) -> SessionFactory:
 async def check_schema(sessions: SessionFactory) -> None:
     async with sessions() as session:
         version = await session.scalar(text("SELECT version_num FROM alembic_version"))
-        if version != "0002_request_correlation":
+        if version != "0003_cli_catalog":
             raise RuntimeError("Playground database needs an explicit schema upgrade")
 
 

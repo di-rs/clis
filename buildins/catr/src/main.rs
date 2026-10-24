@@ -10,6 +10,9 @@ use catr::write_lines;
 mod cli;
 
 fn main() -> std::process::ExitCode {
+    if let Some(status) = cli_schema::emit::<Args>() {
+        return status;
+    }
     cli_log::run("catr", |cli| match run(&cli) {
         Ok(failed) => i32::from(failed),
         Err(CliError::Config) => {

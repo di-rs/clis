@@ -103,7 +103,7 @@ class SessionStore:
             session.add(
                 Upload(
                     request_id=intent.request_id,
-                    **intent.artifact.model_dump(),
+                    **intent.artifact.model_dump(by_alias=True),
                     build_sha=intent.build.sha if intent.build else None,
                     run_id=intent.build.run_id if intent.build else None,
                     run_number=intent.build.run_number if intent.build else None,

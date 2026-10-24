@@ -959,6 +959,10 @@ def test_configured_origin_requires_https() -> None:
 def test_build_command_invokes_cargo_once_for_the_selected_batch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, count: int
 ) -> None:
+    from cli_playground import catalog_build
+
+    catalog_export = Mock()
+    monkeypatch.setattr(catalog_build, "build_catalog", catalog_export)
     names = [f"cli{index:03}" for index in range(count)]
     for name in [*names, "unused"]:
         executable = tmp_path / "target/release" / name
@@ -980,7 +984,17 @@ def test_build_command_invokes_cargo_once_for_the_selected_batch(
     monkeypatch.setattr(
         sys,
         "argv",
-        ["preview_ci.py", "build", "--base", "base", "--head", "head", "--output", str(output)],
+        [
+            "preview_ci.py",
+            "build",
+            "--catalog",
+            "--base",
+            "base",
+            "--head",
+            "head",
+            "--output",
+            str(output),
+        ],
     )
     preview_ci.main()
     assert commands.call_args_list[0].args[0] == [
@@ -998,6 +1012,7 @@ def test_build_command_invokes_cargo_once_for_the_selected_batch(
         assert not list(output.glob("*"))
         return
     assert commands.call_count == 2
+    catalog_export.assert_called_once_with(tmp_path, "base", "head", names, output)
     commands.assert_called_with(
         [
             "cargo",
@@ -1013,3 +1028,28 @@ def test_build_command_invokes_cargo_once_for_the_selected_batch(
     for name in names:
         assert (output / name).read_bytes() == elf_binary(name.encode())
         assert (output / name).stat().st_mode & 0o111
+
+
+@pytest.mark.parametrize("valid", [True, False])
+def test_trusted_publisher_validates_catalog_without_running_uploaded_code(valid: bool) -> None:
+    from .catalog_fixtures import catalog
+    from .helpers import binary_bundle
+
+    github = FakeGitHub()
+    reference = catalog(SHA)
+    if not valid:
+        reference.head_sha = "b" * 40
+    github.payload = binary_bundle({"echor": elf_binary(), "catalog.json": reference.canonical()})
+    backend = Mock(return_value={"id": "a" * 32, "url": "https://play.example/p/" + "a" * 32})
+    if valid:
+        preview_ci.publish(github, REPO, 500, "https://play.example", "secret", backend=backend)
+        uploads = [
+            call for call in backend.call_args_list if call.args[2].startswith("/api/environments?")
+        ]
+        assert len(uploads) == 1
+    else:
+        with pytest.raises(ValueError, match="Failed to publish"):
+            preview_ci.publish(github, REPO, 500, "https://play.example", "secret", backend=backend)
+        assert not any(
+            call.args[2].startswith("/api/environments?") for call in backend.call_args_list
+        )

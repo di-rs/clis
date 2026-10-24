@@ -1,6 +1,7 @@
 """Failure and restart contracts across actual product/API/supervisor servers."""
 
 import asyncio
+import hashlib
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -19,6 +20,8 @@ from websockets.exceptions import ConnectionClosedError, InvalidStatus
 from websockets.typing import Origin
 
 from .boxie_network import admit, boxie_network, product_server, publish, socket_url
+from .catalog_fixtures import catalog
+from .helpers import AUTH, binary_bundle, elf_binary
 
 
 @pytest.mark.parametrize("failure", ["reply", "commit"])
@@ -52,7 +55,17 @@ def test_failed_publication_preserves_ready_revision_and_recovers_exact_upload(
                             raise OSError("injected metadata commit failure")
 
                         fault.setattr(EnvironmentStore, "_publish", fail_commit)
-                    failed = await publish(product, "b" * 40)
+                    reference = catalog("b" * 40)
+                    binary = elf_binary(b"b" * 40)
+                    reference.clis[0].binary_sha256 = hashlib.sha256(binary).hexdigest()
+                    failed = await product.http.post(
+                        "/api/environments",
+                        params={"sha": "b" * 40, "pr": 123},
+                        headers=AUTH,
+                        content=binary_bundle(
+                            {"echor": binary, "catalog.json": reference.canonical()}
+                        ),
+                    )
                     assert failed.status_code == (503 if failure == "reply" else 500)
                 assert (await product.service.store.get(identifier)) == original
                 old_page = await admit(product, identifier, "a" * 40)
@@ -67,6 +80,8 @@ def test_failed_publication_preserves_ready_revision_and_recovers_exact_upload(
                     assert (await attach(ws))[1] == b"ready\n"
                 (pending,) = await product.service.sessions.uploads()
                 artifact_id = pending.artifact.artifact_id
+                assert pending.artifact.catalog == reference
+                assert pending.artifact.catalog_sha256 == reference.digest()
                 assert pending.request_id == UUID(failed.headers["x-request-id"])
                 # Both failures occur after the real supervisor has accepted these bytes.
                 assert (network.config.data_dir / "artifacts" / str(artifact_id)).exists()
@@ -83,6 +98,12 @@ def test_failed_publication_preserves_ready_revision_and_recovers_exact_upload(
                 recovered = await restarted.service.store.get(identifier)
                 assert recovered is not None and recovered.revision == "b" * 40
                 assert recovered.artifact_id == artifact_id
+                assert recovered.catalog == reference
+                assert recovered.catalog_sha256 == reference.digest()
+                response = await restarted.http.get(
+                    f"/api/environments/{identifier}/revisions/{'b' * 40}/catalog"
+                )
+                assert response.json() == reference.model_dump(by_alias=True)
                 assert not (await restarted.service.sessions.uploads())
                 assert not (await restarted.service.sessions.retirements())
                 await restarted.service.sessions.retire(original.artifact_id)

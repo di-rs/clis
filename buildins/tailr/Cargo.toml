@@ -9,11 +9,13 @@ cli-log.workspace = true
 clap = { version = "4.5.0", features = ["derive"] }
 thiserror = "2.0.20"
 exitcode = "1.1.2"
+cli-schema = { version = "0.1.0", path = "../../utils/cli-schema" }
 
 [dev-dependencies]
 assert_fs.workspace = true
 cli-testing.workspace = true
 predicates = "3.0.4"
+serde_json.workspace = true
 
 [lints]
 workspace = true

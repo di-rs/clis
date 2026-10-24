@@ -6,6 +6,9 @@ use crate::cli::{Cli, CliError};
 use findr::{is_name_matches, is_type_matches};
 
 fn main() -> std::process::ExitCode {
+    if let Some(status) = cli_schema::emit::<Cli>() {
+        return status;
+    }
     cli_log::run("findr", |cli| match run(cli) {
         Ok(failed) => i32::from(failed),
         Err(e) => {
