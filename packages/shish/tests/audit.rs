@@ -607,3 +607,19 @@ fn task_20_stderr_redirection() {
         .assert().code(0).stdout("visible").stderr("");
     home.child("err").assert("second");
 }
+
+#[test]
+fn task_21_stdout_append() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args([
+            "-c",
+            "printf first > out; printf second >> out; printf new >> created; printf visible",
+        ])
+        .assert()
+        .code(0)
+        .stdout("visible")
+        .stderr("");
+    home.child("out").assert("firstsecond");
+    home.child("created").assert("new");
+}
