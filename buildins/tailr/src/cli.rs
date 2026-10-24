@@ -32,7 +32,7 @@ pub struct Cli {
     )]
     pub bytes: Option<TakeValue>,
 
-    /// Supress header printing when multiple files provided
+    /// Suppress header printing when multiple files provided
     #[arg(short('q'), long)]
     pub quiet: bool,
 }
