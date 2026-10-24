@@ -843,3 +843,21 @@ fn task_30_nested_file_completion() -> anyhow::Result<()> {
     terminal.send("exit 0\n")?;
     terminal.finish(0)
 }
+
+#[test]
+fn task_31_directory_completion() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    home.child("unique_directory").create_dir_all()?;
+    let root = home.path().canonicalize()?;
+    let mut terminal = support::pty::Pty::new(&root, &["-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("cd uniq\t")?;
+    terminal.expect("shish-test> cd unique_directory/")?;
+    terminal.send("\n")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("/bin/pwd\n")?;
+    terminal.expect(&format!("\n{}\n", root.join("unique_directory").display()))?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("exit 0\n")?;
+    terminal.finish(0)
+}
