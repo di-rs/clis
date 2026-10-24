@@ -1204,3 +1204,24 @@ fn task_48_background_output() -> anyhow::Result<()> {
     terminal.send("wait; exit 0\n")?;
     terminal.finish(0)
 }
+
+#[test]
+fn task_49_list_one_job() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    home.child("worker")
+        .write_str("while [ ! -e release ]; do /bin/sleep 0.02; done\n")?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("/bin/sh worker & jobs > listing 2> errors; echo listed\n")?;
+    terminal.expect("\nlisted\n")?;
+    terminal.expect_line("shish-test> ")?;
+    let listing = std::fs::read_to_string(home.child("listing").path())?;
+    // POSIX leaves the spacing before command text unspecified.
+    anyhow::ensure!(
+        listing.split_whitespace().collect::<Vec<_>>() == ["[1]+", "Running", "/bin/sh", "worker"],
+        "unexpected job listing: {listing:?}"
+    );
+    home.child("errors").assert("");
+    terminal.send(": > release; wait; exit 0\n")?;
+    terminal.finish(0)
+}
