@@ -13,6 +13,9 @@ Stdin is read without consuming data intended for `read` or external programs.
 Interactive input uses a terminal editor. All execution paths preserve command
 statuses and delegate shell exit handling to the runtime.
 
+A history adapter bounds display counts to available entries to prevent overflow.
+
+
 The `true` and `false` builtins call Sanctuary's utility libraries and return
 status without terminating the shell. Their standalone CLIs own logging and
 process termination.
