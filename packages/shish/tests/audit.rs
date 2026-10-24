@@ -1579,3 +1579,20 @@ fn task_66_append_history_file() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn task_67_startup_history() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    home.child("history")
+        .write_str("echo startup\ntouch must-not-execute\n")?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["--bash", "-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("history -d -1; history > listing 2> errors; unset HISTFILE; exit $?\n")?;
+    terminal.finish(0)?;
+    home.child("listing")
+        .assert("    1  echo startup\n    2  touch must-not-execute\n");
+    home.child("errors").assert("");
+    home.child("must-not-execute")
+        .assert(predicates::path::missing());
+    Ok(())
+}
