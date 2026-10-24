@@ -384,8 +384,8 @@ The task numbers are stable even when implementation order changes.
 | 58 | History: builtin | bash; Bash §9 | Verified in Bash mode: history remains available without PATH commands; [task_58](../tests/audit.rs) | [58 PR](https://github.com/di-rs/sanctuary/pull/170) |
 | 59 | History: listing | bash; Bash §9 | Verified in Bash mode: numbered history listing preserves command order; [task_59](../tests/audit.rs) | [59 PR](https://github.com/di-rs/sanctuary/pull/171) |
 | 60 | History: entry limits | bash; Bash §9 | Verified in Bash mode: history 0, 1, and oversized counts preserve status and numbering; [task_60](../tests/audit.rs) | [60 PR](https://github.com/di-rs/sanctuary/pull/172) |
-| 61 | History: up-arrow | bash; Bash §9 | Verified in Bash mode: up-arrow recalls the preceding command; [task_61](../tests/audit.rs) | Current task PR |
-| 62 | History: down-arrow | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 62 |
+| 61 | History: up-arrow | bash; Bash §9 | Verified in Bash mode: up-arrow recalls the preceding command; [task_61](../tests/audit.rs) | [61 PR](https://github.com/di-rs/sanctuary/pull/173) |
+| 62 | History: down-arrow | bash; Bash §9 | Verified in Bash mode: down-arrow advances from older to newer history and returns to an empty line; [task_62](../tests/audit.rs) | Current task PR |
 | 63 | History: recalled execution | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 63 |
 | 64 | History persistence: read file | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 64 |
 | 65 | History persistence: write file | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 65 |
