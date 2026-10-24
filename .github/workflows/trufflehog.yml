@@ -1,0 +1,66 @@
+name: TruffleHog evaluation
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+permissions:
+  contents: read
+concurrency:
+  group: trufflehog-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+env:
+  PYTHONPATH: tools
+jobs:
+  select:
+    if: ${{ !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'run-ci') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      selected: ${{ steps.paths.outputs.selected }}
+      base: ${{ steps.paths.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: python3 -m unittest discover -s tools/guardrails/tests -p test_scope.py
+      - id: paths
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: >-
+          python3 -m guardrails.scope --base "$BASE"
+          --patterns '*'
+          --present '*'
+          --config '.github/workflows/trufflehog.yml' 'tools/guardrails/trufflehog.py' 'tools/guardrails/changes.py' 'tools/guardrails/scope.py'
+  check:
+    name: TruffleHog evaluation
+    needs: select
+    if: needs.select.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BASE: ${{ needs.select.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # No --fail: this evaluates the scanner, without introducing a second gate.
+      # Do not upload raw findings or print credential material.
+      - name: Evaluate without credential verification
+        run: |
+          status=0
+          docker run --rm --network none -v "$PWD:/repo:ro" \
+            trufflesecurity/trufflehog:3.99.4 git file:///repo \
+            --since-commit "$BASE" --branch HEAD --no-verification --no-update --json \
+            > "$RUNNER_TEMP/trufflehog.jsonl" 2> "$RUNNER_TEMP/trufflehog-errors.txt" || status=$?
+          if [ "$status" -eq 0 ]; then
+            count=$(wc -l < "$RUNNER_TEMP/trufflehog.jsonl")
+            echo "TruffleHog evaluation: $count unverified candidates; credential verification disabled." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'TruffleHog evaluation incomplete; Gitleaks remains the secret gate.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          rm -f "$RUNNER_TEMP/trufflehog.jsonl" "$RUNNER_TEMP/trufflehog-errors.txt"

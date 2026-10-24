@@ -5,6 +5,8 @@ persistence, CI publication, or infrastructure. Protect host integrity, session
 and consumer isolation, credentials, artifact integrity, lifecycle state, and
 service availability. User files and terminal contents may contain sensitive data.
 
+Advisory secret scans must not publish credential values and run without credential verification or container network access.
+
 ## Trust boundaries
 
 - **Local CLIs:** Arguments, stdin, files, and filenames are untrusted. Commands
