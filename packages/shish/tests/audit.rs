@@ -1026,3 +1026,28 @@ fn task_41_completer_arguments() -> anyhow::Result<()> {
         .assert("<pick>\n<arg>\n<pick>\n");
     Ok(())
 }
+
+#[test]
+fn task_42_completer_environment() -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    let home = assert_fs::TempDir::new()?;
+    let helper = home.child("completer");
+    helper.write_str("#!/bin/sh\nprintf '%s\\n' \"$COMP_LINE\" \"$COMP_POINT\" \"$SHISH_COMPLETION_CONTEXT\" > completion-env\nprintf 'environment_candidate\\n'\n")?;
+    std::fs::set_permissions(helper.path(), std::fs::Permissions::from_mode(0o755))?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["--bash", "-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send(
+        "export SHISH_COMPLETION_CONTEXT=visible; complete -C ./completer pick; echo setup-ready\n",
+    )?;
+    terminal.expect("\nsetup-ready\n")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("pick env\t")?;
+    terminal.expect("shish-test> pick environment_candidate ")?;
+    terminal.send("\x03")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("exit 0\n")?;
+    terminal.finish(0)?;
+    home.child("completion-env")
+        .assert("pick env\n8\nvisible\n");
+    Ok(())
+}
