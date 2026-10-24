@@ -229,8 +229,8 @@ The task numbers are stable even when implementation order changes.
 | 26 | Command completion: executables | interactive; product UI | Verified: custom PATH executable is completed and executed; [task_26](../tests/audit.rs) | [26 PR](https://github.com/di-rs/sanctuary/pull/140) |
 | 27 | Command completion: multiple matches | interactive; product UI | Verified: completion menu lists both executable candidates and can be cancelled; [task_27](../tests/audit.rs) | [27 PR](https://github.com/di-rs/sanctuary/pull/141) |
 | 28 | Command completion: partial matches | interactive; product UI | Unverified; dedicated audit pending | Planned task 28 |
-| 29 | Filename completion: files | interactive; product UI | Verified: a completed filename containing a space opens the intended file; [task_29](../tests/audit.rs) | Current task PR |
-| 30 | Filename completion: nested files | interactive; product UI | Unverified; dedicated audit pending | Planned task 30 |
+| 29 | Filename completion: files | interactive; product UI | Verified: a completed filename containing a space opens the intended file; [task_29](../tests/audit.rs) | [29 PR](https://github.com/di-rs/sanctuary/pull/142) |
+| 30 | Filename completion: nested files | interactive; product UI | Verified: directory continuation and a nested file are completed and opened; [task_30](../tests/audit.rs) | Current task PR |
 | 31 | Filename completion: directories | interactive; product UI | Unverified; dedicated audit pending | Planned task 31 |
 | 32 | Filename completion: no matches | interactive; product UI | Unverified; dedicated audit pending | Planned task 32 |
 | 33 | Filename completion: multiple matches | interactive; product UI | Unverified; dedicated audit pending | Planned task 33 |

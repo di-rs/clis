@@ -824,3 +824,22 @@ fn task_29_file_completion() -> anyhow::Result<()> {
     terminal.send("exit 0\n")?;
     terminal.finish(0)
 }
+
+#[test]
+fn task_30_nested_file_completion() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    home.child("nested/deep").create_dir_all()?;
+    home.child("nested/deep/file.txt")
+        .write_str("nested-completion-ok\n")?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("/bin/cat nested/de\t")?;
+    terminal.expect("shish-test> /bin/cat nested/deep/")?;
+    terminal.send("fi\t")?;
+    terminal.expect("shish-test> /bin/cat nested/deep/file.txt ")?;
+    terminal.send("\n")?;
+    terminal.expect("\nnested-completion-ok\n")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("exit 0\n")?;
+    terminal.finish(0)
+}
