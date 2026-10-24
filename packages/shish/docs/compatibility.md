@@ -226,8 +226,8 @@ The task numbers are stable even when implementation order changes.
 | 23 | Command completion: builtins | interactive; product UI | Verified: bounded PTY Tab interaction with isolated PATH; [task_23](../tests/audit.rs) | [23 PR](https://github.com/di-rs/sanctuary/pull/138) |
 | 24 | Command completion: arguments | interactive; product UI | Verified: bounded PTY Tab interaction with isolated PATH; [task_24](../tests/audit.rs) | [24 PR](https://github.com/di-rs/sanctuary/pull/139) |
 | 25 | Command completion: no matches | interactive; product UI | Unverified; dedicated audit pending | Planned task 25 |
-| 26 | Command completion: executables | interactive; product UI | Verified: custom PATH executable is completed and executed; [task_26](../tests/audit.rs) | Current task PR |
-| 27 | Command completion: multiple matches | interactive; product UI | Unverified; dedicated audit pending | Planned task 27 |
+| 26 | Command completion: executables | interactive; product UI | Verified: custom PATH executable is completed and executed; [task_26](../tests/audit.rs) | [26 PR](https://github.com/di-rs/sanctuary/pull/140) |
+| 27 | Command completion: multiple matches | interactive; product UI | Verified: completion menu lists both executable candidates and can be cancelled; [task_27](../tests/audit.rs) | Current task PR |
 | 28 | Command completion: partial matches | interactive; product UI | Unverified; dedicated audit pending | Planned task 28 |
 | 29 | Filename completion: files | interactive; product UI | Unverified; dedicated audit pending | Planned task 29 |
 | 30 | Filename completion: nested files | interactive; product UI | Unverified; dedicated audit pending | Planned task 30 |
