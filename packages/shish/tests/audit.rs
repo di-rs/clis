@@ -1271,3 +1271,26 @@ fn task_51_reap_one_job() -> anyhow::Result<()> {
     home.child("errors").assert("");
     Ok(())
 }
+
+#[test]
+fn task_52_reap_multiple_jobs() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    home.child("worker").write_str(
+        "while [ ! -e release ]; do /bin/sleep 0.02; done\nprintf finished > \"$1\"\n",
+    )?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("/bin/sh worker one & /bin/sh worker two & echo launched\n")?;
+    terminal.expect("\nlaunched\n")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send(": > release; wait; echo joined\n")?;
+    terminal.expect("\njoined\n")?;
+    terminal.expect_line("shish-test> ")?;
+    home.child("one").assert("finished");
+    home.child("two").assert("finished");
+    terminal.send("jobs > remaining 2> errors; exit $?\n")?;
+    terminal.finish(0)?;
+    home.child("remaining").assert("");
+    home.child("errors").assert("");
+    Ok(())
+}
