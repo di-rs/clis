@@ -233,9 +233,9 @@ The task numbers are stable even when implementation order changes.
 | 30 | Filename completion: nested files | interactive; product UI | Verified: directory continuation and a nested file are completed and opened; [task_30](../tests/audit.rs) | [30 PR](https://github.com/di-rs/sanctuary/pull/143) |
 | 31 | Filename completion: directories | interactive; product UI | Verified: completion appends a directory separator and cd enters the result; [task_31](../tests/audit.rs) | [31 PR](https://github.com/di-rs/sanctuary/pull/144) |
 | 32 | Filename completion: no matches | interactive; product UI | Unverified; dedicated audit pending | Planned task 32 |
-| 33 | Filename completion: multiple matches | interactive; product UI | Verified: both filename candidates appear in the completion menu; [task_33](../tests/audit.rs) | Current task PR |
+| 33 | Filename completion: multiple matches | interactive; product UI | Verified: both filename candidates appear in the completion menu; [task_33](../tests/audit.rs) | [33 PR](https://github.com/di-rs/sanctuary/pull/145) |
 | 34 | Filename completion: partial matches | interactive; product UI | Unverified; dedicated audit pending | Planned task 34 |
-| 35 | Filename completion: multiple arguments | interactive; product UI | Unverified; dedicated audit pending | Planned task 35 |
+| 35 | Filename completion: multiple arguments | interactive; product UI | Verified: completing the next argument preserves an already completed filename; [task_35](../tests/audit.rs) | Current task PR |
 | 36 | Programmable completion: registration | bash; Bash §8.6–8.7 | Unverified; dedicated audit pending | Planned task 36 |
 | 37 | Programmable completion: missing specifications | bash; Bash §8.6–8.7 | Unverified; dedicated audit pending | Planned task 37 |
 | 38 | Programmable completion: display specifications | bash; Bash §8.6–8.7 | Unverified; dedicated audit pending | Planned task 38 |
