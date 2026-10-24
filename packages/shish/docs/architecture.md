@@ -15,7 +15,8 @@ statuses and delegate shell exit handling to the runtime.
 
 A history adapter bounds display counts to available entries to prevent overflow.
 History imports resolve paths from the shell directory and enforce a size limit;
-imported entries are never executed.
+imported entries are never executed. History writes also resolve paths from the
+shell directory. Unknown history options are rejected before file operations.
 
 
 The `true` and `false` builtins call Sanctuary's utility libraries and return

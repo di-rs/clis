@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::fs::File;
+use std::io::Write as _;
 use std::path::PathBuf;
 
 use brush_core::builtins::{BoxFuture, Registration};
@@ -22,11 +23,24 @@ fn execute<SE: ShellExtensions>(
     mut args: Vec<CommandArg>,
 ) -> BoxFuture<'_, Result<ExecutionResult, Error>> {
     Box::pin(async move {
+        if let Some(option) = invalid_option(&args) {
+            writeln!(context.stderr(), "history: invalid option: {option}")?;
+            return Ok(brush_core::ExecutionExitCode::InvalidUsage.into());
+        }
         if let [_, CommandArg::String(option), rest @ ..] = args.as_slice()
             && option == "-r"
             && rest.len() <= 1
         {
             return read_history(&mut context, rest.first().map(ToString::to_string));
+        }
+        if let [_, CommandArg::String(option), rest @ ..] = args.as_slice()
+            && option == "-w"
+            && rest.len() <= 1
+            && rest
+                .first()
+                .is_none_or(|arg| !arg.to_string().starts_with('-'))
+        {
+            return write_history(&mut context, rest.first().map(ToString::to_string));
         }
         // Brush 0.2.0 subtracts the requested count without saturating. Clamp
         // only display operands; numeric filenames and delete offsets retain
@@ -88,4 +102,54 @@ fn read_history<SE: ShellExtensions>(
         history.add(item.clone())?;
     }
     Ok(ExecutionResult::success())
+}
+
+fn write_history<SE: ShellExtensions>(
+    context: &mut ExecutionContext<'_, SE>,
+    filename: Option<String>,
+) -> Result<ExecutionResult, Error> {
+    let path = filename
+        .map(PathBuf::from)
+        .or_else(|| context.shell.history_file_path());
+    let path = path.map(|path| context.shell.working_dir().join(path));
+    let timestamps = context.shell.history_time_format().is_some();
+    let history = context
+        .shell
+        .history_mut()
+        .ok_or(brush_core::ErrorKind::HistoryNotEnabled)?;
+    if let Some(path) = path {
+        history.flush(path, false, false, timestamps)?;
+    }
+    Ok(ExecutionResult::success())
+}
+
+// Brush treats unknown flags as positional arguments and may ignore them when
+// a file operation is present. Validate option spelling without interpreting
+// counts, file paths, offsets, or the literal arguments to -p/-s.
+fn invalid_option(args: &[CommandArg]) -> Option<&str> {
+    let mut args = args.iter().skip(1);
+    while let Some(CommandArg::String(arg)) = args.next() {
+        if !arg.starts_with('-') || matches!(arg.as_str(), "-" | "--") {
+            break;
+        }
+        if arg == "--help" {
+            continue;
+        }
+        let mut flags = arg.chars();
+        flags.next();
+        while let Some(flag) = flags.next() {
+            match flag {
+                'a' | 'n' | 'r' | 'w' | 'c' | 'h' => {}
+                'd' => {
+                    if flags.as_str().is_empty() {
+                        args.next();
+                    }
+                    break;
+                }
+                'p' | 's' => return None,
+                _ => return Some(arg),
+            }
+        }
+    }
+    None
 }

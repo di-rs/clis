@@ -1500,3 +1500,58 @@ fn task_64_missing_history_file_preserves_entries() -> anyhow::Result<()> {
         .assert(predicates::str::contains("No such file"));
     Ok(())
 }
+
+#[test]
+fn task_65_write_history_file() -> anyhow::Result<()> {
+    for default_file in [false, true] {
+        let home = assert_fs::TempDir::new()?;
+        home.child("sub").create_dir_all()?;
+        home.child("sub/saved").write_str("obsolete\n")?;
+        let mut terminal = support::pty::Pty::new(home.path(), &["--bash", "-i"], &[])?;
+        terminal.expect("shish-test> ")?;
+        let write = if default_file {
+            "HISTFILE=saved; history -w"
+        } else {
+            "history -w saved"
+        };
+        terminal.send(&format!("history -c; history -s first; history -s second; cd sub; {write} > output 2> errors; printf '%s' \"$?\" > status; unset HISTFILE; exit 0\n"))?;
+        terminal.finish(0)?;
+        home.child("sub/saved").assert("first\nsecond\n");
+        home.child("sub/status").assert("0");
+        home.child("sub/output").assert("");
+        home.child("sub/errors").assert("");
+        home.child("saved").assert(predicates::path::missing());
+    }
+    Ok(())
+}
+
+#[test]
+fn history_write_rejects_unknown_options_without_creating_files() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["--bash", "-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("history -w -Z > output 2> errors; printf '%s' \"$?\" > status; exit 0\n")?;
+    terminal.finish(0)?;
+    home.child("status").assert("2");
+    home.child("output").assert("");
+    home.child("errors")
+        .assert(predicates::str::contains("invalid option"));
+    home.child("-Z").assert(predicates::path::missing());
+    Ok(())
+}
+
+#[test]
+fn history_write_with_clear_keeps_option_semantics() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["--bash", "-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("history -c; history -s kept; history -w -c > output 2> errors; printf '%s' \"$?\" > status; history > listing; unset HISTFILE; exit 0\n")?;
+    terminal.finish(0)?;
+    home.child("status").assert("0");
+    home.child("output").assert("");
+    home.child("errors").assert("");
+    home.child("listing").assert("");
+    home.child("history").assert("");
+    home.child("-c").assert(predicates::path::missing());
+    Ok(())
+}
