@@ -199,6 +199,23 @@ Tests: `task_25_unmatched_input_can_be_cancelled` and the ignored
 Separate follow-up for task 25: adopt published empty-menu handling, enable this
 acceptance case, and retain the cancellation regression.
 
+### C28: command completion does not insert the common prefix
+
+Reference: screenshot task 28 and
+[Readline completion commands](https://www.gnu.org/software/bash/manual/html_node/Commands-For-Completion.html).
+Put executable files `shish_pick_one` and `shish_pick_two` on an isolated PATH.
+In default interactive mode, type `shish_p` and Tab. Expected input:
+`shish_pick_`. Observed input: `shish_p`, with both candidates displayed below it.
+
+Owner: Brush's Reedline configuration leaves partial completions disabled and
+exposes no setting to enable them. Impact: users must type the shared suffix
+themselves. Workaround: cancel and type the complete command, or use the candidate
+menu. Task 27 verifies candidate display separately.
+
+Ignored acceptance: `task_28_command_common_prefix` in [audit.rs](../tests/audit.rs).
+Separate follow-up for task 28: adopt a published partial-completion setting,
+enable it in shish, and enable this acceptance test.
+
 ## Foundation stack
 
 Each row is independently reviewable and targets its predecessor. No PR is merged
@@ -254,10 +271,10 @@ The task numbers are stable even when implementation order changes.
 | 22 | Redirection: append stderr | sh; §2.7 | Verified: exact file contents, unaffected output stream, and success status; [task_22](../tests/audit.rs) | [22 PR](https://github.com/di-rs/sanctuary/pull/127) |
 | 23 | Command completion: builtins | interactive; product UI | Verified: bounded PTY Tab interaction with isolated PATH; [task_23](../tests/audit.rs) | [23 PR](https://github.com/di-rs/sanctuary/pull/138) |
 | 24 | Command completion: arguments | interactive; product UI | Verified: bounded PTY Tab interaction with isolated PATH; [task_24](../tests/audit.rs) | [24 PR](https://github.com/di-rs/sanctuary/pull/139) |
-| 25 | Command completion: no matches | interactive; product UI | Partial: unmatched input is preserved and cancellation works; Enter handling remains missing (C25); [task_25](../tests/audit.rs) | Current task PR |
+| 25 | Command completion: no matches | interactive; product UI | Partial: unmatched input is preserved and cancellation works; Enter handling remains missing (C25); [task_25](../tests/audit.rs) | [25 PR](https://github.com/di-rs/sanctuary/pull/147) |
 | 26 | Command completion: executables | interactive; product UI | Verified: custom PATH executable is completed and executed; [task_26](../tests/audit.rs) | [26 PR](https://github.com/di-rs/sanctuary/pull/140) |
 | 27 | Command completion: multiple matches | interactive; product UI | Verified: completion menu lists both executable candidates and can be cancelled; [task_27](../tests/audit.rs) | [27 PR](https://github.com/di-rs/sanctuary/pull/141) |
-| 28 | Command completion: partial matches | interactive; product UI | Unverified; dedicated audit pending | Planned task 28 |
+| 28 | Command completion: partial matches | interactive; product UI | Missing: multiple candidates are listed but the common prefix is not inserted (C28); [task_28](../tests/audit.rs) | Current task PR |
 | 29 | Filename completion: files | interactive; product UI | Verified: a completed filename containing a space opens the intended file; [task_29](../tests/audit.rs) | [29 PR](https://github.com/di-rs/sanctuary/pull/142) |
 | 30 | Filename completion: nested files | interactive; product UI | Verified: directory continuation and a nested file are completed and opened; [task_30](../tests/audit.rs) | [30 PR](https://github.com/di-rs/sanctuary/pull/143) |
 | 31 | Filename completion: directories | interactive; product UI | Verified: completion appends a directory separator and cd enters the result; [task_31](../tests/audit.rs) | [31 PR](https://github.com/di-rs/sanctuary/pull/144) |

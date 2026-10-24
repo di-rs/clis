@@ -133,6 +133,15 @@ impl Pty {
         })
     }
 
+    /// Match a complete rendered line even when a completion menu follows it.
+    pub fn expect_screen_line(&mut self, text: &str) -> anyhow::Result<()> {
+        self.wait_for(text, |contents| {
+            contents
+                .lines()
+                .any(|line| line.trim_end() == text.trim_end())
+        })
+    }
+
     fn wait_for(&mut self, text: &str, matches: impl Fn(&str) -> bool) -> anyhow::Result<()> {
         let started = Instant::now();
         while !matches(&self.terminal.screen().contents()) {
