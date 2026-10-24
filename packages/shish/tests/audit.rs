@@ -734,3 +734,10 @@ fn task_75_braced_expansion() {
         .stdout("value_tail/fallback\n")
         .stderr("");
 }
+
+#[test]
+fn task_76_empty_expansion() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path()).args(["-c", "unset v; empty=; set -- $v \"$v\" $empty \"$empty\"; printf '%s\\n' \"$#\"; printf '<%s>\\n' \"$@\""])
+        .assert().code(0).stdout("2\n<>\n<>\n").stderr("");
+}
