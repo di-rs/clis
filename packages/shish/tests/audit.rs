@@ -632,3 +632,14 @@ fn task_22_stderr_append() {
     home.child("err").assert("firstsecond");
     home.child("created").assert("new");
 }
+
+#[test]
+fn task_55_two_command_pipeline() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args(["-c", "/bin/sh -c 'printf abc; exit 7' | tr a-z A-Z"])
+        .assert()
+        .code(0)
+        .stdout("ABC")
+        .stderr("");
+}
