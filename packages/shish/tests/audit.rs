@@ -1596,3 +1596,27 @@ fn task_67_startup_history() -> anyhow::Result<()> {
         .assert(predicates::path::missing());
     Ok(())
 }
+
+#[test]
+fn task_68_exit_history_write() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["--bash", "-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("history -c; history -s saved; exit 0\n")?;
+    terminal.finish(0)?;
+    home.child("history").assert("saved\n");
+    Ok(())
+}
+
+#[test]
+#[ignore = "H68: Brush always appends history at exit, ignoring histappend"]
+fn task_68_exit_history_overwrite() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    home.child("history").write_str("obsolete\n")?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["--bash", "-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("shopt -u histappend; history -c; history -s replacement; exit 0\n")?;
+    terminal.finish(0)?;
+    home.child("history").assert("replacement\n");
+    Ok(())
+}
