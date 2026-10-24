@@ -34,13 +34,17 @@ fn execute<SE: ShellExtensions>(
             return read_history(&mut context, rest.first().map(ToString::to_string));
         }
         if let [_, CommandArg::String(option), rest @ ..] = args.as_slice()
-            && option == "-w"
+            && matches!(option.as_str(), "-w" | "-a")
             && rest.len() <= 1
             && rest
                 .first()
                 .is_none_or(|arg| !arg.to_string().starts_with('-'))
         {
-            return write_history(&mut context, rest.first().map(ToString::to_string));
+            return write_history(
+                &mut context,
+                rest.first().map(ToString::to_string),
+                option == "-a",
+            );
         }
         // Brush 0.2.0 subtracts the requested count without saturating. Clamp
         // only display operands; numeric filenames and delete offsets retain
@@ -107,6 +111,7 @@ fn read_history<SE: ShellExtensions>(
 fn write_history<SE: ShellExtensions>(
     context: &mut ExecutionContext<'_, SE>,
     filename: Option<String>,
+    append: bool,
 ) -> Result<ExecutionResult, Error> {
     let path = filename
         .map(PathBuf::from)
@@ -118,7 +123,7 @@ fn write_history<SE: ShellExtensions>(
         .history_mut()
         .ok_or(brush_core::ErrorKind::HistoryNotEnabled)?;
     if let Some(path) = path {
-        history.flush(path, false, false, timestamps)?;
+        history.flush(path, append, append, timestamps)?;
     }
     Ok(ExecutionResult::success())
 }

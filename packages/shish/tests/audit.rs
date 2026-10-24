@@ -1555,3 +1555,27 @@ fn history_write_with_clear_keeps_option_semantics() -> anyhow::Result<()> {
     home.child("-c").assert(predicates::path::missing());
     Ok(())
 }
+
+#[test]
+fn task_66_append_history_file() -> anyhow::Result<()> {
+    for default_file in [false, true] {
+        let home = assert_fs::TempDir::new()?;
+        home.child("sub").create_dir_all()?;
+        home.child("sub/saved").write_str("existing\n")?;
+        let mut terminal = support::pty::Pty::new(home.path(), &["--bash", "-i"], &[])?;
+        terminal.expect("shish-test> ")?;
+        let append = if default_file {
+            "HISTFILE=saved; history -a"
+        } else {
+            "history -a saved"
+        };
+        terminal.send(&format!("history -c; history -s first; cd sub; {append}; {append}; history -s second; {append} > output 2> errors; printf '%s' \"$?\" > status; unset HISTFILE; exit 0\n"))?;
+        terminal.finish(0)?;
+        home.child("sub/saved").assert("existing\nfirst\nsecond\n");
+        home.child("sub/status").assert("0");
+        home.child("sub/output").assert("");
+        home.child("sub/errors").assert("");
+        home.child("saved").assert(predicates::path::missing());
+    }
+    Ok(())
+}
