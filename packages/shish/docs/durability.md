@@ -1,15 +1,10 @@
 # Shish, Boxie, and durable execution
 
-Start by running shish as an operator-approved program inside Boxie's existing
-sandbox lifecycle. Keep Temporal connectivity in Boxie. A later durable-job
-facility should accept explicitly submitted work with declared recovery policy;
-ordinary terminal commands do not become durable jobs automatically.
-
-This is a design recommendation, not a runtime implementation or a new remote
-execution API. Shish currently runs locally; Boxie's shipped sandbox uses Bash.
-The [platform policy](../../../docs/platform-direction.md#compatibility-and-product-priorities)
-keeps shell compatibility, isolation, recovery, and interactive conveniences
-separate. Full POSIX conformance is not a prerequisite for this integration.
+Shish currently runs locally; Boxie's shipped sandbox uses Bash. This proposal
+would run shish as an operator-approved program inside Boxie's existing sandbox
+lifecycle, keeping Temporal connectivity in Boxie. Durable jobs would require
+explicit submission and a declared recovery policy; ordinary terminal commands
+would not become durable automatically.
 
 ## Existing boundary and first integration
 
@@ -163,28 +158,25 @@ crossing the activity boundary. Output/checkpoint storage needs encryption,
 owner authorization, retention, deletion, and size limits independently of
 Temporal history retention.
 
-## Focused implementation proposals
+## Validation before implementation
 
-Each row is a separate future PR, with its own acceptance evidence. D01–D02 enable
-ordinary shish sandboxes; D03 onward require an explicit durable-job product
-contract. None is included in this documentation stage.
+Shish integration needs a digest-pinned image, an approved profile, and Linux/gVisor
+checks for non-root execution, read-only mounts, disabled networking, executable
+locations, and profile rejection. PTY checks must cover sizing, signals, foreground
+groups, reconnects, stream gaps, deadlines, and supervisor restart.
 
-| ID | Scope and dependency | Acceptance evidence |
-| --- | --- | --- |
-| D01 | Digest-pinned shish image and approved profile; depends on shell foundation. | Linux/gVisor launch, non-root/read-only/no-network enforcement, executable locations, and profile rejection tests. |
-| D02 | Shish terminal transport gate; depends on D01. | PTY sizing, signals, foreground groups, disconnect/reconnect, stream gaps, deadlines, and supervisor restart showing no false resume claim. |
-| D03 | Owner-scoped durable job/attempt schema and submission contract. | Changed-key conflicts, immutable inputs, generation fences, outcome-unknown states, and migration tests; no command execution yet. |
-| D04 | Durable input/output storage and publication; depends on D03. | Owner isolation, checksums, quotas, partial publication, crash consistency, and retention. |
-| D05 | Supervisor-mediated job lifecycle; depends on D03–D04. | Lost start/completion acknowledgements reconcile without duplicate launch; workflow replay and worker-version tests. |
-| D06 | Cancellation and absolute deadline enforcement; depends on D05. | Stop/start races, descendants, dependency outages, and cleanup accounting. |
-| D07 | Opt-in retry policies and external receipts; depends on D05–D06. | Non-idempotent append example remains unknown instead of rerunning; deduplicated job type survives repeated activity delivery. |
-| D08 | Host-loss recovery; depends on D04–D07. | Lost local disk, fenced former owner, off-host restore, orphan cleanup, and pinned environment recreation. |
-| D09 | One application checkpoint protocol; depends on D05. | Checkpoint integrity/version checks, interrupted publication, and measured restoration of that application only. |
-| D10 | Credential/data-flow and operational release gate; depends on the selected implementation scope. | No sandbox control credentials; sensitive payload/history audit, restore drills, operator runbooks, and retention checks. |
+Durable jobs additionally require the contracts above, validated with changed-key
+conflicts, owner isolation, generation fences, quotas, partial publication, and
+crash consistency. Lost start/completion acknowledgements must reconcile without
+duplicate launches. Test workflow replay, worker upgrades, cancellation races,
+descendant cleanup, dependency outages, and deadlines across retries.
 
-These proposals reuse the current
-[workflow payload boundary](../../boxie/src/boxie/temporal/contracts.py) and pinned
-Python SDK 1.34.0. A Rust Temporal SDK migration is unnecessary for this starting
-design. Research was checked against repository contracts and upstream Temporal
-documentation on 2026-10-22; no recovery experiment or production rollout is
+Before claiming host-loss recovery, test off-host restore, former-owner fencing,
+orphan cleanup, and recreation of the pinned environment. Each checkpoint protocol
+needs integrity/version checks and interrupted-publication tests for its supported
+application. Release checks must include credential and sensitive-data handling,
+restore drills, operator runbooks, retention, and deletion.
+
+The design reuses Boxie's [workflow payload boundary](../../boxie/src/boxie/temporal/contracts.py)
+and Python Temporal workers. No recovery experiment or production rollout is
 claimed here.
