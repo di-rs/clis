@@ -676,3 +676,14 @@ fn task_70_declare() {
         .stdout("<a b>\n")
         .stderr("");
 }
+
+#[test]
+fn task_71_missing_variable() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path())
+        .args(["--bash", "-c", "declare -p shish_missing_variable"])
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr(predicates::str::contains("shish_missing_variable"));
+}

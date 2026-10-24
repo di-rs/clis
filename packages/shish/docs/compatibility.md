@@ -270,8 +270,8 @@ The task numbers are stable even when implementation order changes.
 | 67 | History persistence: startup read | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 67 |
 | 68 | History persistence: exit write | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 68 |
 | 69 | History persistence: exit append | bash; Bash §9 | Unverified; dedicated audit pending | Planned task 69 |
-| 70 | Parameters: declare | bash declare; sh §2.5–2.6 | Verified: declare creates a shell variable (bash mode); [task_70](../tests/audit.rs) | Current task PR |
-| 71 | Parameters: missing-variable diagnostics | bash declare; sh §2.5–2.6 | Unverified; dedicated audit pending | Planned task 71 |
+| 70 | Parameters: declare | bash declare; sh §2.5–2.6 | Verified: declare creates a shell variable (bash mode); [task_70](../tests/audit.rs) | [70 PR](https://github.com/di-rs/sanctuary/pull/131) |
+| 71 | Parameters: missing-variable diagnostics | bash declare; sh §2.5–2.6 | Verified: missing variable diagnostics (bash mode); [task_71](../tests/audit.rs) | Current task PR |
 | 72 | Parameters: storage | bash declare; sh §2.5–2.6 | Unverified; dedicated audit pending | Planned task 72 |
 | 73 | Parameters: name validation | bash declare; sh §2.5–2.6 | Unverified; dedicated audit pending | Planned task 73 |
 | 74 | Parameters: expansion | bash declare; sh §2.5–2.6 | Unverified; dedicated audit pending | Planned task 74 |
