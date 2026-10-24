@@ -1,10 +1,16 @@
-# Shish compatibility and delivery inventory
+# Shish compatibility
 
-Shish targets correct common shell operations with explicit recovery boundaries.
-Full POSIX conformance is a future product decision, not a platform release gate.
-This inventory covers shell language and shell builtins against
+Shish defaults to sh/POSIX settings but does not claim full conformance.
+This reference covers shell language and shell builtins against
 [POSIX.1-2024](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html).
 It does not claim operating-system-wide or complete utility conformance.
+
+- [Evidence and environments](#reading-the-evidence)
+- [POSIX coverage](#posix-scope-audit)
+- [POSIX gaps](#confirmed-posix-gaps)
+- [Input and command lookup gaps](#input-and-command-lookup-gaps)
+- [Interactive gaps](#interactive-compatibility-gaps)
+- [Feature coverage](#feature-coverage)
 
 ## Reading the evidence
 
@@ -15,14 +21,12 @@ It does not claim operating-system-wide or complete utility conformance.
 - **Unverified** means no adequate shish evidence has been recorded. An upstream
   claim, parser acceptance, or absence of a reported failure is not verification.
 
-The initial audit ran on 2026-10-22: shish 0.1.0 at runtime foundation `b643cdb`,
+The initial audit ran on 2026-10-22: shish 0.1.0 on
 Darwin 27.0.0 arm64, Brush core 0.5.0/parser 0.4.0/builtins 0.2.0/interactive 0.4.0,
 Reedline 0.47.0, default sh/POSIX mode. Commands used `-c` unless otherwise stated.
 PTY cases use `-i`, a 120-column terminal, and an isolated temporary home. Linux,
 gVisor, other locales, and other architectures remain unverified by this local run.
-The full screenshot-stack commit `8b998b8` subsequently passed the Rust tests and
-doctests on CI runners Ubuntu 24.04 and macOS 15, plus formatting, linting,
-package/feature compatibility, dependency policy, and documentation checks in
+The Rust tests and doctests also passed on Ubuntu 24.04 and macOS 15 in
 [run 39836059386](https://github.com/di-rs/sanctuary/actions/runs/39836059386).
 This extends only the tested cases to those runners; it does not verify gVisor.
 
@@ -32,7 +36,7 @@ Bash is a comparison implementation, not the standard; its differences and
 unspecified behavior do not automatically become requirements. New 2024-only
 requirements need specification-derived expectations or another suitable reference.
 Expected bytes are written from the specification/reference, never regenerated
-from shish. M01 adds explicit `--bash` with the same dependency versions; mode-selection,
+from shish. Explicit `--bash` uses the same dependency versions; mode-selection,
 parse-only, registry, and conflict tests are in [audit.rs](../tests/audit.rs).
 This does not verify the entire Bash feature set. External utility output depends
 on the image's tools: Brush's default
@@ -42,12 +46,10 @@ See [audit tests](../tests/audit.rs), [invocation tests](../tests/runtime.rs), a
 [utility tests](../tests/builtins.rs). The
 [test guide](testing.md) explains reproducibility and the terminal driver.
 
-The completed screenshot audit is recorded at `8b998b8` with the same dependency
-versions and local platform. All 76 items have separate draft PRs below: 68 have
-passing focused evidence, five are partial, and three remain missing. The eight
-partial/missing items have reproduced acceptance gaps, not blanket support claims.
-The current local suite leaves 13 known-failing acceptance cases ignored: five
-POSIX cases and eight screenshot cases. P05 is a separately tested startup policy.
+The feature table records 76 cases: 68 verified, five partial, and three missing.
+The audit suite has 13 ignored acceptance cases: five POSIX cases and eight
+interactive cases. P05 is a separately tested startup policy. Two additional
+ignored CLI cases cover multiline input and PATH lookup below.
 
 ## POSIX scope audit
 
@@ -79,13 +81,12 @@ provides audit candidates, not confirmed shish defects. `select`, `wait -n`,
 `disown`, advanced key bindings, and other Bash-specific gaps need reproduction
 in explicit Bash mode and stay outside the POSIX gap count.
 
-## Confirmed gaps and focused follow-ups
+## Confirmed POSIX gaps
 
 All P01–P04 reproducers use the version/platform/mode snapshot above. Unless noted,
 stdout is shown with `\n` for a newline and stderr is empty. The expected status
-is 0. The owner classification identifies where a fix belongs, not an allegation
-based only on upstream documentation. No upstream issue has been filed or linked
-for these reproductions yet.
+is 0. The owner identifies the component responsible for a fix. No upstream issues
+are recorded for these reproductions.
 
 ### P01: non-whitespace IFS fields
 
@@ -99,7 +100,7 @@ Expected `<>\n<a>\n<>\n<b>\n`; observed `<a>\n<b>\n`, status 0. Empty fields
 are lost, corrupting delimiter-based records. Owner: Brush expansion. Workaround:
 keep values quoted and use an explicit data parser when delimiters matter.
 Acceptance test: `posix_ifs_preserves_empty_fields` in [audit.rs](../tests/audit.rs),
-currently ignored because it fails. Proposed separate PR P01: reproduce in Brush,
+currently ignored because it fails. Fix requirements: reproduce in Brush,
 fix field splitting upstream, adopt a published release, and enable the test.
 
 ### P02: assignments before special builtins
@@ -114,7 +115,7 @@ Expected `<kept>\n`; observed `<>\n`, status 0. Subsequent commands lose assigne
 shell state. Owner: Brush evaluation. Workaround: `v=kept; :` when that separate
 assignment has the intended semantics. Acceptance test:
 `posix_special_builtin_assignment_persists` in [audit.rs](../tests/audit.rs),
-currently ignored. Proposed separate PR P02: upstream special-builtin assignment
+currently ignored. Fix requirements: upstream special-builtin assignment
 semantics, published dependency update, and assignment/error regression matrix.
 
 ### P03: asynchronous process parameter
@@ -131,8 +132,8 @@ Brush job tracking; jobs currently use internal asynchronous tasks without a
 reliable process ID. Workaround: `wait` without a PID when waiting for all jobs is
 acceptable; do not use this as a durable-job identity. Acceptance test:
 `posix_background_process_parameter_is_set` in [audit.rs](../tests/audit.rs),
-currently ignored. Proposed separate PR P03: upstream job/process identity and
-published dependency update. Screenshot jobs tasks remain separate.
+currently ignored. Fix requirements: upstream job/process identity and
+published dependency update.
 
 ### P04: signal traps
 
@@ -148,7 +149,7 @@ Brush signal/trap dispatch; handler registration does not establish TERM deliver
 EXIT handling works separately. Workaround: delegate signal-sensitive scripts to
 a shell with verified handling; do not depend on this trap for cleanup.
 Acceptance test: `posix_term_trap_handles_signal` in [audit.rs](../tests/audit.rs),
-currently ignored. Proposed separate PR P04: upstream signal delivery, handler
+currently ignored. Fix requirements: upstream signal delivery, handler
 execution and inheritance, published update, and PTY/noninteractive regressions.
 
 ### P05: interactive startup files are skipped
@@ -160,7 +161,7 @@ MARK unset. Owner: intentional shish integration policy (`ProfileLoadBehavior`
 and `RcLoadBehavior` are Skip), verified by the PTY test
 `startup_policy_skips_interactive_env` in [audit.rs](../tests/audit.rs).
 Impact: users must source configuration explicitly. Workaround: `. /absolute/startup`.
-Proposed separate PR P05, if strict startup compatibility is selected: implement
+If strict startup compatibility is selected: implement
 and test ENV expansion, privilege checks, interaction modes, and file errors.
 Do not silently enable host startup files as an unrelated feature fix.
 
@@ -178,8 +179,67 @@ that use `command -v` to detect a function incorrectly conclude it is absent.
 Owner: Brush's `command` builtin lookup only considers builtins and executables.
 Workaround: use `type` for inspection where its descriptive format is acceptable.
 Acceptance test: `posix_command_v_reports_functions` in [audit.rs](../tests/audit.rs),
-currently ignored. Proposed separate PR P06: upstream function/alias description
-lookup, published dependency update, and acceptance tests. No upstream issue linked yet.
+currently ignored. Fix requirements: upstream function/alias description
+lookup, published dependency update, and acceptance tests.
+
+## Input and command lookup gaps
+
+Evidence was collected on macOS 27.0.1 (arm64) with shish 0.1.0, brush-core 0.5.0,
+and brush-parser 0.4.0 in the default sh/POSIX mode. Other platforms are unverified.
+The reference is `/bin/sh` (Bash 3.2.57 in sh mode); it passes both fixtures.
+The ignored tests in [the CLI suite](../tests/cli.rs) assert the desired behavior;
+they are not passing support claims.
+
+### Large multiline stdin: partial support
+
+The stdin adapter clones and reparses the entire pending command after every
+line. A multiline quoted assignment containing 20,000 `payload` lines, followed
+by `printf done`, exceeds the five-second acceptance budget before producing
+output. The same input should finish with status 0, stdout `done`, and empty
+stderr. Small multiline commands work; generated loops, here-documents, and
+quoted strings can incur quadratic input-processing cost. This is an integration
+performance gap, not a POSIX timing violation.
+
+Run the bounded reproducer from the repository root:
+
+```sh
+cargo test -p shish --test cli large_multiline_stdin_completes_within_budget -- --ignored --exact
+```
+
+As a workaround, save generated code in a script and invoke `shish script.sh`.
+Script operands use Brush's script API and avoid the adapter's prefix loop.
+Reading all stdin before execution is not an equivalent fix: `read` and external
+programs must retain access to their portion of stdin.
+
+A fix needs a published incremental command parser to replace the prefix loop.
+It must pass the acceptance test above and retain
+`read`, external-program stdin, incomplete-EOF, and positional-argument behavior.
+Brush's published parser currently exposes whole-program parsing; its tokenizer
+is private.
+
+### Directory entries in PATH: partial support
+
+With `PATH=first:second:third`, put a directory named `probe` in `first`, a
+non-executable file named `probe` in `second`, and an executable `probe` that
+prints `found` in `third`. Expected behavior is status 0, stdout `found`, and empty
+stderr. Current execution returns 126 with a permission-denied diagnostic and
+no stdout because lookup selects the first directory.
+
+This conflicts with the executable search described in POSIX.1-2024,
+[Shell Command Language, Command Search and Execution](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html#tag_19_09_01_04).
+Brush's normal cached lookup checks executable permissions without excluding
+directories; its separate path-search helper excludes them. No shish lookup
+replacement is introduced. Use an explicit executable path or remove the
+conflicting directory entry from PATH as a workaround.
+
+```sh
+cargo test -p shish --test cli path_lookup_skips_directories_and_nonexecutable_files -- --ignored --exact
+```
+
+A published Brush fix must pass this test and cover normal dispatch, cached
+lookup, and explicit PATH assignments.
+The separate checkout-relative `target/debug` lookup vulnerability is removed by
+the runtime replacement and covered by an active CLI regression.
 
 ## Interactive compatibility gaps
 
@@ -189,11 +249,11 @@ recorded shish 0.1.0, Brush 0.5.0/interactive 0.4.0, Reedline 0.47.0, and Darwin
 output combines stdout/stderr. Acceptance tests assert the intended behavior and
 remain ignored until a published dependency or integration fix makes them pass.
 The platform keeps published dependencies instead of introducing patches for these
-gaps. No upstream issue is linked yet.
+gaps.
 
 ### C25: Enter after an empty command-completion menu
 
-Reference: screenshot task 25 and
+Reference:
 [Readline completion commands](https://www.gnu.org/software/bash/manual/html_node/Commands-For-Completion.html).
 In an isolated PATH, type `shish_missing_completion`, Tab, then Enter. Expected:
 the unchanged command executes, reports command-not-found, and returns status 127.
@@ -207,12 +267,12 @@ with Ctrl-C and type the full command without Tab.
 
 Tests: `task_25_unmatched_input_can_be_cancelled` and the ignored
 `task_25_enter_executes_after_no_completion` in [audit.rs](../tests/audit.rs).
-Separate follow-up for task 25: adopt published empty-menu handling, enable this
+Fix requirements: adopt published empty-menu handling, enable this
 acceptance case, and retain the cancellation regression.
 
 ### C28: command completion does not insert the common prefix
 
-Reference: screenshot task 28 and
+Reference:
 [Readline completion commands](https://www.gnu.org/software/bash/manual/html_node/Commands-For-Completion.html).
 Put executable files `shish_pick_one` and `shish_pick_two` on an isolated PATH.
 In default interactive mode, type `shish_p` and Tab. Expected input:
@@ -224,12 +284,12 @@ themselves. Workaround: cancel and type the complete command, or use the candida
 menu. Task 27 verifies candidate display separately.
 
 Ignored acceptance: `task_28_command_common_prefix` in [audit.rs](../tests/audit.rs).
-Separate follow-up for task 28: adopt a published partial-completion setting,
+Fix requirements: adopt a published partial-completion setting,
 enable it in shish, and enable this acceptance test.
 
 ### C32: Enter after unmatched filename completion
 
-Reference: screenshot task 32 and Readline completion behavior linked under C25.
+Reference: Readline completion behavior linked under C25.
 In an empty directory, start default `shish -i`, type
 `/bin/echo shish_missing_filename`, Tab, then Enter. Expected: the unchanged
 argument is printed, followed by a new prompt. Observed: the input remains visible
@@ -239,12 +299,12 @@ Owner: the same Brush/Reedline empty-menu handling as C25. Impact: filename
 completion adds an extra submission step. Workaround: cancel with Ctrl-C and
 retype the full command without Tab. Ignored acceptance:
 `task_32_missing_file_completion` in [audit.rs](../tests/audit.rs).
-Separate task 32 follow-up: adopt published empty-menu handling and enable the
+Fix requirements: adopt published empty-menu handling and enable the
 filename-specific case; passing the command-name case alone does not close it.
 
 ### C34: filename completion does not insert the common prefix
 
-Reference: screenshot task 34 and Readline completion behavior linked under C28.
+Reference: Readline completion behavior linked under C28.
 Create files `shared_one` and `shared_two`. In default `shish -i`, type
 `/bin/cat sha` and Tab. Expected input: `/bin/cat shared_`. Observed input:
 `/bin/cat sha`, with both filenames listed.
@@ -252,12 +312,12 @@ Create files `shared_one` and `shared_two`. In default `shish -i`, type
 Owner: Brush's disabled Reedline partial-completion setting (C28). Impact: the
 shared filename suffix must be entered manually. Workaround: cancel and type the
 full filename without Tab. Ignored acceptance: `task_34_file_common_prefix` in
-[audit.rs](../tests/audit.rs). Separate task 34 follow-up: enable a published
+[audit.rs](../tests/audit.rs). Fix requirements: enable a published
 partial-completion option and this filename-specific acceptance case.
 
 ### C40: Enter after an empty programmable-completion result
 
-Reference: screenshot task 40 and
+Reference:
 [Bash programmable completion](https://www.gnu.org/software/bash/manual/html_node/Programmable-Completion.html).
 In `shish --bash -i`, register
 `_pick() { COMPREPLY=(); }; pick() { printf '<%s>\n' "$1"; }; complete -F _pick pick`.
@@ -268,12 +328,12 @@ Owner: Brush/Reedline empty-menu handling (C25); the empty result itself is
 preserved. Impact: a completer returning no candidates impedes command submission.
 Workaround: cancel and retype the command without Tab. Ignored acceptance:
 `task_40_empty_programmed_completion` in [audit.rs](../tests/audit.rs).
-Separate task 40 follow-up: adopt published empty-menu handling and enable the
+Fix requirements: adopt published empty-menu handling and enable the
 programmable-completion case.
 
 ### C44: programmable completion does not insert the longest common prefix
 
-Reference: screenshot task 44 and Bash/Readline completion references above.
+Reference: Bash/Readline completion references above.
 In `shish --bash -i`, run `complete -W 'prefix_one prefix_two' pick`, then type
 `pick pre` and Tab. Expected input: `pick prefix_`. Observed input:
 `pick pre`, with both programmed candidates listed.
@@ -281,7 +341,7 @@ In `shish --bash -i`, run `complete -W 'prefix_one prefix_two' pick`, then type
 Owner: Brush's disabled Reedline partial-completion setting (C28). Impact: users
 must enter the shared suffix themselves. Workaround: cancel and type the full
 argument without Tab. Ignored acceptance: `task_44_programmed_common_prefix` in
-[audit.rs](../tests/audit.rs). Separate task 44 follow-up: adopt published
+[audit.rs](../tests/audit.rs). Fix requirements: adopt published
 configuration support and enable this programmed-candidate acceptance case.
 
 ### J54: job numbers collide after selective reaping
@@ -299,9 +359,9 @@ Workaround: avoid launching additional jobs while a partially reaped table still
 contains active jobs; use an external supervisor for reliable job identity.
 
 Acceptance: `task_54_job_number_recycling` in [audit.rs](../tests/audit.rs)
-is ignored after reproducing the collision. Task 54 keeps this gap in its own PR.
+is ignored after reproducing the collision.
 Follow-up: fix allocation upstream, adopt a published release, and enable the
-acceptance test; no fork or upstream issue has been created. Public shish builtin
+acceptance test. Public shish builtin
 adapters cannot intercept Brush's asynchronous job allocation safely.
 
 ### H68: exit persistence ignores overwrite mode
@@ -322,134 +382,102 @@ when replacement is required. This also disables the later automatic save.
 
 Acceptance: `task_68_exit_history_overwrite` in [audit.rs](../tests/audit.rs),
 ignored after reproducing the failure; fresh-file saving has a passing test.
-Task 68 tracks this gap in its own PR. Follow-up: honor the option upstream, adopt
-a published release, and enable the acceptance test. No upstream issue is linked.
+Fix requirements: honor the option upstream, adopt
+a published release, and enable the acceptance test.
 Rewriting the file after Brush's exit hook would change ordering and risk overwriting
 hook effects; shish does not introduce that workaround internally.
 
-## Foundation stack
+## Feature coverage
 
-Each row is independently reviewable and targets its predecessor. No PR is merged
-automatically. Feature tasks below build on F08, prioritizing common execution
-before interactive enhancements. Each feature PR body identifies its predecessor,
-which is its target branch; numerical order is not the dependency order. M01 adds
-opt-in `--bash` before Bash-specific features; it does not change the default mode.
+The numbers match the `task_NN` tests in [audit.rs](../tests/audit.rs).
+Verified rows cover only the named cases. `complete`, `history`, and `declare`
+require Bash mode; completion UI and prompt appearance are product behavior.
 
-| Stage | PR | Deliverable |
-| --- | --- | --- |
-| F00 | [#95](https://github.com/di-rs/sanctuary/pull/95) | Platform compatibility and durability policy |
-| F01 | [#96](https://github.com/di-rs/sanctuary/pull/96) | Package import, workspace integration, smoke coverage |
-| F02 | [#97](https://github.com/di-rs/sanctuary/pull/97) | EOF, input lifecycle, failure handling |
-| F03 | [#98](https://github.com/di-rs/sanctuary/pull/98) | Reusable true/false libraries |
-| F04 | [#99](https://github.com/di-rs/sanctuary/pull/99) | Private Brush parsing facade |
-| F05 | [#100](https://github.com/di-rs/sanctuary/pull/100) | Brush runtime and invocation modes |
-| F06 | [#101](https://github.com/di-rs/sanctuary/pull/101) | Sanctuary builtin integration and installation |
-| F07 | [#102](https://github.com/di-rs/sanctuary/pull/102) | Temporal/Boxie research and recovery design |
-| F08 | [#103](https://github.com/di-rs/sanctuary/pull/103) | Compatibility inventory and CLI/PTY infrastructure |
-| M01 | [#105](https://github.com/di-rs/sanctuary/pull/105) | Explicit opt-in Bash mode |
-
-The [history option validation follow-up](https://github.com/di-rs/sanctuary/pull/182)
-builds on task 69 and preserves Brush's conflict diagnostics for the adapters.
-The final documentation PR builds on that follow-up. These do not combine or
-replace any screenshot task PR.
-
-## Screenshot task inventory
-
-Each numbered item keeps its own PR, including already-working behavior: that PR
-adds focused regression evidence and updates its row. Verified rows describe only
-the tested cases, not promises inferred from Brush. Bash mode is required for
-`complete`, `history`, and `declare`; their absence from default mode is a documented mode choice.
-Completion UI and prompt appearance are product behavior rather than POSIX gates.
-The task numbers are stable even when implementation order changes.
-
-| Task | Area and behavior | Mode/reference | Status and evidence | Focused PR |
-| --- | --- | --- | --- | --- |
-| 01 | Basics: prompt | sh; invocation/§2.9.1 | Verified: home/directory prompt, PS1, no noninteractive prompt; [task_01](../tests/audit.rs) | [01 PR](https://github.com/di-rs/sanctuary/pull/106) |
-| 02 | Basics: invalid commands | sh; invocation/§2.9.1 | Verified: status 127, diagnostic, and continued stdin execution; [task_02](../tests/audit.rs) | [02 PR](https://github.com/di-rs/sanctuary/pull/107) |
-| 03 | Basics: REPL | sh; invocation/§2.9.1 | Verified: multiline interactive loop and persistent variables; [task_03](../tests/audit.rs) | [03 PR](https://github.com/di-rs/sanctuary/pull/108) |
-| 04 | Basics: exit | sh; invocation/§2.9.1 | Verified: exit stops later commands and inherits the last status; [task_04](../tests/audit.rs) | [04 PR](https://github.com/di-rs/sanctuary/pull/109) |
-| 05 | Basics: echo | sh; invocation/§2.9.1 | Verified: ordinary echo in sh/PATH and Bash builtin modes; option extensions excluded; [task_05](../tests/audit.rs) | [05 PR](https://github.com/di-rs/sanctuary/pull/110) |
-| 06 | Basics: type | sh; invocation/§2.9.1 | Verified: builtin/external type and function type via -t extension; missing type diagnostic. P06 tracks command -v separately; [task_06](../tests/audit.rs) | [06 PR](https://github.com/di-rs/sanctuary/pull/111) |
-| 07 | Basics: executable lookup | sh; invocation/§2.9.1 | Verified: custom PATH, executable permission, and missing lookup; [task_07](../tests/audit.rs) | [07 PR](https://github.com/di-rs/sanctuary/pull/112) |
-| 08 | Basics: program execution | sh; invocation/§2.9.1 | Verified: argv boundaries, stdout/stderr, and external status; [task_08](../tests/audit.rs) | [08 PR](https://github.com/di-rs/sanctuary/pull/113) |
-| 09 | Navigation: pwd | sh; pwd/cd | Verified: initial and changed working directories; [task_09](../tests/audit.rs) | [09 PR](https://github.com/di-rs/sanctuary/pull/114) |
-| 10 | Navigation: absolute cd | sh; pwd/cd | Verified: absolute cd updates shell cwd while host test cwd is unchanged; [task_10](../tests/audit.rs) | [10 PR](https://github.com/di-rs/sanctuary/pull/115) |
-| 11 | Navigation: relative cd | sh; pwd/cd | Verified: relative paths and parent traversal; [task_11](../tests/audit.rs) | [11 PR](https://github.com/di-rs/sanctuary/pull/116) |
-| 12 | Navigation: home-directory cd | sh; pwd/cd | Verified: cd without operands and tilde expansion; [task_12](../tests/audit.rs) | [12 PR](https://github.com/di-rs/sanctuary/pull/117) |
-| 13 | Quoting: single quotes | sh; §2.2 | Verified: single quotes retain whitespace, empty words, metacharacters, and joined quote segments; [task_13](../tests/audit.rs) | [13 PR](https://github.com/di-rs/sanctuary/pull/118) |
-| 14 | Quoting: double quotes | sh; §2.2 | Verified: double quotes preserve whitespace and empty expansions without globbing; [task_14](../tests/audit.rs) | [14 PR](https://github.com/di-rs/sanctuary/pull/119) |
-| 15 | Quoting: unquoted backslashes | sh; §2.2 | Verified: escaped spaces and metacharacters, plus backslash-newline joining; [task_15](../tests/audit.rs) | [15 PR](https://github.com/di-rs/sanctuary/pull/120) |
-| 16 | Quoting: backslashes in single quotes | sh; §2.2 | Verified: backslashes remain literal inside single quotes; [task_16](../tests/audit.rs) | [16 PR](https://github.com/di-rs/sanctuary/pull/121) |
-| 17 | Quoting: backslashes in double quotes | sh; §2.2 | Verified: double-quote escape rules preserve unknown escapes and remove continued newlines; [task_17](../tests/audit.rs) | [17 PR](https://github.com/di-rs/sanctuary/pull/122) |
-| 18 | Quoting: quoted executables | sh; §2.2 | Verified: executable paths containing spaces retain argument boundaries; [task_18](../tests/audit.rs) | [18 PR](https://github.com/di-rs/sanctuary/pull/123) |
-| 19 | Redirection: stdout | sh; §2.7 | Verified: exact file contents, unaffected output stream, and success status; [task_19](../tests/audit.rs) | [19 PR](https://github.com/di-rs/sanctuary/pull/124) |
-| 20 | Redirection: stderr | sh; §2.7 | Verified: exact file contents, unaffected output stream, and success status; [task_20](../tests/audit.rs) | [20 PR](https://github.com/di-rs/sanctuary/pull/125) |
-| 21 | Redirection: append stdout | sh; §2.7 | Verified: exact file contents, unaffected output stream, and success status; [task_21](../tests/audit.rs) | [21 PR](https://github.com/di-rs/sanctuary/pull/126) |
-| 22 | Redirection: append stderr | sh; §2.7 | Verified: exact file contents, unaffected output stream, and success status; [task_22](../tests/audit.rs) | [22 PR](https://github.com/di-rs/sanctuary/pull/127) |
-| 23 | Command completion: builtins | interactive; product UI | Verified: bounded PTY Tab interaction with isolated PATH; [task_23](../tests/audit.rs) | [23 PR](https://github.com/di-rs/sanctuary/pull/138) |
-| 24 | Command completion: arguments | interactive; product UI | Verified: bounded PTY Tab interaction with isolated PATH; [task_24](../tests/audit.rs) | [24 PR](https://github.com/di-rs/sanctuary/pull/139) |
-| 25 | Command completion: no matches | interactive; product UI | Partial: unmatched input is preserved and cancellation works; Enter handling remains missing (C25); [task_25](../tests/audit.rs) | [25 PR](https://github.com/di-rs/sanctuary/pull/147) |
-| 26 | Command completion: executables | interactive; product UI | Verified: custom PATH executable is completed and executed; [task_26](../tests/audit.rs) | [26 PR](https://github.com/di-rs/sanctuary/pull/140) |
-| 27 | Command completion: multiple matches | interactive; product UI | Verified: completion menu lists both executable candidates and can be cancelled; [task_27](../tests/audit.rs) | [27 PR](https://github.com/di-rs/sanctuary/pull/141) |
-| 28 | Command completion: partial matches | interactive; product UI | Missing: multiple candidates are listed but the common prefix is not inserted (C28); [task_28](../tests/audit.rs) | [28 PR](https://github.com/di-rs/sanctuary/pull/148) |
-| 29 | Filename completion: files | interactive; product UI | Verified: a completed filename containing a space opens the intended file; [task_29](../tests/audit.rs) | [29 PR](https://github.com/di-rs/sanctuary/pull/142) |
-| 30 | Filename completion: nested files | interactive; product UI | Verified: directory continuation and a nested file are completed and opened; [task_30](../tests/audit.rs) | [30 PR](https://github.com/di-rs/sanctuary/pull/143) |
-| 31 | Filename completion: directories | interactive; product UI | Verified: completion appends a directory separator and cd enters the result; [task_31](../tests/audit.rs) | [31 PR](https://github.com/di-rs/sanctuary/pull/144) |
-| 32 | Filename completion: no matches | interactive; product UI | Partial: unmatched filename is preserved; first Enter is consumed by the empty menu (C32); [task_32](../tests/audit.rs) | [32 PR](https://github.com/di-rs/sanctuary/pull/157) |
-| 33 | Filename completion: multiple matches | interactive; product UI | Verified: both filename candidates appear in the completion menu; [task_33](../tests/audit.rs) | [33 PR](https://github.com/di-rs/sanctuary/pull/145) |
-| 34 | Filename completion: partial matches | interactive; product UI | Missing: filename candidates are displayed without insertion of their common prefix (C34); [task_34](../tests/audit.rs) | [34 PR](https://github.com/di-rs/sanctuary/pull/158) |
-| 35 | Filename completion: multiple arguments | interactive; product UI | Verified: completing the next argument preserves an already completed filename; [task_35](../tests/audit.rs) | [35 PR](https://github.com/di-rs/sanctuary/pull/146) |
-| 36 | Programmable completion: registration | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_36](../tests/audit.rs) | [36 PR](https://github.com/di-rs/sanctuary/pull/149) |
-| 37 | Programmable completion: missing specifications | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_37](../tests/audit.rs) | [37 PR](https://github.com/di-rs/sanctuary/pull/150) |
-| 38 | Programmable completion: display specifications | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_38](../tests/audit.rs) | [38 PR](https://github.com/di-rs/sanctuary/pull/151) |
-| 39 | Programmable completion: single candidate | bash; Bash §8.6–8.7 | Verified: COMPREPLY supplies one candidate that is completed and passed to the command; [task_39](../tests/audit.rs) | [39 PR](https://github.com/di-rs/sanctuary/pull/152) |
-| 40 | Programmable completion: no candidates | bash; Bash §8.6–8.7 | Partial: empty COMPREPLY leaves input unchanged; Enter handling remains missing (C40); [task_40](../tests/audit.rs) | [40 PR](https://github.com/di-rs/sanctuary/pull/159) |
-| 41 | Programmable completion: command-line arguments | bash; Bash §8.6–8.7 | Verified: completer receives command name, current word, and previous word in Bash mode; [task_41](../tests/audit.rs) | [41 PR](https://github.com/di-rs/sanctuary/pull/153) |
-| 42 | Programmable completion: environment variables | bash; Bash §8.6–8.7 | Verified: external completer receives COMP_LINE, COMP_POINT, and exported environment; [task_42](../tests/audit.rs) | [42 PR](https://github.com/di-rs/sanctuary/pull/154) |
-| 43 | Programmable completion: multiple candidates | bash; Bash §8.6–8.7 | Verified: registered word-list candidates appear in the terminal menu; [task_43](../tests/audit.rs) | [43 PR](https://github.com/di-rs/sanctuary/pull/155) |
-| 44 | Programmable completion: longest common prefix | bash; Bash §8.6–8.7 | Missing: programmed candidates are listed without inserting their longest common prefix (C44); [task_44](../tests/audit.rs) | [44 PR](https://github.com/di-rs/sanctuary/pull/160) |
-| 45 | Programmable completion: unregistration | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_45](../tests/audit.rs) | [45 PR](https://github.com/di-rs/sanctuary/pull/156) |
-| 46 | Background jobs: jobs | interactive sh; §2.11/jobs/wait | Verified: empty job table, builtin lookup, status and streams; [task_46](../tests/audit.rs) | [46 PR](https://github.com/di-rs/sanctuary/pull/161) |
-| 47 | Background jobs: launch | interactive sh; §2.11/jobs/wait | Verified: prompt returns while a background worker awaits release; [task_47](../tests/audit.rs) | [47 PR](https://github.com/di-rs/sanctuary/pull/162) |
-| 48 | Background jobs: output | interactive sh; §2.11/jobs/wait | Verified: background stdout and stderr reach the terminal; [task_48](../tests/audit.rs) | [48 PR](https://github.com/di-rs/sanctuary/pull/163) |
-| 49 | Background jobs: list one | interactive sh; §2.11/jobs/wait | Verified: one active job lists its number, state, and command; [task_49](../tests/audit.rs) | [49 PR](https://github.com/di-rs/sanctuary/pull/164) |
-| 50 | Background jobs: list multiple | interactive sh; §2.11/jobs/wait | Verified: two active jobs have distinct IDs and current/previous annotations; [task_50](../tests/audit.rs) | [50 PR](https://github.com/di-rs/sanctuary/pull/165) |
-| 51 | Background jobs: reap one | interactive sh; §2.11/jobs/wait | Verified: wait %1 completes the worker and removes it before the next command; [task_51](../tests/audit.rs) | [51 PR](https://github.com/di-rs/sanctuary/pull/166) |
-| 52 | Background jobs: reap multiple | interactive sh; §2.11/jobs/wait | Verified: bare wait completes both workers and clears the job table; [task_52](../tests/audit.rs) | [52 PR](https://github.com/di-rs/sanctuary/pull/167) |
-| 53 | Background jobs: reap before prompt | interactive sh; §2.11/jobs/wait | Verified: completion notice and job removal before the next command; [task_53](../tests/audit.rs) | [53 PR](https://github.com/di-rs/sanctuary/pull/168) |
-| 54 | Background jobs: recycle job numbers | interactive sh; §2.11/jobs/wait | Partial: empty-table recycling works; J54 reproduces duplicate live IDs; [task_54](../tests/audit.rs) | [54 PR](https://github.com/di-rs/sanctuary/pull/169) |
-| 55 | Pipelines: two commands | sh; §2.9.2 | Verified: pipeline output, final status, and bounded fixture execution; [task_55](../tests/audit.rs) | [55 PR](https://github.com/di-rs/sanctuary/pull/128) |
-| 56 | Pipelines: builtins | sh; §2.9.2 | Verified: pipeline output, final status, and bounded fixture execution; [task_56](../tests/audit.rs) | [56 PR](https://github.com/di-rs/sanctuary/pull/129) |
-| 57 | Pipelines: multiple commands | sh; §2.9.2 | Verified: pipeline output, final status, and bounded fixture execution; [task_57](../tests/audit.rs) | [57 PR](https://github.com/di-rs/sanctuary/pull/130) |
-| 58 | History: builtin | bash; Bash §9 | Verified in Bash mode: history remains available without PATH commands; [task_58](../tests/audit.rs) | [58 PR](https://github.com/di-rs/sanctuary/pull/170) |
-| 59 | History: listing | bash; Bash §9 | Verified in Bash mode: numbered history listing preserves command order; [task_59](../tests/audit.rs) | [59 PR](https://github.com/di-rs/sanctuary/pull/171) |
-| 60 | History: entry limits | bash; Bash §9 | Verified in Bash mode: history 0, 1, and oversized counts preserve status and numbering; [task_60](../tests/audit.rs) | [60 PR](https://github.com/di-rs/sanctuary/pull/172) |
-| 61 | History: up-arrow | bash; Bash §9 | Verified in Bash mode: up-arrow recalls the preceding command; [task_61](../tests/audit.rs) | [61 PR](https://github.com/di-rs/sanctuary/pull/173) |
-| 62 | History: down-arrow | bash; Bash §9 | Verified in Bash mode: down-arrow advances from older to newer history and returns to an empty line; [task_62](../tests/audit.rs) | [62 PR](https://github.com/di-rs/sanctuary/pull/174) |
-| 63 | History: recalled execution | bash; Bash §9 | Verified in Bash mode: recalling and submitting repeats the command's filesystem effect; [task_63](../tests/audit.rs) | [63 PR](https://github.com/di-rs/sanctuary/pull/175) |
-| 64 | History persistence: read file | bash; Bash §9 | Verified in Bash mode: explicit and default history files load without executing entries; [task_64](../tests/audit.rs) | [64 PR](https://github.com/di-rs/sanctuary/pull/176) |
-| 65 | History persistence: write file | bash; Bash §9 | Verified in Bash mode: history -w replaces explicit/default files after cd; [task_65](../tests/audit.rs) | [65 PR](https://github.com/di-rs/sanctuary/pull/177) |
-| 66 | History persistence: append file | bash; Bash §9 | Verified in Bash mode: history -a preserves existing contents and appends each new entry once; [task_66](../tests/audit.rs) | [66 PR](https://github.com/di-rs/sanctuary/pull/178) |
-| 67 | History persistence: startup read | bash; Bash §9 | Verified in Bash mode: HISTFILE loads before the first command without executing entries; [task_67](../tests/audit.rs) | [67 PR](https://github.com/di-rs/sanctuary/pull/179) |
-| 68 | History persistence: exit write | bash; Bash §9 | Partial: fresh-file exit persistence verified; H68 reproduces ignored overwrite mode; [task_68](../tests/audit.rs) | [68 PR](https://github.com/di-rs/sanctuary/pull/180) |
-| 69 | History persistence: exit append | bash; Bash §9 | Verified in Bash mode: exit appends unsaved entries without duplicating an earlier history -a; [task_69](../tests/audit.rs) | [69 PR](https://github.com/di-rs/sanctuary/pull/181) |
-| 70 | Parameters: declare | bash declare; sh §2.5–2.6 | Verified: declare creates a shell variable (bash mode); [task_70](../tests/audit.rs) | [70 PR](https://github.com/di-rs/sanctuary/pull/131) |
-| 71 | Parameters: missing-variable diagnostics | bash declare; sh §2.5–2.6 | Verified: missing variable diagnostics (bash mode); [task_71](../tests/audit.rs) | [71 PR](https://github.com/di-rs/sanctuary/pull/132) |
-| 72 | Parameters: storage | sh; §2.5–2.6 | Verified: shell variable storage and export (sh mode); [task_72](../tests/audit.rs) | [72 PR](https://github.com/di-rs/sanctuary/pull/133) |
-| 73 | Parameters: name validation | bash declare; sh §2.5–2.6 | Verified: invalid declaration names are rejected (bash mode); [task_73](../tests/audit.rs) | [73 PR](https://github.com/di-rs/sanctuary/pull/134) |
-| 74 | Parameters: expansion | sh; §2.5–2.6 | Verified: quoted and unquoted variable expansion (sh mode); [task_74](../tests/audit.rs) | [74 PR](https://github.com/di-rs/sanctuary/pull/135) |
-| 75 | Parameters: braced expansion | sh; §2.5–2.6 | Verified: braced parameter boundaries and defaults (sh mode); [task_75](../tests/audit.rs) | [75 PR](https://github.com/di-rs/sanctuary/pull/136) |
-| 76 | Parameters: empty expansion | sh; §2.5–2.6 | Verified: empty quoted and unquoted parameters (sh mode); [task_76](../tests/audit.rs) | [76 PR](https://github.com/di-rs/sanctuary/pull/137) |
+| Task | Area and behavior | Mode/reference | Status and evidence |
+| --- | --- | --- | --- |
+| 01 | Basics: prompt | sh; invocation/§2.9.1 | Verified: home/directory prompt, PS1, no noninteractive prompt; [task_01](../tests/audit.rs) |
+| 02 | Basics: invalid commands | sh; invocation/§2.9.1 | Verified: status 127, diagnostic, and continued stdin execution; [task_02](../tests/audit.rs) |
+| 03 | Basics: REPL | sh; invocation/§2.9.1 | Verified: multiline interactive loop and persistent variables; [task_03](../tests/audit.rs) |
+| 04 | Basics: exit | sh; invocation/§2.9.1 | Verified: exit stops later commands and inherits the last status; [task_04](../tests/audit.rs) |
+| 05 | Basics: echo | sh; invocation/§2.9.1 | Verified: ordinary echo in sh/PATH and Bash builtin modes; option extensions excluded; [task_05](../tests/audit.rs) |
+| 06 | Basics: type | sh; invocation/§2.9.1 | Verified: builtin/external type and function type via -t extension; missing type diagnostic. P06 tracks command -v separately; [task_06](../tests/audit.rs) |
+| 07 | Basics: executable lookup | sh; invocation/§2.9.1 | Verified: custom PATH, executable permission, and missing lookup; [task_07](../tests/audit.rs) |
+| 08 | Basics: program execution | sh; invocation/§2.9.1 | Verified: argv boundaries, stdout/stderr, and external status; [task_08](../tests/audit.rs) |
+| 09 | Navigation: pwd | sh; pwd/cd | Verified: initial and changed working directories; [task_09](../tests/audit.rs) |
+| 10 | Navigation: absolute cd | sh; pwd/cd | Verified: absolute cd updates shell cwd while host test cwd is unchanged; [task_10](../tests/audit.rs) |
+| 11 | Navigation: relative cd | sh; pwd/cd | Verified: relative paths and parent traversal; [task_11](../tests/audit.rs) |
+| 12 | Navigation: home-directory cd | sh; pwd/cd | Verified: cd without operands and tilde expansion; [task_12](../tests/audit.rs) |
+| 13 | Quoting: single quotes | sh; §2.2 | Verified: single quotes retain whitespace, empty words, metacharacters, and joined quote segments; [task_13](../tests/audit.rs) |
+| 14 | Quoting: double quotes | sh; §2.2 | Verified: double quotes preserve whitespace and empty expansions without globbing; [task_14](../tests/audit.rs) |
+| 15 | Quoting: unquoted backslashes | sh; §2.2 | Verified: escaped spaces and metacharacters, plus backslash-newline joining; [task_15](../tests/audit.rs) |
+| 16 | Quoting: backslashes in single quotes | sh; §2.2 | Verified: backslashes remain literal inside single quotes; [task_16](../tests/audit.rs) |
+| 17 | Quoting: backslashes in double quotes | sh; §2.2 | Verified: double-quote escape rules preserve unknown escapes and remove continued newlines; [task_17](../tests/audit.rs) |
+| 18 | Quoting: quoted executables | sh; §2.2 | Verified: executable paths containing spaces retain argument boundaries; [task_18](../tests/audit.rs) |
+| 19 | Redirection: stdout | sh; §2.7 | Verified: exact file contents, unaffected output stream, and success status; [task_19](../tests/audit.rs) |
+| 20 | Redirection: stderr | sh; §2.7 | Verified: exact file contents, unaffected output stream, and success status; [task_20](../tests/audit.rs) |
+| 21 | Redirection: append stdout | sh; §2.7 | Verified: exact file contents, unaffected output stream, and success status; [task_21](../tests/audit.rs) |
+| 22 | Redirection: append stderr | sh; §2.7 | Verified: exact file contents, unaffected output stream, and success status; [task_22](../tests/audit.rs) |
+| 23 | Command completion: builtins | interactive; product UI | Verified: bounded PTY Tab interaction with isolated PATH; [task_23](../tests/audit.rs) |
+| 24 | Command completion: arguments | interactive; product UI | Verified: bounded PTY Tab interaction with isolated PATH; [task_24](../tests/audit.rs) |
+| 25 | Command completion: no matches | interactive; product UI | Partial: unmatched input is preserved and cancellation works; Enter handling remains missing (C25); [task_25](../tests/audit.rs) |
+| 26 | Command completion: executables | interactive; product UI | Verified: custom PATH executable is completed and executed; [task_26](../tests/audit.rs) |
+| 27 | Command completion: multiple matches | interactive; product UI | Verified: completion menu lists both executable candidates and can be cancelled; [task_27](../tests/audit.rs) |
+| 28 | Command completion: partial matches | interactive; product UI | Missing: multiple candidates are listed but the common prefix is not inserted (C28); [task_28](../tests/audit.rs) |
+| 29 | Filename completion: files | interactive; product UI | Verified: a completed filename containing a space opens the intended file; [task_29](../tests/audit.rs) |
+| 30 | Filename completion: nested files | interactive; product UI | Verified: directory continuation and a nested file are completed and opened; [task_30](../tests/audit.rs) |
+| 31 | Filename completion: directories | interactive; product UI | Verified: completion appends a directory separator and cd enters the result; [task_31](../tests/audit.rs) |
+| 32 | Filename completion: no matches | interactive; product UI | Partial: unmatched filename is preserved; first Enter is consumed by the empty menu (C32); [task_32](../tests/audit.rs) |
+| 33 | Filename completion: multiple matches | interactive; product UI | Verified: both filename candidates appear in the completion menu; [task_33](../tests/audit.rs) |
+| 34 | Filename completion: partial matches | interactive; product UI | Missing: filename candidates are displayed without insertion of their common prefix (C34); [task_34](../tests/audit.rs) |
+| 35 | Filename completion: multiple arguments | interactive; product UI | Verified: completing the next argument preserves an already completed filename; [task_35](../tests/audit.rs) |
+| 36 | Programmable completion: registration | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_36](../tests/audit.rs) |
+| 37 | Programmable completion: missing specifications | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_37](../tests/audit.rs) |
+| 38 | Programmable completion: display specifications | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_38](../tests/audit.rs) |
+| 39 | Programmable completion: single candidate | bash; Bash §8.6–8.7 | Verified: COMPREPLY supplies one candidate that is completed and passed to the command; [task_39](../tests/audit.rs) |
+| 40 | Programmable completion: no candidates | bash; Bash §8.6–8.7 | Partial: empty COMPREPLY leaves input unchanged; Enter handling remains missing (C40); [task_40](../tests/audit.rs) |
+| 41 | Programmable completion: command-line arguments | bash; Bash §8.6–8.7 | Verified: completer receives command name, current word, and previous word in Bash mode; [task_41](../tests/audit.rs) |
+| 42 | Programmable completion: environment variables | bash; Bash §8.6–8.7 | Verified: external completer receives COMP_LINE, COMP_POINT, and exported environment; [task_42](../tests/audit.rs) |
+| 43 | Programmable completion: multiple candidates | bash; Bash §8.6–8.7 | Verified: registered word-list candidates appear in the terminal menu; [task_43](../tests/audit.rs) |
+| 44 | Programmable completion: longest common prefix | bash; Bash §8.6–8.7 | Missing: programmed candidates are listed without inserting their longest common prefix (C44); [task_44](../tests/audit.rs) |
+| 45 | Programmable completion: unregistration | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_45](../tests/audit.rs) |
+| 46 | Background jobs: jobs | interactive sh; §2.11/jobs/wait | Verified: empty job table, builtin lookup, status and streams; [task_46](../tests/audit.rs) |
+| 47 | Background jobs: launch | interactive sh; §2.11/jobs/wait | Verified: prompt returns while a background worker awaits release; [task_47](../tests/audit.rs) |
+| 48 | Background jobs: output | interactive sh; §2.11/jobs/wait | Verified: background stdout and stderr reach the terminal; [task_48](../tests/audit.rs) |
+| 49 | Background jobs: list one | interactive sh; §2.11/jobs/wait | Verified: one active job lists its number, state, and command; [task_49](../tests/audit.rs) |
+| 50 | Background jobs: list multiple | interactive sh; §2.11/jobs/wait | Verified: two active jobs have distinct IDs and current/previous annotations; [task_50](../tests/audit.rs) |
+| 51 | Background jobs: reap one | interactive sh; §2.11/jobs/wait | Verified: wait %1 completes the worker and removes it before the next command; [task_51](../tests/audit.rs) |
+| 52 | Background jobs: reap multiple | interactive sh; §2.11/jobs/wait | Verified: bare wait completes both workers and clears the job table; [task_52](../tests/audit.rs) |
+| 53 | Background jobs: reap before prompt | interactive sh; §2.11/jobs/wait | Verified: completion notice and job removal before the next command; [task_53](../tests/audit.rs) |
+| 54 | Background jobs: recycle job numbers | interactive sh; §2.11/jobs/wait | Partial: empty-table recycling works; J54 reproduces duplicate live IDs; [task_54](../tests/audit.rs) |
+| 55 | Pipelines: two commands | sh; §2.9.2 | Verified: pipeline output, final status, and bounded fixture execution; [task_55](../tests/audit.rs) |
+| 56 | Pipelines: builtins | sh; §2.9.2 | Verified: pipeline output, final status, and bounded fixture execution; [task_56](../tests/audit.rs) |
+| 57 | Pipelines: multiple commands | sh; §2.9.2 | Verified: pipeline output, final status, and bounded fixture execution; [task_57](../tests/audit.rs) |
+| 58 | History: builtin | bash; Bash §9 | Verified in Bash mode: history remains available without PATH commands; [task_58](../tests/audit.rs) |
+| 59 | History: listing | bash; Bash §9 | Verified in Bash mode: numbered history listing preserves command order; [task_59](../tests/audit.rs) |
+| 60 | History: entry limits | bash; Bash §9 | Verified in Bash mode: history 0, 1, and oversized counts preserve status and numbering; [task_60](../tests/audit.rs) |
+| 61 | History: up-arrow | bash; Bash §9 | Verified in Bash mode: up-arrow recalls the preceding command; [task_61](../tests/audit.rs) |
+| 62 | History: down-arrow | bash; Bash §9 | Verified in Bash mode: down-arrow advances from older to newer history and returns to an empty line; [task_62](../tests/audit.rs) |
+| 63 | History: recalled execution | bash; Bash §9 | Verified in Bash mode: recalling and submitting repeats the command's filesystem effect; [task_63](../tests/audit.rs) |
+| 64 | History persistence: read file | bash; Bash §9 | Verified in Bash mode: explicit and default history files load without executing entries; [task_64](../tests/audit.rs) |
+| 65 | History persistence: write file | bash; Bash §9 | Verified in Bash mode: history -w replaces explicit/default files after cd; [task_65](../tests/audit.rs) |
+| 66 | History persistence: append file | bash; Bash §9 | Verified in Bash mode: history -a preserves existing contents and appends each new entry once; [task_66](../tests/audit.rs) |
+| 67 | History persistence: startup read | bash; Bash §9 | Verified in Bash mode: HISTFILE loads before the first command without executing entries; [task_67](../tests/audit.rs) |
+| 68 | History persistence: exit write | bash; Bash §9 | Partial: fresh-file exit persistence verified; H68 reproduces ignored overwrite mode; [task_68](../tests/audit.rs) |
+| 69 | History persistence: exit append | bash; Bash §9 | Verified in Bash mode: exit appends unsaved entries without duplicating an earlier history -a; [task_69](../tests/audit.rs) |
+| 70 | Parameters: declare | bash declare; sh §2.5–2.6 | Verified: declare creates a shell variable (bash mode); [task_70](../tests/audit.rs) |
+| 71 | Parameters: missing-variable diagnostics | bash declare; sh §2.5–2.6 | Verified: missing variable diagnostics (bash mode); [task_71](../tests/audit.rs) |
+| 72 | Parameters: storage | sh; §2.5–2.6 | Verified: shell variable storage and export (sh mode); [task_72](../tests/audit.rs) |
+| 73 | Parameters: name validation | bash declare; sh §2.5–2.6 | Verified: invalid declaration names are rejected (bash mode); [task_73](../tests/audit.rs) |
+| 74 | Parameters: expansion | sh; §2.5–2.6 | Verified: quoted and unquoted variable expansion (sh mode); [task_74](../tests/audit.rs) |
+| 75 | Parameters: braced expansion | sh; §2.5–2.6 | Verified: braced parameter boundaries and defaults (sh mode); [task_75](../tests/audit.rs) |
+| 76 | Parameters: empty expansion | sh; §2.5–2.6 | Verified: empty quoted and unquoted parameters (sh mode); [task_76](../tests/audit.rs) |
 
 Bash-extension references: [completion](https://www.gnu.org/software/bash/manual/html_node/Programmable-Completion.html),
 [completion builtins](https://www.gnu.org/software/bash/manual/html_node/Programmable-Completion-Builtins.html),
 [history](https://www.gnu.org/software/bash/manual/html_node/Bash-History-Facilities.html),
 and [Bash builtins](https://www.gnu.org/software/bash/manual/html_node/Bash-Builtins.html).
 
-For any newly found gap, retain its reference section, tested versions/platform/mode,
-minimal reproducer, expected and actual status/streams/effects, impact, owner,
-workaround, regression link, upstream issue when available, and separate follow-up
-PR. Update evidence after implementation changes and dependency upgrades; keep
-untested platforms and semantics explicit. If strict conformance is selected,
-first choose its scope/platforms, then expand this matrix and promote the relevant
-gaps to required acceptance criteria. They do not collectively block platform work.
+When updating this reference, retain the tested environment, reproducer, expected
+and actual results, impact, workaround, responsible component, and regression test.
+Recheck evidence after implementation or dependency changes; mark untested
+platforms and behavior explicitly.
