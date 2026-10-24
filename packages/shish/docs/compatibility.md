@@ -244,6 +244,22 @@ full filename without Tab. Ignored acceptance: `task_34_file_common_prefix` in
 [audit.rs](../tests/audit.rs). Separate task 34 follow-up: enable a published
 partial-completion option and this filename-specific acceptance case.
 
+### C40: Enter after an empty programmable-completion result
+
+Reference: screenshot task 40 and
+[Bash programmable completion](https://www.gnu.org/software/bash/manual/html_node/Programmable-Completion.html).
+In `shish --bash -i`, register
+`_pick() { COMPREPLY=(); }; pick() { printf '<%s>\n' "$1"; }; complete -F _pick pick`.
+Type `pick untouched`, Tab, then Enter. Expected: `<untouched>` and a new prompt.
+Observed: the unchanged input remains visible without execution.
+
+Owner: Brush/Reedline empty-menu handling (C25); the empty result itself is
+preserved. Impact: a completer returning no candidates impedes command submission.
+Workaround: cancel and retype the command without Tab. Ignored acceptance:
+`task_40_empty_programmed_completion` in [audit.rs](../tests/audit.rs).
+Separate task 40 follow-up: adopt published empty-menu handling and enable the
+programmable-completion case.
+
 ## Foundation stack
 
 Each row is independently reviewable and targets its predecessor. No PR is merged
@@ -308,13 +324,13 @@ The task numbers are stable even when implementation order changes.
 | 31 | Filename completion: directories | interactive; product UI | Verified: completion appends a directory separator and cd enters the result; [task_31](../tests/audit.rs) | [31 PR](https://github.com/di-rs/sanctuary/pull/144) |
 | 32 | Filename completion: no matches | interactive; product UI | Partial: unmatched filename is preserved; first Enter is consumed by the empty menu (C32); [task_32](../tests/audit.rs) | [32 PR](https://github.com/di-rs/sanctuary/pull/157) |
 | 33 | Filename completion: multiple matches | interactive; product UI | Verified: both filename candidates appear in the completion menu; [task_33](../tests/audit.rs) | [33 PR](https://github.com/di-rs/sanctuary/pull/145) |
-| 34 | Filename completion: partial matches | interactive; product UI | Missing: filename candidates are displayed without insertion of their common prefix (C34); [task_34](../tests/audit.rs) | Current task PR |
+| 34 | Filename completion: partial matches | interactive; product UI | Missing: filename candidates are displayed without insertion of their common prefix (C34); [task_34](../tests/audit.rs) | [34 PR](https://github.com/di-rs/sanctuary/pull/158) |
 | 35 | Filename completion: multiple arguments | interactive; product UI | Verified: completing the next argument preserves an already completed filename; [task_35](../tests/audit.rs) | [35 PR](https://github.com/di-rs/sanctuary/pull/146) |
 | 36 | Programmable completion: registration | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_36](../tests/audit.rs) | [36 PR](https://github.com/di-rs/sanctuary/pull/149) |
 | 37 | Programmable completion: missing specifications | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_37](../tests/audit.rs) | [37 PR](https://github.com/di-rs/sanctuary/pull/150) |
 | 38 | Programmable completion: display specifications | bash; Bash §8.6–8.7 | Verified: Bash-mode specification state, exact output/diagnostic, and status; diagnostic wording is Brush-specific; [task_38](../tests/audit.rs) | [38 PR](https://github.com/di-rs/sanctuary/pull/151) |
 | 39 | Programmable completion: single candidate | bash; Bash §8.6–8.7 | Verified: COMPREPLY supplies one candidate that is completed and passed to the command; [task_39](../tests/audit.rs) | [39 PR](https://github.com/di-rs/sanctuary/pull/152) |
-| 40 | Programmable completion: no candidates | bash; Bash §8.6–8.7 | Unverified; dedicated audit pending | Planned task 40 |
+| 40 | Programmable completion: no candidates | bash; Bash §8.6–8.7 | Partial: empty COMPREPLY leaves input unchanged; Enter handling remains missing (C40); [task_40](../tests/audit.rs) | Current task PR |
 | 41 | Programmable completion: command-line arguments | bash; Bash §8.6–8.7 | Verified: completer receives command name, current word, and previous word in Bash mode; [task_41](../tests/audit.rs) | [41 PR](https://github.com/di-rs/sanctuary/pull/153) |
 | 42 | Programmable completion: environment variables | bash; Bash §8.6–8.7 | Verified: external completer receives COMP_LINE, COMP_POINT, and exported environment; [task_42](../tests/audit.rs) | [42 PR](https://github.com/di-rs/sanctuary/pull/154) |
 | 43 | Programmable completion: multiple candidates | bash; Bash §8.6–8.7 | Verified: registered word-list candidates appear in the terminal menu; [task_43](../tests/audit.rs) | [43 PR](https://github.com/di-rs/sanctuary/pull/155) |

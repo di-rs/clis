@@ -1116,3 +1116,21 @@ fn task_34_file_common_prefix() -> anyhow::Result<()> {
     terminal.send("exit 0\n")?;
     terminal.finish(0)
 }
+
+#[test]
+#[ignore = "C40: empty programmable-completion menu consumes Enter"]
+fn task_40_empty_programmed_completion() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["--bash", "-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("_pick() { COMPREPLY=(); }; pick() { printf '<%s>\\n' \"$1\"; }; complete -F _pick pick; echo setup-ready\n")?;
+    terminal.expect("\nsetup-ready\n")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("pick untouched\t")?;
+    terminal.expect("shish-test> pick untouched")?;
+    terminal.send("\n")?;
+    terminal.expect("\n<untouched>\n")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("exit 0\n")?;
+    terminal.finish(0)
+}
