@@ -69,7 +69,7 @@ def test_groups_both_platforms_by_cli_and_sorts_cases(github: FakeGitHub) -> Non
         for binary in ("wcr", "tailr")
     ]
     result = report.render(REPO, github.run, github.jobs, suites, {}, [])
-    sections = result.split("<details>")[1:]
+    sections = result.split("<details>")[1:-1]
     assert len(sections) == 2
     for section, binary in zip(sections, ("tailr", "wcr"), strict=True):
         assert f"<strong>{binary}</strong> · 2 cases · Linux, macOS" in section
@@ -147,7 +147,7 @@ def test_grouped_results_keep_global_200_measurement_limit(github: FakeGitHub) -
     ]
     result = report.render(REPO, github.run, github.jobs, suites, {}, [])
     assert result.count("| `case-") == 200
-    assert result.count("<details>") == result.count("</details>") == 2
+    assert result.count("<details>") == result.count("</details>") == 3
     assert "Showing the first 200 of 204 measurements" in result
     assert "full results are in the run artifacts" in result
     assert "| `case-098`" not in result.split("<strong>wcr</strong>")[1]
@@ -321,3 +321,45 @@ def test_prior_attempt_artifacts_are_not_shown_as_current_results(github: FakeGi
     assert result is not None
     assert "No completed benchmark measurements" in result
     assert "2.000 ms" not in result
+
+
+def test_summary_and_warnings_precede_details_and_ci_time(github: FakeGitHub) -> None:
+    files = suite_files()
+    files["coreutils-tailr-benches-cli-bench.toml/metadata.json"] = {
+        "status": "failed",
+        "cases": ["last-lines", "missing"],
+        "completed_cases": ["last-lines"],
+        "runs": 1,
+    }
+    github.responses[f"{BASE}/actions/artifacts/1/zip"] = archive(files)
+    result = report.generate(github, REPO, 500)
+    assert result is not None
+    assert "**Completed measurements:** 1" in result
+    assert "| `tailr` | Linux | 1/2 | Incomplete | System tool |" in result
+    assert "| `tailr` | macOS | 0/0 | Unavailable | — |" in result
+    assert result.index("Some suites did not complete") < result.index("#### Measurements")
+    assert (
+        result.index("Package summary")
+        < result.index("#### Measurements")
+        < result.index("CI time and diagnostics")
+    )
+
+
+def test_mixed_comparisons_stay_explicit(github: FakeGitHub) -> None:
+    rows = [
+        report.Measurement(
+            system="ubuntu-24.04",
+            binary="tailr",
+            case=kind,
+            candidate=0.002,
+            comparison=None if kind == "candidate" else 0.004,
+            kind=kind,
+        )
+        for kind in ("reference", "baseline", "candidate")
+    ]
+    suites = [report.Suite(binary="tailr", status="complete", runs=1, rows=rows)]
+    result = report.render(REPO, github.run, github.jobs, suites, {}, [])
+    assert "System tool, Previous executable, None" in result
+    assert "4.000 ms (system)" in result
+    assert "4.000 ms (previous version)" in result
+    assert "| `candidate` | Linux | 2.000 ms | — | — |" in result

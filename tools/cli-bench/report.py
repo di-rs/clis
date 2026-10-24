@@ -215,6 +215,8 @@ class Suite(ReportRecord):
     binary: str
     status: str
     runs: int
+    system: str = ""
+    expected_cases: int | None = None
     rows: list[Measurement]
 
 
@@ -276,7 +278,16 @@ def read_suites(data: bytes, system: str) -> list[Suite]:
                     kind=str(names[0]),
                 )
             )
-        suites.append(Suite(binary=binary, status=str(status), runs=runs, rows=rows))
+        suites.append(
+            Suite(
+                binary=binary,
+                status=str(status),
+                runs=runs,
+                system=system,
+                expected_cases=len(cases),
+                rows=rows,
+            )
+        )
     return suites
 
 
@@ -387,7 +398,8 @@ def render(
         "",
         f"> {mode}",
         "",
-        "#### CI time",
+        "<details>",
+        "<summary>CI time and diagnostics</summary>",
         "",
         "| Platform | Total job | Build | Benchmarks | Result |",
         "| --- | ---: | ---: | ---: | --- |",
@@ -420,14 +432,67 @@ def render(
         "and selection, excluding queue time. Platforms: Ubuntu 24.04 and macOS 15.",
         "",
     ]
+    lines += ["</details>", ""]
+    # Keep measurements and incomplete-result notices above runner diagnostics.
+    diagnostics_start = lines.index("<details>")
+    diagnostics = lines[diagnostics_start:]
+    lines = lines[:diagnostics_start]
     rows = [row for suite in suites for row in suite.rows]
+    lines += [f"**Completed measurements:** {len(rows)}", ""]
+    notices = list(warnings)
+    if any(suite.status != "complete" for suite in suites):
+        notices.append("Some suites did not complete; only completed cases are shown.")
+    if run["conclusion"] != "success":
+        notices.append("The workflow did not succeed; inspect the linked run for failures.")
+    lines += [
+        *(f"> {notice}" for notice in notices),
+        "",
+        "#### Package summary",
+        "",
+        "| Package | Platform | Completed cases | Status | Comparison |",
+        "| --- | --- | ---: | --- | --- |",
+    ]
+    for binary in binaries:
+        for system in SYSTEMS:
+            matched = [
+                suite
+                for suite in suites
+                if suite.binary == binary
+                and (suite.system == system or any(row.system == system for row in suite.rows))
+            ]
+            measured = [row for suite in matched for row in suite.rows if row.system == system]
+            kinds = {row.kind for row in measured}
+            comparison = (
+                ", ".join(
+                    label
+                    for kind, label in (
+                        ("reference", "System tool"),
+                        ("baseline", "Previous executable"),
+                        ("candidate", "None"),
+                    )
+                    if kind in kinds
+                )
+                or "—"
+            )
+            state = (
+                (
+                    "Complete"
+                    if all(suite.status == "complete" for suite in matched)
+                    else "Incomplete"
+                )
+                if matched
+                else "Unavailable"
+            )
+            expected = sum(suite.expected_cases or len(suite.rows) for suite in matched)
+            lines.append(
+                f"| `{binary}` | {PLATFORMS[system]} | {len(measured)}/{expected} | {state} | {comparison} |"
+            )
+    lines.append("")
     if rows:
         lines += measurement_tables(rows)
     else:
         lines.append("No completed benchmark measurements were available.")
-    if any(suite.status != "complete" for suite in suites):
-        warnings.append("Some suites did not complete; only completed cases are shown.")
-    lines.extend(["", *warnings])
+    lines.extend(["", *diagnostics])
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -443,8 +508,21 @@ def current_pull(api: GitHub[TokenAuthStrategy], repo: str, number: int, sha: st
 
 
 def generate(
-    api: GitHub[TokenAuthStrategy], repo: str, run_id: int, *, author: str | None = None
+    api: GitHub[TokenAuthStrategy],
+    repo: str,
+    run_id: int,
+    *,
+    author: str | None = None,
+    kind: str = "bench",
 ) -> str | None:
+    if kind not in {"bench", "size"}:
+        raise ValueError("invalid report kind")
+    workflow_path = f".github/workflows/cli-{kind}.yml"
+    marker_pattern = (
+        MARKER
+        if kind == "bench"
+        else re.compile(r"<!-- cli-size-report number=(\d+) run=(\d+) attempt=(\d+) -->")
+    )
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
         raise ValueError("invalid repository")
     base = f"repos/{repo}"
@@ -454,12 +532,12 @@ def generate(
         or run.get("event") != "pull_request"
         or run.get("status") != "completed"
         or run.get("conclusion") in ("cancelled", "skipped")
-        or run.get("path") != WORKFLOW
+        or run.get("path") != workflow_path
         or table(run.get("repository")).get("full_name") != repo
     ):
         return None
-    workflow = table(github_json(api, f"{base}/actions/workflows/cli-bench.yml"))
-    if workflow.get("id") != run.get("workflow_id") or workflow.get("path") != WORKFLOW:
+    workflow = table(github_json(api, f"{base}/actions/workflows/cli-{kind}.yml"))
+    if workflow.get("id") != run.get("workflow_id") or workflow.get("path") != workflow_path:
         return None
     sha = str(run.get("head_sha"))
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
@@ -477,6 +555,53 @@ def generate(
     pull_number = matches[0]
     attempt = integer(run.get("run_attempt"))
     jobs = github_pages(api, f"{base}/actions/runs/{run_id}/attempts/{attempt}/jobs", "jobs")
+    if kind == "size":
+        from size_report import generate_size
+
+        markdown = generate_size(api, repo, run, jobs)
+    else:
+        markdown = generate_bench(api, repo, run, jobs)
+    if markdown is None:
+        return None
+    if author is not None:
+        comments = github_pages(api, f"{base}/issues/{pull_number}/comments")
+        owned = [
+            comment
+            for comment in comments
+            if table(comment.get("user")).get("login") == author
+            and marker_pattern.match(str(comment.get("body", "")))
+        ]
+        revision = (integer(run["run_number"]), attempt)
+        for comment in owned:
+            marker = marker_pattern.match(str(comment["body"]))
+            assert marker is not None
+            if (int(marker[1]), int(marker[3])) > revision:
+                return markdown
+        if not current_pull(api, repo, pull_number, sha):
+            return None
+        if owned:
+            if owned[0].get("body") != markdown:
+                github_request(
+                    api,
+                    f"{base}/issues/comments/{integer(owned[0]['id'])}",
+                    method="PATCH",
+                    body={"body": markdown},
+                )
+        else:
+            github_request(
+                api, f"{base}/issues/{pull_number}/comments", method="POST", body={"body": markdown}
+            )
+    return markdown
+
+
+def generate_bench(
+    api: GitHub[TokenAuthStrategy],
+    repo: str,
+    run: dict[str, object],
+    jobs: list[dict[str, object]],
+) -> str | None:
+    base = f"repos/{repo}"
+    run_id = integer(run["id"])
     if not any(
         job.get("name") in {f"⏱️ Run CLI benchmarks ({system})" for system in SYSTEMS}
         and job.get("conclusion") != "skipped"
@@ -530,40 +655,12 @@ def generate(
                 suites.extend(read_suites(data, system))
         except ValueError, KeyError, UnicodeError, zipfile.BadZipFile, RecursionError:
             warnings.append(f"{name}: invalid artifact data omitted.")
-    markdown = render(repo, run, jobs, suites, selection, warnings)
-    if author is not None:
-        comments = github_pages(api, f"{base}/issues/{pull_number}/comments")
-        owned = [
-            comment
-            for comment in comments
-            if table(comment.get("user")).get("login") == author
-            and MARKER.match(str(comment.get("body", "")))
-        ]
-        revision = (integer(run["run_number"]), attempt)
-        for comment in owned:
-            marker = MARKER.match(str(comment["body"]))
-            assert marker is not None
-            if (int(marker[1]), int(marker[3])) > revision:
-                return markdown
-        if not current_pull(api, repo, pull_number, sha):
-            return None
-        if owned:
-            if owned[0].get("body") != markdown:
-                github_request(
-                    api,
-                    f"{base}/issues/comments/{integer(owned[0]['id'])}",
-                    method="PATCH",
-                    body={"body": markdown},
-                )
-        else:
-            github_request(
-                api, f"{base}/issues/{pull_number}/comments", method="POST", body={"body": markdown}
-            )
-    return markdown
+    return render(repo, run, jobs, suites, selection, warnings)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--kind", choices=("bench", "size"), default="bench")
     parser.add_argument("--repo", required=True)
     parser.add_argument("--run-id", required=True, type=int)
     parser.add_argument("--output", type=Path)
@@ -578,9 +675,9 @@ def main() -> None:
                 if os.environ.get("GITHUB_ACTIONS") == "true"
                 else str(table(github_json(api, "user"))["login"])
             )
-        markdown = generate(api, args.repo, args.run_id, author=author)
+        markdown = generate(api, args.repo, args.run_id, author=author, kind=args.kind)
         if markdown is None:
-            print("Skipped: no current eligible PR benchmark run.")
+            print("Skipped: no current eligible PR report.")
             return
         if args.output:
             args.output.write_text(markdown, encoding="utf-8")
@@ -589,7 +686,8 @@ def main() -> None:
                 output.write(markdown)
         print(markdown, end="")
     except (ValueError, KeyError, OSError, subprocess.SubprocessError) as error:
-        sys.exit(f"Cannot report benchmarks: {error}")
+        label = "benchmarks" if args.kind == "bench" else "sizes"
+        sys.exit(f"Cannot report {label}: {error}")
 
 
 if __name__ == "__main__":
