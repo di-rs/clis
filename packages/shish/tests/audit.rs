@@ -808,3 +808,19 @@ fn task_27_multiple_command_completions() -> anyhow::Result<()> {
     terminal.send("exit 0\n")?;
     terminal.finish(0)
 }
+
+#[test]
+fn task_29_file_completion() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    home.child("unique file")
+        .write_str("file-completion-ok\n")?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("/bin/cat uniq\t")?;
+    terminal.expect("shish-test> /bin/cat unique\\ file ")?;
+    terminal.send("\n")?;
+    terminal.expect("\nfile-completion-ok\n")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("exit 0\n")?;
+    terminal.finish(0)
+}
