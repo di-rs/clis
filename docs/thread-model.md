@@ -49,6 +49,8 @@ not leave unauthorized sessions, published files, or indefinite capacity
 reservations. Keep terminal contents and credentials out of logs and metrics.
 Distinguish local CLI failures from remotely reachable service vulnerabilities.
 
+Source badge generation runs with read-only access; its write-capable publisher never executes repository code or artifact contents.
+
 ## Deployment assumptions
 
 The intended topology exposes only the playground. Confirm that Boxie,

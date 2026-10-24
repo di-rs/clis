@@ -1,0 +1,74 @@
+name: Source line-count badge
+on:
+  push:
+    branches: [master]
+    paths:
+      - '**/*.rs'
+      - '**/*.py'
+      - '**/*.pyi'
+      - '**/*.js'
+      - '**/*.jsx'
+      - '**/*.ts'
+      - '**/*.tsx'
+      - '**/*.svelte'
+      - 'tools/guardrails/source_badge.py'
+      - 'tools/guardrails/changes.py'
+      - '.github/workflows/source-badge.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: source-badge
+  cancel-in-progress: false
+jobs:
+  measure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - env:
+          PYTHONPATH: tools
+        run: python3 -m guardrails.source_badge
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: source-badge
+          path: badge/loc.svg
+          retention-days: 1
+  publish:
+    needs: measure
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      # No repository code is executed in this write-capable job.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: source-badge
+          path: badge
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          script: |
+            const fs = require('fs');
+            const branch = 'chore/badges';
+            try {
+              await github.rest.git.getRef({...context.repo, ref: `heads/${branch}`});
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              await github.rest.git.createRef({...context.repo, ref: `refs/heads/${branch}`, sha: context.sha});
+            }
+            let sha;
+            try {
+              const result = await github.rest.repos.getContent({...context.repo, path: 'loc.svg', ref: branch});
+              sha = result.data.sha;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            await github.rest.repos.createOrUpdateFileContents({
+              ...context.repo, branch, path: 'loc.svg', sha,
+              message: '📊 Update source line-count badge',
+              content: fs.readFileSync('badge/loc.svg').toString('base64')
+            });
