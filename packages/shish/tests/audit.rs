@@ -861,3 +861,19 @@ fn task_31_directory_completion() -> anyhow::Result<()> {
     terminal.send("exit 0\n")?;
     terminal.finish(0)
 }
+
+#[test]
+fn task_33_multiple_file_completions() -> anyhow::Result<()> {
+    let home = assert_fs::TempDir::new()?;
+    home.child("pick_one").touch()?;
+    home.child("pick_two").touch()?;
+    let mut terminal = support::pty::Pty::new(home.path(), &["-i"], &[])?;
+    terminal.expect("shish-test> ")?;
+    terminal.send("/bin/cat pick_\t")?;
+    terminal.expect("pick_one")?;
+    terminal.expect("pick_two")?;
+    terminal.send("\x03")?;
+    terminal.expect_line("shish-test> ")?;
+    terminal.send("exit 0\n")?;
+    terminal.finish(0)
+}
