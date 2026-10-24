@@ -687,3 +687,10 @@ fn task_71_missing_variable() {
         .stdout("")
         .stderr(predicates::str::contains("shish_missing_variable"));
 }
+
+#[test]
+fn task_72_variable_storage() {
+    let home = assert_fs::TempDir::new().unwrap();
+    command(home.path()).args(["-c", "v='a b'; printf '<%s>\\n' \"$v\"; export v; /bin/sh -c 'printf \"<%s>\\n\" \"$v\"; v=child'; printf '<%s>\\n' \"$v\""])
+        .assert().code(0).stdout("<a b>\n<a b>\n<a b>\n").stderr("");
+}
