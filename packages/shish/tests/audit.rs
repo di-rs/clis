@@ -566,3 +566,21 @@ fn task_17_double_quote_backslashes() {
         .stdout("<\\ok>\n<$v>\n<\\q>\n<\">\n<ab>\n")
         .stderr("");
 }
+
+#[test]
+fn task_18_quoted_executable_path() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let home = assert_fs::TempDir::new().unwrap();
+    let tool = home.child("tool with space");
+    tool.write_str("#!/bin/sh\nprintf '<%s>\\n' \"$1\"\n")
+        .unwrap();
+    std::fs::set_permissions(tool.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    for script in ["'./tool with space' 'a b'", "\"./tool with space\" 'a b'"] {
+        command(home.path())
+            .args(["-c", script])
+            .assert()
+            .code(0)
+            .stdout("<a b>\n")
+            .stderr("");
+    }
+}
