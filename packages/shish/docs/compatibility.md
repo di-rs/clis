@@ -206,8 +206,8 @@ The task numbers are stable even when implementation order changes.
 | 03 | Basics: REPL | sh; invocation/§2.9.1 | Verified: multiline interactive loop and persistent variables; [task_03](../tests/audit.rs) | [03 PR](https://github.com/di-rs/sanctuary/pull/108) |
 | 04 | Basics: exit | sh; invocation/§2.9.1 | Verified: exit stops later commands and inherits the last status; [task_04](../tests/audit.rs) | [04 PR](https://github.com/di-rs/sanctuary/pull/109) |
 | 05 | Basics: echo | sh; invocation/§2.9.1 | Verified: ordinary echo in sh/PATH and Bash builtin modes; option extensions excluded; [task_05](../tests/audit.rs) | [05 PR](https://github.com/di-rs/sanctuary/pull/110) |
-| 06 | Basics: type | sh; invocation/§2.9.1 | Verified: builtin/external type and function type via -t extension; missing type diagnostic. P06 tracks command -v separately; [task_06](../tests/audit.rs) | Current task PR |
-| 07 | Basics: executable lookup | sh; invocation/§2.9.1 | Unverified; dedicated audit pending | Planned task 07 |
+| 06 | Basics: type | sh; invocation/§2.9.1 | Verified: builtin/external type and function type via -t extension; missing type diagnostic. P06 tracks command -v separately; [task_06](../tests/audit.rs) | [06 PR](https://github.com/di-rs/sanctuary/pull/111) |
+| 07 | Basics: executable lookup | sh; invocation/§2.9.1 | Verified: custom PATH, executable permission, and missing lookup; [task_07](../tests/audit.rs) | Current task PR |
 | 08 | Basics: program execution | sh; invocation/§2.9.1 | Verified external echo; broader task pending | Planned task 08 |
 | 09 | Navigation: pwd | sh; pwd/cd | Unverified; dedicated audit pending | Planned task 09 |
 | 10 | Navigation: absolute cd | sh; pwd/cd | Unverified; dedicated audit pending | Planned task 10 |

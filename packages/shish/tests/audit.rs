@@ -408,3 +408,27 @@ fn posix_command_v_reports_functions() {
         .stdout("f\n")
         .stderr("");
 }
+
+#[test]
+fn task_07_path_finds_executable_without_build_directory_discovery() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let home = assert_fs::TempDir::new().unwrap();
+    let tool = home.child("shish_lookup_fixture");
+    tool.write_str("#!/bin/sh\nprintf 'found:%s\\n' \"$1\"\n")
+        .unwrap();
+    std::fs::set_permissions(tool.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    command(home.path())
+        .env("PATH", home.path())
+        .args(["-c", "shish_lookup_fixture 'a b'"])
+        .assert()
+        .code(0)
+        .stdout("found:a b\n")
+        .stderr("");
+    command(home.path())
+        .env("PATH", home.path().join("absent"))
+        .args(["-c", "shish_lookup_fixture"])
+        .assert()
+        .code(127)
+        .stdout("")
+        .stderr("error: command not found: shish_lookup_fixture\n");
+}
